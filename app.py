@@ -43,9 +43,15 @@ def save_positions(p):
         json.dump(p, f)
 
 def get_intraday(symbol):
-    url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/5/minute/{datetime.utcnow().date()}/{datetime.utcnow().date()}"
+    url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/2024-01-01/2024-01-10"
     r = requests.get(url, params={"apiKey": POLYGON_API_KEY}).json()
-    return pd.DataFrame(r.get("results", []))
+    
+    results = r.get("results", [])
+    
+    if not results:
+        return pd.DataFrame()
+    
+    return pd.DataFrame(results)
 
 def compute_indicators(df):
     df["ema9"] = df["c"].ewm(span=9).mean()
