@@ -123,9 +123,25 @@ def webhook():
         "prob": prob
     })
 
-@app.route('/dashboard')
-def dashboard():
-    return jsonify({"status":"running"})
+@app.route('/backtest/<symbol>')
+def backtest(symbol):
+    try:
+        df = compute_indicators(get_intraday(symbol))
+        if df.empty:
+            return jsonify({"error": "No data returned"})
+
+        trades = len(df)
+        avg_pnl = round(df["c"].pct_change().mean() * 100, 2)
+        balance = round(1000 + (avg_pnl * trades), 2)
+
+        return jsonify({
+            "symbol": symbol,
+            "trades": trades,
+            "avg_pnl": avg_pnl,
+            "balance": balance
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
