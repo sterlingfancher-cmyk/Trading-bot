@@ -9,7 +9,7 @@ import joblib
 app = Flask(__name__)
 
 TRADIER_API_KEY = "YOUR_TRADIER_API_KEY"
-POLYGON_API_KEY = "YOUR_POLYGON_API_KEY"
+POLYGON_API_KEY = "u1sj82NBjSYn4lkvHxn5eMZyXAVaEIlk"
 ACCOUNT_ID = "YOUR_ACCOUNT_ID"
 
 BASE_URL = "https://api.tradier.com/v1"
