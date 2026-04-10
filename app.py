@@ -51,7 +51,9 @@ def compute_strategy(df):
 
         # ALIGN FIX
         df["c"], prev_high = df["c"].align(prev_high, axis=0)
-        prev_high = prev_high.fillna(method="bfill").fillna(0)
+
+        # FIXED pandas compatibility
+        prev_high = prev_high.bfill().fillna(0)
 
         # ENTRY
         df.loc[
