@@ -144,14 +144,25 @@ def backtest(symbol):
         if raw.empty:
             return jsonify({"error": "No valid data from Polygon"})
 
-        df = compute_indicators(raw)
+        df = raw.copy()
 
+        # Ensure close column exists
         if "c" not in df.columns:
-            return jsonify({"error": "Missing price data (c column)"})
+            return jsonify({"error": "Missing price data"})
 
+        # Calculate returns
+        df["returns"] = df["c"].pct_change()
+
+        # Remove NaN values
+        df = df.dropna()
+
+        if df.empty:
+            return jsonify({"error": "Not enough data to calculate returns"})
+
+        # Simulate trades (simple strategy: every period is a trade)
         trades = len(df)
-        avg_pnl = round(df["c"].pct_change().mean() * 100, 2)
-        balance = round(1000 + (avg_pnl * trades), 2)
+        avg_pnl = round(df["returns"].mean() * 100, 4)
+        balance = round(1000 * (1 + df["returns"].sum()), 2)
 
         return jsonify({
             "symbol": symbol,
