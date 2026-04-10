@@ -26,8 +26,8 @@ RISK_PER_TRADE = 0.1
 MAX_POSITIONS = 3
 TOP_N = 3
 
-# 🔥 NEW: breakout strength threshold
-BREAKOUT_THRESHOLD = 0.01   # 1% breakout
+# Strong breakout filter
+BREAKOUT_THRESHOLD = 0.01
 
 
 # =========================
@@ -149,7 +149,7 @@ def portfolio():
         top_symbols = [s[0] for s in rs_list[:TOP_N]]
 
         # =========================
-        # ENTRIES (FILTERED)
+        # ENTRIES (DYNAMIC SIZING)
         # =========================
         for symbol in top_symbols:
 
@@ -169,12 +169,17 @@ def portfolio():
             trend = row["c"] > row["ma_200"]
             vol = row["atr_change"] > 0
 
-            # 🔥 STRONG BREAKOUT FILTER
             breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
 
             if trend and vol and breakout_strength > BREAKOUT_THRESHOLD:
 
-                risk_amount = capital * RISK_PER_TRADE
+                # 🔥 DYNAMIC POSITION SIZING
+                base_risk = capital * RISK_PER_TRADE
+
+                size_multiplier = breakout_strength / BREAKOUT_THRESHOLD
+                size_multiplier = max(0.5, min(size_multiplier, 2))  # clamp
+
+                risk_amount = base_risk * size_multiplier
 
                 positions[symbol] = True
                 entry_price[symbol] = row["c"]
