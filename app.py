@@ -6,15 +6,9 @@ import numpy as np
 
 app = Flask(__name__)
 
-# =========================
-# CONFIG
-# =========================
 POLYGON_API_KEY = "L3SUCdmHWD0ctcfwFAsXBD5pFvHumpQi"
 ACCOUNT_SIZE = 1000
 
-# =========================
-# HEALTH CHECK
-# =========================
 @app.route("/")
 def home():
     return jsonify({"status": "RUNNING"})
@@ -46,7 +40,7 @@ def get_intraday(symbol):
         return pd.DataFrame()
 
 # =========================
-# STRATEGY (IMPROVED)
+# STRATEGY
 # =========================
 def compute_strategy(df):
 
@@ -54,17 +48,15 @@ def compute_strategy(df):
     df["ma_slow"] = df["c"].rolling(50).mean()
     df["returns"] = df["c"].pct_change()
 
-    # 🔥 NEW: volatility filter
+    # VOL FILTER
     df["volatility"] = df["returns"].rolling(10).std()
-
-    # remove low volatility (chop)
     df = df[df["volatility"] > df["volatility"].rolling(50).mean()]
 
     df["signal"] = 0.0
 
     strength = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
 
-    # 🔥 IMPROVED ENTRY (stronger filters)
+    # ENTRY (STRONGER)
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &
         (df["returns"] > 0.001) &
@@ -73,13 +65,17 @@ def compute_strategy(df):
         "signal"
     ] = strength
 
-    # SCALE
+    # SCALE POSITION SIZE
     df["signal"] = (df["signal"] / 0.04).clip(0, 1)
+
+    # 🔥 COOLDOWN (REDUCES TRADES MASSIVELY)
+    df["cooldown"] = df["signal"].rolling(15).max().shift(1)
+    df.loc[df["cooldown"] > 0, "signal"] = 0
 
     # EXIT
     df.loc[
-        (df["returns"] < -0.0025) |
-        (df["returns"] > 0.005),
+        (df["returns"] < -0.003) |   # tighter stop
+        (df["returns"] > 0.008),     # bigger winners
         "signal"
     ] = 0
 
@@ -88,12 +84,14 @@ def compute_strategy(df):
     if df.empty:
         return pd.DataFrame()
 
-    # POSITION
+    # POSITION (SIZED)
     df["position"] = df["signal"].replace(0, np.nan).ffill().fillna(0)
 
-    # RETURNS
+    # RETURNS WITH POSITION SIZE
     df["strategy_returns"] = df["returns"] * df["position"].shift(1)
-    df["strategy_returns"] = df["strategy_returns"].clip(-0.01, 0.02)
+
+    # CAP EXTREMES
+    df["strategy_returns"] = df["strategy_returns"].clip(-0.015, 0.03)
 
     return df
 
@@ -148,7 +146,7 @@ def backtest(symbol):
         return jsonify({"error": str(e)})
 
 # =========================
-# RUN (RAILWAY)
+# RUN
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
