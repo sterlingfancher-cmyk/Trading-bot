@@ -7,6 +7,9 @@ from sklearn.ensemble import RandomForestClassifier
 import joblib
 
 app = Flask(__name__)
+@app.route("/")
+def home():
+    return "VERSION 2 LIVE"
 
 def compute_strategy(df):
     print("RUNNING COMPUTE STRATEGY") 
