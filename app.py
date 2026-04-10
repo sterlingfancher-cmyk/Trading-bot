@@ -18,7 +18,7 @@ def compute_strategy(df):
     # ENTRY
     df.loc[
     (
-        (df["ma_fast"] > df["ma_slow"]) & # trend
+        (df["ma_fast"] > df["ma_slow"])  # trend
     ),   
         "signal"
     ] = 1
