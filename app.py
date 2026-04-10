@@ -21,7 +21,7 @@ def get_intraday(symbol):
     return df.dropna()
 
 # =========================
-# STRATEGY (TREND + PULLBACK)
+# STRATEGY (FIXED)
 # =========================
 def compute_strategy(df):
 
@@ -29,20 +29,21 @@ def compute_strategy(df):
     df["ma_slow"] = df["c"].rolling(50).mean()
     df["returns"] = df["c"].pct_change()
 
+    # DROP NaNs BEFORE USING LOGIC
+    df = df.dropna().copy()
+
     # Trend
     df["trend"] = df["ma_fast"] > df["ma_slow"]
 
-    # Pullback (price dips below fast MA but still in trend)
+    # Pullback
     df["pullback"] = df["c"] < df["ma_fast"]
 
-    # Momentum recovery (price turning back up)
+    # Momentum recovery
     df["momentum"] = df["returns"] > 0
 
     df["signal"] = 0
 
-    # =========================
-    # ENTRY (SMARTER)
-    # =========================
+    # ENTRY
     df.loc[
         (df["trend"]) &
         (df["pullback"]) &
@@ -50,21 +51,17 @@ def compute_strategy(df):
         "signal"
     ] = 1
 
-    # =========================
-    # HOLD POSITION
-    # =========================
+    # HOLD
     cooldown = 5
     for i in range(1, len(df)):
         if df["signal"].iloc[i] == 1:
             df.iloc[i:i+cooldown, df.columns.get_loc("signal")] = 1
 
-    # =========================
-    # EXIT (TREND BREAK)
-    # =========================
+    # EXIT
     df.loc[
-        (df["ma_fast"] < df["ma_slow"]) |  # trend reversal
-        (df["returns"] < -0.003) |         # stop loss
-        (df["returns"] > 0.012),           # let winners run bigger
+        (df["ma_fast"] < df["ma_slow"]) |
+        (df["returns"] < -0.003) |
+        (df["returns"] > 0.012),
         "signal"
     ] = 0
 
@@ -108,7 +105,15 @@ def home():
 @app.route("/backtest/<symbol>")
 def backtest(symbol):
     df = get_intraday(symbol)
+
+    if df.empty:
+        return jsonify({"error": "No data"})
+
     df = compute_strategy(df)
+
+    if df.empty:
+        return jsonify({"error": "Strategy returned no data"})
+
     return jsonify(calculate_metrics(df, symbol))
 
 # =========================
