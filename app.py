@@ -11,7 +11,6 @@ app = Flask(__name__)
 LOOKBACK = 20
 ATR_MULT = 2.5
 
-# 🔥 EXPANDED UNIVERSE (KEY UPGRADE)
 SYMBOLS = [
     "SPY", "QQQ", "IWM",
     "XLE", "XLK", "XLF", "XLV",
@@ -25,7 +24,10 @@ SYMBOLS = [
 INITIAL_CAPITAL = 1000
 RISK_PER_TRADE = 0.1
 MAX_POSITIONS = 3
-TOP_N = 3  # top 3 strongest assets
+TOP_N = 3
+
+# 🔥 NEW: breakout strength threshold
+BREAKOUT_THRESHOLD = 0.01   # 1% breakout
 
 
 # =========================
@@ -70,7 +72,7 @@ def prepare(df):
     df["atr"] = tr.rolling(14).mean()
     df["atr_change"] = df["atr"].pct_change()
 
-    # 🔥 RELATIVE STRENGTH (50-day momentum)
+    # Relative strength (momentum)
     df["momentum"] = df["c"] / df["c"].shift(50)
 
     return df.dropna()
@@ -147,7 +149,7 @@ def portfolio():
         top_symbols = [s[0] for s in rs_list[:TOP_N]]
 
         # =========================
-        # ENTRIES
+        # ENTRIES (FILTERED)
         # =========================
         for symbol in top_symbols:
 
@@ -165,10 +167,12 @@ def portfolio():
             row = df.loc[date]
 
             trend = row["c"] > row["ma_200"]
-            breakout = row["c"] > row["high_break"]
             vol = row["atr_change"] > 0
 
-            if trend and breakout and vol:
+            # 🔥 STRONG BREAKOUT FILTER
+            breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
+
+            if trend and vol and breakout_strength > BREAKOUT_THRESHOLD:
 
                 risk_amount = capital * RISK_PER_TRADE
 
