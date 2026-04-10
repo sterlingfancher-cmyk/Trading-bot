@@ -21,43 +21,50 @@ def get_intraday(symbol):
     return df.dropna()
 
 # =========================
-# STRATEGY (HIGHER EDGE)
+# STRATEGY (TREND + PULLBACK)
 # =========================
 def compute_strategy(df):
 
-    df["ma_fast"] = df["c"].rolling(12).mean()
-    df["ma_slow"] = df["c"].rolling(35).mean()
+    df["ma_fast"] = df["c"].rolling(20).mean()
+    df["ma_slow"] = df["c"].rolling(50).mean()
     df["returns"] = df["c"].pct_change()
 
-    df["trend"] = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
-    df["volatility"] = df["returns"].rolling(6).std()
+    # Trend
+    df["trend"] = df["ma_fast"] > df["ma_slow"]
+
+    # Pullback (price dips below fast MA but still in trend)
+    df["pullback"] = df["c"] < df["ma_fast"]
+
+    # Momentum recovery (price turning back up)
+    df["momentum"] = df["returns"] > 0
 
     df["signal"] = 0
 
     # =========================
-    # ENTRY (MORE FREQUENT)
+    # ENTRY (SMARTER)
     # =========================
     df.loc[
-        (df["trend"] > 0.0003) &
-        (df["ma_fast"] > df["ma_slow"]) &
-        (df["volatility"] > 0.0002),
+        (df["trend"]) &
+        (df["pullback"]) &
+        (df["momentum"]),
         "signal"
     ] = 1
 
     # =========================
-    # VERY SHORT COOLDOWN (MORE TRADES)
+    # HOLD POSITION
     # =========================
-    cooldown = 2
+    cooldown = 5
     for i in range(1, len(df)):
         if df["signal"].iloc[i] == 1:
             df.iloc[i:i+cooldown, df.columns.get_loc("signal")] = 1
 
     # =========================
-    # BETTER EXIT (LET WINNERS RUN)
+    # EXIT (TREND BREAK)
     # =========================
     df.loc[
-        (df["returns"] < -0.002) |   # tighter stop
-        (df["returns"] > 0.01),      # BIGGER winner
+        (df["ma_fast"] < df["ma_slow"]) |  # trend reversal
+        (df["returns"] < -0.003) |         # stop loss
+        (df["returns"] > 0.012),           # let winners run bigger
         "signal"
     ] = 0
 
