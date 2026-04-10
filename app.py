@@ -180,27 +180,17 @@ def backtest(symbol):
 
         df = raw.copy()
 
-        # Ensure close column exists
-        if "c" not in df.columns:
-            return jsonify({"error": "Missing price data"})
+df = compute_strategy(df)
+if df.empty:
+    return jsonify({"error": "Strategy returned no data"})
 
-        # Calculate returns
-        df["returns"] = df["c"].pct_change()
-
-        # Remove NaN values
-        df = df.dropna()
-
-        if df.empty:
-            return jsonify({"error": "Not enough data to calculate returns"})
-
-        # Simulate trades (simple strategy: every period is a trade)
-        trades = len(df)
-        avg_pnl = round(df["returns"].mean() * 100, 4)
-        balance = round(1000 * (1 + df["returns"].sum()), 2)
+trades = (df["signal"].diff().abs() >0).sum()
+avg_pnl = round(df["strategy_returns"].mean() * 100, 4) if not df[strategy_returns"].empty else 0
+balance = round(1000 * (df["strategy_returns"] + 1).cumprod().iloc[-1], 2)
 
         return jsonify({
             "symbol": symbol,
-            "trades": trades,
+            "trades": int(trades),
             "avg_pnl": avg_pnl,
             "balance": balance
         })
