@@ -19,7 +19,7 @@ def compute_strategy(df):
     df.loc[
     (
         (df["ma_fast"] > df["ma_slow"]) & # trend
-        (df["returns"] < -0.002) & # pullback 
+        (df["returns"] < -0.002)  # pullback 
     ),   
         "signal"
     ] = 1
