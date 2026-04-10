@@ -18,17 +18,18 @@ def compute_strategy(df):
     # ENTRY
     df.loc[
     (
-        (df["ma_fast"] > df["ma_slow"]) &
-        (df["returns"] < -0.004) &
-        ((df["ma_fast"] - df["ma_slow"]) / df["ma_slow"] > 0.002) &
-        (df["ma_slow"].diff() > 0)
+        (df["ma_fast"] > df["ma_slow"]) & # trend
+        (df["returns"] < -0.003) & # pullback
+        (df["ma_slow"].diff() > 0) #trend strengthening
     ),   
         "signal"
     ] = 1
 
     #EXIT
     df.loc[
-        (df["returns"] > 0.002) | (df["returns"] < -0.003),
+        (df["returns"] > 0.003) |  # take profit
+        (df["returns"] < -0.002)    # stop loss
+    ),
         "signal"
     ] = -1
 
