@@ -21,7 +21,7 @@ def compute_strategy(df):
 
     # Entry: Trend + Pullback + Low volatility
     df.loc[
-        (df["ma_fast"] > df["ma_slow"]) &           # uptrend
+        (df["ma_fast"] > df["ma_slow"]),             # uptrend
         "signal"
     ] = 1
 
