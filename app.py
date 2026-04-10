@@ -6,7 +6,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG
+# CONFIG (UPDATED 🔥)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 2.5
@@ -22,19 +22,21 @@ SYMBOLS = [
 ]
 
 INITIAL_CAPITAL = 1000
-RISK_PER_TRADE = 0.1
-MAX_POSITIONS = 3
-TOP_N = 3
+
+# 🔥 INCREASED DEPLOYMENT
+RISK_PER_TRADE = 0.12
+MAX_POSITIONS = 5
+TOP_N = 5
+MAX_TOTAL_RISK = 0.6
 
 TRANSACTION_COST = 0.001
-MAX_TOTAL_RISK = 0.3
 
 # 🔥 GLOBAL CACHE
 DATA = None
 
 
 # =========================
-# LOAD DATA (LAZY + FAST)
+# LOAD DATA (LAZY)
 # =========================
 def load_data():
     global DATA
@@ -63,7 +65,7 @@ def load_data():
             })
 
             # =========================
-            # INDICATORS (SIMPLE + EFFECTIVE)
+            # INDICATORS (SIMPLE + STRONG)
             # =========================
             df["ma_200"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
@@ -93,7 +95,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "simple-dynamic-system-live"})
+    return jsonify({"status": "high-deployment-system-live"})
 
 
 @app.route("/portfolio")
@@ -122,7 +124,7 @@ def portfolio():
     for date in all_dates:
 
         # =========================
-        # MARKET REGIME FILTER
+        # MARKET REGIME
         # =========================
         if date not in spy_df.index:
             continue
@@ -131,7 +133,7 @@ def portfolio():
             continue
 
         # =========================
-        # EXITS (TREND + TRAILING STOP)
+        # EXITS
         # =========================
         for symbol in list(positions.keys()):
 
@@ -160,7 +162,7 @@ def portfolio():
                 trades += 1
 
         # =========================
-        # RELATIVE STRENGTH (TOP PERFORMERS)
+        # RELATIVE STRENGTH
         # =========================
         rs = []
 
@@ -175,7 +177,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (SIMPLE + POWERFUL)
+        # ENTRIES
         # =========================
         for symbol in top_symbols:
 
@@ -198,7 +200,7 @@ def portfolio():
 
             if trend and breakout and vol:
 
-                # 🔥 DYNAMIC POSITION SIZING
+                # 🔥 DYNAMIC SIZING
                 breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
 
                 size_multiplier = breakout_strength / 0.02
