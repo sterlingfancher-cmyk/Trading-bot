@@ -27,8 +27,10 @@ MAX_POSITIONS = 3
 TOP_N = 3
 
 BREAKOUT_THRESHOLD = 0.01
-TRANSACTION_COST = 0.001  # 0.1%
-MAX_TOTAL_RISK = 0.3      # max 30% capital deployed
+TRANSACTION_COST = 0.001
+MAX_TOTAL_RISK = 0.3
+
+MIN_HOLD_DAYS = 5  # 🔥 NEW
 
 
 # =========================
@@ -98,10 +100,11 @@ def portfolio():
     entry_price = {}
     peak_price = {}
     position_size = {}
+    entry_index = {}  # 🔥 NEW
 
     trade_log = []
 
-    for date in all_dates:
+    for i, date in enumerate(all_dates):
 
         # =========================
         # EXITS
@@ -118,7 +121,10 @@ def portfolio():
             stop = peak_price[symbol] - (ATR_MULT * row["atr"])
             trend_break = row["c"] < row["ma_200"]
 
-            if row["c"] < stop or trend_break:
+            # 🔥 MIN HOLD FILTER
+            min_hold = (i - entry_index[symbol]) > MIN_HOLD_DAYS
+
+            if (row["c"] < stop or trend_break) and min_hold:
                 pct = (row["c"] - entry_price[symbol]) / entry_price[symbol]
                 pct -= TRANSACTION_COST
 
@@ -137,6 +143,7 @@ def portfolio():
                 del entry_price[symbol]
                 del peak_price[symbol]
                 del position_size[symbol]
+                del entry_index[symbol]
 
         # =========================
         # RELATIVE STRENGTH
@@ -151,7 +158,7 @@ def portfolio():
         top_symbols = [s[0] for s in rs_list[:TOP_N]]
 
         # =========================
-        # RISK CHECK
+        # RISK CONTROL
         # =========================
         total_allocated = sum(position_size.values())
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
@@ -193,6 +200,7 @@ def portfolio():
                 entry_price[symbol] = row["c"]
                 peak_price[symbol] = row["c"]
                 position_size[symbol] = risk_amount
+                entry_index[symbol] = i  # 🔥 NEW
 
                 available_risk -= risk_amount
 
