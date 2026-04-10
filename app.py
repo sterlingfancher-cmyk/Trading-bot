@@ -6,6 +6,10 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 import joblib
 
+@app.route('/')
+def home():
+    return jsonify({"status": "running"})
+    
 app = Flask(__name__)
 
 TRADIER_API_KEY = "YOUR_TRADIER_API_KEY"
