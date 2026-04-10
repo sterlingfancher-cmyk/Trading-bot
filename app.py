@@ -19,7 +19,8 @@ def compute_strategy(df):
     df.loc[
     (
         (df["ma_fast"] > df["ma_slow"]) &  #trend
-        (df["returns"] > 0)
+        (df["returns"] > 0.0005) &
+        (df["returns"].rolling(2).mean() >0)
     ),   
         "signal"
     ] = 1
