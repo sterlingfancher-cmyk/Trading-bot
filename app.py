@@ -16,7 +16,7 @@ def compute_strategy(df):
     df["signal"] = 0
 
     # ENTRY
-    strength = (df["ma_fast"] - df["ma_slow"] / df["ma_slow"]
+    strength = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
     
     df.loc[
     (
