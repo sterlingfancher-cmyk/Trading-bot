@@ -2,6 +2,7 @@ from flask import Flask, jsonify
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import itertools
 
 app = Flask(__name__)
 
@@ -9,152 +10,140 @@ app = Flask(__name__)
 # DATA
 # =========================
 def get_intraday(symbol):
-    try:
-        df = yf.download(symbol, period="5d", interval="5m")
+    df = yf.download(symbol, period="5d", interval="5m")
 
-        if df is None or df.empty:
-            return None
-
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
-        df = df.rename(columns={
-            "Close": "c",
-            "High": "h",
-            "Low": "l",
-            "Open": "o",
-            "Volume": "v"
-        })
-
-        return df
-
-    except:
+    if df is None or df.empty:
         return None
 
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    df = df.rename(columns={
+        "Close": "c",
+        "High": "h",
+        "Low": "l",
+        "Open": "o",
+        "Volume": "v"
+    })
+
+    return df
+
 
 # =========================
-# STRATEGY (ATR BASED)
+# STRATEGY
 # =========================
-def compute_strategy(df):
-    try:
-        df = df.copy()
+def run_strategy(df, fast, slow, atr_mult_sl, atr_mult_tp, vol_thresh):
 
-        # Indicators
-        df["ma_fast"] = df["c"].rolling(10).mean()
-        df["ma_slow"] = df["c"].rolling(30).mean()
+    df = df.copy()
 
-        # ATR calculation
-        df["tr"] = np.maximum(
-            df["h"] - df["l"],
-            np.maximum(
-                abs(df["h"] - df["c"].shift(1)),
-                abs(df["l"] - df["c"].shift(1))
-            )
+    df["ma_fast"] = df["c"].rolling(fast).mean()
+    df["ma_slow"] = df["c"].rolling(slow).mean()
+
+    # ATR
+    df["tr"] = np.maximum(
+        df["h"] - df["l"],
+        np.maximum(
+            abs(df["h"] - df["c"].shift(1)),
+            abs(df["l"] - df["c"].shift(1))
         )
-        df["atr"] = df["tr"].rolling(14).mean()
+    )
+    df["atr"] = df["tr"].rolling(14).mean()
 
-        df = df.dropna()
+    df["returns"] = df["c"].pct_change()
+    df["vol"] = df["returns"].rolling(10).std()
 
-        if df.empty:
-            return None, "Empty after indicators"
+    df = df.dropna()
 
-        position = 0
-        entry_price = 0
-        entry_atr = 0
+    position = 0
+    entry_price = 0
+    entry_atr = 0
 
-        signals = []
-        returns = []
+    results = []
 
-        for i in range(len(df)):
-            row = df.iloc[i]
+    for i in range(len(df)):
+        row = df.iloc[i]
 
-            if position == 0:
-                # ENTRY
-                if row["ma_fast"] > row["ma_slow"]:
-                    position = 1
-                    entry_price = row["c"]
-                    entry_atr = row["atr"]
-                    signals.append(1)
-                    returns.append(0)
-                else:
-                    signals.append(0)
-                    returns.append(0)
-
+        if position == 0:
+            if (
+                row["ma_fast"] > row["ma_slow"] and
+                row["vol"] > vol_thresh
+            ):
+                position = 1
+                entry_price = row["c"]
+                entry_atr = row["atr"]
+                results.append(0)
             else:
-                price_change = row["c"] - entry_price
+                results.append(0)
 
-                # ATR-based stop/take
-                stop_loss = -1.5 * entry_atr
-                take_profit = 2.5 * entry_atr
+        else:
+            change = row["c"] - entry_price
 
-                if (
-                    price_change <= stop_loss or
-                    price_change >= take_profit or
-                    row["ma_fast"] < row["ma_slow"]
-                ):
-                    position = 0
-                    signals.append(0)
-                    returns.append(price_change / entry_price)
-                else:
-                    signals.append(1)
-                    returns.append(0)
+            stop = -atr_mult_sl * entry_atr
+            target = atr_mult_tp * entry_atr
 
-        df["signal"] = signals
-        df["strategy"] = returns
+            if (
+                change <= stop or
+                change >= target or
+                row["ma_fast"] < row["ma_slow"]
+            ):
+                position = 0
+                results.append(change / entry_price)
+            else:
+                results.append(0)
 
-        return df, None
+    df["strategy"] = results
 
-    except Exception as e:
-        return None, f"Strategy error: {str(e)}"
+    total_return = df["strategy"].sum()
+    sharpe = df["strategy"].mean() / (df["strategy"].std() + 1e-9)
+
+    return total_return, sharpe
 
 
 # =========================
-# ROUTES
+# OPTIMIZER
 # =========================
-@app.route("/")
-def home():
-    return jsonify({"status": "running"})
+@app.route("/optimize/<symbol>")
+def optimize(symbol):
+    df = get_intraday(symbol)
 
+    if df is None:
+        return jsonify({"error": "No data"})
 
-@app.route("/backtest/<symbol>")
-def backtest(symbol):
-    try:
-        raw = get_intraday(symbol)
+    best = {
+        "balance": 0,
+        "sharpe": -999,
+        "params": {}
+    }
 
-        if raw is None:
-            return jsonify({"error": "Data fetch failed"})
+    fast_range = [5, 8, 10, 12]
+    slow_range = [20, 30, 40]
+    sl_range = [1.0, 1.5, 2.0]
+    tp_range = [2.0, 2.5, 3.0]
+    vol_range = [0.0005, 0.001, 0.0015]
 
-        df, err = compute_strategy(raw)
+    for fast, slow, sl, tp, vol in itertools.product(
+        fast_range, slow_range, sl_range, tp_range, vol_range
+    ):
+        if fast >= slow:
+            continue
 
-        if err:
-            return jsonify({"error": err})
+        ret, sharpe = run_strategy(df, fast, slow, sl, tp, vol)
+        balance = 1000 * (1 + ret)
 
-        if df is None or df.empty:
-            return jsonify({"error": "No usable data"})
+        if sharpe > best["sharpe"]:
+            best = {
+                "balance": round(balance, 2),
+                "sharpe": round(sharpe, 4),
+                "params": {
+                    "fast": fast,
+                    "slow": slow,
+                    "atr_sl": sl,
+                    "atr_tp": tp,
+                    "vol_thresh": vol
+                }
+            }
 
-        df["equity"] = (1 + df["strategy"]).cumprod() * 1000
-
-        trades = int((df["strategy"] != 0).sum())
-
-        total_return = df["equity"].iloc[-1]
-        avg_pnl = df["strategy"].mean()
-
-        sharpe = df["strategy"].mean() / (df["strategy"].std() + 1e-9)
-        drawdown = (df["equity"] / df["equity"].cummax() - 1).min()
-        win_rate = (df["strategy"] > 0).sum() / max(1, trades) * 100
-
-        return jsonify({
-            "symbol": symbol,
-            "balance": round(total_return, 2),
-            "avg_pnl": round(avg_pnl, 6),
-            "sharpe": round(sharpe, 4),
-            "max_drawdown": round(drawdown, 4),
-            "trades": trades,
-            "win_rate": round(win_rate, 2)
-        })
-
-    except Exception as e:
-        return jsonify({"error": f"Server crash: {str(e)}"})
+    return jsonify(best)
 
 
 # =========================
