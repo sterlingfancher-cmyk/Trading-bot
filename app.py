@@ -7,11 +7,12 @@ import itertools
 app = Flask(__name__)
 
 # =========================
-# DATA FETCH
+# DATA FETCH (UPGRADED)
 # =========================
 def get_intraday(symbol):
     try:
-        df = yf.download(symbol, period="5d", interval="5m", progress=False)
+        # 🔥 BIG FIX: More data, better timeframe
+        df = yf.download(symbol, period="60d", interval="15m", progress=False)
 
         if df is None or df.empty:
             return None
@@ -114,7 +115,7 @@ def run_strategy(df, fast, slow, sl_mult, vol_thresh):
 
 
 # =========================
-# BACKTEST
+# BACKTEST ROUTE
 # =========================
 @app.route("/backtest/<symbol>")
 def backtest(symbol):
