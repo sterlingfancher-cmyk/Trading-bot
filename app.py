@@ -34,15 +34,19 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (TREND + DIP BUY)
+# STRATEGY (BASE + VOL FILTER)
 # =========================
 def compute_strategy(df):
     try:
         df = df.copy()
 
-        df["ma_fast"] = df["c"].rolling(20).mean()
-        df["ma_slow"] = df["c"].rolling(50).mean()
+        # Core indicators (this is your original edge)
+        df["ma_fast"] = df["c"].rolling(10).mean()
+        df["ma_slow"] = df["c"].rolling(30).mean()
         df["returns"] = df["c"].pct_change()
+
+        # 🔥 NEW: volatility filter
+        df["volatility"] = df["returns"].rolling(10).std()
 
         df = df.dropna()
 
@@ -51,22 +55,15 @@ def compute_strategy(df):
 
         df["signal"] = 0
 
-        # Trend
-        trend = df["ma_fast"] > df["ma_slow"]
+        # Only trade when volatility is above average
+        vol_threshold = df["volatility"].mean()
 
-        # Dip below fast MA
-        dip = df["c"] < df["ma_fast"]
-
-        # Recovery (turning back up)
-        recovery = df["returns"] > 0
-
-        # ENTRY (buy dips in trend)
         df.loc[
-            trend & dip & recovery,
+            (df["ma_fast"] > df["ma_slow"]) &
+            (df["volatility"] > vol_threshold),
             "signal"
         ] = 1
 
-        # EXIT
         df.loc[
             (df["ma_fast"] < df["ma_slow"]) |
             (df["returns"] < -0.0025) |
