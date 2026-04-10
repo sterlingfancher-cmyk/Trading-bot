@@ -35,7 +35,7 @@ DATA = None
 
 
 # =========================
-# LOAD DATA (SAFE)
+# LOAD DATA (LAZY + SAFE)
 # =========================
 def load_data():
     global DATA
@@ -47,7 +47,7 @@ def load_data():
 
     for symbol in SYMBOLS:
         try:
-            df = yf.download(symbol, period="6mo", interval="1d", progress=False)
+            df = yf.download(symbol, period="1y", interval="1d", progress=False)
 
             if df is None or df.empty:
                 continue
@@ -63,8 +63,10 @@ def load_data():
                 "Volume": "v"
             })
 
-            # Indicators
-            df["ma_200"] = df["c"].rolling(50).mean()
+            # =========================
+            # INDICATORS (IMPROVED)
+            # =========================
+            df["ma_200"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
             prev_close = df["c"].shift(1)
@@ -75,7 +77,9 @@ def load_data():
 
             df["atr"] = tr.rolling(14).mean()
             df["atr_change"] = df["atr"].pct_change()
-            df["momentum"] = df["c"] / df["c"].shift(20)
+
+            # 🔥 Better momentum
+            df["momentum"] = df["c"] / df["c"].shift(30)
 
             data[symbol] = df.dropna()
 
@@ -91,7 +95,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "live-trading-system"})
+    return jsonify({"status": "optimized-system-live"})
 
 
 @app.route("/portfolio")
@@ -122,7 +126,7 @@ def portfolio():
     for date in all_dates:
 
         # =========================
-        # MARKET REGIME
+        # MARKET REGIME FILTER
         # =========================
         if date not in spy_df.index:
             continue
@@ -190,7 +194,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES
+        # ENTRIES (IMPROVED)
         # =========================
         for symbol in top_symbols:
 
@@ -211,7 +215,9 @@ def portfolio():
             trend = row["c"] > row["ma_200"]
             recent_breakout = breakout_age[symbol] <= BREAKOUT_LOOKBACK
 
-            pullback = row["c"] <= row["high_break"] * 1.02
+            # 🔥 IMPROVED PULLBACK
+            pullback = row["c"] <= row["high_break"] * 1.05
+
             bounce = row["c"] > prev["c"]
             vol = row["atr_change"] > 0
 
@@ -233,6 +239,9 @@ def portfolio():
     })
 
 
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
