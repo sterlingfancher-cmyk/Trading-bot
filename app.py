@@ -6,7 +6,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG (UPDATED 🔥)
+# CONFIG
 # =========================
 LOOKBACK = 20
 ATR_MULT = 2.5
@@ -23,7 +23,7 @@ SYMBOLS = [
 
 INITIAL_CAPITAL = 1000
 
-# 🔥 INCREASED DEPLOYMENT
+# 🔥 HIGH DEPLOYMENT SETTINGS
 RISK_PER_TRADE = 0.12
 MAX_POSITIONS = 5
 TOP_N = 5
@@ -65,7 +65,7 @@ def load_data():
             })
 
             # =========================
-            # INDICATORS (SIMPLE + STRONG)
+            # INDICATORS
             # =========================
             df["ma_200"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
@@ -87,7 +87,7 @@ def load_data():
             print(f"ERROR loading {symbol}: {e}")
 
     DATA = data
-    return DATA
+    return data
 
 
 # =========================
@@ -95,7 +95,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "high-deployment-system-live"})
+    return jsonify({"status": "near-breakout-system-live"})
 
 
 @app.route("/portfolio")
@@ -124,7 +124,7 @@ def portfolio():
     for date in all_dates:
 
         # =========================
-        # MARKET REGIME
+        # MARKET REGIME FILTER
         # =========================
         if date not in spy_df.index:
             continue
@@ -177,7 +177,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES
+        # ENTRIES (NEAR BREAKOUT 🔥)
         # =========================
         for symbol in top_symbols:
 
@@ -195,12 +195,14 @@ def portfolio():
             row = df.loc[date]
 
             trend = row["c"] > row["ma_200"]
-            breakout = row["c"] > row["high_break"]
+
+            # 🔥 KEY CHANGE: NEAR BREAKOUT
+            breakout = row["c"] >= row["high_break"] * 0.995
+
             vol = row["atr_change"] > 0
 
             if trend and breakout and vol:
 
-                # 🔥 DYNAMIC SIZING
                 breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
 
                 size_multiplier = breakout_strength / 0.02
