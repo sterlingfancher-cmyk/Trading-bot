@@ -21,43 +21,43 @@ def get_intraday(symbol):
     return df.dropna()
 
 # =========================
-# STRATEGY (OPTIMIZED)
+# STRATEGY (BALANCED BOOST)
 # =========================
 def compute_strategy(df):
 
-    df["ma_fast"] = df["c"].rolling(20).mean()
-    df["ma_slow"] = df["c"].rolling(50).mean()
+    df["ma_fast"] = df["c"].rolling(15).mean()
+    df["ma_slow"] = df["c"].rolling(40).mean()
     df["returns"] = df["c"].pct_change()
 
     df["trend"] = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
-    df["volatility"] = df["returns"].rolling(10).std()
+    df["volatility"] = df["returns"].rolling(8).std()
 
     df["signal"] = 0
 
     # =========================
-    # ENTRY (LOOSENED)
+    # ENTRY (MORE FREQUENT)
     # =========================
     df.loc[
-        (df["trend"] > 0.0007) &                      # lowered threshold
+        (df["trend"] > 0.0005) &
         (df["ma_fast"] > df["ma_slow"]) &
-        (df["volatility"] > 0.0004),                  # slightly looser
+        (df["volatility"] > 0.0003),
         "signal"
     ] = 1
 
     # =========================
-    # SHORTER COOLDOWN (more trades)
+    # COOLDOWN (MORE TRADES)
     # =========================
-    cooldown = 6
+    cooldown = 4
     for i in range(1, len(df)):
         if df["signal"].iloc[i] == 1:
             df.iloc[i:i+cooldown, df.columns.get_loc("signal")] = 1
 
     # =========================
-    # EXIT (IMPROVED)
+    # SMART EXIT (KEY UPGRADE)
     # =========================
     df.loc[
-        (df["returns"] < -0.003) |   # tighter stop loss
-        (df["returns"] > 0.008),     # realistic take profit
+        (df["returns"] < -0.0025) |   # tighter stop loss
+        (df["returns"] > 0.006),      # quicker profit taking
         "signal"
     ] = 0
 
