@@ -16,15 +16,15 @@ def get_intraday(symbol):
         if df is None or df.empty:
             return None
 
-        # Flatten columns if needed
+        # Flatten multi-index
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
         df = df.rename(columns={
-            "Close": "c",
+            "Open": "o",
             "High": "h",
             "Low": "l",
-            "Open": "o",
+            "Close": "c",
             "Volume": "v"
         })
 
@@ -44,11 +44,10 @@ def run_strategy(df, fast, slow, atr_mult_sl, atr_mult_tp, vol_thresh):
     try:
         df = df.copy()
 
-        # Moving averages
+        # Indicators
         df["ma_fast"] = df["c"].rolling(fast).mean()
         df["ma_slow"] = df["c"].rolling(slow).mean()
 
-        # ATR
         prev_close = df["c"].shift(1)
         tr1 = df["h"] - df["l"]
         tr2 = (df["h"] - prev_close).abs()
@@ -57,7 +56,6 @@ def run_strategy(df, fast, slow, atr_mult_sl, atr_mult_tp, vol_thresh):
         df["tr"] = np.maximum(tr1, np.maximum(tr2, tr3))
         df["atr"] = df["tr"].rolling(14).mean()
 
-        # Volatility
         df["returns"] = df["c"].pct_change()
         df["vol"] = df["returns"].rolling(10).std()
 
@@ -138,7 +136,7 @@ def backtest(symbol):
         slow=30,
         atr_mult_sl=1.5,
         atr_mult_tp=2.5,
-        vol_thresh=0.001
+        vol_thresh=0.0005
     )
 
     if result is None or "error" in result:
@@ -155,7 +153,7 @@ def backtest(symbol):
 
 
 # =========================
-# OPTIMIZER ROUTE (UPDATED)
+# OPTIMIZER ROUTE (FIXED)
 # =========================
 @app.route("/optimize/<symbol>")
 def optimize(symbol):
@@ -172,11 +170,12 @@ def optimize(symbol):
         "params": {}
     }
 
-    fast_range = [5, 8, 10, 12]
-    slow_range = [20, 30, 40]
+    # 🔥 Expanded search space
+    fast_range = [5, 6, 8, 10, 12]
+    slow_range = [15, 20, 25, 30, 40]
     sl_range = [1.0, 1.5, 2.0]
     tp_range = [2.0, 2.5, 3.0]
-    vol_range = [0.0005, 0.001, 0.0015]
+    vol_range = [0.0002, 0.0005, 0.0008]
 
     for fast, slow, sl, tp, vol in itertools.product(
         fast_range, slow_range, sl_range, tp_range, vol_range
@@ -191,12 +190,16 @@ def optimize(symbol):
 
         balance = 1000 * (1 + result["total_return"])
 
-        # 🔥 BALANCED SCORING SYSTEM
+        # 🔥 Balanced scoring
         score = (
             result["sharpe"] * 2 +
             result["total_return"] * 50 +
-            min(result["trades"], 20) * 0.01
+            min(result["trades"], 25) * 0.02
         )
+
+        # 🔥 Penalize low trades
+        if result["trades"] < 8:
+            score *= 0.5
 
         if score > best["score"]:
             best = {
