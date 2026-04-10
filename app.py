@@ -22,7 +22,7 @@ def compute_strategy(df):
     (
         (df["ma_fast"] > df["ma_slow"]) &  #trend
         (df["returns"] > 0.0005) &
-        (strength > 0.001)
+        (strength > 0.007)
     ),   
         "signal"
     ] = 1
