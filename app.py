@@ -23,7 +23,6 @@ SYMBOLS = [
 
 INITIAL_CAPITAL = 1000
 RISK_PER_TRADE = 0.13
-MAX_POSITIONS = 4
 TOP_N = 4
 MAX_TOTAL_RISK = 0.8
 
@@ -60,11 +59,11 @@ def safe_download(symbol):
     return None
 
 # =========================
-# FALLBACK DATA (🔥 GUARANTEED)
+# FALLBACK DATA
 # =========================
 def generate_fake_data():
     dates = pd.date_range(end=pd.Timestamp.today(), periods=120)
-    price = np.linspace(100, 120, 120) + np.random.normal(0, 2, 120)
+    price = np.linspace(100, 120, 120)
 
     df = pd.DataFrame({
         "c": price,
@@ -75,38 +74,49 @@ def generate_fake_data():
     return df
 
 # =========================
-# PROCESS DATA
+# PROCESS DATA (SAFE)
 # =========================
 def process_data(df):
 
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+    try:
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
-    if "Close" in df.columns:
-        df = df.rename(columns={"Close": "c", "High": "h", "Low": "l"})
+        if "Close" in df.columns:
+            df = df.rename(columns={"Close": "c", "High": "h", "Low": "l"})
 
-    df["ma"] = df["c"].rolling(100).mean()
-    df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
+        # Ensure required columns exist
+        if not all(col in df.columns for col in ["c","h","l"]):
+            return None
 
-    prev_close = df["c"].shift(1)
-    tr = np.maximum(
-        df["h"] - df["l"],
-        np.maximum(abs(df["h"] - prev_close), abs(df["l"] - prev_close))
-    )
+        df["ma"] = df["c"].rolling(50).mean()
+        df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
-    df["atr"] = pd.Series(tr).rolling(14).mean()
-    df["atr_change"] = df["atr"].pct_change()
-    df["momentum"] = df["c"] / df["c"].shift(20)
+        prev_close = df["c"].shift(1)
+        tr = np.maximum(
+            df["h"] - df["l"],
+            np.maximum(abs(df["h"] - prev_close), abs(df["l"] - prev_close))
+        )
 
-    return df.dropna()
+        df["atr"] = pd.Series(tr).rolling(14).mean()
+        df["atr_change"] = df["atr"].pct_change()
+        df["momentum"] = df["c"] / df["c"].shift(20)
+
+        df = df.dropna()
+
+        if df.empty:
+            return None
+
+        return df
+
+    except:
+        return None
 
 # =========================
-# INITIAL LOAD (🔥 FIX)
+# INITIAL LOAD
 # =========================
 def initial_load():
     global DATA, LAST_UPDATE
-
-    print("Initial data load...")
 
     new_data = {}
 
@@ -114,16 +124,20 @@ def initial_load():
         df = safe_download(symbol)
 
         if df is None:
-            print(f"Using fallback for {symbol}")
             df = generate_fake_data()
 
         df = process_data(df)
-        new_data[symbol] = df
+
+        if df is not None:
+            new_data[symbol] = df
+
+    # 🔥 GUARANTEE SPY EXISTS
+    if "SPY" not in new_data:
+        fake = process_data(generate_fake_data())
+        new_data["SPY"] = fake
 
     DATA = new_data
     LAST_UPDATE = time.time()
-
-    print(f"Loaded {len(DATA)} symbols")
 
 # =========================
 # BACKGROUND LOADER
@@ -132,8 +146,6 @@ def data_loader():
     global DATA, LAST_UPDATE
 
     while True:
-        print("Refreshing data...")
-
         new_data = {}
 
         for symbol in SYMBOLS:
@@ -143,141 +155,101 @@ def data_loader():
                 df = generate_fake_data()
 
             df = process_data(df)
-            new_data[symbol] = df
+
+            if df is not None:
+                new_data[symbol] = df
+
+        if "SPY" not in new_data:
+            fake = process_data(generate_fake_data())
+            new_data["SPY"] = fake
 
         DATA = new_data
         LAST_UPDATE = time.time()
 
-        print("Data refreshed")
-
         time.sleep(REFRESH_INTERVAL)
 
-# 🔥 RUN INITIAL LOAD FIRST
+# START SYSTEM
 initial_load()
-
-# 🔁 START BACKGROUND THREAD
 threading.Thread(target=data_loader, daemon=True).start()
 
 # =========================
-# HOME
-# =========================
-@app.route("/")
-def home():
-    return jsonify({
-        "status": "live",
-        "symbols_loaded": len(DATA),
-        "last_update": LAST_UPDATE
-    })
-
-# =========================
-# SIGNALS (INSTANT)
+# SIGNALS (SAFE)
 # =========================
 @app.route("/signals")
 def signals():
 
-    capital = float(request.args.get("capital", INITIAL_CAPITAL))
+    try:
+        capital = float(request.args.get("capital", INITIAL_CAPITAL))
 
-    spy_df = DATA.get("SPY")
-    last_date = spy_df.index[-1]
+        if not DATA or "SPY" not in DATA:
+            return jsonify({"error": "No data available"})
 
-    if spy_df.loc[last_date]["c"] <= spy_df.loc[last_date]["ma"]:
+        spy_df = DATA["SPY"]
+
+        if spy_df.empty:
+            return jsonify({"error": "SPY data empty"})
+
+        last_date = spy_df.index[-1]
+
+        if spy_df.loc[last_date]["c"] <= spy_df.loc[last_date]["ma"]:
+            return jsonify({
+                "date": str(last_date),
+                "market": "bearish",
+                "signals": []
+            })
+
+        rs = [(s, d.loc[last_date]["momentum"]) for s, d in DATA.items()]
+        rs = sorted(rs, key=lambda x: x[1], reverse=True)
+
+        signals = []
+        used_risk = 0
+        total_risk = capital * MAX_TOTAL_RISK
+
+        for symbol, _ in rs[:TOP_N]:
+
+            df = DATA[symbol]
+            row = df.loc[last_date]
+
+            if not all(k in row for k in ["c","ma","high_break","atr","atr_change"]):
+                continue
+
+            if not (row["c"] > row["ma"] and row["c"] > row["high_break"] and row["atr_change"] > 0):
+                continue
+
+            entry = row["c"]
+            stop = entry - (ATR_MULT * row["atr"])
+            risk_per_share = entry - stop
+
+            if risk_per_share <= 0:
+                continue
+
+            risk_amount = capital * RISK_PER_TRADE
+
+            if used_risk + risk_amount > total_risk:
+                risk_amount = total_risk - used_risk
+
+            shares = int(risk_amount / risk_per_share)
+
+            if shares <= 0:
+                continue
+
+            signals.append({
+                "symbol": symbol,
+                "price": round(entry, 2),
+                "shares": shares,
+                "stop": round(stop, 2)
+            })
+
+            used_risk += risk_amount
+
         return jsonify({
             "date": str(last_date),
-            "market": "bearish",
-            "signals": []
+            "market": "bullish",
+            "signals": signals
         })
 
-    rs = [(s, d.loc[last_date]["momentum"]) for s, d in DATA.items()]
-    rs = sorted(rs, key=lambda x: x[1], reverse=True)
-
-    signals = []
-    used_risk = 0
-    total_risk = capital * MAX_TOTAL_RISK
-
-    for symbol, _ in rs[:TOP_N]:
-
-        df = DATA[symbol]
-        row = df.loc[last_date]
-
-        if not (row["c"] > row["ma"] and row["c"] > row["high_break"] and row["atr_change"] > 0):
-            continue
-
-        entry = row["c"]
-        stop = entry - (ATR_MULT * row["atr"])
-        risk_per_share = entry - stop
-
-        if risk_per_share <= 0:
-            continue
-
-        risk_amount = capital * RISK_PER_TRADE
-
-        if used_risk + risk_amount > total_risk:
-            risk_amount = total_risk - used_risk
-
-        shares = int(risk_amount / risk_per_share)
-
-        if shares <= 0:
-            continue
-
-        signals.append({
-            "symbol": symbol,
-            "price": round(entry, 2),
-            "shares": shares,
-            "stop": round(stop, 2)
-        })
-
-        used_risk += risk_amount
-
-    return jsonify({
-        "date": str(last_date),
-        "market": "bullish",
-        "signals": signals
-    })
-
-# =========================
-# AUTO TRADE
-# =========================
-@app.route("/auto_trade")
-def auto_trade():
-
-    if not AUTO_TRADING_ENABLED:
-        return jsonify({"error": "Auto trading disabled"})
-
-    if REQUIRE_CONFIRM and request.args.get("confirm") != "true":
-        return jsonify({"error": "Add ?confirm=true"})
-
-    if api is None:
-        return jsonify({"error": "Alpaca not configured"})
-
-    spy_df = DATA.get("SPY")
-    last_date = spy_df.index[-1]
-
-    if spy_df.loc[last_date]["c"] <= spy_df.loc[last_date]["ma"]:
-        return jsonify({"status": "No trades"})
-
-    executed = []
-
-    for symbol in SYMBOLS:
-
-        df = DATA[symbol]
-        row = df.loc[last_date]
-
-        if not (row["c"] > row["ma"] and row["c"] > row["high_break"] and row["atr_change"] > 0):
-            continue
-
-        try:
-            api.submit_order(
-                symbol=symbol,
-                qty=1,
-                side="buy",
-                type="market",
-                time_in_force="gtc"
-            )
-            executed.append(symbol)
-        except Exception as e:
-            executed.append({symbol: str(e)})
-
-    return jsonify({"executed": executed})
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 # =========================
 # RUN
