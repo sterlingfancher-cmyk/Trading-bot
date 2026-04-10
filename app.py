@@ -13,7 +13,7 @@ def compute_strategy(df):
     df["ma_slow"] = df["c"].rolling(50).mean()
     df["returns"] = df["c"].pct_change()
 
-    df["signal"] = 0
+    df["signal"] = 0.0
 
     # ENTRY
     strength = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
