@@ -6,7 +6,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG
+# CONFIG (FINAL TUNED)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 2.5
@@ -23,22 +23,20 @@ SYMBOLS = [
 
 INITIAL_CAPITAL = 1000
 
+# 🔥 FINAL SETTINGS
 RISK_PER_TRADE = 0.12
-MAX_POSITIONS = 5
-TOP_N = 5
+MAX_POSITIONS = 3
+TOP_N = 3
 MAX_TOTAL_RISK = 0.6
 
 TRANSACTION_COST = 0.001
+MOMENTUM_THRESHOLD = 1.10  # 🔥 STRONG FILTER
 
-# 🔥 NEW: MOMENTUM THRESHOLD
-MOMENTUM_THRESHOLD = 1.05
-
-# 🔥 GLOBAL CACHE
 DATA = None
 
 
 # =========================
-# LOAD DATA
+# LOAD DATA (LAZY)
 # =========================
 def load_data():
     global DATA
@@ -66,9 +64,7 @@ def load_data():
                 "Volume": "v"
             })
 
-            # =========================
-            # INDICATORS
-            # =========================
+            # Indicators
             df["ma_200"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
@@ -80,7 +76,6 @@ def load_data():
 
             df["atr"] = tr.rolling(14).mean()
             df["atr_change"] = df["atr"].pct_change()
-
             df["momentum"] = df["c"] / df["c"].shift(30)
 
             data[symbol] = df.dropna()
@@ -97,7 +92,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "momentum-filter-system-live"})
+    return jsonify({"status": "final-tuned-system-live"})
 
 
 @app.route("/portfolio")
@@ -164,7 +159,7 @@ def portfolio():
                 trades += 1
 
         # =========================
-        # RELATIVE STRENGTH
+        # RELATIVE STRENGTH (TOP 3 ONLY 🔥)
         # =========================
         rs = []
 
@@ -179,7 +174,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (FILTERED 🔥)
+        # ENTRIES (STRICT QUALITY)
         # =========================
         for symbol in top_symbols:
 
@@ -197,16 +192,12 @@ def portfolio():
             row = df.loc[date]
 
             trend = row["c"] > row["ma_200"]
-
-            # 🔥 NEW: MOMENTUM FILTER
             strong = row["momentum"] > MOMENTUM_THRESHOLD
-
             breakout = row["c"] >= row["high_break"] * 0.995
             vol = row["atr_change"] > 0
 
             if trend and strong and breakout and vol:
 
-                # 🔥 DYNAMIC SIZING
                 breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
 
                 size_multiplier = breakout_strength / 0.02
@@ -224,8 +215,7 @@ def portfolio():
     return jsonify({
         "final_balance": round(capital, 2),
         "trades": trades,
-        "active_positions": len(positions),
-        "symbols_traded": len(data)
+        "active_positions": len(positions)
     })
 
 
