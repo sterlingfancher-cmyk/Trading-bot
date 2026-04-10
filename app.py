@@ -30,8 +30,6 @@ BREAKOUT_THRESHOLD = 0.01
 TRANSACTION_COST = 0.001
 MAX_TOTAL_RISK = 0.3
 
-MIN_HOLD_DAYS = 5  # 🔥 NEW
-
 
 # =========================
 # DATA
@@ -91,6 +89,9 @@ def portfolio():
         if df is not None:
             data[symbol] = prepare(df)
 
+    # 🔥 SPY regime filter data
+    spy_df = prepare(get_data("SPY"))
+
     all_dates = sorted(set().union(*[df.index for df in data.values()]))
 
     capital = INITIAL_CAPITAL
@@ -100,11 +101,24 @@ def portfolio():
     entry_price = {}
     peak_price = {}
     position_size = {}
-    entry_index = {}  # 🔥 NEW
 
     trade_log = []
 
-    for i, date in enumerate(all_dates):
+    for date in all_dates:
+
+        # =========================
+        # 🔥 MARKET REGIME FILTER
+        # =========================
+        if date not in spy_df.index:
+            continue
+
+        spy_row = spy_df.loc[date]
+
+        market_trend = spy_row["c"] > spy_row["ma_200"]
+
+        if not market_trend:
+            equity_curve.append(capital)
+            continue
 
         # =========================
         # EXITS
@@ -121,10 +135,7 @@ def portfolio():
             stop = peak_price[symbol] - (ATR_MULT * row["atr"])
             trend_break = row["c"] < row["ma_200"]
 
-            # 🔥 MIN HOLD FILTER
-            min_hold = (i - entry_index[symbol]) > MIN_HOLD_DAYS
-
-            if (row["c"] < stop or trend_break) and min_hold:
+            if row["c"] < stop or trend_break:
                 pct = (row["c"] - entry_price[symbol]) / entry_price[symbol]
                 pct -= TRANSACTION_COST
 
@@ -143,7 +154,6 @@ def portfolio():
                 del entry_price[symbol]
                 del peak_price[symbol]
                 del position_size[symbol]
-                del entry_index[symbol]
 
         # =========================
         # RELATIVE STRENGTH
@@ -200,7 +210,6 @@ def portfolio():
                 entry_price[symbol] = row["c"]
                 peak_price[symbol] = row["c"]
                 position_size[symbol] = risk_amount
-                entry_index[symbol] = i  # 🔥 NEW
 
                 available_risk -= risk_amount
 
