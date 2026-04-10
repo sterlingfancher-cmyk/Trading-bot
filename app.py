@@ -172,7 +172,15 @@ def backtest(symbol):
         raw = get_intraday(symbol)
 
         if raw.empty:
-            return jsonify({"error": "No valid data from Polygon"})
+            return jsonify({"error": "RAW DATA EMPTY"})
+
+        # TEMP DEBUG - REMOVE AFTER TEST
+        debug = {
+            "rows":len(raw),
+            "columns": list(raw.columns),
+            "sample": raw.head(3).to_dict()
+        }
+        print(debug)    # logs to Railway logs
 
         df = raw.copy()
 
