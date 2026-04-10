@@ -18,7 +18,8 @@ def compute_strategy(df):
     # ENTRY
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &
-        (df["returns"] < -0.001),    # stronger pullback
+        (df["returns"] < -0.002) &
+        ((df[ma_fast"] - df["ma_slow"]) / df["ma_slow] > 0.001),  # stronger pullback
         "signal"
     ] = 1
 
@@ -39,6 +40,7 @@ def compute_strategy(df):
     # Strategy returns
     df["strategy_returns"] = df["returns"] * df["position"].shift(1)
     df["strategy_returns"] = df["strategy_returns"].clip(lower=-0.01, upper=0.02)
+    df["strategy_returns"] = df["strategy_returns"].where(df["strategy_returns"].abs()>0.0002, 0)
 
     # Volatility filter
     df["volatility"] = df["returns"].rolling(10).std()
