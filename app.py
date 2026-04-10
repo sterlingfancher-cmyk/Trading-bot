@@ -6,7 +6,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# DATA (FIXED MULTI-INDEX)
+# DATA
 # =========================
 def get_intraday(symbol):
     try:
@@ -15,7 +15,7 @@ def get_intraday(symbol):
         if df is None or df.empty:
             return None
 
-        # Fix multi-index issue
+        # Fix multi-index
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
@@ -34,19 +34,20 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (TREND + STRENGTH + MOMENTUM)
+# STRATEGY (TIGHTENED)
 # =========================
 def compute_strategy(df):
     try:
         df = df.copy()
 
-        # Indicators
         df["ma_fast"] = df["c"].rolling(10).mean()
         df["ma_slow"] = df["c"].rolling(30).mean()
         df["returns"] = df["c"].pct_change()
 
         df["trend_strength"] = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
-        df["momentum"] = df["returns"].rolling(3).mean()
+
+        # 🔥 STRONGER momentum filter
+        df["momentum"] = df["returns"].rolling(5).mean()
 
         df = df.dropna()
 
@@ -55,11 +56,11 @@ def compute_strategy(df):
 
         df["signal"] = 0
 
-        # ENTRY (high-quality only)
+        # ENTRY (tightened)
         df.loc[
             (df["ma_fast"] > df["ma_slow"]) &
-            (df["trend_strength"] > 0.0007) &
-            (df["momentum"] > 0),
+            (df["trend_strength"] > 0.0008) &
+            (df["momentum"] > 0.0002),
             "signal"
         ] = 1
 
