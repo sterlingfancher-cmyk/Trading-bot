@@ -21,52 +21,46 @@ def get_intraday(symbol):
     return df.dropna()
 
 # =========================
-# STRATEGY (FIXED VERSION)
+# STRATEGY (OPTIMIZED)
 # =========================
 def compute_strategy(df):
 
-    # Indicators
     df["ma_fast"] = df["c"].rolling(20).mean()
-    df["ma_slow"] = df["c"].rolling(60).mean()
+    df["ma_slow"] = df["c"].rolling(50).mean()
     df["returns"] = df["c"].pct_change()
 
-    # Trend strength
     df["trend"] = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
-
-    # Volatility filter
     df["volatility"] = df["returns"].rolling(10).std()
 
     df["signal"] = 0
 
     # =========================
-    # ENTRY (MORE RELIABLE)
+    # ENTRY (LOOSENED)
     # =========================
     df.loc[
-        (df["trend"] > 0.001) &                        # stronger trend
-        (df["ma_fast"] > df["ma_slow"]) &              # trend direction
-        (df["ma_fast"].shift(1) > df["ma_slow"].shift(1)) &  # confirmation (not just crossing)
-        (df["volatility"] > 0.0005),                   # avoid dead zones
+        (df["trend"] > 0.0007) &                      # lowered threshold
+        (df["ma_fast"] > df["ma_slow"]) &
+        (df["volatility"] > 0.0004),                  # slightly looser
         "signal"
     ] = 1
 
     # =========================
-    # HOLD POSITIONS LONGER
+    # SHORTER COOLDOWN (more trades)
     # =========================
-    cooldown = 12  # MUCH stronger filter
+    cooldown = 6
     for i in range(1, len(df)):
         if df["signal"].iloc[i] == 1:
             df.iloc[i:i+cooldown, df.columns.get_loc("signal")] = 1
 
     # =========================
-    # BETTER EXIT LOGIC
+    # EXIT (IMPROVED)
     # =========================
     df.loc[
-        (df["returns"] < -0.004) |   # stop loss
-        (df["returns"] > 0.01),      # take profit
+        (df["returns"] < -0.003) |   # tighter stop loss
+        (df["returns"] > 0.008),     # realistic take profit
         "signal"
     ] = 0
 
-    # Position
     df["position"] = df["signal"].shift().fillna(0)
     df["strategy"] = df["position"] * df["returns"]
 
@@ -79,7 +73,6 @@ def calculate_metrics(df, symbol):
 
     total_return = df["strategy"].sum()
     trades = (df["signal"].diff().abs() > 0).sum()
-
     win_rate = (df["strategy"] > 0).mean()
 
     sharpe = 0
