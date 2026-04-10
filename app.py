@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -39,7 +39,7 @@ LAST_FETCH = 0
 
 
 # =========================
-# SAFE DOWNLOAD (RETRY)
+# SAFE DOWNLOAD
 # =========================
 def safe_download(symbol):
     for _ in range(3):
@@ -65,7 +65,6 @@ def load_data():
 
     data = {}
 
-    # Ensure SPY loads first
     symbols_ordered = ["SPY"] + [s for s in SYMBOLS if s != "SPY"]
 
     for symbol in symbols_ordered:
@@ -86,7 +85,6 @@ def load_data():
                 "Volume": "v"
             })
 
-            # Indicators
             df["ma"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
@@ -117,13 +115,13 @@ def load_data():
 @app.route("/")
 def home():
     return jsonify({
-        "status": "production-ready",
+        "status": "portfolio-system-live",
         "endpoints": ["/signals", "/portfolio"]
     })
 
 
 # =========================
-# SIGNALS (WITH POSITION SIZING)
+# SIGNALS (PORTFOLIO-AWARE)
 # =========================
 @app.route("/signals")
 def signals():
@@ -133,7 +131,7 @@ def signals():
     signals = []
     warnings = []
 
-    capital = INITIAL_CAPITAL
+    capital = float(request.args.get("capital", INITIAL_CAPITAL))
 
     spy_df = data.get("SPY")
 
@@ -158,19 +156,23 @@ def signals():
     # Rank symbols
     rs = []
     for symbol, df in data.items():
-        try:
-            if last_date in df.index:
-                rs.append((symbol, df.loc[last_date]["momentum"]))
-        except:
-            warnings.append(f"{symbol} data issue")
+        if df is not None and last_date in df.index:
+            rs.append((symbol, df.loc[last_date]["momentum"]))
 
     rs = sorted(rs, key=lambda x: x[1], reverse=True)
     top_symbols = [s[0] for s in rs[:TOP_N]]
 
+    # Portfolio constraints
+    total_risk_budget = capital * MAX_TOTAL_RISK
+    used_risk = 0
+    positions_taken = 0
+
     for symbol in top_symbols:
 
-        df = data.get(symbol)
+        if positions_taken >= MAX_POSITIONS:
+            break
 
+        df = data.get(symbol)
         if df is None or last_date not in df.index:
             continue
 
@@ -180,35 +182,48 @@ def signals():
         breakout = row["c"] > row["high_break"]
         vol = row["atr_change"] > 0
 
-        if trend and breakout and vol:
+        if not (trend and breakout and vol):
+            continue
 
-            entry = row["c"]
-            stop = entry - (ATR_MULT * row["atr"])
+        entry = row["c"]
+        stop = entry - (ATR_MULT * row["atr"])
 
-            risk_per_share = entry - stop
-            if risk_per_share <= 0:
-                continue
+        risk_per_share = entry - stop
+        if risk_per_share <= 0:
+            continue
 
-            # Position sizing
-            risk_amount = capital * RISK_PER_TRADE
-            shares = int(risk_amount / risk_per_share)
-            position_value = shares * entry
+        risk_amount = capital * RISK_PER_TRADE
 
-            signals.append({
-                "symbol": symbol,
-                "price": round(entry, 2),
-                "momentum": round(row["momentum"], 3),
-                "stop": round(stop, 2),
-                "shares": shares,
-                "position_size": round(position_value, 2),
-                "risk_amount": round(risk_amount, 2)
-            })
+        if used_risk + risk_amount > total_risk_budget:
+            risk_amount = total_risk_budget - used_risk
+
+        if risk_amount <= 0:
+            break
+
+        shares = int(risk_amount / risk_per_share)
+        position_value = shares * entry
+
+        if shares <= 0:
+            continue
+
+        signals.append({
+            "symbol": symbol,
+            "price": round(entry, 2),
+            "stop": round(stop, 2),
+            "shares": shares,
+            "position_size": round(position_value, 2),
+            "risk_amount": round(risk_amount, 2)
+        })
+
+        used_risk += risk_amount
+        positions_taken += 1
 
     return jsonify({
         "date": str(last_date),
         "market": "bullish",
-        "signals": signals,
-        "warnings": warnings
+        "capital": capital,
+        "total_risk_used": round(used_risk, 2),
+        "signals": signals
     })
 
 
