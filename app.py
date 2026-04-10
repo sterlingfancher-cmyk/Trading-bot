@@ -30,7 +30,7 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (SAFE VERSION)
+# STRATEGY (FINAL FIX)
 # =========================
 def compute_strategy(df):
     try:
@@ -46,28 +46,31 @@ def compute_strategy(df):
         if df.empty:
             return None, "Empty after indicators"
 
-        # Shifted breakout level
-        prev_high = df["high_lookback"].shift(1).bfill().fillna(0)
+        # Convert EVERYTHING to numpy (no alignment issues)
+        close_vals = df["c"].to_numpy()
+        fast_vals = df["ma_fast"].to_numpy()
+        slow_vals = df["ma_slow"].to_numpy()
+        returns_vals = df["returns"].to_numpy()
+        prev_high_vals = df["high_lookback"].shift(1).bfill().fillna(0).to_numpy()
 
-        # Build signal safely using pandas (NOT numpy indexing)
-        df["signal"] = 0
+        # Build signal safely
+        signal = np.zeros(len(df))
 
-        entry_condition = (
-            (df["ma_fast"] > df["ma_slow"]) &
-            (df["c"] > prev_high * 0.999)
-        )
+        # ENTRY
+        entry = (fast_vals > slow_vals) & (close_vals > prev_high_vals * 0.999)
 
-        exit_condition = (
-            (df["ma_fast"] < df["ma_slow"]) |
-            (df["returns"] < -0.002)
-        )
+        # EXIT
+        exit_cond = (fast_vals < slow_vals) | (returns_vals < -0.002)
 
-        df.loc[entry_condition, "signal"] = 1
-        df.loc[exit_condition, "signal"] = 0
+        signal[entry] = 1
+        signal[exit_cond] = 0
 
-        # Fallback: ensure trades exist
-        if df["signal"].sum() == 0:
-            df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
+        # Fallback if no trades
+        if signal.sum() == 0:
+            signal[fast_vals > slow_vals] = 1
+
+        # Assign back safely
+        df["signal"] = signal
 
         df["position"] = df["signal"].shift(1).fillna(0)
         df["strategy"] = df["position"] * df["returns"]
