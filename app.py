@@ -38,7 +38,7 @@ def compute_strategy(df):
 
     # Strategy returns
     df["strategy_returns"] = df["returns"] * df["position"].shift(1)
-    df["strategy_returns"] = df[strategy returns"].clip(lower=-0.01, upper=0.02)
+    df["strategy_returns"] = df[strategy_returns"].clip(lower=-0.01, upper=0.02)
 
     # Volatility filter
     df["volatility"] = df["returns"].rolling(100.std()
