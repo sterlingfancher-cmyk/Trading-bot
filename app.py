@@ -205,9 +205,24 @@ def backtest(symbol):
         if df.empty:
             return jsonify({"error": "Strategy returned no data"})
 
-        trades = (df["signal"].diff().abs() >0).sum()
-        avg_pnl = round(df["strategy_returns"].mean() * 100, 4) if not df["strategy_returns"].empty else 0
-        balance = round(1000 * (df["strategy_returns"] + 1).cumprod().iloc[-1], 2)
+        import numpy as np
+
+trades = (df["signal"].diff().abs() > 0).sum()
+
+returns = df["strategy_returns"].dropna()
+
+avg_pnl = round(returns.mean() * 100, 4) if not returns.empty else 0
+balance = round(1000 * (returns + 1).cumprod().iloc[-1], 2) if not returns.empty else 1000
+
+# NEW METRICS
+sharpe = round((returns.mean() / returns.std()) * np.sqrt(252), 4) if returns.std() != 0 else 0
+
+cum_returns = (returns + 1).cumprod()
+peak = cum_returns.cummax()
+drawdown = (cum_returns - peak) / peak
+max_drawdown = round(drawdown.min() * 100, 2)
+
+win_rate = round((returns > 0).mean() * 100, 2)
 
         return jsonify({
             "symbol": symbol,
