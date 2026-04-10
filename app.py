@@ -27,6 +27,7 @@ def compute_strategy(df):
 
     #EXIT
     df.loc[
+    (   
         (df["returns"] > 0.003) |  # take profit
         (df["returns"] < -0.002)    # stop loss
     ),
