@@ -4,7 +4,7 @@ import numpy as np
 import yfinance as yf
 import time
 import os
-import requests
+import threading
 import alpaca_trade_api as tradeapi
 
 app = Flask(__name__)
@@ -14,7 +14,7 @@ app = Flask(__name__)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 3.0
-CACHE_TTL = 300
+REFRESH_INTERVAL = 300  # 5 minutes
 
 SYMBOLS = [
     "SPY","QQQ",
@@ -28,10 +28,8 @@ TOP_N = 4
 MAX_TOTAL_RISK = 0.8
 
 # =========================
-# API KEYS
+# ALPACA CONFIG
 # =========================
-TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY")
-
 ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY")
 ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY")
 BASE_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
@@ -44,114 +42,90 @@ if ALPACA_API_KEY and ALPACA_SECRET_KEY:
     api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL, api_version='v2')
 
 # =========================
-# CACHE
+# GLOBAL DATA STORE
 # =========================
-DATA = None
-LAST_FETCH = 0
+DATA = {}
+LAST_UPDATE = None
 
 # =========================
-# DATA LOADER (YAHOO + FALLBACK)
+# SAFE DOWNLOAD
 # =========================
 def safe_download(symbol):
-
-    # ===== TRY YAHOO =====
-    for _ in range(2):
-        try:
-            df = yf.download(
-                symbol,
-                period="6mo",
-                interval="1d",
-                progress=False,
-                threads=False
-            )
-            if df is not None and not df.empty:
-                return df
-        except:
-            pass
-        time.sleep(0.5)
-
-    # ===== FALLBACK: TWELVE DATA =====
     try:
-        url = "https://api.twelvedata.com/time_series"
-        params = {
-            "symbol": symbol,
-            "interval": "1day",
-            "outputsize": 120,
-            "apikey": TWELVE_API_KEY
-        }
-
-        res = requests.get(url, params=params, timeout=5)
-        data = res.json()
-
-        if "values" not in data:
-            print(f"TwelveData failed: {symbol}")
-            return None
-
-        df = pd.DataFrame(data["values"])
-
-        df = df.rename(columns={
-            "open": "o",
-            "high": "h",
-            "low": "l",
-            "close": "c",
-            "volume": "v"
-        })
-
-        df["c"] = df["c"].astype(float)
-        df["h"] = df["h"].astype(float)
-        df["l"] = df["l"].astype(float)
-
-        df = df.iloc[::-1]
-        df.index = pd.to_datetime(df["datetime"])
-        df = df.drop(columns=["datetime"])
-
-        return df
-
-    except Exception as e:
-        print(f"TwelveData error: {symbol} {e}")
-        return None
-
-# =========================
-# LOAD DATA
-# =========================
-def load_data():
-    global DATA, LAST_FETCH
-
-    now = time.time()
-
-    if DATA is not None and (now - LAST_FETCH) < CACHE_TTL:
-        return DATA
-
-    data = {}
-
-    for symbol in SYMBOLS:
-        df = safe_download(symbol)
-
-        if df is None or df.empty:
-            continue
-
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
-        df["ma"] = df["c"].rolling(100).mean()
-        df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
-
-        prev_close = df["c"].shift(1)
-        tr = np.maximum(
-            df["h"] - df["l"],
-            np.maximum(abs(df["h"] - prev_close), abs(df["l"] - prev_close))
+        df = yf.download(
+            symbol,
+            period="6mo",
+            interval="1d",
+            progress=False,
+            threads=False
         )
+        if df is not None and not df.empty:
+            return df
+    except:
+        pass
+    return None
 
-        df["atr"] = tr.rolling(14).mean()
-        df["atr_change"] = df["atr"].pct_change()
-        df["momentum"] = df["c"] / df["c"].shift(20)
+# =========================
+# PROCESS DATA
+# =========================
+def process_data(df):
 
-        data[symbol] = df.dropna()
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
 
-    DATA = data
-    LAST_FETCH = now
+    df = df.rename(columns={
+        "Open": "o",
+        "High": "h",
+        "Low": "l",
+        "Close": "c"
+    })
 
-    return data
+    df["ma"] = df["c"].rolling(100).mean()
+    df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
+
+    prev_close = df["c"].shift(1)
+    tr = np.maximum(
+        df["h"] - df["l"],
+        np.maximum(abs(df["h"] - prev_close), abs(df["l"] - prev_close))
+    )
+
+    df["atr"] = pd.Series(tr).rolling(14).mean()
+    df["atr_change"] = df["atr"].pct_change()
+    df["momentum"] = df["c"] / df["c"].shift(20)
+
+    return df.dropna()
+
+# =========================
+# BACKGROUND LOADER 🔥
+# =========================
+def data_loader():
+    global DATA, LAST_UPDATE
+
+    while True:
+        print("Refreshing market data...")
+
+        new_data = {}
+
+        for symbol in SYMBOLS:
+            df = safe_download(symbol)
+
+            if df is not None:
+                df = process_data(df)
+                new_data[symbol] = df
+            else:
+                print(f"Failed to load: {symbol}")
+
+        if new_data:
+            DATA = new_data
+            LAST_UPDATE = time.time()
+            print(f"Data updated: {len(DATA)} symbols")
+
+        time.sleep(REFRESH_INTERVAL)
+
+# =========================
+# START BACKGROUND THREAD
+# =========================
+threading.Thread(target=data_loader, daemon=True).start()
 
 # =========================
 # HOME
@@ -159,28 +133,26 @@ def load_data():
 @app.route("/")
 def home():
     return jsonify({
-        "status": "live",
-        "endpoints": ["/signals", "/auto_trade"]
+        "status": "background-data-live",
+        "symbols_loaded": len(DATA),
+        "last_update": LAST_UPDATE
     })
 
 # =========================
-# SIGNALS
+# SIGNALS (INSTANT)
 # =========================
 @app.route("/signals")
 def signals():
 
-    start_time = time.time()
-    data = load_data()
+    if not DATA:
+        return jsonify({"error": "Data not ready yet"})
+
     capital = float(request.args.get("capital", INITIAL_CAPITAL))
 
-    spy_df = data.get("SPY")
+    spy_df = DATA.get("SPY")
 
     if spy_df is None:
-        return jsonify({
-            "market": "unknown",
-            "signals": [],
-            "warning": "All data providers failed"
-        })
+        return jsonify({"error": "SPY missing"})
 
     last_date = spy_df.index[-1]
 
@@ -191,23 +163,16 @@ def signals():
             "signals": []
         })
 
-    rs = []
-    for symbol, df in data.items():
-        if last_date in df.index:
-            rs.append((symbol, df.loc[last_date]["momentum"]))
-
+    rs = [(s, d.loc[last_date]["momentum"]) for s, d in DATA.items()]
     rs = sorted(rs, key=lambda x: x[1], reverse=True)
 
-    total_risk_budget = capital * MAX_TOTAL_RISK
-    used_risk = 0
     signals = []
+    used_risk = 0
+    total_risk = capital * MAX_TOTAL_RISK
 
     for symbol, _ in rs[:TOP_N]:
 
-        if time.time() - start_time > 8:
-            break
-
-        df = data[symbol]
+        df = DATA[symbol]
         row = df.loc[last_date]
 
         if not (row["c"] > row["ma"] and row["c"] > row["high_break"] and row["atr_change"] > 0):
@@ -222,8 +187,8 @@ def signals():
 
         risk_amount = capital * RISK_PER_TRADE
 
-        if used_risk + risk_amount > total_risk_budget:
-            risk_amount = total_risk_budget - used_risk
+        if used_risk + risk_amount > total_risk:
+            risk_amount = total_risk - used_risk
 
         shares = int(risk_amount / risk_per_share)
 
@@ -260,12 +225,10 @@ def auto_trade():
     if api is None:
         return jsonify({"error": "Alpaca not configured"})
 
-    data = load_data()
+    if not DATA:
+        return jsonify({"error": "No data yet"})
 
-    spy_df = data.get("SPY")
-    if spy_df is None:
-        return jsonify({"error": "No data available"})
-
+    spy_df = DATA.get("SPY")
     last_date = spy_df.index[-1]
 
     if spy_df.loc[last_date]["c"] <= spy_df.loc[last_date]["ma"]:
@@ -275,8 +238,8 @@ def auto_trade():
 
     for symbol in SYMBOLS:
 
-        df = data.get(symbol)
-        if df is None or last_date not in df.index:
+        df = DATA.get(symbol)
+        if df is None:
             continue
 
         row = df.loc[last_date]
@@ -292,9 +255,7 @@ def auto_trade():
                 type="market",
                 time_in_force="gtc"
             )
-
             executed.append(symbol)
-
         except Exception as e:
             executed.append({symbol: str(e)})
 
