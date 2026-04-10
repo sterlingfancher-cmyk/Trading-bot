@@ -11,14 +11,28 @@ app = Flask(__name__)
 LOOKBACK = 20
 ATR_MULT = 2.5
 
+# 🔥 EXPANDED UNIVERSE
 SYMBOLS = [
-    "SPY", "QQQ", "IWM",
-    "XLE", "XLK", "XLF", "XLV",
-    "XLI", "XLP", "XLY",
-    "GLD", "SLV",
-    "TLT",
-    "ARKK",
-    "SMH"
+    # Indexes
+    "SPY","QQQ","IWM",
+
+    # Sectors
+    "XLE","XLK","XLF","XLV","XLI","XLP","XLY","XLU","XLB",
+
+    # Commodities
+    "GLD","SLV","USO","UNG",
+
+    # Bonds
+    "TLT","IEF","HYG",
+
+    # Growth / Tech
+    "ARKK","SMH","SOXX","IGV","BOTZ",
+
+    # International
+    "EFA","EEM","FXI",
+
+    # High momentum stocks
+    "NVDA","TSLA","AMD","META","AAPL","MSFT"
 ]
 
 INITIAL_CAPITAL = 1000
@@ -36,7 +50,7 @@ DATA = None
 
 
 # =========================
-# LOAD DATA (LAZY)
+# LOAD DATA (LAZY + SAFE)
 # =========================
 def load_data():
     global DATA
@@ -95,7 +109,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "near-breakout-system-live"})
+    return jsonify({"status": "expanded-universe-system-live"})
 
 
 @app.route("/portfolio")
@@ -177,7 +191,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (NEAR BREAKOUT 🔥)
+        # ENTRIES (NEAR BREAKOUT)
         # =========================
         for symbol in top_symbols:
 
@@ -196,13 +210,13 @@ def portfolio():
 
             trend = row["c"] > row["ma_200"]
 
-            # 🔥 KEY CHANGE: NEAR BREAKOUT
             breakout = row["c"] >= row["high_break"] * 0.995
 
             vol = row["atr_change"] > 0
 
             if trend and breakout and vol:
 
+                # 🔥 DYNAMIC SIZING
                 breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
 
                 size_multiplier = breakout_strength / 0.02
@@ -220,7 +234,8 @@ def portfolio():
     return jsonify({
         "final_balance": round(capital, 2),
         "trades": trades,
-        "active_positions": len(positions)
+        "active_positions": len(positions),
+        "symbols_traded": len(data)
     })
 
 
