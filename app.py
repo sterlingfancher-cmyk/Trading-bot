@@ -41,7 +41,7 @@ def get_intraday(symbol):
         return pd.DataFrame()
 
 # =========================
-# STRATEGY CORE
+# STRATEGY CORE (LESS STRICT)
 # =========================
 def run_strategy(df, fast, slow, ret_th, strength_th):
 
@@ -59,21 +59,17 @@ def run_strategy(df, fast, slow, ret_th, strength_th):
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &
         (df["returns"] > ret_th) &
-        (strength > strength_th) &
-        (df["volatility"] > df["volatility"].rolling(20).mean()),
+        (strength > strength_th),
         "signal"
     ] = strength
 
     df["signal"] = (df["signal"] / 0.04).clip(0, 1)
 
-    df["cooldown"] = df["signal"].rolling(5).max().shift(1)
-    df.loc[df["cooldown"] > 0, "signal"] = 0
-
     df["position"] = df["signal"].replace(0, np.nan).ffill().fillna(0)
 
     df.loc[
-        (df["returns"] < -0.0025) |
-        (df["returns"] > 0.007),
+        (df["returns"] < -0.003) |
+        (df["returns"] > 0.008),
         "position"
     ] = 0
 
@@ -90,7 +86,8 @@ def run_strategy(df, fast, slow, ret_th, strength_th):
 
     trades = int((df["position"].diff().abs() > 0).sum())
 
-    if trades < 10:
+    # 🔥 FIX: allow low trade count
+    if trades < 3:
         return None
 
     balance = ACCOUNT_SIZE * (returns + 1).cumprod().iloc[-1]
@@ -106,7 +103,7 @@ def run_strategy(df, fast, slow, ret_th, strength_th):
     }
 
 # =========================
-# NORMAL BACKTEST
+# BACKTEST
 # =========================
 @app.route("/backtest/<symbol>")
 def backtest(symbol):
@@ -116,7 +113,7 @@ def backtest(symbol):
     if df.empty:
         return jsonify({"error": "No data"})
 
-    result = run_strategy(df, 20, 50, 0.0006, 0.0012)
+    result = run_strategy(df, 20, 50, 0.0005, 0.001)
 
     if not result:
         return jsonify({"error": "No trades generated"})
@@ -124,7 +121,7 @@ def backtest(symbol):
     return jsonify(result)
 
 # =========================
-# AUTO OPTIMIZER (ADVANCED)
+# OPTIMIZER (FIXED)
 # =========================
 @app.route("/optimize/<symbol>")
 def optimize(symbol):
@@ -134,10 +131,10 @@ def optimize(symbol):
     if df.empty:
         return jsonify({"error": "No data"})
 
-    fast_range = [10, 15, 20, 25]
-    slow_range = [40, 50, 60, 70]
-    return_range = [0.0004, 0.0006, 0.0008]
-    strength_range = [0.0008, 0.001, 0.0012]
+    fast_range = [8, 10, 15, 20]
+    slow_range = [30, 40, 50, 60]
+    return_range = [0.0003, 0.0005, 0.0007]
+    strength_range = [0.0006, 0.0008, 0.001]
 
     best = None
 
