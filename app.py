@@ -25,7 +25,7 @@ def get_intraday(symbol):
 
         return data
 
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -45,30 +45,31 @@ def compute_strategy(df):
         if df.empty:
             return None, "Empty after indicators"
 
-        df["signal"] = 0
+        # Convert to numpy arrays (safe)
+        close_vals = df["c"].to_numpy()
+        fast_vals = df["ma_fast"].to_numpy()
+        slow_vals = df["ma_slow"].to_numpy()
+        returns_vals = df["returns"].to_numpy()
+        prev_high = df["high_lookback"].shift(1).bfill().fillna(0).to_numpy()
 
-        # SHIFT + SAFE FILL
-        prev_high = df["high_lookback"].shift(1).bfill().fillna(0)
-
-        # 🔥 NUMPY FIX (no alignment issues)
-        close_vals = df["c"].values
-        prev_high_vals = prev_high.values
-        fast_vals = df["ma_fast"].values
-        slow_vals = df["ma_slow"].values
-        returns_vals = df["returns"].values
+        # Initialize signal
+        signal = np.zeros(len(df))
 
         # ENTRY
-        entry = (fast_vals > slow_vals) & (close_vals > prev_high_vals * 0.999)
+        entry = (fast_vals > slow_vals) & (close_vals > prev_high * 0.999)
 
         # EXIT
         exit_cond = (fast_vals < slow_vals) | (returns_vals < -0.002)
 
-        df.loc[entry, "signal"] = 1
-        df.loc[exit_cond, "signal"] = 0
+        signal[entry] = 1
+        signal[exit_cond] = 0
 
-        # FALLBACK (ensures trades exist)
-        if df["signal"].sum() == 0:
-            df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
+        # Fallback (ensures trades exist)
+        if signal.sum() == 0:
+            signal[fast_vals > slow_vals] = 1
+
+        # Assign back to dataframe
+        df["signal"] = signal
 
         df["position"] = df["signal"].shift().fillna(0)
         df["strategy"] = df["position"] * df["returns"]
@@ -80,7 +81,7 @@ def compute_strategy(df):
 
 
 # =========================
-# ROUTES
+# BACKTEST ROUTE
 # =========================
 @app.route("/")
 def home():
@@ -105,7 +106,7 @@ def backtest(symbol):
 
         df["equity"] = (1 + df["strategy"]).cumprod() * 1000
 
-        trades = (df["signal"].diff().abs() > 0).sum()
+        trades = int((df["signal"].diff().abs() > 0).sum())
 
         if trades == 0:
             return jsonify({"error": "No trades generated"})
@@ -122,7 +123,7 @@ def backtest(symbol):
             "avg_pnl": round(avg_pnl, 6),
             "sharpe": round(sharpe, 4),
             "max_drawdown": round(drawdown, 4),
-            "trades": int(trades),
+            "trades": trades,
             "win_rate": round(win_rate, 2)
         })
 
@@ -131,7 +132,7 @@ def backtest(symbol):
 
 
 # =========================
-# START
+# START SERVER
 # =========================
 if __name__ == "__main__":
     import os
