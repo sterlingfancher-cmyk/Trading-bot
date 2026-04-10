@@ -10,12 +10,22 @@ app = Flask(__name__)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 2.5
-SYMBOLS = ["SPY", "QQQ", "IWM", "XLE", "XLK"]
+
+# 🔥 EXPANDED UNIVERSE (KEY UPGRADE)
+SYMBOLS = [
+    "SPY", "QQQ", "IWM",
+    "XLE", "XLK", "XLF", "XLV",
+    "XLI", "XLP", "XLY",
+    "GLD", "SLV",
+    "TLT",
+    "ARKK",
+    "SMH"
+]
 
 INITIAL_CAPITAL = 1000
 RISK_PER_TRADE = 0.1
 MAX_POSITIONS = 3
-TOP_N = 2   # 🔥 ONLY TRADE TOP 2 STRONGEST
+TOP_N = 3  # top 3 strongest assets
 
 
 # =========================
@@ -67,7 +77,7 @@ def prepare(df):
 
 
 # =========================
-# PORTFOLIO ENGINE (RS FILTER)
+# PORTFOLIO ENGINE
 # =========================
 @app.route("/portfolio")
 def portfolio():
@@ -99,6 +109,7 @@ def portfolio():
         for symbol in list(positions.keys()):
 
             df = data[symbol]
+
             if date not in df.index:
                 continue
 
@@ -121,7 +132,7 @@ def portfolio():
                 trade_count += 1
 
         # =========================
-        # RANK RELATIVE STRENGTH
+        # RELATIVE STRENGTH RANKING
         # =========================
         rs_list = []
 
@@ -136,7 +147,7 @@ def portfolio():
         top_symbols = [s[0] for s in rs_list[:TOP_N]]
 
         # =========================
-        # ENTRIES (ONLY TOP RS)
+        # ENTRIES
         # =========================
         for symbol in top_symbols:
 
@@ -147,6 +158,7 @@ def portfolio():
                 break
 
             df = data[symbol]
+
             if date not in df.index:
                 continue
 
@@ -172,11 +184,17 @@ def portfolio():
     })
 
 
+# =========================
+# HEALTH
+# =========================
 @app.route("/")
 def home():
     return jsonify({"status": "running"})
 
 
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
