@@ -3,6 +3,7 @@ import requests, os
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
+import itertools
 
 app = Flask(__name__)
 
@@ -40,109 +41,136 @@ def get_intraday(symbol):
         return pd.DataFrame()
 
 # =========================
-# STRATEGY (FIXED BALANCE)
+# STRATEGY CORE
 # =========================
-def compute_strategy(df):
+def run_strategy(df, fast, slow, ret_th, strength_th):
 
-    df["ma_fast"] = df["c"].rolling(20).mean()
-    df["ma_slow"] = df["c"].rolling(50).mean()
+    df = df.copy()
+
+    df["ma_fast"] = df["c"].rolling(fast).mean()
+    df["ma_slow"] = df["c"].rolling(slow).mean()
     df["returns"] = df["c"].pct_change()
-
-    # LIGHT volatility filter (less aggressive)
     df["volatility"] = df["returns"].rolling(10).std()
-    df = df[df["volatility"] > df["volatility"].rolling(20).mean() * 0.8]
 
     df["signal"] = 0.0
 
     strength = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
 
-    # ENTRY (relaxed but still strong)
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &
-        (df["returns"] > 0.0006) &
-        (strength > 0.0012),
+        (df["returns"] > ret_th) &
+        (strength > strength_th) &
+        (df["volatility"] > df["volatility"].rolling(20).mean()),
         "signal"
     ] = strength
 
-    # SCALE
     df["signal"] = (df["signal"] / 0.04).clip(0, 1)
 
-    # LIGHT cooldown (not killing trades)
     df["cooldown"] = df["signal"].rolling(5).max().shift(1)
     df.loc[df["cooldown"] > 0, "signal"] = 0
 
-    # POSITION
     df["position"] = df["signal"].replace(0, np.nan).ffill().fillna(0)
 
-    # EXIT (balanced)
     df.loc[
         (df["returns"] < -0.0025) |
         (df["returns"] > 0.007),
         "position"
     ] = 0
 
-    df = df.dropna(subset=["ma_fast", "ma_slow", "returns"])
+    df = df.dropna()
 
     if df.empty:
-        return pd.DataFrame()
+        return None
 
-    # RETURNS
     df["strategy_returns"] = df["returns"] * df["position"].shift(1)
+    returns = df["strategy_returns"].dropna()
 
-    # CAP EXTREMES
-    df["strategy_returns"] = df["strategy_returns"].clip(-0.015, 0.025)
+    if returns.empty:
+        return None
 
-    return df
+    trades = int((df["position"].diff().abs() > 0).sum())
+
+    if trades < 10:
+        return None
+
+    balance = ACCOUNT_SIZE * (returns + 1).cumprod().iloc[-1]
+
+    sharpe = 0
+    if returns.std() != 0:
+        sharpe = (returns.mean() / returns.std()) * np.sqrt(252)
+
+    return {
+        "balance": round(balance, 2),
+        "sharpe": round(sharpe, 4),
+        "trades": trades
+    }
 
 # =========================
-# BACKTEST
+# NORMAL BACKTEST
 # =========================
 @app.route("/backtest/<symbol>")
 def backtest(symbol):
-    try:
-        df = get_intraday(symbol)
 
-        if df.empty:
-            return jsonify({"error": "No market data"})
+    df = get_intraday(symbol)
 
-        df = compute_strategy(df)
+    if df.empty:
+        return jsonify({"error": "No data"})
 
-        if df.empty:
-            return jsonify({"error": "Strategy produced no usable data"})
+    result = run_strategy(df, 20, 50, 0.0006, 0.0012)
 
-        returns = df["strategy_returns"].dropna()
+    if not result:
+        return jsonify({"error": "No trades generated"})
 
-        if returns.empty:
-            return jsonify({"error": "No returns generated"})
+    return jsonify(result)
 
-        trades = int((df["position"].diff().abs() > 0).sum())
+# =========================
+# AUTO OPTIMIZER (ADVANCED)
+# =========================
+@app.route("/optimize/<symbol>")
+def optimize(symbol):
 
-        avg_pnl = round(returns.mean() * 100, 4)
-        balance = round(ACCOUNT_SIZE * (returns + 1).cumprod().iloc[-1], 2)
+    df = get_intraday(symbol)
 
-        sharpe = 0
-        if returns.std() != 0:
-            sharpe = round((returns.mean() / returns.std()) * np.sqrt(252), 4)
+    if df.empty:
+        return jsonify({"error": "No data"})
 
-        cum = (returns + 1).cumprod()
-        peak = cum.cummax()
-        drawdown = (cum - peak) / peak
-        max_dd = round(drawdown.min() * 100, 2)
+    fast_range = [10, 15, 20, 25]
+    slow_range = [40, 50, 60, 70]
+    return_range = [0.0004, 0.0006, 0.0008]
+    strength_range = [0.0008, 0.001, 0.0012]
 
-        win_rate = round((returns > 0).mean() * 100, 2)
+    best = None
 
-        return jsonify({
-            "symbol": symbol.upper(),
-            "trades": trades,
-            "avg_pnl": avg_pnl,
-            "balance": balance,
-            "sharpe": sharpe,
-            "max_drawdown": max_dd,
-            "win_rate": win_rate
-        })
+    for fast, slow, ret_th, strength_th in itertools.product(
+        fast_range, slow_range, return_range, strength_range
+    ):
 
-    except Exception as e:
-        return jsonify({"error": str(e)})
+        if fast >= slow:
+            continue
+
+        result = run_strategy(df, fast, slow, ret_th, strength_th)
+
+        if not result:
+            continue
+
+        score = result["sharpe"]
+
+        if not best or score > best["score"]:
+            best = {
+                "score": score,
+                "params": {
+                    "ma_fast": fast,
+                    "ma_slow": slow,
+                    "return_threshold": ret_th,
+                    "strength": strength_th
+                },
+                "performance": result
+            }
+
+    if not best:
+        return jsonify({"error": "No viable strategies found"})
+
+    return jsonify(best)
 
 # =========================
 # RUN
