@@ -24,8 +24,8 @@ def compute_strategy(df):
     df.loc[
     (
         (df["ma_fast"] > df["ma_slow"]) &  #trend
-        (df["returns"] > 0) &
-        (strength > 0)
+        (df["returns"] > 0.0003) &
+        (strength > 0.0003)
     ),   
         "signal"
     ] = 1
