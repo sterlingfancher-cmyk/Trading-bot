@@ -10,89 +10,80 @@ app = Flask(__name__)
 # DATA
 # =========================
 def get_intraday(symbol):
-    try:
-        df = yf.download(symbol, period="60d", interval="15m", progress=False)
+    df = yf.download(symbol, period="60d", interval="15m", progress=False)
 
-        if df is None or df.empty:
-            return None
-
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
-        df = df.rename(columns={
-            "Open": "o",
-            "High": "h",
-            "Low": "l",
-            "Close": "c",
-            "Volume": "v"
-        })
-
-        return df[["o", "h", "l", "c", "v"]].dropna()
-
-    except:
+    if df is None or df.empty:
         return None
 
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    df = df.rename(columns={
+        "Open": "o",
+        "High": "h",
+        "Low": "l",
+        "Close": "c",
+        "Volume": "v"
+    })
+
+    return df[["o", "h", "l", "c", "v"]].dropna()
+
 
 # =========================
-# STRATEGY (VOL BREAKOUT)
+# STRATEGY (FIXED BREAKOUT)
 # =========================
 def run_strategy(df, lookback, atr_mult):
-    try:
-        df = df.copy()
+    df = df.copy()
 
-        df["high_break"] = df["h"].rolling(lookback).max()
-        df["low_break"] = df["l"].rolling(lookback).min()
+    # 🔥 FIXED: shift to avoid lookahead bias
+    df["high_break"] = df["h"].rolling(lookback).max().shift(1)
 
-        prev_close = df["c"].shift(1)
-        tr = np.maximum(
-            df["h"] - df["l"],
-            np.maximum(
-                abs(df["h"] - prev_close),
-                abs(df["l"] - prev_close)
-            )
+    prev_close = df["c"].shift(1)
+    tr = np.maximum(
+        df["h"] - df["l"],
+        np.maximum(
+            abs(df["h"] - prev_close),
+            abs(df["l"] - prev_close)
         )
-        df["atr"] = tr.rolling(14).mean()
+    )
+    df["atr"] = tr.rolling(14).mean()
 
-        df = df.dropna()
+    df = df.dropna()
 
-        capital = 1000
-        position = 0
-        entry_price = 0
+    capital = 1000
+    position = 0
+    entry_price = 0
 
-        trades = []
+    trades = []
 
-        for i in range(len(df)):
-            row = df.iloc[i]
+    for i in range(len(df)):
+        row = df.iloc[i]
 
-            # ENTRY
-            if position == 0:
-                if row["c"] > row["high_break"]:
-                    position = 1
-                    entry_price = row["c"]
+        # 🔥 LOOSENED ENTRY
+        if position == 0:
+            if row["c"] > row["high_break"] * 0.998:
+                position = 1
+                entry_price = row["c"]
 
-            # EXIT
-            else:
-                stop = entry_price - (atr_mult * row["atr"])
+        else:
+            stop = entry_price - (atr_mult * row["atr"])
 
-                if row["c"] < stop:
-                    pct = (row["c"] - entry_price) / entry_price
-                    capital *= (1 + pct)
-                    trades.append(pct)
-                    position = 0
+            if row["c"] < stop:
+                pct = (row["c"] - entry_price) / entry_price
+                capital *= (1 + pct)
+                trades.append(pct)
+                position = 0
 
-        if len(trades) == 0:
-            return None
+    if len(trades) == 0:
+        return None
 
-        sharpe = np.mean(trades) / (np.std(trades) + 1e-9)
+    sharpe = np.mean(trades) / (np.std(trades) + 1e-9)
 
-        return {
-            "balance": capital,
-            "sharpe": sharpe,
-            "trades": len(trades)
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
+    return {
+        "balance": capital,
+        "sharpe": sharpe,
+        "trades": len(trades)
+    }
 
 
 # =========================
