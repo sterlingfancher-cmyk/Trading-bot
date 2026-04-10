@@ -34,7 +34,7 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (TIGHTENED)
+# STRATEGY (BREAKOUT)
 # =========================
 def compute_strategy(df):
     try:
@@ -44,10 +44,8 @@ def compute_strategy(df):
         df["ma_slow"] = df["c"].rolling(30).mean()
         df["returns"] = df["c"].pct_change()
 
-        df["trend_strength"] = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
-
-        # 🔥 STRONGER momentum filter
-        df["momentum"] = df["returns"].rolling(5).mean()
+        # 🔥 Breakout level
+        df["recent_high"] = df["h"].rolling(15).max()
 
         df = df.dropna()
 
@@ -56,11 +54,10 @@ def compute_strategy(df):
 
         df["signal"] = 0
 
-        # ENTRY (tightened)
+        # ENTRY (trend + breakout)
         df.loc[
             (df["ma_fast"] > df["ma_slow"]) &
-            (df["trend_strength"] > 0.0008) &
-            (df["momentum"] > 0.0002),
+            (df["c"] > df["recent_high"].shift(1)),
             "signal"
         ] = 1
 
@@ -68,7 +65,7 @@ def compute_strategy(df):
         df.loc[
             (df["ma_fast"] < df["ma_slow"]) |
             (df["returns"] < -0.002) |
-            (df["returns"] > 0.007),
+            (df["returns"] > 0.008),
             "signal"
         ] = 0
 
