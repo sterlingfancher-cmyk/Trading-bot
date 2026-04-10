@@ -33,14 +33,25 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (TREND + RISK MGMT)
+# STRATEGY (ATR BASED)
 # =========================
 def compute_strategy(df):
     try:
         df = df.copy()
 
+        # Indicators
         df["ma_fast"] = df["c"].rolling(10).mean()
         df["ma_slow"] = df["c"].rolling(30).mean()
+
+        # ATR calculation
+        df["tr"] = np.maximum(
+            df["h"] - df["l"],
+            np.maximum(
+                abs(df["h"] - df["c"].shift(1)),
+                abs(df["l"] - df["c"].shift(1))
+            )
+        )
+        df["atr"] = df["tr"].rolling(14).mean()
 
         df = df.dropna()
 
@@ -49,9 +60,7 @@ def compute_strategy(df):
 
         position = 0
         entry_price = 0
-
-        stop_loss = 0.003   # 0.3%
-        take_profit = 0.008 # 0.8%
+        entry_atr = 0
 
         signals = []
         returns = []
@@ -64,6 +73,7 @@ def compute_strategy(df):
                 if row["ma_fast"] > row["ma_slow"]:
                     position = 1
                     entry_price = row["c"]
+                    entry_atr = row["atr"]
                     signals.append(1)
                     returns.append(0)
                 else:
@@ -71,17 +81,20 @@ def compute_strategy(df):
                     returns.append(0)
 
             else:
-                price_change = (row["c"] - entry_price) / entry_price
+                price_change = row["c"] - entry_price
 
-                # EXIT CONDITIONS
+                # ATR-based stop/take
+                stop_loss = -1.5 * entry_atr
+                take_profit = 2.5 * entry_atr
+
                 if (
-                    price_change <= -stop_loss or
+                    price_change <= stop_loss or
                     price_change >= take_profit or
                     row["ma_fast"] < row["ma_slow"]
                 ):
                     position = 0
                     signals.append(0)
-                    returns.append(price_change)
+                    returns.append(price_change / entry_price)
                 else:
                     signals.append(1)
                     returns.append(0)
