@@ -30,7 +30,7 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY
+# STRATEGY (FINAL FIXED)
 # =========================
 def compute_strategy(df):
     try:
@@ -47,27 +47,24 @@ def compute_strategy(df):
 
         df["signal"] = 0
 
-        prev_high = df["high_lookback"].shift(1)
+        # SHIFT + SAFE FILL
+        prev_high = df["high_lookback"].shift(1).bfill().fillna(0)
 
-        # ALIGN FIX
-        df["c"], prev_high = df["c"].align(prev_high, axis=0)
-
-        # FIXED pandas compatibility
-        prev_high = prev_high.bfill().fillna(0)
+        # 🔥 NUMPY FIX (no alignment issues)
+        close_vals = df["c"].values
+        prev_high_vals = prev_high.values
+        fast_vals = df["ma_fast"].values
+        slow_vals = df["ma_slow"].values
+        returns_vals = df["returns"].values
 
         # ENTRY
-        df.loc[
-            (df["ma_fast"] > df["ma_slow"]) &
-            (df["c"] > prev_high * 0.999),
-            "signal"
-        ] = 1
+        entry = (fast_vals > slow_vals) & (close_vals > prev_high_vals * 0.999)
 
         # EXIT
-        df.loc[
-            (df["ma_fast"] < df["ma_slow"]) |
-            (df["returns"] < -0.002),
-            "signal"
-        ] = 0
+        exit_cond = (fast_vals < slow_vals) | (returns_vals < -0.002)
+
+        df.loc[entry, "signal"] = 1
+        df.loc[exit_cond, "signal"] = 0
 
         # FALLBACK (ensures trades exist)
         if df["signal"].sum() == 0:
@@ -137,4 +134,6 @@ def backtest(symbol):
 # START
 # =========================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
