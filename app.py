@@ -15,7 +15,7 @@ def get_intraday(symbol):
         if df is None or df.empty:
             return None
 
-        # Fix multi-index columns from yfinance
+        # Fix multi-index issue
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
@@ -34,18 +34,19 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (IMPROVED)
+# STRATEGY (TREND + STRENGTH + MOMENTUM)
 # =========================
 def compute_strategy(df):
     try:
         df = df.copy()
 
+        # Indicators
         df["ma_fast"] = df["c"].rolling(10).mean()
         df["ma_slow"] = df["c"].rolling(30).mean()
         df["returns"] = df["c"].pct_change()
 
-        # NEW: trend strength filter
         df["trend_strength"] = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
+        df["momentum"] = df["returns"].rolling(3).mean()
 
         df = df.dropna()
 
@@ -54,10 +55,11 @@ def compute_strategy(df):
 
         df["signal"] = 0
 
-        # ENTRY (strong trend only)
+        # ENTRY (high-quality only)
         df.loc[
             (df["ma_fast"] > df["ma_slow"]) &
-            (df["trend_strength"] > 0.0007),
+            (df["trend_strength"] > 0.0007) &
+            (df["momentum"] > 0),
             "signal"
         ] = 1
 
