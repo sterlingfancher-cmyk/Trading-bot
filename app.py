@@ -34,17 +34,15 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (BALANCED BREAKOUT)
+# STRATEGY (TREND + DIP BUY)
 # =========================
 def compute_strategy(df):
     try:
         df = df.copy()
 
-        df["ma_fast"] = df["c"].rolling(10).mean()
-        df["ma_slow"] = df["c"].rolling(30).mean()
+        df["ma_fast"] = df["c"].rolling(20).mean()
+        df["ma_slow"] = df["c"].rolling(50).mean()
         df["returns"] = df["c"].pct_change()
-
-        df["recent_high"] = df["h"].rolling(15).max()
 
         df = df.dropna()
 
@@ -53,30 +51,28 @@ def compute_strategy(df):
 
         df["signal"] = 0
 
-        # Core conditions
+        # Trend
         trend = df["ma_fast"] > df["ma_slow"]
-        breakout = df["c"] > df["recent_high"].shift(1)
 
-        # Optional pullback (not required)
-        pullback = df["c"] < df["ma_fast"]
+        # Dip below fast MA
+        dip = df["c"] < df["ma_fast"]
 
-        # ENTRY (balanced)
+        # Recovery (turning back up)
+        recovery = df["returns"] > 0
+
+        # ENTRY (buy dips in trend)
         df.loc[
-            trend & breakout,
+            trend & dip & recovery,
             "signal"
         ] = 1
 
         # EXIT
         df.loc[
             (df["ma_fast"] < df["ma_slow"]) |
-            (df["returns"] < -0.002) |
+            (df["returns"] < -0.0025) |
             (df["returns"] > 0.008),
             "signal"
         ] = 0
-
-        # Fallback (ensures trades ALWAYS exist)
-        if df["signal"].sum() == 0:
-            df.loc[trend, "signal"] = 1
 
         df["position"] = df["signal"].shift(1).fillna(0)
         df["strategy"] = df["position"] * df["returns"]
