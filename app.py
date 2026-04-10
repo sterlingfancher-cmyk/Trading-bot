@@ -7,11 +7,10 @@ import itertools
 app = Flask(__name__)
 
 # =========================
-# DATA FETCH (UPGRADED)
+# DATA
 # =========================
 def get_intraday(symbol):
     try:
-        # 🔥 BIG FIX: More data, better timeframe
         df = yf.download(symbol, period="60d", interval="15m", progress=False)
 
         if df is None or df.empty:
@@ -36,13 +35,12 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (TRAILING STOP)
+# STRATEGY (REGIME FILTER)
 # =========================
-def run_strategy(df, fast, slow, sl_mult, vol_thresh):
+def run_strategy(df, fast, slow, sl_mult, vol_thresh, trend_thresh):
     try:
         df = df.copy()
 
-        # Indicators
         df["ma_fast"] = df["c"].rolling(fast).mean()
         df["ma_slow"] = df["c"].rolling(slow).mean()
 
@@ -59,10 +57,10 @@ def run_strategy(df, fast, slow, sl_mult, vol_thresh):
         df["returns"] = df["c"].pct_change()
         df["vol"] = df["returns"].rolling(10).std()
 
-        df = df.dropna()
+        # 🔥 NEW: trend strength filter
+        df["trend_strength"] = abs(df["ma_fast"] - df["ma_slow"]) / df["c"]
 
-        if df.empty:
-            return None
+        df = df.dropna()
 
         capital = 1000
         position = 0
@@ -70,44 +68,46 @@ def run_strategy(df, fast, slow, sl_mult, vol_thresh):
         entry_atr = 0
         peak_price = 0
 
-        trade_results = []
+        trades = []
 
         for i in range(len(df)):
             row = df.iloc[i]
 
             # ENTRY
             if position == 0:
-                if row["ma_fast"] > row["ma_slow"] and row["vol"] > vol_thresh:
+                if (
+                    row["ma_fast"] > row["ma_slow"] and
+                    row["vol"] > vol_thresh and
+                    row["trend_strength"] > trend_thresh
+                ):
                     position = 1
                     entry_price = row["c"]
                     entry_atr = row["atr"]
                     peak_price = row["c"]
 
-            # TRADE MANAGEMENT
+            # EXIT
             else:
                 peak_price = max(peak_price, row["c"])
-
                 trailing_stop = peak_price - (sl_mult * entry_atr)
 
                 if (
                     row["c"] <= trailing_stop or
                     row["ma_fast"] < row["ma_slow"]
                 ):
-                    pct_return = (row["c"] - entry_price) / entry_price
-                    capital *= (1 + pct_return)
-
-                    trade_results.append(pct_return)
+                    pct = (row["c"] - entry_price) / entry_price
+                    capital *= (1 + pct)
+                    trades.append(pct)
                     position = 0
 
-        if len(trade_results) == 0:
+        if len(trades) == 0:
             return None
 
-        sharpe = np.mean(trade_results) / (np.std(trade_results) + 1e-9)
+        sharpe = np.mean(trades) / (np.std(trades) + 1e-9)
 
         return {
             "balance": capital,
             "sharpe": sharpe,
-            "trades": len(trade_results)
+            "trades": len(trades)
         }
 
     except Exception as e:
@@ -115,7 +115,7 @@ def run_strategy(df, fast, slow, sl_mult, vol_thresh):
 
 
 # =========================
-# BACKTEST ROUTE
+# BACKTEST
 # =========================
 @app.route("/backtest/<symbol>")
 def backtest(symbol):
@@ -124,13 +124,7 @@ def backtest(symbol):
     if df is None:
         return jsonify({"error": "Data fetch failed"})
 
-    result = run_strategy(
-        df,
-        fast=10,
-        slow=30,
-        sl_mult=1.5,
-        vol_thresh=0.0005
-    )
+    result = run_strategy(df, 10, 30, 1.5, 0.0005, 0.001)
 
     if result is None:
         return jsonify({"error": "No trades"})
@@ -159,14 +153,15 @@ def optimize(symbol):
     slow_range = [15, 20, 30, 40]
     sl_range = [1.0, 1.5, 2.0]
     vol_range = [0.0002, 0.0005, 0.0008]
+    trend_range = [0.0005, 0.001, 0.002]
 
-    for fast, slow, sl, vol in itertools.product(
-        fast_range, slow_range, sl_range, vol_range
+    for fast, slow, sl, vol, trend in itertools.product(
+        fast_range, slow_range, sl_range, vol_range, trend_range
     ):
         if fast >= slow:
             continue
 
-        result = run_strategy(df, fast, slow, sl, vol)
+        result = run_strategy(df, fast, slow, sl, vol, trend)
 
         if result is None:
             continue
@@ -190,24 +185,19 @@ def optimize(symbol):
                     "fast": fast,
                     "slow": slow,
                     "atr_sl": sl,
-                    "vol_thresh": vol
+                    "vol_thresh": vol,
+                    "trend_thresh": trend
                 }
             }
 
     return jsonify(best)
 
 
-# =========================
-# HEALTH CHECK
-# =========================
 @app.route("/")
 def home():
     return jsonify({"status": "running"})
 
 
-# =========================
-# RUN
-# =========================
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
