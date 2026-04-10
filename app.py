@@ -6,86 +6,116 @@ import itertools
 
 app = Flask(__name__)
 
+# =========================
+# DATA FETCH
+# =========================
 def get_intraday(symbol):
-    df = yf.download(symbol, period="5d", interval="5m", progress=False)
+    try:
+        df = yf.download(symbol, period="5d", interval="5m", progress=False)
 
-    if df is None or df.empty:
+        if df is None or df.empty:
+            return None
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
+        df = df.rename(columns={
+            "Open": "o",
+            "High": "h",
+            "Low": "l",
+            "Close": "c",
+            "Volume": "v"
+        })
+
+        return df[["o", "h", "l", "c", "v"]].dropna()
+
+    except Exception as e:
+        print("DATA ERROR:", e)
         return None
 
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
 
-    df = df.rename(columns={
-        "Open": "o",
-        "High": "h",
-        "Low": "l",
-        "Close": "c",
-        "Volume": "v"
-    })
+# =========================
+# STRATEGY (TRAILING STOP)
+# =========================
+def run_strategy(df, fast, slow, sl_mult, vol_thresh):
+    try:
+        df = df.copy()
 
-    return df[["o", "h", "l", "c", "v"]].dropna()
+        # Indicators
+        df["ma_fast"] = df["c"].rolling(fast).mean()
+        df["ma_slow"] = df["c"].rolling(slow).mean()
 
-
-def run_strategy(df, fast, slow, sl_mult, tp_mult, vol_thresh):
-    df = df.copy()
-
-    df["ma_fast"] = df["c"].rolling(fast).mean()
-    df["ma_slow"] = df["c"].rolling(slow).mean()
-
-    prev_close = df["c"].shift(1)
-    tr = np.maximum(
-        df["h"] - df["l"],
-        np.maximum(
-            abs(df["h"] - prev_close),
-            abs(df["l"] - prev_close)
+        prev_close = df["c"].shift(1)
+        tr = np.maximum(
+            df["h"] - df["l"],
+            np.maximum(
+                abs(df["h"] - prev_close),
+                abs(df["l"] - prev_close)
+            )
         )
-    )
-    df["atr"] = tr.rolling(14).mean()
+        df["atr"] = tr.rolling(14).mean()
 
-    df["returns"] = df["c"].pct_change()
-    df["vol"] = df["returns"].rolling(10).std()
+        df["returns"] = df["c"].pct_change()
+        df["vol"] = df["returns"].rolling(10).std()
 
-    df = df.dropna()
+        df = df.dropna()
 
-    capital = 1000
-    position = 0
-    entry_price = 0
-    entry_atr = 0
+        if df.empty:
+            return None
 
-    trade_results = []
+        capital = 1000
+        position = 0
+        entry_price = 0
+        entry_atr = 0
+        peak_price = 0
 
-    for i in range(len(df)):
-        row = df.iloc[i]
+        trade_results = []
 
-        if position == 0:
-            if row["ma_fast"] > row["ma_slow"] and row["vol"] > vol_thresh:
-                position = 1
-                entry_price = row["c"]
-                entry_atr = row["atr"]
+        for i in range(len(df)):
+            row = df.iloc[i]
 
-        else:
-            move = row["c"] - entry_price
-            stop = -sl_mult * entry_atr
-            target = tp_mult * entry_atr
+            # ENTRY
+            if position == 0:
+                if row["ma_fast"] > row["ma_slow"] and row["vol"] > vol_thresh:
+                    position = 1
+                    entry_price = row["c"]
+                    entry_atr = row["atr"]
+                    peak_price = row["c"]
 
-            if move <= stop or move >= target or row["ma_fast"] < row["ma_slow"]:
-                pct_return = move / entry_price
-                capital *= (1 + pct_return)
-                trade_results.append(pct_return)
-                position = 0
+            # TRADE MANAGEMENT
+            else:
+                peak_price = max(peak_price, row["c"])
 
-    if len(trade_results) == 0:
-        return None
+                trailing_stop = peak_price - (sl_mult * entry_atr)
 
-    sharpe = np.mean(trade_results) / (np.std(trade_results) + 1e-9)
+                if (
+                    row["c"] <= trailing_stop or
+                    row["ma_fast"] < row["ma_slow"]
+                ):
+                    pct_return = (row["c"] - entry_price) / entry_price
+                    capital *= (1 + pct_return)
 
-    return {
-        "balance": capital,
-        "sharpe": sharpe,
-        "trades": len(trade_results)
-    }
+                    trade_results.append(pct_return)
+                    position = 0
+
+        if len(trade_results) == 0:
+            return None
+
+        sharpe = np.mean(trade_results) / (np.std(trade_results) + 1e-9)
+
+        return {
+            "balance": capital,
+            "sharpe": sharpe,
+            "trades": len(trade_results)
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
 
 
+# =========================
+# BACKTEST
+# =========================
 @app.route("/backtest/<symbol>")
 def backtest(symbol):
     df = get_intraday(symbol)
@@ -93,7 +123,13 @@ def backtest(symbol):
     if df is None:
         return jsonify({"error": "Data fetch failed"})
 
-    result = run_strategy(df, 10, 30, 1.2, 3.5, 0.0005)
+    result = run_strategy(
+        df,
+        fast=10,
+        slow=30,
+        sl_mult=1.5,
+        vol_thresh=0.0005
+    )
 
     if result is None:
         return jsonify({"error": "No trades"})
@@ -106,6 +142,9 @@ def backtest(symbol):
     })
 
 
+# =========================
+# OPTIMIZER
+# =========================
 @app.route("/optimize/<symbol>")
 def optimize(symbol):
     df = get_intraday(symbol)
@@ -117,17 +156,16 @@ def optimize(symbol):
 
     fast_range = [5, 8, 10, 12]
     slow_range = [15, 20, 30, 40]
-    sl_range = [1.0, 1.2, 1.5]
-    tp_range = [2.5, 3.0, 3.5, 4.0]
+    sl_range = [1.0, 1.5, 2.0]
     vol_range = [0.0002, 0.0005, 0.0008]
 
-    for fast, slow, sl, tp, vol in itertools.product(
-        fast_range, slow_range, sl_range, tp_range, vol_range
+    for fast, slow, sl, vol in itertools.product(
+        fast_range, slow_range, sl_range, vol_range
     ):
         if fast >= slow:
             continue
 
-        result = run_strategy(df, fast, slow, sl, tp, vol)
+        result = run_strategy(df, fast, slow, sl, vol)
 
         if result is None:
             continue
@@ -151,7 +189,6 @@ def optimize(symbol):
                     "fast": fast,
                     "slow": slow,
                     "atr_sl": sl,
-                    "atr_tp": tp,
                     "vol_thresh": vol
                 }
             }
@@ -159,11 +196,17 @@ def optimize(symbol):
     return jsonify(best)
 
 
+# =========================
+# HEALTH CHECK
+# =========================
 @app.route("/")
 def home():
     return jsonify({"status": "running"})
 
 
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
