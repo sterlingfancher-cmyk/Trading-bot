@@ -16,11 +16,13 @@ def compute_strategy(df):
     df["signal"] = 0
 
     # ENTRY
+    strength = (df["ma_fast"] - df["ma_slow"] / df["ma_slow"]
+    
     df.loc[
     (
         (df["ma_fast"] > df["ma_slow"]) &  #trend
         (df["returns"] > 0.0005) &
-        (df["returns"].rolling(2).mean() >0)
+        (strength > 0.001)
     ),   
         "signal"
     ] = 1
