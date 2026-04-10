@@ -11,33 +11,18 @@ app = Flask(__name__)
 LOOKBACK = 20
 ATR_MULT = 2.5
 
-# 🔥 EXPANDED UNIVERSE
 SYMBOLS = [
-    # Indexes
     "SPY","QQQ","IWM",
-
-    # Sectors
     "XLE","XLK","XLF","XLV","XLI","XLP","XLY","XLU","XLB",
-
-    # Commodities
     "GLD","SLV","USO","UNG",
-
-    # Bonds
     "TLT","IEF","HYG",
-
-    # Growth / Tech
     "ARKK","SMH","SOXX","IGV","BOTZ",
-
-    # International
     "EFA","EEM","FXI",
-
-    # High momentum stocks
     "NVDA","TSLA","AMD","META","AAPL","MSFT"
 ]
 
 INITIAL_CAPITAL = 1000
 
-# 🔥 HIGH DEPLOYMENT SETTINGS
 RISK_PER_TRADE = 0.12
 MAX_POSITIONS = 5
 TOP_N = 5
@@ -45,12 +30,15 @@ MAX_TOTAL_RISK = 0.6
 
 TRANSACTION_COST = 0.001
 
+# 🔥 NEW: MOMENTUM THRESHOLD
+MOMENTUM_THRESHOLD = 1.05
+
 # 🔥 GLOBAL CACHE
 DATA = None
 
 
 # =========================
-# LOAD DATA (LAZY + SAFE)
+# LOAD DATA
 # =========================
 def load_data():
     global DATA
@@ -109,7 +97,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "expanded-universe-system-live"})
+    return jsonify({"status": "momentum-filter-system-live"})
 
 
 @app.route("/portfolio")
@@ -191,7 +179,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (NEAR BREAKOUT)
+        # ENTRIES (FILTERED 🔥)
         # =========================
         for symbol in top_symbols:
 
@@ -210,11 +198,13 @@ def portfolio():
 
             trend = row["c"] > row["ma_200"]
 
-            breakout = row["c"] >= row["high_break"] * 0.995
+            # 🔥 NEW: MOMENTUM FILTER
+            strong = row["momentum"] > MOMENTUM_THRESHOLD
 
+            breakout = row["c"] >= row["high_break"] * 0.995
             vol = row["atr_change"] > 0
 
-            if trend and breakout and vol:
+            if trend and strong and breakout and vol:
 
                 # 🔥 DYNAMIC SIZING
                 breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
