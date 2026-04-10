@@ -13,7 +13,7 @@ ATR_MULT = 2.5
 SYMBOLS = ["SPY", "QQQ", "IWM", "XLE", "XLK"]
 
 INITIAL_CAPITAL = 1000
-RISK_PER_TRADE = 0.1   # 10%
+RISK_PER_TRADE = 0.1
 MAX_POSITIONS = 3
 
 
@@ -57,13 +57,13 @@ def prepare(df):
     )
 
     df["atr"] = tr.rolling(14).mean()
-    df["atr_rising"] = df["atr"] > df["atr"].shift(1)
+    df["atr_change"] = df["atr"].pct_change()
 
     return df.dropna()
 
 
 # =========================
-# 🔥 PORTFOLIO ENGINE (UPGRADED)
+# 🔥 PORTFOLIO ENGINE (RANKED)
 # =========================
 @app.route("/portfolio")
 def portfolio():
@@ -90,7 +90,7 @@ def portfolio():
     for date in all_dates:
 
         # =========================
-        # CHECK EXITS FIRST
+        # EXITS
         # =========================
         for symbol in list(positions.keys()):
 
@@ -106,7 +106,6 @@ def portfolio():
 
             if row["c"] < stop:
                 pct = (row["c"] - entry_price[symbol]) / entry_price[symbol]
-
                 capital += position_size[symbol] * pct
 
                 del positions[symbol]
@@ -117,12 +116,9 @@ def portfolio():
                 trade_count += 1
 
         # =========================
-        # CHECK ENTRIES
+        # FIND SIGNALS
         # =========================
-        open_slots = MAX_POSITIONS - len(positions)
-
-        if open_slots <= 0:
-            continue
+        signals = []
 
         for symbol, df in data.items():
 
@@ -136,20 +132,33 @@ def portfolio():
 
             trend = row["c"] > row["ma_200"]
             breakout = row["c"] > row["high_break"]
-            vol = row["atr_rising"]
+            vol = row["atr_change"] > 0
 
             if trend and breakout and vol:
 
-                # 🔥 POSITION SIZING
-                risk_amount = capital * RISK_PER_TRADE
+                # 🔥 SCORE SIGNAL
+                breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
+                vol_strength = row["atr_change"]
 
-                positions[symbol] = True
-                entry_price[symbol] = row["c"]
-                peak_price[symbol] = row["c"]
-                position_size[symbol] = risk_amount
+                score = breakout_strength + vol_strength
 
-                if len(positions) >= MAX_POSITIONS:
-                    break
+                signals.append((symbol, score, row))
+
+        # =========================
+        # TAKE BEST SIGNALS ONLY
+        # =========================
+        signals = sorted(signals, key=lambda x: x[1], reverse=True)
+
+        open_slots = MAX_POSITIONS - len(positions)
+
+        for symbol, score, row in signals[:open_slots]:
+
+            risk_amount = capital * RISK_PER_TRADE
+
+            positions[symbol] = True
+            entry_price[symbol] = row["c"]
+            peak_price[symbol] = row["c"]
+            position_size[symbol] = risk_amount
 
     return jsonify({
         "final_balance": round(capital, 2),
@@ -158,17 +167,11 @@ def portfolio():
     })
 
 
-# =========================
-# HEALTH
-# =========================
 @app.route("/")
 def home():
     return jsonify({"status": "running"})
 
 
-# =========================
-# RUN
-# =========================
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
