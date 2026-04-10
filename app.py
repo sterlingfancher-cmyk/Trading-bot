@@ -6,10 +6,10 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG (CLEAN + WINNING)
+# CONFIG (SCALED WINNER 🔥)
 # =========================
 LOOKBACK = 20
-ATR_MULT = 3.0  # balanced trailing stop
+ATR_MULT = 3.0
 
 SYMBOLS = [
     "SPY","QQQ","IWM",
@@ -22,10 +22,11 @@ SYMBOLS = [
 
 INITIAL_CAPITAL = 1000
 
-RISK_PER_TRADE = 0.1
+# 🔥 ONLY CHANGES
+RISK_PER_TRADE = 0.12
 MAX_POSITIONS = 3
 TOP_N = 3
-MAX_TOTAL_RISK = 0.5
+MAX_TOTAL_RISK = 0.7
 
 TRANSACTION_COST = 0.001
 
@@ -33,7 +34,7 @@ DATA = None
 
 
 # =========================
-# LOAD DATA (LAZY)
+# LOAD DATA
 # =========================
 def load_data():
     global DATA
@@ -61,9 +62,6 @@ def load_data():
                 "Volume": "v"
             })
 
-            # =========================
-            # INDICATORS (SIMPLE)
-            # =========================
             df["ma"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
@@ -75,8 +73,6 @@ def load_data():
 
             df["atr"] = tr.rolling(14).mean()
             df["atr_change"] = df["atr"].pct_change()
-
-            # simple momentum (for ranking only)
             df["momentum"] = df["c"] / df["c"].shift(20)
 
             data[symbol] = df.dropna()
@@ -93,7 +89,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "winning-system-restored"})
+    return jsonify({"status": "scaled-winning-system-live"})
 
 
 @app.route("/portfolio")
@@ -122,7 +118,7 @@ def portfolio():
     for date in all_dates:
 
         # =========================
-        # MARKET REGIME (KEEP SIMPLE)
+        # MARKET REGIME
         # =========================
         if date not in spy_df.index:
             continue
@@ -131,7 +127,7 @@ def portfolio():
             continue
 
         # =========================
-        # EXITS (TRAILING ONLY)
+        # EXITS
         # =========================
         for symbol in list(positions.keys()):
 
@@ -160,7 +156,7 @@ def portfolio():
                 trades += 1
 
         # =========================
-        # RELATIVE STRENGTH (RANK ONLY)
+        # RELATIVE STRENGTH
         # =========================
         rs = []
 
@@ -175,7 +171,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (SIMPLE EDGE)
+        # ENTRIES
         # =========================
         for symbol in top_symbols:
 
@@ -198,7 +194,6 @@ def portfolio():
 
             if trend and breakout and vol:
 
-                # 🔥 DYNAMIC SIZING (ONLY UPGRADE)
                 breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
 
                 size_multiplier = breakout_strength / 0.02
