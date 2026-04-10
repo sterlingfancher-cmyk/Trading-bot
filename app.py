@@ -76,14 +76,15 @@ def get_intraday(symbol):
     end = datetime.utcnow()
     start = end - timedelta(days=5)
 
-    url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{start.date()}/{end.date()}"
-    
-    r = requests.get(url, params={"apiKey": POLYGON_API_KEY}).json()
+    url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/minute/{start.date()}/{end.date()}?adjusted=true&sort=asc&limit=50000&apiKey={POLYGON_API_KEY}"
 
-    if "results" not in r:
+    r = requests.get(url)
+    data = r.json()
+
+    if "results" not in data:
         return pd.DataFrame()
 
-    df = pd.DataFrame(r["results"])
+    df = pd.DataFrame(data["results"])
 
     if df.empty or "c" not in df.columns:
         return pd.DataFrame()
