@@ -6,23 +6,26 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG (COMPOUNDING 🚀)
+# CONFIG (FINAL 🚀)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 3.0
 
+# 🔥 EXPANDED WITH WINNERS ONLY
 SYMBOLS = [
     "SPY","QQQ","IWM",
     "XLE","XLK","XLF","XLV","XLI",
     "GLD","SLV",
     "TLT",
-    "ARKK",
-    "SMH"
+    "ARKK","SMH",
+
+    # 🔥 HIGH MOMENTUM STOCKS
+    "NVDA","TSLA","AMD","META","MSFT","AAPL"
 ]
 
 INITIAL_CAPITAL = 1000
 
-# 🔥 AGGRESSIVE BASE
+# 🔥 AGGRESSIVE BUT STABLE
 RISK_PER_TRADE = 0.13
 MAX_POSITIONS = 3
 TOP_N = 3
@@ -62,6 +65,9 @@ def load_data():
                 "Volume": "v"
             })
 
+            # =========================
+            # INDICATORS (KEEP SIMPLE)
+            # =========================
             df["ma"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
@@ -73,6 +79,8 @@ def load_data():
 
             df["atr"] = tr.rolling(14).mean()
             df["atr_change"] = df["atr"].pct_change()
+
+            # ranking only
             df["momentum"] = df["c"] / df["c"].shift(20)
 
             data[symbol] = df.dropna()
@@ -89,7 +97,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "compounding-system-live"})
+    return jsonify({"status": "final-expanded-winners-system-live"})
 
 
 @app.route("/portfolio")
@@ -127,7 +135,7 @@ def portfolio():
             continue
 
         # =========================
-        # EXITS
+        # EXITS (TRAILING ONLY)
         # =========================
         for symbol in list(positions.keys()):
 
@@ -171,7 +179,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (WITH COMPOUNDING 🔥)
+        # ENTRIES (UNCHANGED EDGE)
         # =========================
         for symbol in top_symbols:
 
@@ -199,12 +207,8 @@ def portfolio():
                 size_multiplier = breakout_strength / 0.02
                 size_multiplier = max(0.5, min(size_multiplier, 2))
 
-                # 🔥 EQUITY COMPOUNDING
-                equity_boost = capital / INITIAL_CAPITAL
-                equity_boost = max(0.8, min(equity_boost, 1.5))
-
                 risk = min(
-                    capital * RISK_PER_TRADE * size_multiplier * equity_boost,
+                    capital * RISK_PER_TRADE * size_multiplier,
                     available_risk
                 )
 
