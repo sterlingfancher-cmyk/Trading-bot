@@ -34,7 +34,7 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (BREAKOUT + PULLBACK)
+# STRATEGY (BALANCED BREAKOUT)
 # =========================
 def compute_strategy(df):
     try:
@@ -53,21 +53,16 @@ def compute_strategy(df):
 
         df["signal"] = 0
 
-        # Breakout happened recently
+        # Core conditions
+        trend = df["ma_fast"] > df["ma_slow"]
         breakout = df["c"] > df["recent_high"].shift(1)
 
-        # Pullback after breakout
+        # Optional pullback (not required)
         pullback = df["c"] < df["ma_fast"]
 
-        # Recovery (price turning back up)
-        recovery = df["returns"] > 0
-
-        # Trend filter
-        trend = df["ma_fast"] > df["ma_slow"]
-
-        # ENTRY (refined)
+        # ENTRY (balanced)
         df.loc[
-            trend & breakout & pullback & recovery,
+            trend & breakout,
             "signal"
         ] = 1
 
@@ -75,9 +70,13 @@ def compute_strategy(df):
         df.loc[
             (df["ma_fast"] < df["ma_slow"]) |
             (df["returns"] < -0.002) |
-            (df["returns"] > 0.01),
+            (df["returns"] > 0.008),
             "signal"
         ] = 0
+
+        # Fallback (ensures trades ALWAYS exist)
+        if df["signal"].sum() == 0:
+            df.loc[trend, "signal"] = 1
 
         df["position"] = df["signal"].shift(1).fillna(0)
         df["strategy"] = df["position"] * df["returns"]
