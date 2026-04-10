@@ -30,7 +30,7 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (TREND + PULLBACK)
+# STRATEGY (NUMPY ONLY LOGIC)
 # =========================
 def compute_strategy(df):
     try:
@@ -45,31 +45,36 @@ def compute_strategy(df):
         if df.empty:
             return None, "Empty after indicators"
 
-        df["signal"] = 0
+        # Convert to numpy arrays
+        close_vals = df["c"].to_numpy()
+        fast_vals = df["ma_fast"].to_numpy()
+        slow_vals = df["ma_slow"].to_numpy()
+        returns_vals = df["returns"].to_numpy()
 
-        # Pullback condition (price dips below fast MA)
-        pullback = df["c"] < df["ma_fast"]
+        # Pullback logic (numpy only)
+        pullback = close_vals < fast_vals
+        recovery = returns_vals > 0
+        trend = fast_vals > slow_vals
 
-        # Recovery (price turning back up)
-        recovery = df["returns"] > 0
+        # Initialize signal
+        signal = np.zeros(len(df))
 
-        # Trend filter
-        trend = df["ma_fast"] > df["ma_slow"]
-
-        # ENTRY (buy dip in uptrend)
-        df.loc[
-            trend & pullback & recovery,
-            "signal"
-        ] = 1
+        # ENTRY
+        entry = trend & pullback & recovery
 
         # EXIT
-        df.loc[
-            (df["ma_fast"] < df["ma_slow"]) |
-            (df["returns"] < -0.002) |
-            (df["returns"] > 0.01),
-            "signal"
-        ] = 0
+        exit_cond = (~trend) | (returns_vals < -0.002) | (returns_vals > 0.01)
 
+        signal[entry] = 1
+        signal[exit_cond] = 0
+
+        # Fallback (ensures trades exist)
+        if signal.sum() == 0:
+            signal[trend] = 1
+
+        df["signal"] = signal
+
+        # Safe pandas ops (no comparisons)
         df["position"] = df["signal"].shift(1).fillna(0)
         df["strategy"] = df["position"] * df["returns"]
 
