@@ -200,12 +200,10 @@ def backtest(symbol):
         print(debug)    # logs to Railway logs
 
         df = raw.copy()
-
         df = compute_strategy(df)
+        
         if df.empty:
             return jsonify({"error": "Strategy returned no data"})
-
-        import numpy as np
 
 trades = (df["signal"].diff().abs() > 0).sum()
 
