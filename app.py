@@ -28,7 +28,7 @@ def compute_strategy(df):
     #EXIT
     df.loc[
     (   
-        (df["ma_fast"] < df["ma_slow"])
+        (df["ma_fast"] < df["ma_slow"]) |
         (df["returns"] < -0.002)    # stop loss
     ),
         "signal"
