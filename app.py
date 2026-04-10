@@ -22,8 +22,6 @@ def compute_strategy(df):
     # Entry: Trend + Pullback + Low volatility
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &           # uptrend
-        (df["returns"] < 0) &                       # pullback
-        (df["volatility"] < df["volatility"].rolling(50).mean()),
         "signal"
     ] = 1
 
@@ -33,13 +31,14 @@ def compute_strategy(df):
         "signal"
     ] = 0
 
-    df = df.dropna()
+    df = df.dropna(subset=["ma_fast", "ma_slow", "returns"])
 
     # Strategy returns (position-based, not constant flipping)
     df["position"] = df["signal"].replace(0, None).ffill().fillna(0)
     df["strategy_returns"] = df["returns"] * df["position"].shift(1)
 
-    return df
+    if df.empty:
+        return df
 
 @app.route('/')
 def home():
