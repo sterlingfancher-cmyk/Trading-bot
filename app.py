@@ -45,6 +45,16 @@ def save_positions(p):
 def get_intraday(symbol):
     url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/2024-01-01/2024-01-10"
     r = requests.get(url, params={"apiKey": POLYGON_API_KEY}).json()
+
+    if "results" not in r:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(r["results"])
+
+    if df.empty or "c" not in df.columns:
+        return pd.DataFrame()
+
+    return df
     
     results = r.get("results", [])
     
