@@ -29,20 +29,31 @@ def get_intraday(symbol):
 
         return df[["o", "h", "l", "c", "v"]].dropna()
 
-    except Exception as e:
-        print("DATA ERROR:", e)
+    except:
         return None
 
 
 # =========================
-# STRATEGY (REGIME FILTER)
+# RSI FUNCTION
 # =========================
-def run_strategy(df, fast, slow, sl_mult, vol_thresh, trend_thresh):
+def compute_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
+    rs = gain / (loss + 1e-9)
+    return 100 - (100 / (1 + rs))
+
+
+# =========================
+# STRATEGY (MEAN REVERSION)
+# =========================
+def run_strategy(df, fast, slow, rsi_low, rsi_high, sl_mult):
     try:
         df = df.copy()
 
         df["ma_fast"] = df["c"].rolling(fast).mean()
         df["ma_slow"] = df["c"].rolling(slow).mean()
+        df["rsi"] = compute_rsi(df["c"])
 
         prev_close = df["c"].shift(1)
         tr = np.maximum(
@@ -54,47 +65,39 @@ def run_strategy(df, fast, slow, sl_mult, vol_thresh, trend_thresh):
         )
         df["atr"] = tr.rolling(14).mean()
 
-        df["returns"] = df["c"].pct_change()
-        df["vol"] = df["returns"].rolling(10).std()
-
-        # 🔥 NEW: trend strength filter
-        df["trend_strength"] = abs(df["ma_fast"] - df["ma_slow"]) / df["c"]
-
         df = df.dropna()
 
         capital = 1000
         position = 0
         entry_price = 0
         entry_atr = 0
-        peak_price = 0
 
         trades = []
 
         for i in range(len(df)):
             row = df.iloc[i]
 
-            # ENTRY
+            # ENTRY (dip in uptrend)
             if position == 0:
                 if (
                     row["ma_fast"] > row["ma_slow"] and
-                    row["vol"] > vol_thresh and
-                    row["trend_strength"] > trend_thresh
+                    row["rsi"] < rsi_low
                 ):
                     position = 1
                     entry_price = row["c"]
                     entry_atr = row["atr"]
-                    peak_price = row["c"]
 
             # EXIT
             else:
-                peak_price = max(peak_price, row["c"])
-                trailing_stop = peak_price - (sl_mult * entry_atr)
+                move = row["c"] - entry_price
+                stop = -sl_mult * entry_atr
 
                 if (
-                    row["c"] <= trailing_stop or
+                    move <= stop or
+                    row["rsi"] > rsi_high or
                     row["ma_fast"] < row["ma_slow"]
                 ):
-                    pct = (row["c"] - entry_price) / entry_price
+                    pct = move / entry_price
                     capital *= (1 + pct)
                     trades.append(pct)
                     position = 0
@@ -124,7 +127,7 @@ def backtest(symbol):
     if df is None:
         return jsonify({"error": "Data fetch failed"})
 
-    result = run_strategy(df, 10, 30, 1.5, 0.0005, 0.001)
+    result = run_strategy(df, 10, 30, 30, 60, 1.5)
 
     if result is None:
         return jsonify({"error": "No trades"})
@@ -149,19 +152,19 @@ def optimize(symbol):
 
     best = {"score": -999}
 
-    fast_range = [5, 8, 10, 12]
-    slow_range = [15, 20, 30, 40]
+    fast_range = [8, 10, 12]
+    slow_range = [20, 30, 40]
+    rsi_low_range = [25, 30, 35]
+    rsi_high_range = [55, 60, 65]
     sl_range = [1.0, 1.5, 2.0]
-    vol_range = [0.0002, 0.0005, 0.0008]
-    trend_range = [0.0005, 0.001, 0.002]
 
-    for fast, slow, sl, vol, trend in itertools.product(
-        fast_range, slow_range, sl_range, vol_range, trend_range
+    for fast, slow, rl, rh, sl in itertools.product(
+        fast_range, slow_range, rsi_low_range, rsi_high_range, sl_range
     ):
         if fast >= slow:
             continue
 
-        result = run_strategy(df, fast, slow, sl, vol, trend)
+        result = run_strategy(df, fast, slow, rl, rh, sl)
 
         if result is None:
             continue
@@ -184,9 +187,9 @@ def optimize(symbol):
                 "params": {
                     "fast": fast,
                     "slow": slow,
-                    "atr_sl": sl,
-                    "vol_thresh": vol,
-                    "trend_thresh": trend
+                    "rsi_low": rl,
+                    "rsi_high": rh,
+                    "atr_sl": sl
                 }
             }
 
