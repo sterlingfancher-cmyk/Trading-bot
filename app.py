@@ -30,13 +30,16 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (FIXED BREAKOUT)
+# STRATEGY (MULTI-FACTOR)
 # =========================
-def run_strategy(df, lookback, atr_mult):
+def run_strategy(df, fast, slow, vol_thresh, atr_mult):
     df = df.copy()
 
-    # 🔥 FIXED: shift to avoid lookahead bias
-    df["high_break"] = df["h"].rolling(lookback).max().shift(1)
+    df["ma_fast"] = df["c"].rolling(fast).mean()
+    df["ma_slow"] = df["c"].rolling(slow).mean()
+
+    df["returns"] = df["c"].pct_change()
+    df["vol"] = df["returns"].rolling(10).std()
 
     prev_close = df["c"].shift(1)
     tr = np.maximum(
@@ -53,22 +56,33 @@ def run_strategy(df, lookback, atr_mult):
     capital = 1000
     position = 0
     entry_price = 0
+    entry_atr = 0
 
     trades = []
 
     for i in range(len(df)):
         row = df.iloc[i]
 
-        # 🔥 LOOSENED ENTRY
+        trend = row["ma_fast"] > row["ma_slow"]
+        pullback = row["c"] < row["ma_fast"]
+        recovery = row["returns"] > 0
+        volatility = row["vol"] > vol_thresh
+
+        # ENTRY
         if position == 0:
-            if row["c"] > row["high_break"] * 0.998:
+            if trend and pullback and recovery and volatility:
                 position = 1
                 entry_price = row["c"]
+                entry_atr = row["atr"]
 
+        # EXIT
         else:
-            stop = entry_price - (atr_mult * row["atr"])
+            stop = entry_price - (atr_mult * entry_atr)
 
-            if row["c"] < stop:
+            if (
+                row["c"] < stop or
+                row["ma_fast"] < row["ma_slow"]
+            ):
                 pct = (row["c"] - entry_price) / entry_price
                 capital *= (1 + pct)
                 trades.append(pct)
@@ -96,7 +110,7 @@ def backtest(symbol):
     if df is None:
         return jsonify({"error": "Data fetch failed"})
 
-    result = run_strategy(df, 20, 1.5)
+    result = run_strategy(df, 10, 30, 0.0005, 1.5)
 
     if result is None:
         return jsonify({"error": "No trades"})
@@ -121,12 +135,18 @@ def optimize(symbol):
 
     best = {"score": -999}
 
-    lookback_range = [10, 15, 20, 30]
+    fast_range = [5, 8, 10, 12]
+    slow_range = [15, 20, 30, 40]
+    vol_range = [0.0002, 0.0005, 0.0008]
     atr_range = [1.0, 1.5, 2.0]
 
-    for look, atr in itertools.product(lookback_range, atr_range):
+    for fast, slow, vol, atr in itertools.product(
+        fast_range, slow_range, vol_range, atr_range
+    ):
+        if fast >= slow:
+            continue
 
-        result = run_strategy(df, look, atr)
+        result = run_strategy(df, fast, slow, vol, atr)
 
         if result is None:
             continue
@@ -137,7 +157,7 @@ def optimize(symbol):
             min(result["trades"], 25) * 0.02
         )
 
-        if result["trades"] < 5:
+        if result["trades"] < 8:
             score *= 0.5
 
         if score > best["score"]:
@@ -147,7 +167,9 @@ def optimize(symbol):
                 "sharpe": round(result["sharpe"], 4),
                 "trades": result["trades"],
                 "params": {
-                    "lookback": look,
+                    "fast": fast,
+                    "slow": slow,
+                    "vol_thresh": vol,
                     "atr_mult": atr
                 }
             }
