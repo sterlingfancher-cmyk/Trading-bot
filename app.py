@@ -6,37 +6,34 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG
+# CONFIG (CLEAN + WINNING)
 # =========================
 LOOKBACK = 20
-ATR_MULT = 4.0  # trailing stop
-INITIAL_STOP_MULT = 2.0  # 🔥 new initial stop
+ATR_MULT = 3.0  # balanced trailing stop
 
 SYMBOLS = [
     "SPY","QQQ","IWM",
-    "XLE","XLK","XLF","XLV","XLI","XLP","XLY","XLU","XLB",
-    "GLD","SLV","USO","UNG",
-    "TLT","IEF","HYG",
-    "ARKK","SMH","SOXX","IGV","BOTZ",
-    "EFA","EEM","FXI",
-    "NVDA","TSLA","AMD","META","AAPL","MSFT"
+    "XLE","XLK","XLF","XLV","XLI",
+    "GLD","SLV",
+    "TLT",
+    "ARKK",
+    "SMH"
 ]
 
 INITIAL_CAPITAL = 1000
 
-RISK_PER_TRADE = 0.12
-MAX_POSITIONS = 4
-TOP_N = 4
-MAX_TOTAL_RISK = 0.6
+RISK_PER_TRADE = 0.1
+MAX_POSITIONS = 3
+TOP_N = 3
+MAX_TOTAL_RISK = 0.5
 
 TRANSACTION_COST = 0.001
-MOMENTUM_THRESHOLD = 1.07
 
 DATA = None
 
 
 # =========================
-# LOAD DATA
+# LOAD DATA (LAZY)
 # =========================
 def load_data():
     global DATA
@@ -64,7 +61,10 @@ def load_data():
                 "Volume": "v"
             })
 
-            df["ma_200"] = df["c"].rolling(100).mean()
+            # =========================
+            # INDICATORS (SIMPLE)
+            # =========================
+            df["ma"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
             prev_close = df["c"].shift(1)
@@ -75,7 +75,9 @@ def load_data():
 
             df["atr"] = tr.rolling(14).mean()
             df["atr_change"] = df["atr"].pct_change()
-            df["momentum"] = df["c"] / df["c"].shift(30)
+
+            # simple momentum (for ranking only)
+            df["momentum"] = df["c"] / df["c"].shift(20)
 
             data[symbol] = df.dropna()
 
@@ -91,7 +93,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "risk-managed-system-live"})
+    return jsonify({"status": "winning-system-restored"})
 
 
 @app.route("/portfolio")
@@ -114,21 +116,22 @@ def portfolio():
     entry_price = {}
     peak_price = {}
     position_size = {}
-    initial_stop = {}  # 🔥 new
 
     trades = 0
 
     for date in all_dates:
 
-        # MARKET REGIME
+        # =========================
+        # MARKET REGIME (KEEP SIMPLE)
+        # =========================
         if date not in spy_df.index:
             continue
 
-        if spy_df.loc[date]["c"] <= spy_df.loc[date]["ma_200"]:
+        if spy_df.loc[date]["c"] <= spy_df.loc[date]["ma"]:
             continue
 
         # =========================
-        # EXITS (DUAL STOP SYSTEM)
+        # EXITS (TRAILING ONLY)
         # =========================
         for symbol in list(positions.keys()):
 
@@ -140,9 +143,7 @@ def portfolio():
             row = df.loc[date]
 
             peak_price[symbol] = max(peak_price[symbol], row["c"])
-
-            trailing_stop = peak_price[symbol] - (ATR_MULT * row["atr"])
-            stop = max(trailing_stop, initial_stop[symbol])  # 🔥 key logic
+            stop = peak_price[symbol] - (ATR_MULT * row["atr"])
 
             if row["c"] < stop:
 
@@ -155,12 +156,11 @@ def portfolio():
                 del entry_price[symbol]
                 del peak_price[symbol]
                 del position_size[symbol]
-                del initial_stop[symbol]
 
                 trades += 1
 
         # =========================
-        # RELATIVE STRENGTH
+        # RELATIVE STRENGTH (RANK ONLY)
         # =========================
         rs = []
 
@@ -175,7 +175,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES
+        # ENTRIES (SIMPLE EDGE)
         # =========================
         for symbol in top_symbols:
 
@@ -192,13 +192,13 @@ def portfolio():
 
             row = df.loc[date]
 
-            trend = row["c"] > row["ma_200"]
-            strong = row["momentum"] > MOMENTUM_THRESHOLD
-            breakout = row["c"] >= row["high_break"] * 0.995
+            trend = row["c"] > row["ma"]
+            breakout = row["c"] > row["high_break"]
             vol = row["atr_change"] > 0
 
-            if trend and strong and breakout and vol:
+            if trend and breakout and vol:
 
+                # 🔥 DYNAMIC SIZING (ONLY UPGRADE)
                 breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
 
                 size_multiplier = breakout_strength / 0.02
@@ -210,9 +210,6 @@ def portfolio():
                 entry_price[symbol] = row["c"]
                 peak_price[symbol] = row["c"]
                 position_size[symbol] = risk
-
-                # 🔥 SET INITIAL STOP
-                initial_stop[symbol] = row["c"] - (INITIAL_STOP_MULT * row["atr"])
 
                 available_risk -= risk
 
