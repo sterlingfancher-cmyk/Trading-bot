@@ -5,6 +5,9 @@ import yfinance as yf
 
 app = Flask(__name__)
 
+# =========================
+# CONFIG
+# =========================
 LOOKBACK = 20
 ATR_MULT = 2.5
 SYMBOLS = ["SPY", "QQQ", "IWM", "XLE", "XLK"]
@@ -12,8 +15,12 @@ SYMBOLS = ["SPY", "QQQ", "IWM", "XLE", "XLK"]
 INITIAL_CAPITAL = 1000
 RISK_PER_TRADE = 0.1
 MAX_POSITIONS = 3
+TOP_N = 2   # 🔥 ONLY TRADE TOP 2 STRONGEST
 
 
+# =========================
+# DATA
+# =========================
 def get_data(symbol):
     df = yf.download(symbol, period="5y", interval="1d", progress=False)
 
@@ -34,6 +41,9 @@ def get_data(symbol):
     return df[["o", "h", "l", "c", "v"]].dropna()
 
 
+# =========================
+# PREP
+# =========================
 def prepare(df):
     df["ma_200"] = df["c"].rolling(200).mean()
     df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
@@ -50,9 +60,15 @@ def prepare(df):
     df["atr"] = tr.rolling(14).mean()
     df["atr_change"] = df["atr"].pct_change()
 
+    # 🔥 RELATIVE STRENGTH (50-day momentum)
+    df["momentum"] = df["c"] / df["c"].shift(50)
+
     return df.dropna()
 
 
+# =========================
+# PORTFOLIO ENGINE (RS FILTER)
+# =========================
 @app.route("/portfolio")
 def portfolio():
 
@@ -77,7 +93,9 @@ def portfolio():
 
     for date in all_dates:
 
+        # =========================
         # EXITS
+        # =========================
         for symbol in list(positions.keys()):
 
             df = data[symbol]
@@ -102,14 +120,33 @@ def portfolio():
 
                 trade_count += 1
 
-        # ENTRIES
-        signals = []
+        # =========================
+        # RANK RELATIVE STRENGTH
+        # =========================
+        rs_list = []
 
         for symbol, df in data.items():
+            if date not in df.index:
+                continue
+
+            row = df.loc[date]
+            rs_list.append((symbol, row["momentum"]))
+
+        rs_list = sorted(rs_list, key=lambda x: x[1], reverse=True)
+        top_symbols = [s[0] for s in rs_list[:TOP_N]]
+
+        # =========================
+        # ENTRIES (ONLY TOP RS)
+        # =========================
+        for symbol in top_symbols:
 
             if symbol in positions:
                 continue
 
+            if len(positions) >= MAX_POSITIONS:
+                break
+
+            df = data[symbol]
             if date not in df.index:
                 continue
 
@@ -121,25 +158,12 @@ def portfolio():
 
             if trend and breakout and vol:
 
-                breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
-                vol_strength = row["atr_change"]
+                risk_amount = capital * RISK_PER_TRADE
 
-                score = breakout_strength + vol_strength
-
-                signals.append((symbol, score, row))
-
-        signals = sorted(signals, key=lambda x: x[1], reverse=True)
-
-        open_slots = MAX_POSITIONS - len(positions)
-
-        for symbol, score, row in signals[:open_slots]:
-
-            risk_amount = capital * RISK_PER_TRADE
-
-            positions[symbol] = True
-            entry_price[symbol] = row["c"]
-            peak_price[symbol] = row["c"]
-            position_size[symbol] = risk_amount
+                positions[symbol] = True
+                entry_price[symbol] = row["c"]
+                peak_price[symbol] = row["c"]
+                position_size[symbol] = risk_amount
 
     return jsonify({
         "final_balance": round(capital, 2),
