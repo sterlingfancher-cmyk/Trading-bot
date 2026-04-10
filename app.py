@@ -7,7 +7,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# DATA FETCH
+# DATA
 # =========================
 def get_intraday(symbol):
     try:
@@ -26,73 +26,75 @@ def get_intraday(symbol):
 
         return df.dropna()
 
-    except Exception as e:
-        print("DATA ERROR:", str(e))
+    except:
         return pd.DataFrame()
 
 # =========================
-# STRATEGY (FIXED + RELIABLE)
+# IMPROVED STRATEGY
 # =========================
 def compute_strategy(df):
 
-    try:
-        df["ma_fast"] = df["c"].rolling(10).mean()
-        df["ma_slow"] = df["c"].rolling(30).mean()
-        df["returns"] = df["c"].pct_change()
+    df["ma_fast"] = df["c"].rolling(10).mean()
+    df["ma_slow"] = df["c"].rolling(30).mean()
+    df["returns"] = df["c"].pct_change()
 
-        df = df.dropna().copy()
+    # Momentum filter
+    df["momentum"] = df["returns"].rolling(3).mean()
 
-        if df.empty:
-            return pd.DataFrame()
+    df = df.dropna().copy()
 
-        df["signal"] = 0
-
-        # ENTRY: simple trend
-        df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
-
-        # EXIT
-        df.loc[df["ma_fast"] < df["ma_slow"], "signal"] = 0
-
-        df["position"] = df["signal"].shift().fillna(0)
-        df["strategy"] = df["position"] * df["returns"]
-
-        return df
-
-    except Exception as e:
-        print("STRATEGY ERROR:", str(e))
+    if df.empty:
         return pd.DataFrame()
+
+    df["signal"] = 0
+
+    # ENTRY (trend + momentum)
+    df.loc[
+        (df["ma_fast"] > df["ma_slow"]) &
+        (df["momentum"] > 0),
+        "signal"
+    ] = 1
+
+    # EXIT (trend break OR stop/target)
+    df.loc[
+        (df["ma_fast"] < df["ma_slow"]) |
+        (df["returns"] < -0.0025) |
+        (df["returns"] > 0.008),
+        "signal"
+    ] = 0
+
+    df["position"] = df["signal"].shift().fillna(0)
+    df["strategy"] = df["position"] * df["returns"]
+
+    return df
 
 # =========================
 # METRICS
 # =========================
 def calculate_metrics(df, symbol):
 
-    try:
-        if df.empty:
-            return {"error": "No trades generated"}
+    if df.empty:
+        return {"error": "No trades generated"}
 
-        total_return = df["strategy"].sum()
-        trades = int((df["signal"].diff().abs() > 0).sum())
-        win_rate = float((df["strategy"] > 0).mean())
+    total_return = df["strategy"].sum()
+    trades = int((df["signal"].diff().abs() > 0).sum())
+    win_rate = float((df["strategy"] > 0).mean())
 
-        sharpe = 0
-        if df["strategy"].std() != 0:
-            sharpe = df["strategy"].mean() / df["strategy"].std()
+    sharpe = 0
+    if df["strategy"].std() != 0:
+        sharpe = df["strategy"].mean() / df["strategy"].std()
 
-        drawdown = df["strategy"].cumsum().min()
+    drawdown = df["strategy"].cumsum().min()
 
-        return {
-            "symbol": symbol,
-            "balance": round(1000 * (1 + total_return), 2),
-            "avg_pnl": round(df["strategy"].mean(), 6),
-            "trades": trades,
-            "win_rate": round(win_rate * 100, 2),
-            "sharpe": round(sharpe, 4),
-            "max_drawdown": round(drawdown, 4)
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
+    return {
+        "symbol": symbol,
+        "balance": round(1000 * (1 + total_return), 2),
+        "avg_pnl": round(df["strategy"].mean(), 6),
+        "trades": trades,
+        "win_rate": round(win_rate * 100, 2),
+        "sharpe": round(sharpe, 4),
+        "max_drawdown": round(drawdown, 4)
+    }
 
 # =========================
 # ROUTES
@@ -103,21 +105,17 @@ def home():
 
 @app.route("/backtest/<symbol>")
 def backtest(symbol):
-    try:
-        df = get_intraday(symbol)
+    df = get_intraday(symbol)
 
-        if df.empty:
-            return jsonify({"error": "No data from yfinance"})
+    if df.empty:
+        return jsonify({"error": "No data"})
 
-        df = compute_strategy(df)
+    df = compute_strategy(df)
 
-        if df.empty:
-            return jsonify({"error": "Strategy failed"})
+    if df.empty:
+        return jsonify({"error": "Strategy failed"})
 
-        return jsonify(calculate_metrics(df, symbol))
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    return jsonify(calculate_metrics(df, symbol))
 
 # =========================
 # RUN
