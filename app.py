@@ -6,7 +6,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG (SCALED WINNER 🔥)
+# CONFIG (AGGRESSIVE 🔥)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 3.0
@@ -22,11 +22,11 @@ SYMBOLS = [
 
 INITIAL_CAPITAL = 1000
 
-# 🔥 ONLY CHANGES
-RISK_PER_TRADE = 0.12
+# 🔥 AGGRESSIVE SETTINGS
+RISK_PER_TRADE = 0.13
 MAX_POSITIONS = 3
 TOP_N = 3
-MAX_TOTAL_RISK = 0.7
+MAX_TOTAL_RISK = 0.8
 
 TRANSACTION_COST = 0.001
 
@@ -89,7 +89,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "scaled-winning-system-live"})
+    return jsonify({"status": "aggressive-scaling-system-live"})
 
 
 @app.route("/portfolio")
