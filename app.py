@@ -6,29 +6,26 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG (FINAL 🚀)
+# CONFIG (FINAL OPTIMIZED 🚀)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 3.0
 
-# 🔥 EXPANDED WITH WINNERS ONLY
 SYMBOLS = [
     "SPY","QQQ","IWM",
     "XLE","XLK","XLF","XLV","XLI",
     "GLD","SLV",
     "TLT",
     "ARKK","SMH",
-
-    # 🔥 HIGH MOMENTUM STOCKS
     "NVDA","TSLA","AMD","META","MSFT","AAPL"
 ]
 
 INITIAL_CAPITAL = 1000
 
-# 🔥 AGGRESSIVE BUT STABLE
+# 🔥 FINAL BALANCED + SCALED
 RISK_PER_TRADE = 0.13
-MAX_POSITIONS = 3
-TOP_N = 3
+MAX_POSITIONS = 4
+TOP_N = 4
 MAX_TOTAL_RISK = 0.8
 
 TRANSACTION_COST = 0.001
@@ -65,9 +62,6 @@ def load_data():
                 "Volume": "v"
             })
 
-            # =========================
-            # INDICATORS (KEEP SIMPLE)
-            # =========================
             df["ma"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
@@ -80,7 +74,6 @@ def load_data():
             df["atr"] = tr.rolling(14).mean()
             df["atr_change"] = df["atr"].pct_change()
 
-            # ranking only
             df["momentum"] = df["c"] / df["c"].shift(20)
 
             data[symbol] = df.dropna()
@@ -97,7 +90,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "final-expanded-winners-system-live"})
+    return jsonify({"status": "final-optimized-system-live"})
 
 
 @app.route("/portfolio")
@@ -179,7 +172,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (UNCHANGED EDGE)
+        # ENTRIES (CLEAN EDGE)
         # =========================
         for symbol in top_symbols:
 
