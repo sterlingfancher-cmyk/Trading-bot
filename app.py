@@ -6,7 +6,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG (FINAL TUNED)
+# CONFIG (BALANCED 🔥)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 2.5
@@ -23,14 +23,14 @@ SYMBOLS = [
 
 INITIAL_CAPITAL = 1000
 
-# 🔥 FINAL SETTINGS
+# 🔥 BALANCED SETTINGS
 RISK_PER_TRADE = 0.12
-MAX_POSITIONS = 3
-TOP_N = 3
+MAX_POSITIONS = 4
+TOP_N = 4
 MAX_TOTAL_RISK = 0.6
 
 TRANSACTION_COST = 0.001
-MOMENTUM_THRESHOLD = 1.10  # 🔥 STRONG FILTER
+MOMENTUM_THRESHOLD = 1.07
 
 DATA = None
 
@@ -92,7 +92,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "final-tuned-system-live"})
+    return jsonify({"status": "balanced-system-live"})
 
 
 @app.route("/portfolio")
@@ -121,7 +121,7 @@ def portfolio():
     for date in all_dates:
 
         # =========================
-        # MARKET REGIME FILTER
+        # MARKET REGIME
         # =========================
         if date not in spy_df.index:
             continue
@@ -159,7 +159,7 @@ def portfolio():
                 trades += 1
 
         # =========================
-        # RELATIVE STRENGTH (TOP 3 ONLY 🔥)
+        # RELATIVE STRENGTH
         # =========================
         rs = []
 
@@ -174,7 +174,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (STRICT QUALITY)
+        # ENTRIES (BALANCED)
         # =========================
         for symbol in top_symbols:
 
