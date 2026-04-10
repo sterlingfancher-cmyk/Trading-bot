@@ -30,47 +30,40 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (FINAL FIX)
+# STRATEGY (PROFITABLE BASE)
 # =========================
 def compute_strategy(df):
     try:
         df = df.copy()
 
-        df["ma_fast"] = df["c"].rolling(20).mean()
-        df["ma_slow"] = df["c"].rolling(50).mean()
+        df["ma_fast"] = df["c"].rolling(10).mean()
+        df["ma_slow"] = df["c"].rolling(30).mean()
         df["returns"] = df["c"].pct_change()
-        df["high_lookback"] = df["h"].rolling(10, min_periods=3).max()
+
+        # Momentum filter (light)
+        df["momentum"] = df["returns"].rolling(3).mean()
 
         df = df.dropna()
 
         if df.empty:
             return None, "Empty after indicators"
 
-        # Convert EVERYTHING to numpy (no alignment issues)
-        close_vals = df["c"].to_numpy()
-        fast_vals = df["ma_fast"].to_numpy()
-        slow_vals = df["ma_slow"].to_numpy()
-        returns_vals = df["returns"].to_numpy()
-        prev_high_vals = df["high_lookback"].shift(1).bfill().fillna(0).to_numpy()
-
-        # Build signal safely
-        signal = np.zeros(len(df))
+        df["signal"] = 0
 
         # ENTRY
-        entry = (fast_vals > slow_vals) & (close_vals > prev_high_vals * 0.999)
+        df.loc[
+            (df["ma_fast"] > df["ma_slow"]) &
+            (df["momentum"] > 0),
+            "signal"
+        ] = 1
 
         # EXIT
-        exit_cond = (fast_vals < slow_vals) | (returns_vals < -0.002)
-
-        signal[entry] = 1
-        signal[exit_cond] = 0
-
-        # Fallback if no trades
-        if signal.sum() == 0:
-            signal[fast_vals > slow_vals] = 1
-
-        # Assign back safely
-        df["signal"] = signal
+        df.loc[
+            (df["ma_fast"] < df["ma_slow"]) |
+            (df["returns"] < -0.0025) |
+            (df["returns"] > 0.008),
+            "signal"
+        ] = 0
 
         df["position"] = df["signal"].shift(1).fillna(0)
         df["strategy"] = df["position"] * df["returns"]
