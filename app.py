@@ -1,9 +1,8 @@
-from flask import Flask, request, jsonify
-import requests, os, json
+from flask import Flask, jsonify
+import requests, os
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
-import joblib
 
 app = Flask(__name__)
 
@@ -11,7 +10,6 @@ app = Flask(__name__)
 # CONFIG
 # =========================
 POLYGON_API_KEY = "L3SUCdmHWD0ctcfwFAsXBD5pFvHumpQi"
-
 ACCOUNT_SIZE = 1000
 
 # =========================
@@ -48,7 +46,7 @@ def get_intraday(symbol):
         return pd.DataFrame()
 
 # =========================
-# STRATEGY
+# STRATEGY (IMPROVED)
 # =========================
 def compute_strategy(df):
 
@@ -56,15 +54,22 @@ def compute_strategy(df):
     df["ma_slow"] = df["c"].rolling(50).mean()
     df["returns"] = df["c"].pct_change()
 
+    # 🔥 NEW: volatility filter
+    df["volatility"] = df["returns"].rolling(10).std()
+
+    # remove low volatility (chop)
+    df = df[df["volatility"] > df["volatility"].rolling(50).mean()]
+
     df["signal"] = 0.0
 
     strength = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
 
-    # ENTRY
+    # 🔥 IMPROVED ENTRY (stronger filters)
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &
-        (df["returns"] > 0.0003) &
-        (strength > 0.0003),
+        (df["returns"] > 0.001) &
+        (strength > 0.002) &
+        (df["c"] > df["c"].rolling(20).mean()),
         "signal"
     ] = strength
 
@@ -78,7 +83,6 @@ def compute_strategy(df):
         "signal"
     ] = 0
 
-    # CLEAN
     df = df.dropna(subset=["ma_fast", "ma_slow", "returns"])
 
     if df.empty:
@@ -144,7 +148,7 @@ def backtest(symbol):
         return jsonify({"error": str(e)})
 
 # =========================
-# RUN (RAILWAY FIX)
+# RUN (RAILWAY)
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
