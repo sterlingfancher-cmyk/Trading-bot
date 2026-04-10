@@ -40,7 +40,7 @@ def get_intraday(symbol):
         return pd.DataFrame()
 
 # =========================
-# STRATEGY
+# STRATEGY (FIXED BALANCE)
 # =========================
 def compute_strategy(df):
 
@@ -48,39 +48,37 @@ def compute_strategy(df):
     df["ma_slow"] = df["c"].rolling(50).mean()
     df["returns"] = df["c"].pct_change()
 
-    # VOL FILTER
+    # LIGHT volatility filter (less aggressive)
     df["volatility"] = df["returns"].rolling(10).std()
-    df = df[df["volatility"] > df["volatility"].rolling(50).mean()]
+    df = df[df["volatility"] > df["volatility"].rolling(20).mean() * 0.8]
 
     df["signal"] = 0.0
 
     strength = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
 
-    # 🔥 STRONG ENTRY FILTER
+    # ENTRY (relaxed but still strong)
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &
-        (df["ma_fast"] > df["ma_fast"].shift(5)) &   # trend strengthening
-        (df["returns"] > 0.0015) &
-        (strength > 0.003) &
-        (df["c"] > df["c"].rolling(20).mean()),
+        (df["returns"] > 0.0006) &
+        (strength > 0.0012),
         "signal"
     ] = strength
 
-    # SCALE POSITION SIZE
+    # SCALE
     df["signal"] = (df["signal"] / 0.04).clip(0, 1)
 
-    # 🔥 STRONG COOLDOWN (cuts trades HARD)
-    df["cooldown"] = df["signal"].rolling(25).max().shift(1)
+    # LIGHT cooldown (not killing trades)
+    df["cooldown"] = df["signal"].rolling(5).max().shift(1)
     df.loc[df["cooldown"] > 0, "signal"] = 0
 
-    # 🔥 HOLD WINNERS LONGER
-    df["hold"] = df["signal"].replace(0, np.nan).ffill()
+    # POSITION
+    df["position"] = df["signal"].replace(0, np.nan).ffill().fillna(0)
 
-    # EXIT (smarter)
+    # EXIT (balanced)
     df.loc[
-        (df["returns"] < -0.003) |
-        (df["returns"] > 0.012),   # let winners run longer
-        "signal"
+        (df["returns"] < -0.0025) |
+        (df["returns"] > 0.007),
+        "position"
     ] = 0
 
     df = df.dropna(subset=["ma_fast", "ma_slow", "returns"])
@@ -88,14 +86,11 @@ def compute_strategy(df):
     if df.empty:
         return pd.DataFrame()
 
-    # POSITION
-    df["position"] = df["hold"].fillna(0)
-
     # RETURNS
     df["strategy_returns"] = df["returns"] * df["position"].shift(1)
 
     # CAP EXTREMES
-    df["strategy_returns"] = df["strategy_returns"].clip(-0.02, 0.04)
+    df["strategy_returns"] = df["strategy_returns"].clip(-0.015, 0.025)
 
     return df
 
@@ -120,7 +115,7 @@ def backtest(symbol):
         if returns.empty:
             return jsonify({"error": "No returns generated"})
 
-        trades = int((df["signal"].diff().abs() > 0).sum())
+        trades = int((df["position"].diff().abs() > 0).sum())
 
         avg_pnl = round(returns.mean() * 100, 4)
         balance = round(ACCOUNT_SIZE * (returns + 1).cumprod().iloc[-1], 2)
