@@ -11,7 +11,10 @@ app = Flask(__name__)
 LOOKBACK = 20
 ATR_MULT = 2.5
 SYMBOLS = ["SPY", "QQQ", "IWM", "XLE", "XLK"]
+
 INITIAL_CAPITAL = 1000
+RISK_PER_TRADE = 0.1   # 10%
+MAX_POSITIONS = 3
 
 
 # =========================
@@ -38,7 +41,7 @@ def get_data(symbol):
 
 
 # =========================
-# PREP DATA
+# PREP
 # =========================
 def prepare(df):
     df["ma_200"] = df["c"].rolling(200).mean()
@@ -60,7 +63,7 @@ def prepare(df):
 
 
 # =========================
-# 🔥 TRUE PORTFOLIO ENGINE
+# 🔥 PORTFOLIO ENGINE (UPGRADED)
 # =========================
 @app.route("/portfolio")
 def portfolio():
@@ -73,114 +76,85 @@ def portfolio():
             continue
         data[symbol] = prepare(df)
 
-    # Align dates
     all_dates = sorted(set().union(*[df.index for df in data.values()]))
 
     capital = INITIAL_CAPITAL
+
     positions = {}
     entry_price = {}
     peak_price = {}
+    position_size = {}
 
     trade_count = 0
 
     for date in all_dates:
 
-        for symbol, df in data.items():
+        # =========================
+        # CHECK EXITS FIRST
+        # =========================
+        for symbol in list(positions.keys()):
+
+            df = data[symbol]
 
             if date not in df.index:
                 continue
 
             row = df.loc[date]
 
-            # ENTRY
-            if symbol not in positions:
-                trend = row["c"] > row["ma_200"]
-                breakout = row["c"] > row["high_break"]
-                vol = row["atr_rising"]
+            peak_price[symbol] = max(peak_price[symbol], row["c"])
+            stop = peak_price[symbol] - (ATR_MULT * row["atr"])
 
-                if trend and breakout and vol:
-                    allocation = capital / len(SYMBOLS)
+            if row["c"] < stop:
+                pct = (row["c"] - entry_price[symbol]) / entry_price[symbol]
 
-                    positions[symbol] = allocation
-                    entry_price[symbol] = row["c"]
-                    peak_price[symbol] = row["c"]
+                capital += position_size[symbol] * pct
 
-            # EXIT
-            else:
-                peak_price[symbol] = max(peak_price[symbol], row["c"])
+                del positions[symbol]
+                del entry_price[symbol]
+                del peak_price[symbol]
+                del position_size[symbol]
 
-                stop = peak_price[symbol] - (ATR_MULT * row["atr"])
+                trade_count += 1
 
-                if row["c"] < stop:
-                    pct = (row["c"] - entry_price[symbol]) / entry_price[symbol]
+        # =========================
+        # CHECK ENTRIES
+        # =========================
+        open_slots = MAX_POSITIONS - len(positions)
 
-                    capital += positions[symbol] * pct
+        if open_slots <= 0:
+            continue
 
-                    del positions[symbol]
-                    del entry_price[symbol]
-                    del peak_price[symbol]
+        for symbol, df in data.items():
 
-                    trade_count += 1
+            if symbol in positions:
+                continue
+
+            if date not in df.index:
+                continue
+
+            row = df.loc[date]
+
+            trend = row["c"] > row["ma_200"]
+            breakout = row["c"] > row["high_break"]
+            vol = row["atr_rising"]
+
+            if trend and breakout and vol:
+
+                # 🔥 POSITION SIZING
+                risk_amount = capital * RISK_PER_TRADE
+
+                positions[symbol] = True
+                entry_price[symbol] = row["c"]
+                peak_price[symbol] = row["c"]
+                position_size[symbol] = risk_amount
+
+                if len(positions) >= MAX_POSITIONS:
+                    break
 
     return jsonify({
         "final_balance": round(capital, 2),
         "total_trades": trade_count,
         "active_positions": len(positions)
-    })
-
-
-# =========================
-# SINGLE BACKTEST (UNCHANGED)
-# =========================
-@app.route("/backtest/<symbol>")
-def backtest(symbol):
-    df = get_data(symbol)
-
-    if df is None:
-        return jsonify({"error": "Data fetch failed"})
-
-    df = prepare(df)
-
-    capital = 1000
-    position = 0
-    entry_price = 0
-    peak_price = 0
-
-    trades = []
-
-    for i in range(len(df)):
-        row = df.iloc[i]
-
-        if position == 0:
-            if (
-                row["c"] > row["ma_200"] and
-                row["c"] > row["high_break"] and
-                row["atr_rising"]
-            ):
-                position = 1
-                entry_price = row["c"]
-                peak_price = row["c"]
-
-        else:
-            peak_price = max(peak_price, row["c"])
-            stop = peak_price - (ATR_MULT * row["atr"])
-
-            if row["c"] < stop:
-                pct = (row["c"] - entry_price) / entry_price
-                capital *= (1 + pct)
-                trades.append(pct)
-                position = 0
-
-    if len(trades) == 0:
-        return jsonify({"error": "No trades"})
-
-    sharpe = np.mean(trades) / (np.std(trades) + 1e-9)
-
-    return jsonify({
-        "symbol": symbol,
-        "balance": round(capital, 2),
-        "sharpe": round(sharpe, 4),
-        "trades": len(trades)
     })
 
 
