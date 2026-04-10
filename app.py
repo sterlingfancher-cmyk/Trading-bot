@@ -59,10 +59,10 @@ def safe_download(symbol):
     return None
 
 # =========================
-# FALLBACK DATA
+# FALLBACK DATA (FIXED TIME INDEX)
 # =========================
 def generate_fake_data():
-    dates = pd.date_range(end=pd.Timestamp.today(), periods=120)
+    dates = pd.date_range(end=pd.Timestamp.today().normalize(), periods=120)
     price = np.linspace(100, 120, 120)
 
     df = pd.DataFrame({
@@ -74,43 +74,38 @@ def generate_fake_data():
     return df
 
 # =========================
-# PROCESS DATA (SAFE)
+# PROCESS DATA
 # =========================
 def process_data(df):
 
-    try:
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
 
-        if "Close" in df.columns:
-            df = df.rename(columns={"Close": "c", "High": "h", "Low": "l"})
+    if "Close" in df.columns:
+        df = df.rename(columns={"Close": "c", "High": "h", "Low": "l"})
 
-        # Ensure required columns exist
-        if not all(col in df.columns for col in ["c","h","l"]):
-            return None
-
-        df["ma"] = df["c"].rolling(50).mean()
-        df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
-
-        prev_close = df["c"].shift(1)
-        tr = np.maximum(
-            df["h"] - df["l"],
-            np.maximum(abs(df["h"] - prev_close), abs(df["l"] - prev_close))
-        )
-
-        df["atr"] = pd.Series(tr).rolling(14).mean()
-        df["atr_change"] = df["atr"].pct_change()
-        df["momentum"] = df["c"] / df["c"].shift(20)
-
-        df = df.dropna()
-
-        if df.empty:
-            return None
-
-        return df
-
-    except:
+    if not all(col in df.columns for col in ["c","h","l"]):
         return None
+
+    df["ma"] = df["c"].rolling(50).mean()
+    df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
+
+    prev_close = df["c"].shift(1)
+    tr = np.maximum(
+        df["h"] - df["l"],
+        np.maximum(abs(df["h"] - prev_close), abs(df["l"] - prev_close))
+    )
+
+    df["atr"] = pd.Series(tr).rolling(14).mean()
+    df["atr_change"] = df["atr"].pct_change()
+    df["momentum"] = df["c"] / df["c"].shift(20)
+
+    df = df.dropna()
+
+    if df.empty:
+        return None
+
+    return df
 
 # =========================
 # INITIAL LOAD
@@ -131,10 +126,9 @@ def initial_load():
         if df is not None:
             new_data[symbol] = df
 
-    # 🔥 GUARANTEE SPY EXISTS
+    # Ensure SPY always exists
     if "SPY" not in new_data:
-        fake = process_data(generate_fake_data())
-        new_data["SPY"] = fake
+        new_data["SPY"] = process_data(generate_fake_data())
 
     DATA = new_data
     LAST_UPDATE = time.time()
@@ -160,8 +154,7 @@ def data_loader():
                 new_data[symbol] = df
 
         if "SPY" not in new_data:
-            fake = process_data(generate_fake_data())
-            new_data["SPY"] = fake
+            new_data["SPY"] = process_data(generate_fake_data())
 
         DATA = new_data
         LAST_UPDATE = time.time()
@@ -173,7 +166,18 @@ initial_load()
 threading.Thread(target=data_loader, daemon=True).start()
 
 # =========================
-# SIGNALS (SAFE)
+# HOME
+# =========================
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "live",
+        "symbols_loaded": len(DATA),
+        "last_update": LAST_UPDATE
+    })
+
+# =========================
+# SIGNALS (FIXED)
 # =========================
 @app.route("/signals")
 def signals():
@@ -185,10 +189,6 @@ def signals():
             return jsonify({"error": "No data available"})
 
         spy_df = DATA["SPY"]
-
-        if spy_df.empty:
-            return jsonify({"error": "SPY data empty"})
-
         last_date = spy_df.index[-1]
 
         if spy_df.loc[last_date]["c"] <= spy_df.loc[last_date]["ma"]:
@@ -198,7 +198,11 @@ def signals():
                 "signals": []
             })
 
-        rs = [(s, d.loc[last_date]["momentum"]) for s, d in DATA.items()]
+        rs = []
+        for symbol, df in DATA.items():
+            if last_date in df.index:
+                rs.append((symbol, df.loc[last_date]["momentum"]))
+
         rs = sorted(rs, key=lambda x: x[1], reverse=True)
 
         signals = []
@@ -208,10 +212,12 @@ def signals():
         for symbol, _ in rs[:TOP_N]:
 
             df = DATA[symbol]
-            row = df.loc[last_date]
 
-            if not all(k in row for k in ["c","ma","high_break","atr","atr_change"]):
+            # 🔥 FIXED: avoid timestamp crash
+            if last_date not in df.index:
                 continue
+
+            row = df.loc[last_date]
 
             if not (row["c"] > row["ma"] and row["c"] > row["high_break"] and row["atr_change"] > 0):
                 continue
@@ -250,6 +256,55 @@ def signals():
 
     except Exception as e:
         return jsonify({"error": str(e)})
+
+# =========================
+# AUTO TRADE
+# =========================
+@app.route("/auto_trade")
+def auto_trade():
+
+    if not AUTO_TRADING_ENABLED:
+        return jsonify({"error": "Auto trading disabled"})
+
+    if REQUIRE_CONFIRM and request.args.get("confirm") != "true":
+        return jsonify({"error": "Add ?confirm=true"})
+
+    if api is None:
+        return jsonify({"error": "Alpaca not configured"})
+
+    spy_df = DATA.get("SPY")
+    last_date = spy_df.index[-1]
+
+    if spy_df.loc[last_date]["c"] <= spy_df.loc[last_date]["ma"]:
+        return jsonify({"status": "No trades"})
+
+    executed = []
+
+    for symbol in SYMBOLS:
+
+        df = DATA.get(symbol)
+
+        if df is None or last_date not in df.index:
+            continue
+
+        row = df.loc[last_date]
+
+        if not (row["c"] > row["ma"] and row["c"] > row["high_break"] and row["atr_change"] > 0):
+            continue
+
+        try:
+            api.submit_order(
+                symbol=symbol,
+                qty=1,
+                side="buy",
+                type="market",
+                time_in_force="gtc"
+            )
+            executed.append(symbol)
+        except Exception as e:
+            executed.append({symbol: str(e)})
+
+    return jsonify({"executed": executed})
 
 # =========================
 # RUN
