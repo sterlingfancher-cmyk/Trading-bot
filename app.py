@@ -15,6 +15,7 @@ SYMBOLS = ["SPY", "QQQ", "IWM", "XLE", "XLK"]
 INITIAL_CAPITAL = 1000
 RISK_PER_TRADE = 0.1
 MAX_POSITIONS = 3
+COOLDOWN_DAYS = 10
 
 
 # =========================
@@ -63,7 +64,7 @@ def prepare(df):
 
 
 # =========================
-# 🔥 PORTFOLIO ENGINE (RANKED)
+# PORTFOLIO ENGINE (COOLDOWN)
 # =========================
 @app.route("/portfolio")
 def portfolio():
@@ -85,9 +86,11 @@ def portfolio():
     peak_price = {}
     position_size = {}
 
+    last_exit_index = {s: -999 for s in SYMBOLS}
+
     trade_count = 0
 
-    for date in all_dates:
+    for i, date in enumerate(all_dates):
 
         # =========================
         # EXITS
@@ -108,6 +111,8 @@ def portfolio():
                 pct = (row["c"] - entry_price[symbol]) / entry_price[symbol]
                 capital += position_size[symbol] * pct
 
+                last_exit_index[symbol] = i
+
                 del positions[symbol]
                 del entry_price[symbol]
                 del peak_price[symbol]
@@ -121,6 +126,10 @@ def portfolio():
         signals = []
 
         for symbol, df in data.items():
+
+            # 🔥 COOLDOWN FILTER
+            if i - last_exit_index[symbol] < COOLDOWN_DAYS:
+                continue
 
             if symbol in positions:
                 continue
@@ -136,7 +145,6 @@ def portfolio():
 
             if trend and breakout and vol:
 
-                # 🔥 SCORE SIGNAL
                 breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
                 vol_strength = row["atr_change"]
 
@@ -145,7 +153,7 @@ def portfolio():
                 signals.append((symbol, score, row))
 
         # =========================
-        # TAKE BEST SIGNALS ONLY
+        # TAKE BEST SIGNALS
         # =========================
         signals = sorted(signals, key=lambda x: x[1], reverse=True)
 
