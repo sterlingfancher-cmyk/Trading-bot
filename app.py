@@ -20,7 +20,7 @@ def compute_strategy(df):
     (
         (df["ma_fast"] > df["ma_slow"]) & # trend
         (df["returns"] > 0.001) & # breakout strength
-        (df["returns"].rolling(3).mean() > 0)
+        ((df["ma_fast"] - df["ma_slow"]) / df["ma_slow"] > 0.0005)
     ),   
         "signal"
     ] = 1
@@ -28,7 +28,7 @@ def compute_strategy(df):
     #EXIT
     df.loc[
     (   
-        (df["returns"] > 0.003) |  # take profit
+        (df["ma_fast"] < df["ma_slow"])
         (df["returns"] < -0.002)    # stop loss
     ),
         "signal"
