@@ -30,21 +30,15 @@ def get_intraday(symbol):
 
 
 # =========================
-# IMPROVED STRATEGY
+# STRATEGY (TREND + PULLBACK)
 # =========================
 def compute_strategy(df):
     try:
         df = df.copy()
 
-        df["ma_fast"] = df["c"].rolling(12).mean()
-        df["ma_slow"] = df["c"].rolling(35).mean()
+        df["ma_fast"] = df["c"].rolling(20).mean()
+        df["ma_slow"] = df["c"].rolling(50).mean()
         df["returns"] = df["c"].pct_change()
-
-        # Stronger momentum
-        df["momentum"] = df["returns"].rolling(5).mean()
-
-        # Trend strength
-        df["trend_strength"] = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
 
         df = df.dropna()
 
@@ -53,11 +47,18 @@ def compute_strategy(df):
 
         df["signal"] = 0
 
-        # ENTRY (tightened)
+        # Pullback condition (price dips below fast MA)
+        pullback = df["c"] < df["ma_fast"]
+
+        # Recovery (price turning back up)
+        recovery = df["returns"] > 0
+
+        # Trend filter
+        trend = df["ma_fast"] > df["ma_slow"]
+
+        # ENTRY (buy dip in uptrend)
         df.loc[
-            (df["ma_fast"] > df["ma_slow"]) &
-            (df["momentum"] > 0.0003) &
-            (df["trend_strength"] > 0.0005),
+            trend & pullback & recovery,
             "signal"
         ] = 1
 
@@ -65,7 +66,7 @@ def compute_strategy(df):
         df.loc[
             (df["ma_fast"] < df["ma_slow"]) |
             (df["returns"] < -0.002) |
-            (df["returns"] > 0.007),
+            (df["returns"] > 0.01),
             "signal"
         ] = 0
 
