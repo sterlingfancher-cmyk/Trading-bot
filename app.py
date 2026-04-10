@@ -188,7 +188,7 @@ if df.empty:
     return jsonify({"error": "Strategy returned no data"})
 
 trades = (df["signal"].diff().abs() >0).sum()
-avg_pnl = round(df["strategy_returns"].mean() * 100, 4) if not df[strategy_returns"].empty else 0
+avg_pnl = round(df["strategy_returns"].mean() * 100, 4) if not df["strategy_returns"].empty else 0
 balance = round(1000 * (df["strategy_returns"] + 1).cumprod().iloc[-1], 2)
 
         return jsonify({
