@@ -6,7 +6,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG (FINAL OPTIMIZED 🚀)
+# CONFIG
 # =========================
 LOOKBACK = 20
 ATR_MULT = 3.0
@@ -22,7 +22,6 @@ SYMBOLS = [
 
 INITIAL_CAPITAL = 1000
 
-# 🔥 FINAL BALANCED + SCALED
 RISK_PER_TRADE = 0.13
 MAX_POSITIONS = 4
 TOP_N = 4
@@ -46,7 +45,7 @@ def load_data():
 
     for symbol in SYMBOLS:
         try:
-            df = yf.download(symbol, period="1y", interval="1d", progress=False)
+            df = yf.download(symbol, period="6mo", interval="1d", progress=False)
 
             if df is None or df.empty:
                 continue
@@ -73,7 +72,6 @@ def load_data():
 
             df["atr"] = tr.rolling(14).mean()
             df["atr_change"] = df["atr"].pct_change()
-
             df["momentum"] = df["c"] / df["c"].shift(20)
 
             data[symbol] = df.dropna()
@@ -86,20 +84,83 @@ def load_data():
 
 
 # =========================
-# ROUTES
+# HOME
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "final-optimized-system-live"})
+    return jsonify({"status": "live-signals-enabled"})
 
 
+# =========================
+# SIGNALS ENDPOINT 🔥
+# =========================
+@app.route("/signals")
+def signals():
+
+    data = load_data()
+
+    signals = []
+
+    spy_df = data.get("SPY")
+    if spy_df is None:
+        return jsonify({"error": "SPY missing"})
+
+    last_date = spy_df.index[-1]
+
+    # Market regime
+    if spy_df.loc[last_date]["c"] <= spy_df.loc[last_date]["ma"]:
+        return jsonify({
+            "date": str(last_date),
+            "market": "bearish",
+            "signals": []
+        })
+
+    # Rank symbols
+    rs = []
+    for symbol, df in data.items():
+        if last_date in df.index:
+            rs.append((symbol, df.loc[last_date]["momentum"]))
+
+    rs = sorted(rs, key=lambda x: x[1], reverse=True)
+    top_symbols = [s[0] for s in rs[:TOP_N]]
+
+    for symbol in top_symbols:
+
+        df = data[symbol]
+        if last_date not in df.index:
+            continue
+
+        row = df.loc[last_date]
+
+        trend = row["c"] > row["ma"]
+        breakout = row["c"] > row["high_break"]
+        vol = row["atr_change"] > 0
+
+        if trend and breakout and vol:
+
+            stop = row["c"] - (ATR_MULT * row["atr"])
+
+            signals.append({
+                "symbol": symbol,
+                "price": round(row["c"], 2),
+                "momentum": round(row["momentum"], 3),
+                "stop": round(stop, 2)
+            })
+
+    return jsonify({
+        "date": str(last_date),
+        "market": "bullish",
+        "signals": signals
+    })
+
+
+# =========================
+# PORTFOLIO (UNCHANGED)
+# =========================
 @app.route("/portfolio")
 def portfolio():
 
     data = load_data()
-
-    if len(data) == 0:
-        return jsonify({"error": "no data loaded"})
 
     spy_df = data.get("SPY")
     if spy_df is None:
@@ -118,22 +179,15 @@ def portfolio():
 
     for date in all_dates:
 
-        # =========================
-        # MARKET REGIME
-        # =========================
         if date not in spy_df.index:
             continue
 
         if spy_df.loc[date]["c"] <= spy_df.loc[date]["ma"]:
             continue
 
-        # =========================
-        # EXITS (TRAILING ONLY)
-        # =========================
         for symbol in list(positions.keys()):
 
             df = data[symbol]
-
             if date not in df.index:
                 continue
 
@@ -156,11 +210,7 @@ def portfolio():
 
                 trades += 1
 
-        # =========================
-        # RELATIVE STRENGTH
-        # =========================
         rs = []
-
         for symbol, df in data.items():
             if date in df.index:
                 rs.append((symbol, df.loc[date]["momentum"]))
@@ -171,9 +221,6 @@ def portfolio():
         total_allocated = sum(position_size.values())
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
-        # =========================
-        # ENTRIES (CLEAN EDGE)
-        # =========================
         for symbol in top_symbols:
 
             if symbol in positions:
@@ -183,7 +230,6 @@ def portfolio():
                 break
 
             df = data[symbol]
-
             if date not in df.index:
                 continue
 
@@ -196,14 +242,9 @@ def portfolio():
             if trend and breakout and vol:
 
                 breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
+                size_multiplier = max(0.5, min(breakout_strength / 0.02, 2))
 
-                size_multiplier = breakout_strength / 0.02
-                size_multiplier = max(0.5, min(size_multiplier, 2))
-
-                risk = min(
-                    capital * RISK_PER_TRADE * size_multiplier,
-                    available_risk
-                )
+                risk = min(capital * RISK_PER_TRADE * size_multiplier, available_risk)
 
                 positions[symbol] = True
                 entry_price[symbol] = row["c"]
