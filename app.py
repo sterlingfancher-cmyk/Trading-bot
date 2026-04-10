@@ -15,7 +15,6 @@ def get_intraday(symbol):
         if df is None or df.empty:
             return None
 
-        # Fix multi-index
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
@@ -34,45 +33,61 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (BASE + VOL FILTER)
+# STRATEGY (TREND + RISK MGMT)
 # =========================
 def compute_strategy(df):
     try:
         df = df.copy()
 
-        # Core indicators (this is your original edge)
         df["ma_fast"] = df["c"].rolling(10).mean()
         df["ma_slow"] = df["c"].rolling(30).mean()
-        df["returns"] = df["c"].pct_change()
-
-        # 🔥 NEW: volatility filter
-        df["volatility"] = df["returns"].rolling(10).std()
 
         df = df.dropna()
 
         if df.empty:
             return None, "Empty after indicators"
 
-        df["signal"] = 0
+        position = 0
+        entry_price = 0
 
-        # Only trade when volatility is above average
-        vol_threshold = df["volatility"].mean()
+        stop_loss = 0.003   # 0.3%
+        take_profit = 0.008 # 0.8%
 
-        df.loc[
-            (df["ma_fast"] > df["ma_slow"]) &
-            (df["volatility"] > vol_threshold),
-            "signal"
-        ] = 1
+        signals = []
+        returns = []
 
-        df.loc[
-            (df["ma_fast"] < df["ma_slow"]) |
-            (df["returns"] < -0.0025) |
-            (df["returns"] > 0.008),
-            "signal"
-        ] = 0
+        for i in range(len(df)):
+            row = df.iloc[i]
 
-        df["position"] = df["signal"].shift(1).fillna(0)
-        df["strategy"] = df["position"] * df["returns"]
+            if position == 0:
+                # ENTRY
+                if row["ma_fast"] > row["ma_slow"]:
+                    position = 1
+                    entry_price = row["c"]
+                    signals.append(1)
+                    returns.append(0)
+                else:
+                    signals.append(0)
+                    returns.append(0)
+
+            else:
+                price_change = (row["c"] - entry_price) / entry_price
+
+                # EXIT CONDITIONS
+                if (
+                    price_change <= -stop_loss or
+                    price_change >= take_profit or
+                    row["ma_fast"] < row["ma_slow"]
+                ):
+                    position = 0
+                    signals.append(0)
+                    returns.append(price_change)
+                else:
+                    signals.append(1)
+                    returns.append(0)
+
+        df["signal"] = signals
+        df["strategy"] = returns
 
         return df, None
 
@@ -106,13 +121,14 @@ def backtest(symbol):
 
         df["equity"] = (1 + df["strategy"]).cumprod() * 1000
 
-        trades = int((df["signal"].diff().abs() > 0).sum())
+        trades = int((df["strategy"] != 0).sum())
 
         total_return = df["equity"].iloc[-1]
         avg_pnl = df["strategy"].mean()
+
         sharpe = df["strategy"].mean() / (df["strategy"].std() + 1e-9)
         drawdown = (df["equity"] / df["equity"].cummax() - 1).min()
-        win_rate = (df["strategy"] > 0).sum() / len(df) * 100
+        win_rate = (df["strategy"] > 0).sum() / max(1, trades) * 100
 
         return jsonify({
             "symbol": symbol,
