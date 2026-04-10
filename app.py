@@ -9,32 +9,35 @@ import joblib
 app = Flask(__name__)
 
 def compute_strategy(df):
-    df["ma_short"] = df["c"].rolling(3).mean()
-    df["ma_long"] = df["c"].rolling(5).mean()
 
+    # Indicators
+    df["ma_fast"] = df["c"].rolling(10).mean()
+    df["ma_slow"] = df["c"].rolling(30).mean()
+    df["volatility"] = df["c"].pct_change().rolling(10).std()
     df["returns"] = df["c"].pct_change()
 
+    # Initialize signal
     df["signal"] = 0
 
-    # Buy signal (trend + momentum)
+    # Entry: Trend + Pullback + Low volatility
     df.loc[
-        (df["ma_short"] > df["ma_long"]) &
-        (df["returns"] > 0),
+        (df["ma_fast"] > df["ma_slow"]) &           # uptrend
+        (df["returns"] < 0) &                       # pullback
+        (df["volatility"] < df["volatility"].rolling(50).mean()),
         "signal"
     ] = 1
 
-    # Sell signal
-    df.loc[df["ma_short"] < df["ma_long"], "signal"] = -1
+    # Exit: trend breaks
+    df.loc[
+        (df["ma_fast"] < df["ma_slow"]),
+        "signal"
+    ] = 0
 
     df = df.dropna()
 
-    # Apply strategy
-    df["strategy_returns"] = df["returns"] * df["signal"].shift(1)
-
-    # Risk management (2:1)
-    df["strategy_returns"] = df["strategy_returns"].clip(lower=-0.01, upper=0.02)
-
-    df = df.dropna()
+    # Strategy returns (position-based, not constant flipping)
+    df["position"] = df["signal"].replace(to_replace=0, method="ffill").fillna(0)
+    df["strategy_returns"] = df["returns"] * df["position"].shift(1)
 
     return df
 
