@@ -213,7 +213,10 @@ def backtest(symbol):
             "symbol": symbol,
             "trades": int(trades),
             "avg_pnl": avg_pnl,
-            "balance": balance
+            "balance": balance,
+            "sharpe": sharpe,
+            "max_drawdown": max_drawdown,
+            "win_rate": win_rate
         })
 
     except Exception as e:
