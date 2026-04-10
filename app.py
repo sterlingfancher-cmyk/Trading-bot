@@ -21,7 +21,7 @@ SYMBOLS = ["SPY","QQQ","NVDA","AMD","META","MSFT","AAPL"]
 
 INITIAL_CAPITAL = 1000
 RISK_PER_TRADE = 0.13
-TOP_N = 4
+TOP_N = 5
 MAX_TOTAL_RISK = 0.8
 
 DB_NAME = "trades.db"
@@ -78,14 +78,10 @@ if ALPACA_API_KEY and ALPACA_SECRET_KEY:
     api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL, api_version='v2')
 
 # =========================
-# GLOBAL DATA
+# DATA
 # =========================
 DATA = {}
-LAST_UPDATE = None
 
-# =========================
-# DATA FUNCTIONS
-# =========================
 def safe_download(symbol):
     try:
         df = yf.download(symbol, period="6mo", interval="1d", progress=False, threads=False)
@@ -99,13 +95,11 @@ def generate_fake_data():
     dates = pd.date_range(end=pd.Timestamp.today().normalize(), periods=120)
     price = np.linspace(100, 120, 120)
 
-    df = pd.DataFrame({
+    return pd.DataFrame({
         "c": price,
         "h": price + 1,
         "l": price - 1
     }, index=dates)
-
-    return df
 
 def process_data(df):
     if isinstance(df.columns, pd.MultiIndex):
@@ -118,13 +112,6 @@ def process_data(df):
         return None
 
     df["ma"] = df["c"].rolling(50).mean()
-    df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
-
-    prev = df["c"].shift(1)
-    tr = np.maximum(df["h"]-df["l"], np.maximum(abs(df["h"]-prev), abs(df["l"]-prev)))
-
-    df["atr"] = pd.Series(tr).rolling(14).mean()
-    df["atr_change"] = df["atr"].pct_change()
     df["momentum"] = df["c"] / df["c"].shift(20)
 
     df = df.dropna()
@@ -134,11 +121,8 @@ def process_data(df):
 
     return df
 
-# =========================
-# LOAD DATA
-# =========================
 def load_data():
-    global DATA, LAST_UPDATE
+    global DATA
 
     new_data = {}
 
@@ -157,44 +141,34 @@ def load_data():
         new_data["SPY"] = process_data(generate_fake_data())
 
     DATA = new_data
-    LAST_UPDATE = time.time()
 
-# Initial load
+# initial load + background
 load_data()
 
-# Background refresh
-def background_loader():
+def background():
     while True:
         load_data()
         time.sleep(REFRESH_INTERVAL)
 
-threading.Thread(target=background_loader, daemon=True).start()
+threading.Thread(target=background, daemon=True).start()
 
 # =========================
 # ROUTES
 # =========================
 
-# 🔥 ROOT (FIXES YOUR ERROR)
 @app.route("/")
 def home():
     return jsonify({
         "status": "live",
-        "message": "trading system running",
         "symbols_loaded": len(DATA),
-        "endpoints": [
-            "/signals",
-            "/auto_trade",
-            "/portfolio"
-        ]
+        "endpoints": ["/signals","/auto_trade","/portfolio"]
     })
 
 # =========================
-# SIGNALS
+# SIGNALS (UPDATED STRATEGY)
 # =========================
 @app.route("/signals")
 def signals():
-
-    capital = float(request.args.get("capital", INITIAL_CAPITAL))
 
     spy = DATA["SPY"]
     last = spy.index[-1]
@@ -202,19 +176,12 @@ def signals():
     if spy.loc[last]["c"] <= spy.loc[last]["ma"]:
         return jsonify({"market":"bearish","signals":[]})
 
-    rs = []
-    for s in DATA:
-        if last in DATA[s].index:
-            rs.append((s, DATA[s].loc[last]["momentum"]))
-
+    rs = [(s,DATA[s].loc[last]["momentum"]) for s in DATA if last in DATA[s].index]
     rs = sorted(rs, key=lambda x: x[1], reverse=True)
 
     signals = []
-    used_risk = 0
-    total_risk = capital * MAX_TOTAL_RISK
 
     for s,_ in rs[:TOP_N]:
-
         df = DATA[s]
 
         if last not in df.index:
@@ -222,43 +189,20 @@ def signals():
 
         row = df.loc[last]
 
-        if not (row["c"]>row["ma"] and row["c"]>row["high_break"] and row["atr_change"]>0):
-            continue
-
-        entry = row["c"]
-        stop = entry - (ATR_MULT * row["atr"])
-        risk_per_share = entry - stop
-
-        if risk_per_share <= 0:
-            continue
-
-        risk_amount = capital * RISK_PER_TRADE
-
-        if used_risk + risk_amount > total_risk:
-            risk_amount = total_risk - used_risk
-
-        shares = int(risk_amount / risk_per_share)
-
-        if shares <= 0:
+        # 🔥 NEW STRATEGY
+        if not (row["c"] > row["ma"] and row["momentum"] > 1.02):
             continue
 
         signals.append({
             "symbol": s,
-            "price": round(entry,2),
-            "shares": shares,
-            "stop": round(stop,2)
+            "price": round(row["c"],2),
+            "momentum": round(row["momentum"],3)
         })
 
-        used_risk += risk_amount
-
-    return jsonify({
-        "date": str(last),
-        "market":"bullish",
-        "signals":signals
-    })
+    return jsonify({"market":"bullish","signals":signals})
 
 # =========================
-# AUTO TRADE
+# AUTO TRADE (UPDATED)
 # =========================
 @app.route("/auto_trade")
 def auto_trade():
@@ -286,7 +230,7 @@ def auto_trade():
 
         row = df.loc[last]
 
-        if not (row["c"]>row["ma"] and row["c"]>row["high_break"] and row["atr_change"]>0):
+        if not (row["c"] > row["ma"] and row["momentum"] > 1.02):
             continue
 
         price = float(row["c"])
@@ -329,16 +273,15 @@ def portfolio():
     result = []
 
     for sym,pos in positions.items():
-
         if sym not in DATA:
             continue
 
-        last_price = float(DATA[sym].iloc[-1]["c"])
+        price = float(DATA[sym].iloc[-1]["c"])
 
         result.append({
             "symbol":sym,
             "shares":pos["shares"],
-            "price":round(last_price,2)
+            "price":round(price,2)
         })
 
     return jsonify({"positions":result})
