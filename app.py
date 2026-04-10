@@ -142,9 +142,15 @@ def webhook():
 @app.route('/backtest/<symbol>')
 def backtest(symbol):
     try:
-        df = compute_indicators(get_intraday(symbol))
-        if df.empty:
-            return jsonify({"error": "No data returned"})
+        raw = get_intraday(symbol)
+
+        if raw.empty:
+            return jsonify({"error": "No valid data from Polygon"})
+
+        df = compute_indicators(raw)
+
+        if "c" not in df.columns:
+            return jsonify({"error": "Missing price data (c column)"})
 
         trades = len(df)
         avg_pnl = round(df["c"].pct_change().mean() * 100, 2)
@@ -156,6 +162,7 @@ def backtest(symbol):
             "avg_pnl": avg_pnl,
             "balance": balance
         })
+
     except Exception as e:
         return jsonify({"error": str(e)})
 
