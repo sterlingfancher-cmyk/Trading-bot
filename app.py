@@ -19,8 +19,6 @@ def compute_strategy(df):
     df.loc[
     (
         (df["ma_fast"] > df["ma_slow"]) & # trend
-        (df["returns"] > 0.005) & # breakout strength
-        ((df["ma_fast"] - df["ma_slow"]) / df["ma_slow"] > 0.0003)
     ),   
         "signal"
     ] = 1
@@ -29,7 +27,7 @@ def compute_strategy(df):
     df.loc[
     (   
         (df["returns"] < -0.002) | #stop loss
-        (df["returns"] > 0.003)
+        (df["returns"] > 0.004)
     ),
         "signal"
     ] = 0
