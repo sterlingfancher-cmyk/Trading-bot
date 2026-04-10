@@ -34,26 +34,14 @@ def get_intraday(symbol):
 
 
 # =========================
-# RSI FUNCTION
+# STRATEGY (VOL BREAKOUT)
 # =========================
-def compute_rsi(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
-    rs = gain / (loss + 1e-9)
-    return 100 - (100 / (1 + rs))
-
-
-# =========================
-# STRATEGY (MEAN REVERSION)
-# =========================
-def run_strategy(df, fast, slow, rsi_low, rsi_high, sl_mult):
+def run_strategy(df, lookback, atr_mult):
     try:
         df = df.copy()
 
-        df["ma_fast"] = df["c"].rolling(fast).mean()
-        df["ma_slow"] = df["c"].rolling(slow).mean()
-        df["rsi"] = compute_rsi(df["c"])
+        df["high_break"] = df["h"].rolling(lookback).max()
+        df["low_break"] = df["l"].rolling(lookback).min()
 
         prev_close = df["c"].shift(1)
         tr = np.maximum(
@@ -70,34 +58,24 @@ def run_strategy(df, fast, slow, rsi_low, rsi_high, sl_mult):
         capital = 1000
         position = 0
         entry_price = 0
-        entry_atr = 0
 
         trades = []
 
         for i in range(len(df)):
             row = df.iloc[i]
 
-            # ENTRY (dip in uptrend)
+            # ENTRY
             if position == 0:
-                if (
-                    row["ma_fast"] > row["ma_slow"] and
-                    row["rsi"] < rsi_low
-                ):
+                if row["c"] > row["high_break"]:
                     position = 1
                     entry_price = row["c"]
-                    entry_atr = row["atr"]
 
             # EXIT
             else:
-                move = row["c"] - entry_price
-                stop = -sl_mult * entry_atr
+                stop = entry_price - (atr_mult * row["atr"])
 
-                if (
-                    move <= stop or
-                    row["rsi"] > rsi_high or
-                    row["ma_fast"] < row["ma_slow"]
-                ):
-                    pct = move / entry_price
+                if row["c"] < stop:
+                    pct = (row["c"] - entry_price) / entry_price
                     capital *= (1 + pct)
                     trades.append(pct)
                     position = 0
@@ -127,7 +105,7 @@ def backtest(symbol):
     if df is None:
         return jsonify({"error": "Data fetch failed"})
 
-    result = run_strategy(df, 10, 30, 30, 60, 1.5)
+    result = run_strategy(df, 20, 1.5)
 
     if result is None:
         return jsonify({"error": "No trades"})
@@ -152,19 +130,12 @@ def optimize(symbol):
 
     best = {"score": -999}
 
-    fast_range = [8, 10, 12]
-    slow_range = [20, 30, 40]
-    rsi_low_range = [25, 30, 35]
-    rsi_high_range = [55, 60, 65]
-    sl_range = [1.0, 1.5, 2.0]
+    lookback_range = [10, 15, 20, 30]
+    atr_range = [1.0, 1.5, 2.0]
 
-    for fast, slow, rl, rh, sl in itertools.product(
-        fast_range, slow_range, rsi_low_range, rsi_high_range, sl_range
-    ):
-        if fast >= slow:
-            continue
+    for look, atr in itertools.product(lookback_range, atr_range):
 
-        result = run_strategy(df, fast, slow, rl, rh, sl)
+        result = run_strategy(df, look, atr)
 
         if result is None:
             continue
@@ -175,7 +146,7 @@ def optimize(symbol):
             min(result["trades"], 25) * 0.02
         )
 
-        if result["trades"] < 8:
+        if result["trades"] < 5:
             score *= 0.5
 
         if score > best["score"]:
@@ -185,11 +156,8 @@ def optimize(symbol):
                 "sharpe": round(result["sharpe"], 4),
                 "trades": result["trades"],
                 "params": {
-                    "fast": fast,
-                    "slow": slow,
-                    "rsi_low": rl,
-                    "rsi_high": rh,
-                    "atr_sl": sl
+                    "lookback": look,
+                    "atr_mult": atr
                 }
             }
 
