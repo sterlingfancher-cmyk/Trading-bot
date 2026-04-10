@@ -4,25 +4,21 @@ import numpy as np
 import yfinance as yf
 import time
 import os
-
 import alpaca_trade_api as tradeapi
 
 app = Flask(__name__)
 
 # =========================
-# CONFIG
+# CONFIG (OPTIMIZED)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 3.0
-CACHE_TTL = 300
+CACHE_TTL = 300  # 5 min cache
 
+# 🔥 REDUCED SYMBOLS (FAST)
 SYMBOLS = [
-    "SPY","QQQ","IWM",
-    "XLE","XLK","XLF","XLV","XLI",
-    "GLD","SLV",
-    "TLT",
-    "ARKK","SMH",
-    "NVDA","TSLA","AMD","META","MSFT","AAPL"
+    "SPY","QQQ",
+    "NVDA","AMD","META","MSFT","AAPL"
 ]
 
 INITIAL_CAPITAL = 1000
@@ -31,8 +27,6 @@ RISK_PER_TRADE = 0.13
 MAX_POSITIONS = 4
 TOP_N = 4
 MAX_TOTAL_RISK = 0.8
-
-TRANSACTION_COST = 0.001
 
 # =========================
 # ALPACA CONFIG
@@ -55,31 +49,27 @@ DATA = None
 LAST_FETCH = 0
 
 # =========================
-# SAFE DOWNLOAD (FIXED)
+# FAST DOWNLOAD
 # =========================
 def safe_download(symbol):
-    for i in range(3):
+    for _ in range(2):  # reduced retries
         try:
             df = yf.download(
                 symbol,
                 period="6mo",
                 interval="1d",
                 progress=False,
-                threads=False  # 🔥 critical fix
+                threads=False
             )
-
             if df is not None and not df.empty:
                 return df
-
-        except Exception as e:
-            print(f"{symbol} attempt {i+1} failed: {e}")
-
-        time.sleep(1)
-
+        except:
+            pass
+        time.sleep(0.5)
     return None
 
 # =========================
-# LOAD DATA
+# LOAD DATA (CACHED)
 # =========================
 def load_data():
     global DATA, LAST_FETCH
@@ -91,9 +81,7 @@ def load_data():
 
     data = {}
 
-    symbols_ordered = ["SPY"] + [s for s in SYMBOLS if s != "SPY"]
-
-    for symbol in symbols_ordered:
+    for symbol in SYMBOLS:
         df = safe_download(symbol)
 
         if df is None or df.empty:
@@ -126,8 +114,6 @@ def load_data():
 
         data[symbol] = df.dropna()
 
-    print(f"Loaded symbols: {list(data.keys())}")
-
     DATA = data
     LAST_FETCH = now
 
@@ -139,15 +125,17 @@ def load_data():
 @app.route("/")
 def home():
     return jsonify({
-        "status": "live",
-        "endpoints": ["/signals", "/portfolio", "/auto_trade"]
+        "status": "fast-live",
+        "endpoints": ["/signals", "/auto_trade"]
     })
 
 # =========================
-# SIGNALS
+# SIGNALS (FAST + TIMEOUT SAFE)
 # =========================
 @app.route("/signals")
 def signals():
+
+    start_time = time.time()
 
     data = load_data()
     capital = float(request.args.get("capital", INITIAL_CAPITAL))
@@ -156,10 +144,9 @@ def signals():
 
     if spy_df is None:
         return jsonify({
-            "date": None,
             "market": "unknown",
             "signals": [],
-            "warning": "SPY failed to load - retry"
+            "warning": "SPY failed"
         })
 
     last_date = spy_df.index[-1]
@@ -177,23 +164,19 @@ def signals():
             rs.append((symbol, df.loc[last_date]["momentum"]))
 
     rs = sorted(rs, key=lambda x: x[1], reverse=True)
-    top_symbols = [s[0] for s in rs[:TOP_N]]
 
     total_risk_budget = capital * MAX_TOTAL_RISK
     used_risk = 0
-    positions_taken = 0
-
     signals = []
 
-    for symbol in top_symbols:
+    for symbol, _ in rs[:TOP_N]:
 
-        if positions_taken >= MAX_POSITIONS:
+        # 🔥 HARD TIMEOUT (8 sec)
+        if time.time() - start_time > 8:
+            print("Timeout triggered")
             break
 
-        df = data.get(symbol)
-        if df is None or last_date not in df.index:
-            continue
-
+        df = data[symbol]
         row = df.loc[last_date]
 
         if not (row["c"] > row["ma"] and row["c"] > row["high_break"] and row["atr_change"] > 0):
@@ -211,9 +194,6 @@ def signals():
         if used_risk + risk_amount > total_risk_budget:
             risk_amount = total_risk_budget - used_risk
 
-        if risk_amount <= 0:
-            break
-
         shares = int(risk_amount / risk_per_share)
 
         if shares <= 0:
@@ -222,19 +202,15 @@ def signals():
         signals.append({
             "symbol": symbol,
             "price": round(entry, 2),
-            "stop": round(stop, 2),
             "shares": shares,
-            "position_size": round(shares * entry, 2),
-            "risk_amount": round(risk_amount, 2)
+            "stop": round(stop, 2)
         })
 
         used_risk += risk_amount
-        positions_taken += 1
 
     return jsonify({
         "date": str(last_date),
         "market": "bullish",
-        "capital": capital,
         "signals": signals
     })
 
@@ -264,65 +240,41 @@ def auto_trade():
     last_date = spy_df.index[-1]
 
     if spy_df.loc[last_date]["c"] <= spy_df.loc[last_date]["ma"]:
-        return jsonify({"status": "No trades - bearish"})
+        return jsonify({"status": "No trades"})
 
     current_positions = {p.symbol for p in api.list_positions()}
 
     executed = []
-    used_risk = 0
-    total_risk_budget = capital * MAX_TOTAL_RISK
 
-    rs = [(s, d.loc[last_date]["momentum"]) for s, d in data.items() if last_date in d.index]
-    rs = sorted(rs, key=lambda x: x[1], reverse=True)
-
-    for symbol, _ in rs[:TOP_N]:
+    for symbol in SYMBOLS:
 
         if symbol in current_positions:
             continue
 
-        df = data[symbol]
+        df = data.get(symbol)
+        if df is None or last_date not in df.index:
+            continue
+
         row = df.loc[last_date]
 
         if not (row["c"] > row["ma"] and row["c"] > row["high_break"] and row["atr_change"] > 0):
             continue
 
-        entry = row["c"]
-        stop = entry - (ATR_MULT * row["atr"])
-        risk_per_share = entry - stop
-
-        if risk_per_share <= 0:
-            continue
-
-        risk_amount = capital * RISK_PER_TRADE
-
-        if used_risk + risk_amount > total_risk_budget:
-            risk_amount = total_risk_budget - used_risk
-
-        shares = int(risk_amount / risk_per_share)
-
-        if shares <= 0:
-            continue
-
         try:
             api.submit_order(
                 symbol=symbol,
-                qty=shares,
+                qty=1,  # simplified for speed
                 side="buy",
                 type="market",
                 time_in_force="gtc"
             )
 
-            executed.append({"symbol": symbol, "shares": shares})
-
-            used_risk += risk_amount
+            executed.append(symbol)
 
         except Exception as e:
-            executed.append({"symbol": symbol, "error": str(e)})
+            executed.append({symbol: str(e)})
 
-    return jsonify({
-        "executed_trades": executed,
-        "total_risk_used": round(used_risk, 2)
-    })
+    return jsonify({"executed": executed})
 
 # =========================
 # RUN
