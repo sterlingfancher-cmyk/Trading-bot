@@ -8,6 +8,36 @@ import joblib
 
 app = Flask(__name__)
 
+def compute_strategy(df):
+    df["ma_short"] = df["c"].rolling(3).mean()
+    df["ma_long"] = df["c"].rolling(5).mean()
+
+    df["returns"] = df["c"].pct_change()
+
+    df["signal"] = 0
+
+    # Buy signal (trend + momentum)
+    df.loc[
+        (df["ma_short"] > df["ma_long"]) &
+        (df["returns"] > 0),
+        "signal"
+    ] = 1
+
+    # Sell signal
+    df.loc[df["ma_short"] < df["ma_long"], "signal"] = -1
+
+    df = df.dropna()
+
+    # Apply strategy
+    df["strategy_returns"] = df["returns"] * df["signal"].shift(1)
+
+    # Risk management (2:1)
+    df["strategy_returns"] = df["strategy_returns"].clip(lower=-0.01, upper=0.02)
+
+    df = df.dropna()
+
+    return df
+
 @app.route('/')
 def home():
     return jsonify({"status": "running"})
