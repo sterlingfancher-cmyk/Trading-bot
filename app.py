@@ -21,53 +21,50 @@ def get_intraday(symbol):
     return df.dropna()
 
 # =========================
-# STRATEGY (UPGRADED)
+# STRATEGY (FIXED VERSION)
 # =========================
 def compute_strategy(df):
 
     # Indicators
-    df["ma_fast"] = df["c"].rolling(15).mean()
-    df["ma_slow"] = df["c"].rolling(50).mean()
+    df["ma_fast"] = df["c"].rolling(20).mean()
+    df["ma_slow"] = df["c"].rolling(60).mean()
     df["returns"] = df["c"].pct_change()
-
-    # Volatility filter
-    df["volatility"] = df["returns"].rolling(10).std()
 
     # Trend strength
     df["trend"] = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
 
-    # Momentum confirmation
-    df["momentum"] = df["c"].diff()
+    # Volatility filter
+    df["volatility"] = df["returns"].rolling(10).std()
 
     df["signal"] = 0
 
     # =========================
-    # ENTRY CONDITIONS
+    # ENTRY (MORE RELIABLE)
     # =========================
     df.loc[
-        (df["trend"] > 0.0007) &              # strong trend
-        (df["volatility"] > 0.0006) &         # active market
-        (df["momentum"] > 0) &                # price rising
-        (df["ma_fast"] > df["ma_slow"]),      # confirmation
+        (df["trend"] > 0.001) &                        # stronger trend
+        (df["ma_fast"] > df["ma_slow"]) &              # trend direction
+        (df["ma_fast"].shift(1) > df["ma_slow"].shift(1)) &  # confirmation (not just crossing)
+        (df["volatility"] > 0.0005),                   # avoid dead zones
         "signal"
     ] = 1
 
     # =========================
-    # EXIT CONDITIONS
+    # HOLD POSITIONS LONGER
     # =========================
-    df.loc[
-        (df["returns"] < -0.0035) |   # stop loss
-        (df["returns"] > 0.007),      # take profit
-        "signal"
-    ] = 0
-
-    # =========================
-    # COOLDOWN (prevents noise trades)
-    # =========================
-    cooldown = 5
+    cooldown = 12  # MUCH stronger filter
     for i in range(1, len(df)):
         if df["signal"].iloc[i] == 1:
-            df["signal"].iloc[i:i+cooldown] = 1
+            df.iloc[i:i+cooldown, df.columns.get_loc("signal")] = 1
+
+    # =========================
+    # BETTER EXIT LOGIC
+    # =========================
+    df.loc[
+        (df["returns"] < -0.004) |   # stop loss
+        (df["returns"] > 0.01),      # take profit
+        "signal"
+    ] = 0
 
     # Position
     df["position"] = df["signal"].shift().fillna(0)
@@ -115,7 +112,7 @@ def backtest(symbol):
     return jsonify(calculate_metrics(df, symbol))
 
 # =========================
-# RUN (RAILWAY SAFE)
+# RUN
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
