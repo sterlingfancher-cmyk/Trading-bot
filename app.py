@@ -7,107 +7,163 @@ import itertools
 app = Flask(__name__)
 
 # =========================
-# DATA
+# DATA FETCH (SAFE)
 # =========================
 def get_intraday(symbol):
-    df = yf.download(symbol, period="5d", interval="5m")
+    try:
+        df = yf.download(symbol, period="5d", interval="5m", progress=False)
 
-    if df is None or df.empty:
+        if df is None or df.empty:
+            return None
+
+        # Flatten columns if needed
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
+        df = df.rename(columns={
+            "Close": "c",
+            "High": "h",
+            "Low": "l",
+            "Open": "o",
+            "Volume": "v"
+        })
+
+        df = df[["o", "h", "l", "c", "v"]].dropna()
+
+        return df
+
+    except Exception as e:
+        print("DATA ERROR:", e)
         return None
 
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-
-    df = df.rename(columns={
-        "Close": "c",
-        "High": "h",
-        "Low": "l",
-        "Open": "o",
-        "Volume": "v"
-    })
-
-    return df
-
 
 # =========================
-# STRATEGY
+# CORE STRATEGY ENGINE
 # =========================
 def run_strategy(df, fast, slow, atr_mult_sl, atr_mult_tp, vol_thresh):
+    try:
+        df = df.copy()
 
-    df = df.copy()
+        # Indicators
+        df["ma_fast"] = df["c"].rolling(fast).mean()
+        df["ma_slow"] = df["c"].rolling(slow).mean()
 
-    df["ma_fast"] = df["c"].rolling(fast).mean()
-    df["ma_slow"] = df["c"].rolling(slow).mean()
+        # ATR
+        prev_close = df["c"].shift(1)
+        tr1 = df["h"] - df["l"]
+        tr2 = (df["h"] - prev_close).abs()
+        tr3 = (df["l"] - prev_close).abs()
 
-    # ATR
-    df["tr"] = np.maximum(
-        df["h"] - df["l"],
-        np.maximum(
-            abs(df["h"] - df["c"].shift(1)),
-            abs(df["l"] - df["c"].shift(1))
-        )
-    )
-    df["atr"] = df["tr"].rolling(14).mean()
+        df["tr"] = np.maximum(tr1, np.maximum(tr2, tr3))
+        df["atr"] = df["tr"].rolling(14).mean()
 
-    df["returns"] = df["c"].pct_change()
-    df["vol"] = df["returns"].rolling(10).std()
+        # Volatility
+        df["returns"] = df["c"].pct_change()
+        df["vol"] = df["returns"].rolling(10).std()
 
-    df = df.dropna()
+        df = df.dropna()
 
-    position = 0
-    entry_price = 0
-    entry_atr = 0
+        if df.empty:
+            return None
 
-    results = []
+        position = 0
+        entry_price = 0
+        entry_atr = 0
 
-    for i in range(len(df)):
-        row = df.iloc[i]
+        strategy_returns = []
 
-        if position == 0:
-            if (
-                row["ma_fast"] > row["ma_slow"] and
-                row["vol"] > vol_thresh
-            ):
-                position = 1
-                entry_price = row["c"]
-                entry_atr = row["atr"]
-                results.append(0)
+        for i in range(len(df)):
+            row = df.iloc[i]
+
+            # ENTRY
+            if position == 0:
+                if (
+                    row["ma_fast"] > row["ma_slow"] and
+                    row["vol"] > vol_thresh
+                ):
+                    position = 1
+                    entry_price = row["c"]
+                    entry_atr = row["atr"]
+                    strategy_returns.append(0)
+                else:
+                    strategy_returns.append(0)
+
+            # EXIT
             else:
-                results.append(0)
+                price_move = row["c"] - entry_price
 
-        else:
-            change = row["c"] - entry_price
+                stop = -atr_mult_sl * entry_atr
+                target = atr_mult_tp * entry_atr
 
-            stop = -atr_mult_sl * entry_atr
-            target = atr_mult_tp * entry_atr
+                if (
+                    price_move <= stop or
+                    price_move >= target or
+                    row["ma_fast"] < row["ma_slow"]
+                ):
+                    ret = price_move / entry_price
+                    strategy_returns.append(ret)
+                    position = 0
+                else:
+                    strategy_returns.append(0)
 
-            if (
-                change <= stop or
-                change >= target or
-                row["ma_fast"] < row["ma_slow"]
-            ):
-                position = 0
-                results.append(change / entry_price)
-            else:
-                results.append(0)
+        df["strategy"] = strategy_returns
 
-    df["strategy"] = results
+        # Metrics
+        total_return = df["strategy"].sum()
+        sharpe = df["strategy"].mean() / (df["strategy"].std() + 1e-9)
+        trades = int((df["strategy"] != 0).sum())
 
-    total_return = df["strategy"].sum()
-    sharpe = df["strategy"].mean() / (df["strategy"].std() + 1e-9)
+        return {
+            "total_return": total_return,
+            "sharpe": sharpe,
+            "trades": trades
+        }
 
-    return total_return, sharpe
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # =========================
-# OPTIMIZER
+# BACKTEST ROUTE
+# =========================
+@app.route("/backtest/<symbol>")
+def backtest(symbol):
+    df = get_intraday(symbol)
+
+    if df is None:
+        return jsonify({"error": "Data fetch failed"})
+
+    result = run_strategy(
+        df,
+        fast=10,
+        slow=30,
+        atr_mult_sl=1.5,
+        atr_mult_tp=2.5,
+        vol_thresh=0.001
+    )
+
+    if result is None or "error" in result:
+        return jsonify({"error": result})
+
+    balance = 1000 * (1 + result["total_return"])
+
+    return jsonify({
+        "symbol": symbol,
+        "balance": round(balance, 2),
+        "sharpe": round(result["sharpe"], 4),
+        "trades": result["trades"]
+    })
+
+
+# =========================
+# OPTIMIZER ROUTE
 # =========================
 @app.route("/optimize/<symbol>")
 def optimize(symbol):
     df = get_intraday(symbol)
 
     if df is None:
-        return jsonify({"error": "No data"})
+        return jsonify({"error": "Data fetch failed"})
 
     best = {
         "balance": 0,
@@ -127,13 +183,17 @@ def optimize(symbol):
         if fast >= slow:
             continue
 
-        ret, sharpe = run_strategy(df, fast, slow, sl, tp, vol)
-        balance = 1000 * (1 + ret)
+        result = run_strategy(df, fast, slow, sl, tp, vol)
 
-        if sharpe > best["sharpe"]:
+        if result is None or "error" in result:
+            continue
+
+        balance = 1000 * (1 + result["total_return"])
+
+        if result["sharpe"] > best["sharpe"]:
             best = {
                 "balance": round(balance, 2),
-                "sharpe": round(sharpe, 4),
+                "sharpe": round(result["sharpe"], 4),
                 "params": {
                     "fast": fast,
                     "slow": slow,
@@ -144,6 +204,14 @@ def optimize(symbol):
             }
 
     return jsonify(best)
+
+
+# =========================
+# HEALTH CHECK
+# =========================
+@app.route("/")
+def home():
+    return jsonify({"status": "running"})
 
 
 # =========================
