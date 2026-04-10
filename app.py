@@ -28,7 +28,7 @@ def compute_strategy(df):
         (strength > 0.0003) 
     ),   
         "signal"
-    ] = strength * 100
+    ] = (strength / 0.01).clip(0,1)
 
     #EXIT
     df.loc[
