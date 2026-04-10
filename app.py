@@ -9,7 +9,7 @@ import joblib
 app = Flask(__name__)
 
 def compute_strategy(df):
-    print("NEW VERSION RUNNING") 
+    print("RUNNING COMPUTE STRATEGY") 
     
     df["ma_fast"] = df["c"].rolling(20).mean()
     df["ma_slow"] = df["c"].rolling(50).mean()
