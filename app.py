@@ -9,18 +9,29 @@ import joblib
 app = Flask(__name__)
 
 def compute_strategy(df):
-    df["ma_fast"] = df["c"].rolling(3).mean()
-    df["ma_slow"] = df["c"].rolling(5).mean()
+    df["ma_fast"] = df["c"].rolling(20).mean()
+    df["ma_slow"] = df["c"].rolling(50).mean()
     df["returns"] = df["c"].pct_change()
 
     df["signal"] = 0
 
-    # Simple crossover (guarantees signals)
-    df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
-    df.loc[df["ma_fast"] < df["ma_slow"], "signal"] = -1
+    # ENTRY
+    df.loc[
+        (df["ma_fast"] > df["ma_slow"]) &
+        (df["returns"] < -0.001),    # stronger pullback
+        "signal"
+    ] = 1
+
+    #EXIT
+    df.loc[
+        (df["ma_fast"] < df["ma_slow"]),
+        "signal"
+    ] = -1
 
     # Only drop rows where indicators are missing
     df = df.dropna(subset=["ma_fast", "ma_slow", "returns"])
+    if df.empty:
+        return df
 
     # Build position (carry forward)
     df["position"] = df["signal"].replace(0, None).ffill().fillna(0)
