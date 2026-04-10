@@ -19,15 +19,16 @@ def compute_strategy(df):
     df.loc[
     (
         (df["ma_fast"] > df["ma_slow"]) &
-        (df["returns"] < -0.002) &
-        ((df["ma_fast"] - df["ma_slow"]) / df["ma_slow"] > 0.001)
+        (df["returns"] < -0.004) &
+        ((df["ma_fast"] - df["ma_slow"]) / df["ma_slow"] > 0.002)
+        (df["ma_slow".diff() > 0)
     ),   
         "signal"
     ] = 1
 
     #EXIT
     df.loc[
-        (df["ma_fast"] < df["ma_slow"]),
+        (df["returns"] > 0.002) | (df["returns"] < -0.003),
         "signal"
     ] = -1
 
