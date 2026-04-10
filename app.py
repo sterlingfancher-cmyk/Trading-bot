@@ -6,7 +6,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG (AGGRESSIVE 🔥)
+# CONFIG (COMPOUNDING 🚀)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 3.0
@@ -22,7 +22,7 @@ SYMBOLS = [
 
 INITIAL_CAPITAL = 1000
 
-# 🔥 AGGRESSIVE SETTINGS
+# 🔥 AGGRESSIVE BASE
 RISK_PER_TRADE = 0.13
 MAX_POSITIONS = 3
 TOP_N = 3
@@ -89,7 +89,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "aggressive-scaling-system-live"})
+    return jsonify({"status": "compounding-system-live"})
 
 
 @app.route("/portfolio")
@@ -171,7 +171,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES
+        # ENTRIES (WITH COMPOUNDING 🔥)
         # =========================
         for symbol in top_symbols:
 
@@ -199,7 +199,14 @@ def portfolio():
                 size_multiplier = breakout_strength / 0.02
                 size_multiplier = max(0.5, min(size_multiplier, 2))
 
-                risk = min(capital * RISK_PER_TRADE * size_multiplier, available_risk)
+                # 🔥 EQUITY COMPOUNDING
+                equity_boost = capital / INITIAL_CAPITAL
+                equity_boost = max(0.8, min(equity_boost, 1.5))
+
+                risk = min(
+                    capital * RISK_PER_TRADE * size_multiplier * equity_boost,
+                    available_risk
+                )
 
                 positions[symbol] = True
                 entry_price[symbol] = row["c"]
