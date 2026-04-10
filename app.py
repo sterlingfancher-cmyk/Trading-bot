@@ -7,6 +7,16 @@ import itertools
 app = Flask(__name__)
 
 # =========================
+# CONFIG (YOUR EDGE LOCKED)
+# =========================
+LOOKBACK = 20
+ATR_MULT = 2.5
+
+# Portfolio assets
+SYMBOLS = ["SPY", "QQQ", "IWM", "XLE", "XLK"]
+
+
+# =========================
 # DATA
 # =========================
 def get_data(symbol):
@@ -30,14 +40,12 @@ def get_data(symbol):
 
 
 # =========================
-# STRATEGY (LOW FREQ BREAKOUT)
+# STRATEGY (YOUR EDGE)
 # =========================
 def run_strategy(df, lookback, atr_mult):
     df = df.copy()
 
     df["ma_200"] = df["c"].rolling(200).mean()
-
-    # breakout (shift to avoid lookahead)
     df["high_break"] = df["h"].rolling(lookback).max().shift(1)
 
     prev_close = df["c"].shift(1)
@@ -49,7 +57,6 @@ def run_strategy(df, lookback, atr_mult):
         )
     )
     df["atr"] = tr.rolling(14).mean()
-
     df["atr_rising"] = df["atr"] > df["atr"].shift(1)
 
     df = df.dropna()
@@ -75,7 +82,7 @@ def run_strategy(df, lookback, atr_mult):
                 entry_price = row["c"]
                 peak_price = row["c"]
 
-        # EXIT (trailing stop)
+        # EXIT
         else:
             peak_price = max(peak_price, row["c"])
             stop = peak_price - (atr_mult * row["atr"])
@@ -99,7 +106,7 @@ def run_strategy(df, lookback, atr_mult):
 
 
 # =========================
-# BACKTEST
+# SINGLE BACKTEST
 # =========================
 @app.route("/backtest/<symbol>")
 def backtest(symbol):
@@ -108,7 +115,7 @@ def backtest(symbol):
     if df is None:
         return jsonify({"error": "Data fetch failed"})
 
-    result = run_strategy(df, 20, 2.0)
+    result = run_strategy(df, LOOKBACK, ATR_MULT)
 
     if result is None:
         return jsonify({"error": "No trades"})
@@ -122,7 +129,52 @@ def backtest(symbol):
 
 
 # =========================
-# OPTIMIZER
+# 🔥 PORTFOLIO BACKTEST
+# =========================
+@app.route("/portfolio")
+def portfolio():
+    results = []
+    total_balance = 0
+    sharpes = []
+    total_trades = 0
+
+    for symbol in SYMBOLS:
+        df = get_data(symbol)
+
+        if df is None:
+            continue
+
+        result = run_strategy(df, LOOKBACK, ATR_MULT)
+
+        if result is None:
+            continue
+
+        results.append({
+            "symbol": symbol,
+            "balance": round(result["balance"], 2),
+            "sharpe": round(result["sharpe"], 4),
+            "trades": result["trades"]
+        })
+
+        total_balance += result["balance"]
+        sharpes.append(result["sharpe"])
+        total_trades += result["trades"]
+
+    if len(results) == 0:
+        return jsonify({"error": "No valid results"})
+
+    avg_sharpe = sum(sharpes) / len(sharpes)
+
+    return jsonify({
+        "portfolio_balance": round(total_balance, 2),
+        "average_sharpe": round(avg_sharpe, 4),
+        "total_trades": total_trades,
+        "assets": results
+    })
+
+
+# =========================
+# OPTIMIZER (KEEP FOR TESTING)
 # =========================
 @app.route("/optimize/<symbol>")
 def optimize(symbol):
@@ -133,7 +185,7 @@ def optimize(symbol):
 
     best = {"score": -999}
 
-    lookback_range = [20, 50, 100]
+    lookback_range = [10, 20, 50]
     atr_range = [1.5, 2.0, 2.5, 3.0]
 
     for look, atr in itertools.product(lookback_range, atr_range):
@@ -148,9 +200,6 @@ def optimize(symbol):
             (result["balance"] - 1000) * 0.2 +
             min(result["trades"], 20) * 0.01
         )
-
-        if result["trades"] < 3:
-            score *= 0.5
 
         if score > best["score"]:
             best = {
@@ -167,11 +216,17 @@ def optimize(symbol):
     return jsonify(best)
 
 
+# =========================
+# HEALTH
+# =========================
 @app.route("/")
 def home():
     return jsonify({"status": "running"})
 
 
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
