@@ -9,7 +9,11 @@ import joblib
 app = Flask(__name__)
 @app.route("/")
 def home():
-    return "VERSION 2 LIVE"
+    return "LIVE"
+
+@app.route("/backtest/symbol>")
+def backtest(symbol):
+    ...
 
 def compute_strategy(df):
     print("RUNNING COMPUTE STRATEGY") 
