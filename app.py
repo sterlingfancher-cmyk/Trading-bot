@@ -28,7 +28,10 @@ def compute_strategy(df):
         (strength > 0.0003) 
     ),   
         "signal"
-    ] = (strength / 0.01).clip(0,1)
+    ] = strength
+
+    # APPLY SCALING HERE
+    df["signal"] = (df["signal"] / 0.01).clip(0, 1)
 
     #EXIT
     df.loc[
