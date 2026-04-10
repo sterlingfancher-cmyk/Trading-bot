@@ -26,7 +26,6 @@ RISK_PER_TRADE = 0.1
 MAX_POSITIONS = 3
 TOP_N = 3
 
-BREAKOUT_THRESHOLD = 0.01
 TRANSACTION_COST = 0.001
 MAX_TOTAL_RISK = 0.3
 
@@ -59,6 +58,8 @@ def get_data(symbol):
 # =========================
 def prepare(df):
     df["ma_200"] = df["c"].rolling(200).mean()
+    df["ma_50"] = df["c"].rolling(50).mean()
+
     df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
     prev_close = df["c"].shift(1)
@@ -72,6 +73,7 @@ def prepare(df):
 
     df["atr"] = tr.rolling(14).mean()
     df["atr_change"] = df["atr"].pct_change()
+
     df["momentum"] = df["c"] / df["c"].shift(50)
 
     return df.dropna()
@@ -89,7 +91,6 @@ def portfolio():
         if df is not None:
             data[symbol] = prepare(df)
 
-    # 🔥 SPY regime filter data
     spy_df = prepare(get_data("SPY"))
 
     all_dates = sorted(set().union(*[df.index for df in data.values()]))
@@ -107,13 +108,12 @@ def portfolio():
     for date in all_dates:
 
         # =========================
-        # 🔥 MARKET REGIME FILTER
+        # REGIME FILTER
         # =========================
         if date not in spy_df.index:
             continue
 
         spy_row = spy_df.loc[date]
-
         market_trend = spy_row["c"] > spy_row["ma_200"]
 
         if not market_trend:
@@ -174,7 +174,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES
+        # ENTRIES (🔥 PULLBACK SYSTEM)
         # =========================
         for symbol in top_symbols:
 
@@ -192,19 +192,23 @@ def portfolio():
                 continue
 
             row = df.loc[date]
+            prev_row = df.shift(1).loc[date]
 
+            # --- CONDITIONS ---
             trend = row["c"] > row["ma_200"]
+
+            breakout = row["c"] > row["high_break"]
+
+            pullback = row["c"] < row["ma_50"]
+
+            bounce = row["c"] > prev_row["c"]
+
             vol = row["atr_change"] > 0
-            breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
 
-            if trend and vol and breakout_strength > BREAKOUT_THRESHOLD:
+            if trend and breakout and pullback and bounce and vol:
 
-                base_risk = capital * RISK_PER_TRADE
-
-                size_multiplier = breakout_strength / BREAKOUT_THRESHOLD
-                size_multiplier = max(0.5, min(size_multiplier, 2))
-
-                risk_amount = min(base_risk * size_multiplier, available_risk)
+                # Dynamic sizing (simplified for stability)
+                risk_amount = min(capital * RISK_PER_TRADE, available_risk)
 
                 positions[symbol] = True
                 entry_price[symbol] = row["c"]
@@ -239,7 +243,7 @@ def portfolio():
 
 @app.route("/")
 def home():
-    return jsonify({"status": "production-ready"})
+    return jsonify({"status": "production-ready-pullback"})
 
 
 if __name__ == "__main__":
