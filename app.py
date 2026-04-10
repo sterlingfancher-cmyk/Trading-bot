@@ -1,3 +1,37 @@
+from flask import Flask, jsonify
+import pandas as pd
+import numpy as np
+import yfinance as yf
+
+app = Flask(__name__)
+
+# =========================
+# DATA FETCH
+# =========================
+def get_intraday(symbol):
+    try:
+        data = yf.download(symbol, period="5d", interval="5m")
+
+        if data is None or data.empty:
+            return None
+
+        data = data.rename(columns={
+            "Close": "c",
+            "High": "h",
+            "Low": "l",
+            "Open": "o",
+            "Volume": "v"
+        })
+
+        return data
+
+    except Exception as e:
+        return None
+
+
+# =========================
+# STRATEGY
+# =========================
 def compute_strategy(df):
     try:
         df["ma_fast"] = df["c"].rolling(20).mean()
@@ -13,28 +47,27 @@ def compute_strategy(df):
 
         df["signal"] = 0
 
-        # FIX: ALIGN DATA
         prev_high = df["high_lookback"].shift(1)
 
-        # Align explicitly
+        # ALIGN FIX
         df["c"], prev_high = df["c"].align(prev_high, axis=0)
-
-        # Fill NaNs after align
         prev_high = prev_high.fillna(method="bfill").fillna(0)
 
+        # ENTRY
         df.loc[
             (df["ma_fast"] > df["ma_slow"]) &
             (df["c"] > prev_high * 0.999),
             "signal"
         ] = 1
 
+        # EXIT
         df.loc[
             (df["ma_fast"] < df["ma_slow"]) |
             (df["returns"] < -0.002),
             "signal"
         ] = 0
 
-        # fallback if no trades
+        # FALLBACK (ensures trades exist)
         if df["signal"].sum() == 0:
             df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
 
@@ -45,3 +78,61 @@ def compute_strategy(df):
 
     except Exception as e:
         return None, f"Strategy error: {str(e)}"
+
+
+# =========================
+# ROUTES
+# =========================
+@app.route("/")
+def home():
+    return jsonify({"status": "running"})
+
+
+@app.route("/backtest/<symbol>")
+def backtest(symbol):
+    try:
+        raw = get_intraday(symbol)
+
+        if raw is None:
+            return jsonify({"error": "Data fetch failed"})
+
+        df, err = compute_strategy(raw)
+
+        if err:
+            return jsonify({"error": err})
+
+        if df is None or df.empty:
+            return jsonify({"error": "No usable data"})
+
+        df["equity"] = (1 + df["strategy"]).cumprod() * 1000
+
+        trades = (df["signal"].diff().abs() > 0).sum()
+
+        if trades == 0:
+            return jsonify({"error": "No trades generated"})
+
+        total_return = df["equity"].iloc[-1]
+        avg_pnl = df["strategy"].mean()
+        sharpe = df["strategy"].mean() / (df["strategy"].std() + 1e-9)
+        drawdown = (df["equity"] / df["equity"].cummax() - 1).min()
+        win_rate = (df["strategy"] > 0).sum() / len(df) * 100
+
+        return jsonify({
+            "symbol": symbol,
+            "balance": round(total_return, 2),
+            "avg_pnl": round(avg_pnl, 6),
+            "sharpe": round(sharpe, 4),
+            "max_drawdown": round(drawdown, 4),
+            "trades": int(trades),
+            "win_rate": round(win_rate, 2)
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Server crash: {str(e)}"})
+
+
+# =========================
+# START
+# =========================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
