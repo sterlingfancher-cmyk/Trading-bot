@@ -41,7 +41,7 @@ def compute_strategy(df):
     df["strategy_returns"] = df["strategy_returns"].clip(lower=-0.01, upper=0.02)
 
     # Volatility filter
-    df["volatility"] = df["returns"].rolling(100.std()
+    df["volatility"] = df["returns"].rolling(10).std()
     (df["volatility"] < df["volatility"].rolling(50).mean())                                         
 
     # FINAL safety check (DO NOT REMOVE EVERYTHING)
