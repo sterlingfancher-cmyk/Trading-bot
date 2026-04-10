@@ -4,33 +4,34 @@ import numpy as np
 import yfinance as yf
 import time
 import os
+import requests
 import alpaca_trade_api as tradeapi
 
 app = Flask(__name__)
 
 # =========================
-# CONFIG (OPTIMIZED)
+# CONFIG
 # =========================
 LOOKBACK = 20
 ATR_MULT = 3.0
-CACHE_TTL = 300  # 5 min cache
+CACHE_TTL = 300
 
-# 🔥 REDUCED SYMBOLS (FAST)
 SYMBOLS = [
     "SPY","QQQ",
     "NVDA","AMD","META","MSFT","AAPL"
 ]
 
 INITIAL_CAPITAL = 1000
-
 RISK_PER_TRADE = 0.13
 MAX_POSITIONS = 4
 TOP_N = 4
 MAX_TOTAL_RISK = 0.8
 
 # =========================
-# ALPACA CONFIG
+# API KEYS
 # =========================
+TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY")
+
 ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY")
 ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY")
 BASE_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
@@ -49,10 +50,12 @@ DATA = None
 LAST_FETCH = 0
 
 # =========================
-# FAST DOWNLOAD
+# DATA LOADER (YAHOO + FALLBACK)
 # =========================
 def safe_download(symbol):
-    for _ in range(2):  # reduced retries
+
+    # ===== TRY YAHOO =====
+    for _ in range(2):
         try:
             df = yf.download(
                 symbol,
@@ -66,10 +69,50 @@ def safe_download(symbol):
         except:
             pass
         time.sleep(0.5)
-    return None
+
+    # ===== FALLBACK: TWELVE DATA =====
+    try:
+        url = "https://api.twelvedata.com/time_series"
+        params = {
+            "symbol": symbol,
+            "interval": "1day",
+            "outputsize": 120,
+            "apikey": TWELVE_API_KEY
+        }
+
+        res = requests.get(url, params=params, timeout=5)
+        data = res.json()
+
+        if "values" not in data:
+            print(f"TwelveData failed: {symbol}")
+            return None
+
+        df = pd.DataFrame(data["values"])
+
+        df = df.rename(columns={
+            "open": "o",
+            "high": "h",
+            "low": "l",
+            "close": "c",
+            "volume": "v"
+        })
+
+        df["c"] = df["c"].astype(float)
+        df["h"] = df["h"].astype(float)
+        df["l"] = df["l"].astype(float)
+
+        df = df.iloc[::-1]
+        df.index = pd.to_datetime(df["datetime"])
+        df = df.drop(columns=["datetime"])
+
+        return df
+
+    except Exception as e:
+        print(f"TwelveData error: {symbol} {e}")
+        return None
 
 # =========================
-# LOAD DATA (CACHED)
+# LOAD DATA
 # =========================
 def load_data():
     global DATA, LAST_FETCH
@@ -85,19 +128,10 @@ def load_data():
         df = safe_download(symbol)
 
         if df is None or df.empty:
-            print(f"FAILED: {symbol}")
             continue
 
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-
-        df = df.rename(columns={
-            "Open": "o",
-            "High": "h",
-            "Low": "l",
-            "Close": "c",
-            "Volume": "v"
-        })
 
         df["ma"] = df["c"].rolling(100).mean()
         df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
@@ -125,18 +159,17 @@ def load_data():
 @app.route("/")
 def home():
     return jsonify({
-        "status": "fast-live",
+        "status": "live",
         "endpoints": ["/signals", "/auto_trade"]
     })
 
 # =========================
-# SIGNALS (FAST + TIMEOUT SAFE)
+# SIGNALS
 # =========================
 @app.route("/signals")
 def signals():
 
     start_time = time.time()
-
     data = load_data()
     capital = float(request.args.get("capital", INITIAL_CAPITAL))
 
@@ -146,7 +179,7 @@ def signals():
         return jsonify({
             "market": "unknown",
             "signals": [],
-            "warning": "SPY failed"
+            "warning": "All data providers failed"
         })
 
     last_date = spy_df.index[-1]
@@ -171,9 +204,7 @@ def signals():
 
     for symbol, _ in rs[:TOP_N]:
 
-        # 🔥 HARD TIMEOUT (8 sec)
         if time.time() - start_time > 8:
-            print("Timeout triggered")
             break
 
         df = data[symbol]
@@ -230,26 +261,19 @@ def auto_trade():
         return jsonify({"error": "Alpaca not configured"})
 
     data = load_data()
-    capital = float(request.args.get("capital", INITIAL_CAPITAL))
 
     spy_df = data.get("SPY")
-
     if spy_df is None:
-        return jsonify({"error": "SPY missing"})
+        return jsonify({"error": "No data available"})
 
     last_date = spy_df.index[-1]
 
     if spy_df.loc[last_date]["c"] <= spy_df.loc[last_date]["ma"]:
         return jsonify({"status": "No trades"})
 
-    current_positions = {p.symbol for p in api.list_positions()}
-
     executed = []
 
     for symbol in SYMBOLS:
-
-        if symbol in current_positions:
-            continue
 
         df = data.get(symbol)
         if df is None or last_date not in df.index:
@@ -263,7 +287,7 @@ def auto_trade():
         try:
             api.submit_order(
                 symbol=symbol,
-                qty=1,  # simplified for speed
+                qty=1,
                 side="buy",
                 type="market",
                 time_in_force="gtc"
