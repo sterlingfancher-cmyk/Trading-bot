@@ -7,7 +7,7 @@ import itertools
 app = Flask(__name__)
 
 # =========================
-# DATA FETCH (SAFE)
+# DATA FETCH
 # =========================
 def get_intraday(symbol):
     try:
@@ -38,13 +38,13 @@ def get_intraday(symbol):
 
 
 # =========================
-# CORE STRATEGY ENGINE
+# STRATEGY ENGINE
 # =========================
 def run_strategy(df, fast, slow, atr_mult_sl, atr_mult_tp, vol_thresh):
     try:
         df = df.copy()
 
-        # Indicators
+        # Moving averages
         df["ma_fast"] = df["c"].rolling(fast).mean()
         df["ma_slow"] = df["c"].rolling(slow).mean()
 
@@ -90,17 +90,17 @@ def run_strategy(df, fast, slow, atr_mult_sl, atr_mult_tp, vol_thresh):
 
             # EXIT
             else:
-                price_move = row["c"] - entry_price
+                move = row["c"] - entry_price
 
                 stop = -atr_mult_sl * entry_atr
                 target = atr_mult_tp * entry_atr
 
                 if (
-                    price_move <= stop or
-                    price_move >= target or
+                    move <= stop or
+                    move >= target or
                     row["ma_fast"] < row["ma_slow"]
                 ):
-                    ret = price_move / entry_price
+                    ret = move / entry_price
                     strategy_returns.append(ret)
                     position = 0
                 else:
@@ -108,7 +108,6 @@ def run_strategy(df, fast, slow, atr_mult_sl, atr_mult_tp, vol_thresh):
 
         df["strategy"] = strategy_returns
 
-        # Metrics
         total_return = df["strategy"].sum()
         sharpe = df["strategy"].mean() / (df["strategy"].std() + 1e-9)
         trades = int((df["strategy"] != 0).sum())
@@ -156,7 +155,7 @@ def backtest(symbol):
 
 
 # =========================
-# OPTIMIZER ROUTE
+# OPTIMIZER ROUTE (UPDATED)
 # =========================
 @app.route("/optimize/<symbol>")
 def optimize(symbol):
@@ -166,8 +165,10 @@ def optimize(symbol):
         return jsonify({"error": "Data fetch failed"})
 
     best = {
+        "score": -999,
         "balance": 0,
-        "sharpe": -999,
+        "sharpe": 0,
+        "trades": 0,
         "params": {}
     }
 
@@ -190,10 +191,19 @@ def optimize(symbol):
 
         balance = 1000 * (1 + result["total_return"])
 
-        if result["sharpe"] > best["sharpe"]:
+        # 🔥 BALANCED SCORING SYSTEM
+        score = (
+            result["sharpe"] * 2 +
+            result["total_return"] * 50 +
+            min(result["trades"], 20) * 0.01
+        )
+
+        if score > best["score"]:
             best = {
+                "score": round(score, 4),
                 "balance": round(balance, 2),
                 "sharpe": round(result["sharpe"], 4),
+                "trades": result["trades"],
                 "params": {
                     "fast": fast,
                     "slow": slow,
