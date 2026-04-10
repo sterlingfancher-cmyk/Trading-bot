@@ -10,39 +10,33 @@ app = Flask(__name__)
 # DATA
 # =========================
 def get_intraday(symbol):
-    try:
-        df = yf.download(symbol, period="5d", interval="5m", progress=False)
+    df = yf.download(symbol, period="5d", interval="5m", progress=False)
 
-        if df is None or df.empty:
-            return pd.DataFrame()
-
-        df = df.rename(columns={
-            "Open": "o",
-            "High": "h",
-            "Low": "l",
-            "Close": "c",
-            "Volume": "v"
-        })
-
-        return df.dropna()
-
-    except:
+    if df is None or df.empty:
         return pd.DataFrame()
 
+    df = df.rename(columns={
+        "Open": "o",
+        "High": "h",
+        "Low": "l",
+        "Close": "c",
+        "Volume": "v"
+    })
+
+    return df.dropna()
+
 # =========================
-# IMPROVED STRATEGY v2
+# STRATEGY: TREND + BREAKOUT
 # =========================
 def compute_strategy(df):
 
-    df["ma_fast"] = df["c"].rolling(15).mean()
-    df["ma_slow"] = df["c"].rolling(40).mean()
+    df["ma_fast"] = df["c"].rolling(20).mean()
+    df["ma_slow"] = df["c"].rolling(50).mean()
+
     df["returns"] = df["c"].pct_change()
 
-    # Momentum (stronger)
-    df["momentum"] = df["returns"].rolling(5).mean()
-
-    # Volatility filter
-    df["volatility"] = df["returns"].rolling(10).std()
+    # Highest high breakout
+    df["high_lookback"] = df["h"].rolling(15).max()
 
     df = df.dropna().copy()
 
@@ -51,19 +45,17 @@ def compute_strategy(df):
 
     df["signal"] = 0
 
-    # ENTRY (tightened)
+    # ENTRY: breakout + trend
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &
-        (df["momentum"] > 0.0002) &
-        (df["volatility"] > 0.0005),
+        (df["c"] >= df["high_lookback"].shift(1)),
         "signal"
     ] = 1
 
-    # EXIT
+    # EXIT: trend loss or pullback
     df.loc[
         (df["ma_fast"] < df["ma_slow"]) |
-        (df["returns"] < -0.002) |
-        (df["returns"] > 0.006),
+        (df["returns"] < -0.003),
         "signal"
     ] = 0
 
