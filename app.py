@@ -28,14 +28,13 @@ TOP_N = 3
 
 TRANSACTION_COST = 0.001
 MAX_TOTAL_RISK = 0.3
-BREAKOUT_LOOKBACK = 5
 
 # 🔥 GLOBAL CACHE
 DATA = None
 
 
 # =========================
-# LOAD DATA (LAZY)
+# LOAD DATA (LAZY + FAST)
 # =========================
 def load_data():
     global DATA
@@ -64,7 +63,7 @@ def load_data():
             })
 
             # =========================
-            # INDICATORS
+            # INDICATORS (SIMPLE + EFFECTIVE)
             # =========================
             df["ma_200"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
@@ -94,7 +93,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "dynamic-sizing-live"})
+    return jsonify({"status": "simple-dynamic-system-live"})
 
 
 @app.route("/portfolio")
@@ -118,14 +117,12 @@ def portfolio():
     peak_price = {}
     position_size = {}
 
-    breakout_age = {s: 999 for s in data.keys()}
-
     trades = 0
 
     for date in all_dates:
 
         # =========================
-        # MARKET REGIME
+        # MARKET REGIME FILTER
         # =========================
         if date not in spy_df.index:
             continue
@@ -134,22 +131,7 @@ def portfolio():
             continue
 
         # =========================
-        # UPDATE BREAKOUT STATE
-        # =========================
-        for symbol, df in data.items():
-
-            if date not in df.index:
-                continue
-
-            row = df.loc[date]
-
-            if row["c"] > row["high_break"]:
-                breakout_age[symbol] = 0
-            else:
-                breakout_age[symbol] += 1
-
-        # =========================
-        # EXITS
+        # EXITS (TREND + TRAILING STOP)
         # =========================
         for symbol in list(positions.keys()):
 
@@ -178,7 +160,7 @@ def portfolio():
                 trades += 1
 
         # =========================
-        # RELATIVE STRENGTH
+        # RELATIVE STRENGTH (TOP PERFORMERS)
         # =========================
         rs = []
 
@@ -193,7 +175,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (DYNAMIC SIZING)
+        # ENTRIES (SIMPLE + POWERFUL)
         # =========================
         for symbol in top_symbols:
 
@@ -209,16 +191,12 @@ def portfolio():
                 continue
 
             row = df.loc[date]
-            prev = df.shift(1).loc[date]
 
             trend = row["c"] > row["ma_200"]
-            recent_breakout = breakout_age[symbol] <= BREAKOUT_LOOKBACK
-
-            pullback = row["c"] <= row["high_break"] * 1.05
-            bounce = row["c"] > prev["c"]
+            breakout = row["c"] > row["high_break"]
             vol = row["atr_change"] > 0
 
-            if trend and recent_breakout and pullback and bounce and vol:
+            if trend and breakout and vol:
 
                 # 🔥 DYNAMIC POSITION SIZING
                 breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
