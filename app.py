@@ -7,7 +7,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# DATA
+# DATA FETCH
 # =========================
 def get_intraday(symbol):
     try:
@@ -27,16 +27,17 @@ def get_intraday(symbol):
         return df.dropna()
 
     except Exception as e:
+        print("DATA ERROR:", str(e))
         return pd.DataFrame()
 
 # =========================
-# STRATEGY
+# STRATEGY (FIXED + RELIABLE)
 # =========================
 def compute_strategy(df):
 
     try:
-        df["ma_fast"] = df["c"].rolling(20).mean()
-        df["ma_slow"] = df["c"].rolling(50).mean()
+        df["ma_fast"] = df["c"].rolling(10).mean()
+        df["ma_slow"] = df["c"].rolling(30).mean()
         df["returns"] = df["c"].pct_change()
 
         df = df.dropna().copy()
@@ -44,36 +45,13 @@ def compute_strategy(df):
         if df.empty:
             return pd.DataFrame()
 
-        df["trend"] = df["ma_fast"] > df["ma_slow"]
-        df["pullback"] = df["c"] < df["ma_fast"]
-        df["momentum"] = df["returns"] > 0
-
         df["signal"] = 0
 
-        # ENTRY
-        df.loc[
-            (df["trend"]) &
-            (df["pullback"]) &
-            (df["momentum"]),
-            "signal"
-        ] = 1
-
-        # SAFE HOLD LOGIC (no slicing crash)
-        cooldown = 5
-        signal_idx = df.index[df["signal"] == 1]
-
-        for idx in signal_idx:
-            pos = df.index.get_loc(idx)
-            end = min(pos + cooldown, len(df) - 1)
-            df.iloc[pos:end, df.columns.get_loc("signal")] = 1
+        # ENTRY: simple trend
+        df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
 
         # EXIT
-        df.loc[
-            (df["ma_fast"] < df["ma_slow"]) |
-            (df["returns"] < -0.003) |
-            (df["returns"] > 0.012),
-            "signal"
-        ] = 0
+        df.loc[df["ma_fast"] < df["ma_slow"], "signal"] = 0
 
         df["position"] = df["signal"].shift().fillna(0)
         df["strategy"] = df["position"] * df["returns"]
@@ -134,7 +112,7 @@ def backtest(symbol):
         df = compute_strategy(df)
 
         if df.empty:
-            return jsonify({"error": "Strategy failed or no signals"})
+            return jsonify({"error": "Strategy failed"})
 
         return jsonify(calculate_metrics(df, symbol))
 
