@@ -15,7 +15,7 @@ def get_intraday(symbol):
         if df is None or df.empty:
             return None
 
-        # 🔥 FIX: Flatten multi-index columns
+        # Fix multi-index columns from yfinance
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
@@ -29,12 +29,12 @@ def get_intraday(symbol):
 
         return df
 
-    except Exception as e:
+    except:
         return None
 
 
 # =========================
-# STRATEGY (SIMPLE + STABLE)
+# STRATEGY (IMPROVED)
 # =========================
 def compute_strategy(df):
     try:
@@ -44,6 +44,9 @@ def compute_strategy(df):
         df["ma_slow"] = df["c"].rolling(30).mean()
         df["returns"] = df["c"].pct_change()
 
+        # NEW: trend strength filter
+        df["trend_strength"] = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
+
         df = df.dropna()
 
         if df.empty:
@@ -51,9 +54,20 @@ def compute_strategy(df):
 
         df["signal"] = 0
 
-        # SIMPLE TREND (NO NUMPY, NO ALIGNMENT ISSUES)
-        df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
-        df.loc[df["ma_fast"] < df["ma_slow"], "signal"] = 0
+        # ENTRY (strong trend only)
+        df.loc[
+            (df["ma_fast"] > df["ma_slow"]) &
+            (df["trend_strength"] > 0.0007),
+            "signal"
+        ] = 1
+
+        # EXIT
+        df.loc[
+            (df["ma_fast"] < df["ma_slow"]) |
+            (df["returns"] < -0.002) |
+            (df["returns"] > 0.007),
+            "signal"
+        ] = 0
 
         df["position"] = df["signal"].shift(1).fillna(0)
         df["strategy"] = df["position"] * df["returns"]
