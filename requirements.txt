@@ -1,5 +1,5 @@
-flask
-pandas
-numpy
-yfinance
-alpaca-trade-api
+flask==3.0.3
+pandas==2.2.2
+numpy==1.26.4
+yfinance==0.2.40
+alpaca-trade-api==3.0.2
