@@ -30,16 +30,19 @@ def get_intraday(symbol):
         return pd.DataFrame()
 
 # =========================
-# IMPROVED STRATEGY
+# IMPROVED STRATEGY v2
 # =========================
 def compute_strategy(df):
 
-    df["ma_fast"] = df["c"].rolling(10).mean()
-    df["ma_slow"] = df["c"].rolling(30).mean()
+    df["ma_fast"] = df["c"].rolling(15).mean()
+    df["ma_slow"] = df["c"].rolling(40).mean()
     df["returns"] = df["c"].pct_change()
 
-    # Momentum filter
-    df["momentum"] = df["returns"].rolling(3).mean()
+    # Momentum (stronger)
+    df["momentum"] = df["returns"].rolling(5).mean()
+
+    # Volatility filter
+    df["volatility"] = df["returns"].rolling(10).std()
 
     df = df.dropna().copy()
 
@@ -48,18 +51,19 @@ def compute_strategy(df):
 
     df["signal"] = 0
 
-    # ENTRY (trend + momentum)
+    # ENTRY (tightened)
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &
-        (df["momentum"] > 0),
+        (df["momentum"] > 0.0002) &
+        (df["volatility"] > 0.0005),
         "signal"
     ] = 1
 
-    # EXIT (trend break OR stop/target)
+    # EXIT
     df.loc[
         (df["ma_fast"] < df["ma_slow"]) |
-        (df["returns"] < -0.0025) |
-        (df["returns"] > 0.008),
+        (df["returns"] < -0.002) |
+        (df["returns"] > 0.006),
         "signal"
     ] = 0
 
