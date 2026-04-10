@@ -6,10 +6,10 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG (BALANCED 🔥)
+# CONFIG (TREND CAPTURE 🔥)
 # =========================
 LOOKBACK = 20
-ATR_MULT = 2.5
+ATR_MULT = 4.0  # 🔥 WIDER STOP
 
 SYMBOLS = [
     "SPY","QQQ","IWM",
@@ -92,7 +92,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "balanced-system-live"})
+    return jsonify({"status": "trend-capture-system-live"})
 
 
 @app.route("/portfolio")
@@ -130,7 +130,7 @@ def portfolio():
             continue
 
         # =========================
-        # EXITS
+        # EXITS (IMPROVED 🔥)
         # =========================
         for symbol in list(positions.keys()):
 
@@ -142,9 +142,11 @@ def portfolio():
             row = df.loc[date]
 
             peak_price[symbol] = max(peak_price[symbol], row["c"])
+
+            # 🔥 ONLY TRAILING STOP (NO MA EXIT)
             stop = peak_price[symbol] - (ATR_MULT * row["atr"])
 
-            if row["c"] < stop or row["c"] < row["ma_200"]:
+            if row["c"] < stop:
 
                 pct = (row["c"] - entry_price[symbol]) / entry_price[symbol]
                 pct -= TRANSACTION_COST
@@ -174,7 +176,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (BALANCED)
+        # ENTRIES (UNCHANGED — WORKING)
         # =========================
         for symbol in top_symbols:
 
