@@ -6,16 +6,16 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# DATA FETCH
+# DATA
 # =========================
 def get_intraday(symbol):
     try:
-        data = yf.download(symbol, period="5d", interval="5m")
+        df = yf.download(symbol, period="5d", interval="5m")
 
-        if data is None or data.empty:
+        if df is None or df.empty:
             return None
 
-        data = data.rename(columns={
+        df = df.rename(columns={
             "Close": "c",
             "High": "h",
             "Low": "l",
@@ -23,55 +23,53 @@ def get_intraday(symbol):
             "Volume": "v"
         })
 
-        return data
+        return df
 
-    except Exception:
+    except:
         return None
 
 
 # =========================
-# STRATEGY (FINAL FIXED)
+# STRATEGY (SAFE VERSION)
 # =========================
 def compute_strategy(df):
     try:
+        df = df.copy()
+
         df["ma_fast"] = df["c"].rolling(20).mean()
         df["ma_slow"] = df["c"].rolling(50).mean()
         df["returns"] = df["c"].pct_change()
-
         df["high_lookback"] = df["h"].rolling(10, min_periods=3).max()
 
-        df = df.dropna().copy()
+        df = df.dropna()
 
         if df.empty:
             return None, "Empty after indicators"
 
-        # Convert to numpy arrays (safe)
-        close_vals = df["c"].to_numpy()
-        fast_vals = df["ma_fast"].to_numpy()
-        slow_vals = df["ma_slow"].to_numpy()
-        returns_vals = df["returns"].to_numpy()
-        prev_high = df["high_lookback"].shift(1).bfill().fillna(0).to_numpy()
+        # Shifted breakout level
+        prev_high = df["high_lookback"].shift(1).bfill().fillna(0)
 
-        # Initialize signal
-        signal = np.zeros(len(df))
+        # Build signal safely using pandas (NOT numpy indexing)
+        df["signal"] = 0
 
-        # ENTRY
-        entry = (fast_vals > slow_vals) & (close_vals > prev_high * 0.999)
+        entry_condition = (
+            (df["ma_fast"] > df["ma_slow"]) &
+            (df["c"] > prev_high * 0.999)
+        )
 
-        # EXIT
-        exit_cond = (fast_vals < slow_vals) | (returns_vals < -0.002)
+        exit_condition = (
+            (df["ma_fast"] < df["ma_slow"]) |
+            (df["returns"] < -0.002)
+        )
 
-        signal[entry] = 1
-        signal[exit_cond] = 0
+        df.loc[entry_condition, "signal"] = 1
+        df.loc[exit_condition, "signal"] = 0
 
-        # Fallback (ensures trades exist)
-        if signal.sum() == 0:
-            signal[fast_vals > slow_vals] = 1
+        # Fallback: ensure trades exist
+        if df["signal"].sum() == 0:
+            df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
 
-        # Assign back to dataframe
-        df["signal"] = signal
-
-        df["position"] = df["signal"].shift().fillna(0)
+        df["position"] = df["signal"].shift(1).fillna(0)
         df["strategy"] = df["position"] * df["returns"]
 
         return df, None
@@ -81,7 +79,7 @@ def compute_strategy(df):
 
 
 # =========================
-# BACKTEST ROUTE
+# ROUTES
 # =========================
 @app.route("/")
 def home():
@@ -132,7 +130,7 @@ def backtest(symbol):
 
 
 # =========================
-# START SERVER
+# RUN
 # =========================
 if __name__ == "__main__":
     import os
