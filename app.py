@@ -2,6 +2,7 @@ from flask import Flask, jsonify
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import time
 
 app = Flask(__name__)
 
@@ -10,6 +11,7 @@ app = Flask(__name__)
 # =========================
 LOOKBACK = 20
 ATR_MULT = 3.0
+CACHE_TTL = 300  # 5 minutes
 
 SYMBOLS = [
     "SPY","QQQ","IWM",
@@ -29,23 +31,47 @@ MAX_TOTAL_RISK = 0.8
 
 TRANSACTION_COST = 0.001
 
+# =========================
+# GLOBAL CACHE
+# =========================
 DATA = None
+LAST_FETCH = 0
 
 
 # =========================
-# LOAD DATA
+# SAFE DOWNLOAD (RETRY)
+# =========================
+def safe_download(symbol):
+    for _ in range(3):
+        try:
+            df = yf.download(symbol, period="6mo", interval="1d", progress=False)
+            if df is not None and not df.empty:
+                return df
+        except:
+            pass
+    return None
+
+
+# =========================
+# LOAD DATA (CACHED)
 # =========================
 def load_data():
-    global DATA
+    global DATA, LAST_FETCH
 
-    if DATA is not None:
+    now = time.time()
+
+    # Return cached if fresh
+    if DATA is not None and (now - LAST_FETCH) < CACHE_TTL:
         return DATA
 
     data = {}
 
-    for symbol in SYMBOLS:
+    # 🔥 Ensure SPY loads first
+    symbols_ordered = ["SPY"] + [s for s in SYMBOLS if s != "SPY"]
+
+    for symbol in symbols_ordered:
         try:
-            df = yf.download(symbol, period="6mo", interval="1d", progress=False)
+            df = safe_download(symbol)
 
             if df is None or df.empty:
                 continue
@@ -61,6 +87,7 @@ def load_data():
                 "Volume": "v"
             })
 
+            # Indicators
             df["ma"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
@@ -80,6 +107,8 @@ def load_data():
             print(f"ERROR loading {symbol}: {e}")
 
     DATA = data
+    LAST_FETCH = now
+
     return data
 
 
@@ -88,11 +117,14 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "live-signals-enabled"})
+    return jsonify({
+        "status": "production-ready",
+        "endpoints": ["/signals", "/portfolio"]
+    })
 
 
 # =========================
-# SIGNALS ENDPOINT 🔥
+# SIGNALS (PRODUCTION GRADE)
 # =========================
 @app.route("/signals")
 def signals():
@@ -100,10 +132,17 @@ def signals():
     data = load_data()
 
     signals = []
+    warnings = []
 
     spy_df = data.get("SPY")
+
     if spy_df is None:
-        return jsonify({"error": "SPY missing"})
+        return jsonify({
+            "date": None,
+            "market": "unknown",
+            "signals": [],
+            "warning": "SPY data unavailable"
+        })
 
     last_date = spy_df.index[-1]
 
@@ -118,16 +157,20 @@ def signals():
     # Rank symbols
     rs = []
     for symbol, df in data.items():
-        if last_date in df.index:
-            rs.append((symbol, df.loc[last_date]["momentum"]))
+        try:
+            if last_date in df.index:
+                rs.append((symbol, df.loc[last_date]["momentum"]))
+        except:
+            warnings.append(f"{symbol} data issue")
 
     rs = sorted(rs, key=lambda x: x[1], reverse=True)
     top_symbols = [s[0] for s in rs[:TOP_N]]
 
     for symbol in top_symbols:
 
-        df = data[symbol]
-        if last_date not in df.index:
+        df = data.get(symbol)
+
+        if df is None or last_date not in df.index:
             continue
 
         row = df.loc[last_date]
@@ -150,12 +193,13 @@ def signals():
     return jsonify({
         "date": str(last_date),
         "market": "bullish",
-        "signals": signals
+        "signals": signals,
+        "warnings": warnings
     })
 
 
 # =========================
-# PORTFOLIO (UNCHANGED)
+# PORTFOLIO (UNCHANGED CORE)
 # =========================
 @app.route("/portfolio")
 def portfolio():
@@ -185,19 +229,17 @@ def portfolio():
         if spy_df.loc[date]["c"] <= spy_df.loc[date]["ma"]:
             continue
 
+        # exits
         for symbol in list(positions.keys()):
-
             df = data[symbol]
             if date not in df.index:
                 continue
 
             row = df.loc[date]
-
             peak_price[symbol] = max(peak_price[symbol], row["c"])
             stop = peak_price[symbol] - (ATR_MULT * row["atr"])
 
             if row["c"] < stop:
-
                 pct = (row["c"] - entry_price[symbol]) / entry_price[symbol]
                 pct -= TRANSACTION_COST
 
@@ -210,6 +252,7 @@ def portfolio():
 
                 trades += 1
 
+        # ranking
         rs = []
         for symbol, df in data.items():
             if date in df.index:
@@ -221,8 +264,8 @@ def portfolio():
         total_allocated = sum(position_size.values())
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
+        # entries
         for symbol in top_symbols:
-
             if symbol in positions:
                 continue
 
