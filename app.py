@@ -6,10 +6,11 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# CONFIG (TREND CAPTURE 🔥)
+# CONFIG
 # =========================
 LOOKBACK = 20
-ATR_MULT = 4.0  # 🔥 WIDER STOP
+ATR_MULT = 4.0  # trailing stop
+INITIAL_STOP_MULT = 2.0  # 🔥 new initial stop
 
 SYMBOLS = [
     "SPY","QQQ","IWM",
@@ -23,7 +24,6 @@ SYMBOLS = [
 
 INITIAL_CAPITAL = 1000
 
-# 🔥 BALANCED SETTINGS
 RISK_PER_TRADE = 0.12
 MAX_POSITIONS = 4
 TOP_N = 4
@@ -36,7 +36,7 @@ DATA = None
 
 
 # =========================
-# LOAD DATA (LAZY)
+# LOAD DATA
 # =========================
 def load_data():
     global DATA
@@ -64,7 +64,6 @@ def load_data():
                 "Volume": "v"
             })
 
-            # Indicators
             df["ma_200"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
@@ -92,7 +91,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "trend-capture-system-live"})
+    return jsonify({"status": "risk-managed-system-live"})
 
 
 @app.route("/portfolio")
@@ -115,14 +114,13 @@ def portfolio():
     entry_price = {}
     peak_price = {}
     position_size = {}
+    initial_stop = {}  # 🔥 new
 
     trades = 0
 
     for date in all_dates:
 
-        # =========================
         # MARKET REGIME
-        # =========================
         if date not in spy_df.index:
             continue
 
@@ -130,7 +128,7 @@ def portfolio():
             continue
 
         # =========================
-        # EXITS (IMPROVED 🔥)
+        # EXITS (DUAL STOP SYSTEM)
         # =========================
         for symbol in list(positions.keys()):
 
@@ -143,8 +141,8 @@ def portfolio():
 
             peak_price[symbol] = max(peak_price[symbol], row["c"])
 
-            # 🔥 ONLY TRAILING STOP (NO MA EXIT)
-            stop = peak_price[symbol] - (ATR_MULT * row["atr"])
+            trailing_stop = peak_price[symbol] - (ATR_MULT * row["atr"])
+            stop = max(trailing_stop, initial_stop[symbol])  # 🔥 key logic
 
             if row["c"] < stop:
 
@@ -157,6 +155,7 @@ def portfolio():
                 del entry_price[symbol]
                 del peak_price[symbol]
                 del position_size[symbol]
+                del initial_stop[symbol]
 
                 trades += 1
 
@@ -176,7 +175,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (UNCHANGED — WORKING)
+        # ENTRIES
         # =========================
         for symbol in top_symbols:
 
@@ -211,6 +210,9 @@ def portfolio():
                 entry_price[symbol] = row["c"]
                 peak_price[symbol] = row["c"]
                 position_size[symbol] = risk
+
+                # 🔥 SET INITIAL STOP
+                initial_stop[symbol] = row["c"] - (INITIAL_STOP_MULT * row["atr"])
 
                 available_risk -= risk
 
