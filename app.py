@@ -9,36 +9,30 @@ import joblib
 app = Flask(__name__)
 
 def compute_strategy(df):
-
-    # Indicators
-    df["ma_fast"] = df["c"].rolling(10).mean()
-    df["ma_slow"] = df["c"].rolling(30).mean()
-    df["volatility"] = df["c"].pct_change().rolling(10).std()
+    df["ma_fast"] = df["c"].rolling(3).mean()
+    df["ma_slow"] = df["c"].rolling(5).mean()
     df["returns"] = df["c"].pct_change()
 
-    # Initialize signal
     df["signal"] = 0
 
-    # Entry: Trend + Pullback + Low volatility
-    df.loc[
-        (df["ma_fast"] > df["ma_slow"]),             # uptrend
-        "signal"
-    ] = 1
+    # Simple crossover (guarantees signals)
+    df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
+    df.loc[df["ma_fast"] < df["ma_slow"], "signal"] = -1
 
-    # Exit: trend breaks
-    df.loc[
-        (df["ma_fast"] < df["ma_slow"]),
-        "signal"
-    ] = 0
-
+    # Only drop rows where indicators are missing
     df = df.dropna(subset=["ma_fast", "ma_slow", "returns"])
 
-    # Strategy returns (position-based, not constant flipping)
+    # Build position (carry forward)
     df["position"] = df["signal"].replace(0, None).ffill().fillna(0)
+
+    # Strategy returns
     df["strategy_returns"] = df["returns"] * df["position"].shift(1)
 
-    if df.empty:
-        return df
+    # FINAL safety check (DO NOT REMOVE EVERYTHING)
+    if len(df) < 5:
+        return pd.DataFrame()  # triggers your error safely
+
+    return df
 
 @app.route('/')
 def home():
