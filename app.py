@@ -19,7 +19,8 @@ def compute_strategy(df):
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &
         (df["returns"] < -0.002) &
-        ((df[ma_fast"] - df["ma_slow"]) / df["ma_slow] > 0.001)  # stronger pullback
+        ((df[ma_fast"] - df["ma_slow"]) / df["ma_slow] > 0.001)
+    ),   # trend strength finder
         "signal"
     ] = 1
 
