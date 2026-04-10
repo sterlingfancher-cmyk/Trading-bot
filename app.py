@@ -18,7 +18,7 @@ def compute_strategy(df):
     # ENTRY
     strength = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
 
-    print("Max return:", df[returns"].max())
+    print("Max return:", df["returns"].max())
     print("Max strength:", strength.max())
     
     df.loc[
