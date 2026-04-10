@@ -25,35 +25,49 @@ TOP_N = 3
 
 TRANSACTION_COST = 0.001
 MAX_TOTAL_RISK = 0.3
-
 BREAKOUT_LOOKBACK = 5
 
 
+# =========================
+# SAFE DATA FETCH
+# =========================
 def get_data(symbol):
-    df = yf.download(symbol, period="5y", interval="1d", progress=False)
+    try:
+        df = yf.download(symbol, period="5y", interval="1d", progress=False)
 
+        if df is None or df.empty:
+            return None
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
+        df = df.rename(columns={
+            "Open": "o",
+            "High": "h",
+            "Low": "l",
+            "Close": "c",
+            "Volume": "v"
+        })
+
+        return df[["o", "h", "l", "c", "v"]].dropna()
+
+    except Exception as e:
+        print(f"DATA ERROR: {symbol} -> {e}")
+        return None
+
+
+# =========================
+# SAFE PREP
+# =========================
+def prepare(df):
     if df is None or df.empty:
         return None
 
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-
-    df = df.rename(columns={
-        "Open": "o",
-        "High": "h",
-        "Low": "l",
-        "Close": "c",
-        "Volume": "v"
-    })
-
-    return df[["o", "h", "l", "c", "v"]].dropna()
-
-
-def prepare(df):
     df["ma_200"] = df["c"].rolling(200).mean()
     df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
 
     prev_close = df["c"].shift(1)
+
     tr = np.maximum(
         df["h"] - df["l"],
         np.maximum(abs(df["h"] - prev_close), abs(df["l"] - prev_close))
@@ -66,30 +80,39 @@ def prepare(df):
     return df.dropna()
 
 
+# =========================
+# PORTFOLIO
+# =========================
 @app.route("/portfolio")
 def portfolio():
 
     data = {}
-    for symbol in SYMBOLS:
-        df = get_data(symbol)
-        if df is not None:
-            data[symbol] = prepare(df)
 
-    spy_df = prepare(get_data("SPY"))
+    for symbol in SYMBOLS:
+        df = prepare(get_data(symbol))
+        if df is not None:
+            data[symbol] = df
+
+    # 🔥 SAFE SPY LOAD
+    spy_raw = get_data("SPY")
+    spy_df = prepare(spy_raw)
+
+    if spy_df is None:
+        return jsonify({"error": "SPY data failed to load"})
+
+    if len(data) == 0:
+        return jsonify({"error": "No market data loaded"})
 
     all_dates = sorted(set().union(*[df.index for df in data.values()]))
 
     capital = INITIAL_CAPITAL
-    equity_curve = []
-
     positions = {}
     entry_price = {}
     peak_price = {}
     position_size = {}
 
     trade_log = []
-
-    breakout_age = {s: 999 for s in SYMBOLS}
+    breakout_age = {s: 999 for s in data.keys()}
 
     for date in all_dates:
 
@@ -98,11 +121,11 @@ def portfolio():
             continue
 
         if spy_df.loc[date]["c"] <= spy_df.loc[date]["ma_200"]:
-            equity_curve.append(capital)
             continue
 
         # UPDATE BREAKOUT STATE
         for symbol, df in data.items():
+
             if date not in df.index:
                 continue
 
@@ -115,7 +138,9 @@ def portfolio():
 
         # EXITS
         for symbol in list(positions.keys()):
+
             df = data[symbol]
+
             if date not in df.index:
                 continue
 
@@ -125,6 +150,7 @@ def portfolio():
             stop = peak_price[symbol] - (ATR_MULT * row["atr"])
 
             if row["c"] < stop or row["c"] < row["ma_200"]:
+
                 pct = (row["c"] - entry_price[symbol]) / entry_price[symbol]
                 pct -= TRANSACTION_COST
 
@@ -132,8 +158,6 @@ def portfolio():
 
                 trade_log.append({
                     "symbol": symbol,
-                    "entry": entry_price[symbol],
-                    "exit": row["c"],
                     "return_pct": round(pct, 4)
                 })
 
@@ -144,6 +168,7 @@ def portfolio():
 
         # RELATIVE STRENGTH
         rs = []
+
         for symbol, df in data.items():
             if date in df.index:
                 rs.append((symbol, df.loc[date]["momentum"]))
@@ -154,7 +179,7 @@ def portfolio():
         total_allocated = sum(position_size.values())
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
-        # ENTRIES (FIXED PULLBACK)
+        # ENTRIES
         for symbol in top_symbols:
 
             if symbol in positions:
@@ -164,6 +189,7 @@ def portfolio():
                 break
 
             df = data[symbol]
+
             if date not in df.index:
                 continue
 
@@ -173,7 +199,6 @@ def portfolio():
             trend = row["c"] > row["ma_200"]
             recent_breakout = breakout_age[symbol] <= BREAKOUT_LOOKBACK
 
-            # 🔥 FIXED PULLBACK
             pullback = row["c"] <= row["high_break"] * 1.02
             bounce = row["c"] > prev["c"]
             vol = row["atr_change"] > 0
@@ -189,21 +214,12 @@ def portfolio():
 
                 available_risk -= risk
 
-        equity_curve.append(capital)
-
-    returns = pd.Series(equity_curve).pct_change().dropna()
-
-    sharpe = returns.mean() / (returns.std() + 1e-9)
-    max_dd = (pd.Series(equity_curve) / pd.Series(equity_curve).cummax() - 1).min()
-
     return jsonify({
         "final_balance": round(capital, 2),
-        "trades": len(trade_log),
-        "sharpe": round(sharpe, 3),
-        "max_drawdown": round(max_dd, 3)
+        "trades": len(trade_log)
     })
 
 
 @app.route("/")
 def home():
-    return jsonify({"status": "final-fixed-system"})
+    return jsonify({"status": "running-safe"})
