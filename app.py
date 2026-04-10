@@ -7,10 +7,10 @@ import itertools
 app = Flask(__name__)
 
 # =========================
-# DATA
+# DATA (DAILY NOW)
 # =========================
-def get_intraday(symbol):
-    df = yf.download(symbol, period="60d", interval="15m", progress=False)
+def get_data(symbol):
+    df = yf.download(symbol, period="2y", interval="1d", progress=False)
 
     if df is None or df.empty:
         return None
@@ -30,16 +30,15 @@ def get_intraday(symbol):
 
 
 # =========================
-# STRATEGY (MULTI-FACTOR)
+# STRATEGY (DAILY EDGE)
 # =========================
-def run_strategy(df, fast, slow, vol_thresh, atr_mult):
+def run_strategy(df, fast, slow, atr_mult):
     df = df.copy()
 
     df["ma_fast"] = df["c"].rolling(fast).mean()
     df["ma_slow"] = df["c"].rolling(slow).mean()
 
     df["returns"] = df["c"].pct_change()
-    df["vol"] = df["returns"].rolling(10).std()
 
     prev_close = df["c"].shift(1)
     tr = np.maximum(
@@ -64,13 +63,12 @@ def run_strategy(df, fast, slow, vol_thresh, atr_mult):
         row = df.iloc[i]
 
         trend = row["ma_fast"] > row["ma_slow"]
-        pullback = row["c"] < row["ma_fast"]
+        pullback = row["c"] < row["ma_fast"] * 1.02
         recovery = row["returns"] > 0
-        volatility = row["vol"] > vol_thresh
 
         # ENTRY
         if position == 0:
-            if trend and pullback and recovery and volatility:
+            if trend and pullback and recovery:
                 position = 1
                 entry_price = row["c"]
                 entry_atr = row["atr"]
@@ -105,12 +103,12 @@ def run_strategy(df, fast, slow, vol_thresh, atr_mult):
 # =========================
 @app.route("/backtest/<symbol>")
 def backtest(symbol):
-    df = get_intraday(symbol)
+    df = get_data(symbol)
 
     if df is None:
         return jsonify({"error": "Data fetch failed"})
 
-    result = run_strategy(df, 10, 30, 0.0005, 1.5)
+    result = run_strategy(df, 50, 200, 2.0)
 
     if result is None:
         return jsonify({"error": "No trades"})
@@ -128,25 +126,24 @@ def backtest(symbol):
 # =========================
 @app.route("/optimize/<symbol>")
 def optimize(symbol):
-    df = get_intraday(symbol)
+    df = get_data(symbol)
 
     if df is None:
         return jsonify({"error": "Data fetch failed"})
 
     best = {"score": -999}
 
-    fast_range = [5, 8, 10, 12]
-    slow_range = [15, 20, 30, 40]
-    vol_range = [0.0002, 0.0005, 0.0008]
-    atr_range = [1.0, 1.5, 2.0]
+    fast_range = [20, 50, 75]
+    slow_range = [100, 150, 200]
+    atr_range = [1.5, 2.0, 2.5]
 
-    for fast, slow, vol, atr in itertools.product(
-        fast_range, slow_range, vol_range, atr_range
+    for fast, slow, atr in itertools.product(
+        fast_range, slow_range, atr_range
     ):
         if fast >= slow:
             continue
 
-        result = run_strategy(df, fast, slow, vol, atr)
+        result = run_strategy(df, fast, slow, atr)
 
         if result is None:
             continue
@@ -154,11 +151,8 @@ def optimize(symbol):
         score = (
             result["sharpe"] * 2 +
             (result["balance"] - 1000) * 0.1 +
-            min(result["trades"], 25) * 0.02
+            min(result["trades"], 50) * 0.01
         )
-
-        if result["trades"] < 8:
-            score *= 0.5
 
         if score > best["score"]:
             best = {
@@ -169,7 +163,6 @@ def optimize(symbol):
                 "params": {
                     "fast": fast,
                     "slow": slow,
-                    "vol_thresh": vol,
                     "atr_mult": atr
                 }
             }
