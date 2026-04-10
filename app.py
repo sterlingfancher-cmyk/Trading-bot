@@ -6,7 +6,7 @@ import yfinance as yf
 app = Flask(__name__)
 
 # =========================
-# DATA
+# DATA (FIXED MULTI-INDEX)
 # =========================
 def get_intraday(symbol):
     try:
@@ -14,6 +14,10 @@ def get_intraday(symbol):
 
         if df is None or df.empty:
             return None
+
+        # 🔥 FIX: Flatten multi-index columns
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
         df = df.rename(columns={
             "Close": "c",
@@ -25,19 +29,19 @@ def get_intraday(symbol):
 
         return df
 
-    except:
+    except Exception as e:
         return None
 
 
 # =========================
-# STRATEGY (NUMPY ONLY LOGIC)
+# STRATEGY (SIMPLE + STABLE)
 # =========================
 def compute_strategy(df):
     try:
         df = df.copy()
 
-        df["ma_fast"] = df["c"].rolling(20).mean()
-        df["ma_slow"] = df["c"].rolling(50).mean()
+        df["ma_fast"] = df["c"].rolling(10).mean()
+        df["ma_slow"] = df["c"].rolling(30).mean()
         df["returns"] = df["c"].pct_change()
 
         df = df.dropna()
@@ -45,36 +49,12 @@ def compute_strategy(df):
         if df.empty:
             return None, "Empty after indicators"
 
-        # Convert to numpy arrays
-        close_vals = df["c"].to_numpy()
-        fast_vals = df["ma_fast"].to_numpy()
-        slow_vals = df["ma_slow"].to_numpy()
-        returns_vals = df["returns"].to_numpy()
+        df["signal"] = 0
 
-        # Pullback logic (numpy only)
-        pullback = close_vals < fast_vals
-        recovery = returns_vals > 0
-        trend = fast_vals > slow_vals
+        # SIMPLE TREND (NO NUMPY, NO ALIGNMENT ISSUES)
+        df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
+        df.loc[df["ma_fast"] < df["ma_slow"], "signal"] = 0
 
-        # Initialize signal
-        signal = np.zeros(len(df))
-
-        # ENTRY
-        entry = trend & pullback & recovery
-
-        # EXIT
-        exit_cond = (~trend) | (returns_vals < -0.002) | (returns_vals > 0.01)
-
-        signal[entry] = 1
-        signal[exit_cond] = 0
-
-        # Fallback (ensures trades exist)
-        if signal.sum() == 0:
-            signal[trend] = 1
-
-        df["signal"] = signal
-
-        # Safe pandas ops (no comparisons)
         df["position"] = df["signal"].shift(1).fillna(0)
         df["strategy"] = df["position"] * df["returns"]
 
@@ -111,9 +91,6 @@ def backtest(symbol):
         df["equity"] = (1 + df["strategy"]).cumprod() * 1000
 
         trades = int((df["signal"].diff().abs() > 0).sum())
-
-        if trades == 0:
-            return jsonify({"error": "No trades generated"})
 
         total_return = df["equity"].iloc[-1]
         avg_pnl = df["strategy"].mean()
