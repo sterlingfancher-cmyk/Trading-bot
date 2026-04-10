@@ -9,6 +9,8 @@ import joblib
 app = Flask(__name__)
 
 def compute_strategy(df):
+    print("NEW VERSION RUNNING") 
+    
     df["ma_fast"] = df["c"].rolling(20).mean()
     df["ma_slow"] = df["c"].rolling(50).mean()
     df["returns"] = df["c"].pct_change()
@@ -30,6 +32,7 @@ def compute_strategy(df):
         "signal"
     ] = strength
 
+    print("Signal min/max:", df["signal"].min(), df["signal"].max())
     # APPLY SCALING HERE
     df["signal"] = (df["signal"] / 0.01).clip(0, 1)
 
