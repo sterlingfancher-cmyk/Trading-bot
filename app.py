@@ -7,10 +7,10 @@ import itertools
 app = Flask(__name__)
 
 # =========================
-# DATA (DAILY NOW)
+# DATA
 # =========================
 def get_data(symbol):
-    df = yf.download(symbol, period="2y", interval="1d", progress=False)
+    df = yf.download(symbol, period="5y", interval="1d", progress=False)
 
     if df is None or df.empty:
         return None
@@ -30,15 +30,15 @@ def get_data(symbol):
 
 
 # =========================
-# STRATEGY (DAILY EDGE)
+# STRATEGY (LOW FREQ BREAKOUT)
 # =========================
-def run_strategy(df, fast, slow, atr_mult):
+def run_strategy(df, lookback, atr_mult):
     df = df.copy()
 
-    df["ma_fast"] = df["c"].rolling(fast).mean()
-    df["ma_slow"] = df["c"].rolling(slow).mean()
+    df["ma_200"] = df["c"].rolling(200).mean()
 
-    df["returns"] = df["c"].pct_change()
+    # breakout (shift to avoid lookahead)
+    df["high_break"] = df["h"].rolling(lookback).max().shift(1)
 
     prev_close = df["c"].shift(1)
     tr = np.maximum(
@@ -50,37 +50,37 @@ def run_strategy(df, fast, slow, atr_mult):
     )
     df["atr"] = tr.rolling(14).mean()
 
+    df["atr_rising"] = df["atr"] > df["atr"].shift(1)
+
     df = df.dropna()
 
     capital = 1000
     position = 0
     entry_price = 0
-    entry_atr = 0
+    peak_price = 0
 
     trades = []
 
     for i in range(len(df)):
         row = df.iloc[i]
 
-        trend = row["ma_fast"] > row["ma_slow"]
-        pullback = row["c"] < row["ma_fast"] * 1.02
-        recovery = row["returns"] > 0
+        trend = row["c"] > row["ma_200"]
+        breakout = row["c"] > row["high_break"]
+        volatility = row["atr_rising"]
 
         # ENTRY
         if position == 0:
-            if trend and pullback and recovery:
+            if trend and breakout and volatility:
                 position = 1
                 entry_price = row["c"]
-                entry_atr = row["atr"]
+                peak_price = row["c"]
 
-        # EXIT
+        # EXIT (trailing stop)
         else:
-            stop = entry_price - (atr_mult * entry_atr)
+            peak_price = max(peak_price, row["c"])
+            stop = peak_price - (atr_mult * row["atr"])
 
-            if (
-                row["c"] < stop or
-                row["ma_fast"] < row["ma_slow"]
-            ):
+            if row["c"] < stop:
                 pct = (row["c"] - entry_price) / entry_price
                 capital *= (1 + pct)
                 trades.append(pct)
@@ -108,7 +108,7 @@ def backtest(symbol):
     if df is None:
         return jsonify({"error": "Data fetch failed"})
 
-    result = run_strategy(df, 50, 200, 2.0)
+    result = run_strategy(df, 20, 2.0)
 
     if result is None:
         return jsonify({"error": "No trades"})
@@ -133,26 +133,24 @@ def optimize(symbol):
 
     best = {"score": -999}
 
-    fast_range = [20, 50, 75]
-    slow_range = [100, 150, 200]
-    atr_range = [1.5, 2.0, 2.5]
+    lookback_range = [20, 50, 100]
+    atr_range = [1.5, 2.0, 2.5, 3.0]
 
-    for fast, slow, atr in itertools.product(
-        fast_range, slow_range, atr_range
-    ):
-        if fast >= slow:
-            continue
+    for look, atr in itertools.product(lookback_range, atr_range):
 
-        result = run_strategy(df, fast, slow, atr)
+        result = run_strategy(df, look, atr)
 
         if result is None:
             continue
 
         score = (
             result["sharpe"] * 2 +
-            (result["balance"] - 1000) * 0.1 +
-            min(result["trades"], 50) * 0.01
+            (result["balance"] - 1000) * 0.2 +
+            min(result["trades"], 20) * 0.01
         )
+
+        if result["trades"] < 3:
+            score *= 0.5
 
         if score > best["score"]:
             best = {
@@ -161,8 +159,7 @@ def optimize(symbol):
                 "sharpe": round(result["sharpe"], 4),
                 "trades": result["trades"],
                 "params": {
-                    "fast": fast,
-                    "slow": slow,
+                    "lookback": look,
                     "atr_mult": atr
                 }
             }
