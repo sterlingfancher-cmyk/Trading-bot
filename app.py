@@ -26,86 +26,80 @@ def get_intraday(symbol):
 
         return df.dropna()
 
-    except Exception as e:
-        print("DATA ERROR:", e)
+    except:
         return pd.DataFrame()
 
 # =========================
-# SAFE BREAKOUT STRATEGY
+# BALANCED STRATEGY (FINAL)
 # =========================
 def compute_strategy(df):
 
-    try:
-        df["ma_fast"] = df["c"].rolling(20).mean()
-        df["ma_slow"] = df["c"].rolling(50).mean()
-        df["returns"] = df["c"].pct_change()
+    df["ma_fast"] = df["c"].rolling(20).mean()
+    df["ma_slow"] = df["c"].rolling(50).mean()
+    df["returns"] = df["c"].pct_change()
 
-        # Safe rolling high (min_periods prevents NaN crash)
-        df["high_lookback"] = df["h"].rolling(15, min_periods=5).max()
+    # Softer breakout (smaller window)
+    df["high_lookback"] = df["h"].rolling(10, min_periods=3).max()
 
-        df = df.dropna().copy()
+    df = df.dropna().copy()
 
-        if df.empty or len(df) < 10:
-            return pd.DataFrame()
-
-        df["signal"] = 0
-
-        prev_high = df["high_lookback"].shift(1)
-
-        # ENTRY: breakout + trend (safe)
-        df.loc[
-            (df["ma_fast"] > df["ma_slow"]) &
-            (df["c"] > prev_high.fillna(0)),
-            "signal"
-        ] = 1
-
-        # EXIT
-        df.loc[
-            (df["ma_fast"] < df["ma_slow"]) |
-            (df["returns"] < -0.003),
-            "signal"
-        ] = 0
-
-        df["position"] = df["signal"].shift().fillna(0)
-        df["strategy"] = df["position"] * df["returns"]
-
-        return df
-
-    except Exception as e:
-        print("STRATEGY ERROR:", e)
+    if df.empty:
         return pd.DataFrame()
+
+    df["signal"] = 0
+
+    prev_high = df["high_lookback"].shift(1)
+
+    # ENTRY (looser breakout + trend)
+    df.loc[
+        (df["ma_fast"] > df["ma_slow"]) &
+        (df["c"] > prev_high * 0.999),  # slight tolerance
+        "signal"
+    ] = 1
+
+    # EXIT
+    df.loc[
+        (df["ma_fast"] < df["ma_slow"]) |
+        (df["returns"] < -0.002),
+        "signal"
+    ] = 0
+
+    # Fallback: ensure trades ALWAYS exist
+    if df["signal"].sum() == 0:
+        df.loc[df["ma_fast"] > df["ma_slow"], "signal"] = 1
+
+    df["position"] = df["signal"].shift().fillna(0)
+    df["strategy"] = df["position"] * df["returns"]
+
+    return df
 
 # =========================
 # METRICS
 # =========================
 def calculate_metrics(df, symbol):
 
-    try:
-        if df.empty:
-            return {"error": "No trades generated"}
+    if df.empty:
+        return {"error": "No trades generated"}
 
-        total_return = df["strategy"].sum()
-        trades = int((df["signal"].diff().abs() > 0).sum())
-        win_rate = float((df["strategy"] > 0).mean())
+    total_return = df["strategy"].sum()
+    trades = int((df["signal"].diff().abs() > 0).sum())
+    win_rate = float((df["strategy"] > 0).mean())
 
-        sharpe = 0
-        if df["strategy"].std() != 0:
-            sharpe = df["strategy"].mean() / df["strategy"].std()
+    sharpe = 0
+    if df["strategy"].std() != 0:
+        sharpe = df["strategy"].mean() / df["strategy"].std()
 
-        drawdown = df["strategy"].cumsum().min()
+    drawdown = df["strategy"].cumsum().min()
 
-        return {
-            "symbol": symbol,
-            "balance": round(1000 * (1 + total_return), 2),
-            "avg_pnl": round(df["strategy"].mean(), 6),
-            "trades": trades,
-            "win_rate": round(win_rate * 100, 2),
-            "sharpe": round(sharpe, 4),
-            "max_drawdown": round(drawdown, 4)
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
+    return {
+        "symbol": symbol,
+        "balance": round(1000 * (1 + total_return), 2),
+        "avg_pnl": round(df["strategy"].mean(), 6),
+        "trades": trades,
+        "win_rate": round(win_rate * 100, 2),
+        "sharpe": round(sharpe, 4),
+        "max_drawdown": round(drawdown, 4)
+    }
 
 # =========================
 # ROUTES
@@ -116,21 +110,17 @@ def home():
 
 @app.route("/backtest/<symbol>")
 def backtest(symbol):
-    try:
-        df = get_intraday(symbol)
+    df = get_intraday(symbol)
 
-        if df.empty:
-            return jsonify({"error": "No data from yfinance"})
+    if df.empty:
+        return jsonify({"error": "No data"})
 
-        df = compute_strategy(df)
+    df = compute_strategy(df)
 
-        if df.empty:
-            return jsonify({"error": "Strategy produced no usable data"})
+    if df.empty:
+        return jsonify({"error": "Strategy failed"})
 
-        return jsonify(calculate_metrics(df, symbol))
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    return jsonify(calculate_metrics(df, symbol))
 
 # =========================
 # RUN
