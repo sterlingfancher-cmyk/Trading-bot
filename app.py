@@ -29,6 +29,9 @@ TOP_N = 3
 TRANSACTION_COST = 0.001
 MAX_TOTAL_RISK = 0.3
 
+# 🔥 BREAKOUT MEMORY
+BREAKOUT_LOOKBACK = 5
+
 
 # =========================
 # DATA
@@ -105,6 +108,9 @@ def portfolio():
 
     trade_log = []
 
+    # 🔥 BREAKOUT STATE TRACKING
+    breakout_age = {s: 999 for s in SYMBOLS}
+
     for date in all_dates:
 
         # =========================
@@ -114,11 +120,24 @@ def portfolio():
             continue
 
         spy_row = spy_df.loc[date]
-        market_trend = spy_row["c"] > spy_row["ma_200"]
-
-        if not market_trend:
+        if spy_row["c"] <= spy_row["ma_200"]:
             equity_curve.append(capital)
             continue
+
+        # =========================
+        # UPDATE BREAKOUT STATE
+        # =========================
+        for symbol, df in data.items():
+
+            if date not in df.index:
+                continue
+
+            row = df.loc[date]
+
+            if row["c"] > row["high_break"]:
+                breakout_age[symbol] = 0
+            else:
+                breakout_age[symbol] += 1
 
         # =========================
         # EXITS
@@ -174,7 +193,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (🔥 PULLBACK SYSTEM)
+        # ENTRIES (FIXED PULLBACK)
         # =========================
         for symbol in top_symbols:
 
@@ -194,20 +213,17 @@ def portfolio():
             row = df.loc[date]
             prev_row = df.shift(1).loc[date]
 
-            # --- CONDITIONS ---
             trend = row["c"] > row["ma_200"]
 
-            breakout = row["c"] > row["high_break"]
+            # 🔥 breakout happened recently (state-based)
+            recent_breakout = breakout_age[symbol] <= BREAKOUT_LOOKBACK
 
             pullback = row["c"] < row["ma_50"]
-
             bounce = row["c"] > prev_row["c"]
-
             vol = row["atr_change"] > 0
 
-            if trend and breakout and pullback and bounce and vol:
+            if trend and recent_breakout and pullback and bounce and vol:
 
-                # Dynamic sizing (simplified for stability)
                 risk_amount = min(capital * RISK_PER_TRADE, available_risk)
 
                 positions[symbol] = True
@@ -243,7 +259,7 @@ def portfolio():
 
 @app.route("/")
 def home():
-    return jsonify({"status": "production-ready-pullback"})
+    return jsonify({"status": "pullback-system-ready"})
 
 
 if __name__ == "__main__":
