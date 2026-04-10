@@ -27,12 +27,11 @@ MAX_TOTAL_RISK = 0.8
 DB_NAME = "trades.db"
 
 # =========================
-# DB SETUP
+# DATABASE
 # =========================
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-
     c.execute("""
     CREATE TABLE IF NOT EXISTS trades (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,35 +42,26 @@ def init_db():
         timestamp TEXT
     )
     """)
-
     conn.commit()
     conn.close()
 
-init_db()
-
-# =========================
-# SAVE TRADE
-# =========================
 def save_trade(symbol, side, shares, price):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-
     c.execute("""
     INSERT INTO trades (symbol, side, shares, price, timestamp)
     VALUES (?, ?, ?, ?, datetime('now'))
     """, (symbol, side, shares, price))
-
     conn.commit()
     conn.close()
 
-# =========================
-# LOAD TRADES
-# =========================
 def get_trades():
     conn = sqlite3.connect(DB_NAME)
     df = pd.read_sql("SELECT * FROM trades", conn)
     conn.close()
     return df
+
+init_db()
 
 # =========================
 # ALPACA CONFIG
@@ -88,19 +78,44 @@ if ALPACA_API_KEY and ALPACA_SECRET_KEY:
     api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL, api_version='v2')
 
 # =========================
-# DATA
+# GLOBAL DATA
 # =========================
 DATA = {}
+LAST_UPDATE = None
+
+# =========================
+# DATA FUNCTIONS
+# =========================
+def safe_download(symbol):
+    try:
+        df = yf.download(symbol, period="6mo", interval="1d", progress=False, threads=False)
+        if df is not None and not df.empty:
+            return df
+    except:
+        pass
+    return None
 
 def generate_fake_data():
     dates = pd.date_range(end=pd.Timestamp.today().normalize(), periods=120)
     price = np.linspace(100, 120, 120)
-    df = pd.DataFrame({"c": price, "h": price+1, "l": price-1}, index=dates)
+
+    df = pd.DataFrame({
+        "c": price,
+        "h": price + 1,
+        "l": price - 1
+    }, index=dates)
+
     return df
 
 def process_data(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
     if "Close" in df.columns:
         df = df.rename(columns={"Close":"c","High":"h","Low":"l"})
+
+    if not all(col in df.columns for col in ["c","h","l"]):
+        return None
 
     df["ma"] = df["c"].rolling(50).mean()
     df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
@@ -112,28 +127,66 @@ def process_data(df):
     df["atr_change"] = df["atr"].pct_change()
     df["momentum"] = df["c"] / df["c"].shift(20)
 
-    return df.dropna()
+    df = df.dropna()
 
+    if df.empty:
+        return None
+
+    return df
+
+# =========================
+# LOAD DATA
+# =========================
 def load_data():
-    global DATA
+    global DATA, LAST_UPDATE
+
     new_data = {}
 
     for s in SYMBOLS:
-        try:
-            df = yf.download(s, period="6mo", interval="1d", progress=False, threads=False)
-            if df is None or df.empty:
-                df = generate_fake_data()
-        except:
+        df = safe_download(s)
+
+        if df is None:
             df = generate_fake_data()
 
         df = process_data(df)
-        new_data[s] = df
+
+        if df is not None:
+            new_data[s] = df
+
+    if "SPY" not in new_data:
+        new_data["SPY"] = process_data(generate_fake_data())
 
     DATA = new_data
+    LAST_UPDATE = time.time()
 
-# initial + background
+# Initial load
 load_data()
-threading.Thread(target=lambda: [load_data() or time.sleep(REFRESH_INTERVAL) for _ in iter(int,1)], daemon=True).start()
+
+# Background refresh
+def background_loader():
+    while True:
+        load_data()
+        time.sleep(REFRESH_INTERVAL)
+
+threading.Thread(target=background_loader, daemon=True).start()
+
+# =========================
+# ROUTES
+# =========================
+
+# 🔥 ROOT (FIXES YOUR ERROR)
+@app.route("/")
+def home():
+    return jsonify({
+        "status": "live",
+        "message": "trading system running",
+        "symbols_loaded": len(DATA),
+        "endpoints": [
+            "/signals",
+            "/auto_trade",
+            "/portfolio"
+        ]
+    })
 
 # =========================
 # SIGNALS
@@ -141,19 +194,29 @@ threading.Thread(target=lambda: [load_data() or time.sleep(REFRESH_INTERVAL) for
 @app.route("/signals")
 def signals():
 
+    capital = float(request.args.get("capital", INITIAL_CAPITAL))
+
     spy = DATA["SPY"]
     last = spy.index[-1]
 
     if spy.loc[last]["c"] <= spy.loc[last]["ma"]:
         return jsonify({"market":"bearish","signals":[]})
 
-    rs = [(s,DATA[s].loc[last]["momentum"]) for s in DATA if last in DATA[s].index]
+    rs = []
+    for s in DATA:
+        if last in DATA[s].index:
+            rs.append((s, DATA[s].loc[last]["momentum"]))
+
     rs = sorted(rs, key=lambda x: x[1], reverse=True)
 
     signals = []
+    used_risk = 0
+    total_risk = capital * MAX_TOTAL_RISK
 
     for s,_ in rs[:TOP_N]:
+
         df = DATA[s]
+
         if last not in df.index:
             continue
 
@@ -162,15 +225,40 @@ def signals():
         if not (row["c"]>row["ma"] and row["c"]>row["high_break"] and row["atr_change"]>0):
             continue
 
+        entry = row["c"]
+        stop = entry - (ATR_MULT * row["atr"])
+        risk_per_share = entry - stop
+
+        if risk_per_share <= 0:
+            continue
+
+        risk_amount = capital * RISK_PER_TRADE
+
+        if used_risk + risk_amount > total_risk:
+            risk_amount = total_risk - used_risk
+
+        shares = int(risk_amount / risk_per_share)
+
+        if shares <= 0:
+            continue
+
         signals.append({
             "symbol": s,
-            "price": round(row["c"],2)
+            "price": round(entry,2),
+            "shares": shares,
+            "stop": round(stop,2)
         })
 
-    return jsonify({"market":"bullish","signals":signals})
+        used_risk += risk_amount
+
+    return jsonify({
+        "date": str(last),
+        "market":"bullish",
+        "signals":signals
+    })
 
 # =========================
-# AUTO TRADE + SAVE
+# AUTO TRADE
 # =========================
 @app.route("/auto_trade")
 def auto_trade():
@@ -181,13 +269,18 @@ def auto_trade():
     if REQUIRE_CONFIRM and request.args.get("confirm") != "true":
         return jsonify({"error":"confirm required"})
 
-    executed = []
-
     spy = DATA["SPY"]
     last = spy.index[-1]
 
+    if spy.loc[last]["c"] <= spy.loc[last]["ma"]:
+        return jsonify({"status":"no trades"})
+
+    executed = []
+
     for s in SYMBOLS:
+
         df = DATA[s]
+
         if last not in df.index:
             continue
 
@@ -202,7 +295,7 @@ def auto_trade():
             if api:
                 api.submit_order(symbol=s, qty=1, side="buy", type="market", time_in_force="gtc")
 
-            save_trade(s, "BUY", 1, price)
+            save_trade(s,"BUY",1,price)
 
             executed.append({"symbol":s,"price":price})
 
@@ -212,7 +305,7 @@ def auto_trade():
     return jsonify({"executed":executed})
 
 # =========================
-# PORTFOLIO (🔥 NEW)
+# PORTFOLIO
 # =========================
 @app.route("/portfolio")
 def portfolio():
@@ -226,8 +319,9 @@ def portfolio():
 
     for _,t in trades.iterrows():
         sym = t["symbol"]
+
         if sym not in positions:
-            positions[sym] = {"shares":0,"avg_price":0}
+            positions[sym] = {"shares":0}
 
         if t["side"]=="BUY":
             positions[sym]["shares"] += t["shares"]
@@ -235,6 +329,7 @@ def portfolio():
     result = []
 
     for sym,pos in positions.items():
+
         if sym not in DATA:
             continue
 
