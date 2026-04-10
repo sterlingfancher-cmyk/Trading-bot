@@ -14,15 +14,9 @@ app = Flask(__name__)
 # CONFIG
 # =========================
 LOOKBACK = 20
-ATR_MULT = 3.0
 REFRESH_INTERVAL = 300
 
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META","MSFT","AAPL"]
-
-INITIAL_CAPITAL = 1000
-RISK_PER_TRADE = 0.13
-TOP_N = 5
-MAX_TOTAL_RISK = 0.8
 
 DB_NAME = "trades.db"
 
@@ -61,6 +55,23 @@ def get_trades():
     conn.close()
     return df
 
+# 🔥 NEW: Get open positions
+def get_open_positions():
+    trades = get_trades()
+    positions = {}
+
+    for _, t in trades.iterrows():
+        sym = t["symbol"]
+
+        if sym not in positions:
+            positions[sym] = 0
+
+        if t["side"] == "BUY":
+            positions[sym] += t["shares"]
+
+    # Only return active positions
+    return {k:v for k,v in positions.items() if v > 0}
+
 init_db()
 
 # =========================
@@ -94,55 +105,31 @@ def safe_download(symbol):
 def generate_fake_data():
     dates = pd.date_range(end=pd.Timestamp.today().normalize(), periods=120)
     price = np.linspace(100, 120, 120)
-
-    return pd.DataFrame({
-        "c": price,
-        "h": price + 1,
-        "l": price - 1
-    }, index=dates)
+    return pd.DataFrame({"c": price, "h": price+1, "l": price-1}, index=dates)
 
 def process_data(df):
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-
     if "Close" in df.columns:
         df = df.rename(columns={"Close":"c","High":"h","Low":"l"})
-
-    if not all(col in df.columns for col in ["c","h","l"]):
-        return None
 
     df["ma"] = df["c"].rolling(50).mean()
     df["momentum"] = df["c"] / df["c"].shift(20)
 
-    df = df.dropna()
-
-    if df.empty:
-        return None
-
-    return df
+    return df.dropna()
 
 def load_data():
     global DATA
-
     new_data = {}
 
     for s in SYMBOLS:
         df = safe_download(s)
-
         if df is None:
             df = generate_fake_data()
 
         df = process_data(df)
-
-        if df is not None:
-            new_data[s] = df
-
-    if "SPY" not in new_data:
-        new_data["SPY"] = process_data(generate_fake_data())
+        new_data[s] = df
 
     DATA = new_data
 
-# initial load + background
 load_data()
 
 def background():
@@ -155,17 +142,16 @@ threading.Thread(target=background, daemon=True).start()
 # =========================
 # ROUTES
 # =========================
-
 @app.route("/")
 def home():
     return jsonify({
-        "status": "live",
-        "symbols_loaded": len(DATA),
-        "endpoints": ["/signals","/auto_trade","/portfolio"]
+        "status":"live",
+        "symbols_loaded":len(DATA),
+        "endpoints":["/signals","/auto_trade","/portfolio"]
     })
 
 # =========================
-# SIGNALS (UPDATED STRATEGY)
+# SIGNALS
 # =========================
 @app.route("/signals")
 def signals():
@@ -181,7 +167,7 @@ def signals():
 
     signals = []
 
-    for s,_ in rs[:TOP_N]:
+    for s,_ in rs[:5]:
         df = DATA[s]
 
         if last not in df.index:
@@ -189,20 +175,18 @@ def signals():
 
         row = df.loc[last]
 
-        # 🔥 NEW STRATEGY
         if not (row["c"] > row["ma"] and row["momentum"] > 1.02):
             continue
 
         signals.append({
             "symbol": s,
-            "price": round(row["c"],2),
-            "momentum": round(row["momentum"],3)
+            "price": round(row["c"],2)
         })
 
     return jsonify({"market":"bullish","signals":signals})
 
 # =========================
-# AUTO TRADE (UPDATED)
+# AUTO TRADE (NO DUPES)
 # =========================
 @app.route("/auto_trade")
 def auto_trade():
@@ -221,7 +205,14 @@ def auto_trade():
 
     executed = []
 
+    # 🔥 GET CURRENT POSITIONS
+    open_positions = get_open_positions()
+
     for s in SYMBOLS:
+
+        # 🔥 SKIP DUPLICATES
+        if s in open_positions:
+            continue
 
         df = DATA[s]
 
@@ -254,25 +245,11 @@ def auto_trade():
 @app.route("/portfolio")
 def portfolio():
 
-    trades = get_trades()
-
-    if trades.empty:
-        return jsonify({"positions":[]})
-
-    positions = {}
-
-    for _,t in trades.iterrows():
-        sym = t["symbol"]
-
-        if sym not in positions:
-            positions[sym] = {"shares":0}
-
-        if t["side"]=="BUY":
-            positions[sym]["shares"] += t["shares"]
+    positions = get_open_positions()
 
     result = []
 
-    for sym,pos in positions.items():
+    for sym, shares in positions.items():
         if sym not in DATA:
             continue
 
@@ -280,7 +257,7 @@ def portfolio():
 
         result.append({
             "symbol":sym,
-            "shares":pos["shares"],
+            "shares":shares,
             "price":round(price,2)
         })
 
