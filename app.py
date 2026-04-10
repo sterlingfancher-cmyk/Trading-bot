@@ -36,7 +36,7 @@ def compute_strategy(df):
     df = df.dropna()
 
     # Strategy returns (position-based, not constant flipping)
-    df["position"] = df["signal"].replace(to_replace=0, method="ffill").fillna(0)
+    df["position"] = df["signal"].replace(0, None).ffill().fillna(0)
     df["strategy_returns"] = df["returns"] * df["position"].shift(1)
 
     return df
