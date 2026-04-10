@@ -5,9 +5,6 @@ import yfinance as yf
 
 app = Flask(__name__)
 
-# =========================
-# CONFIG
-# =========================
 LOOKBACK = 20
 ATR_MULT = 2.5
 SYMBOLS = ["SPY", "QQQ", "IWM", "XLE", "XLK"]
@@ -15,12 +12,8 @@ SYMBOLS = ["SPY", "QQQ", "IWM", "XLE", "XLK"]
 INITIAL_CAPITAL = 1000
 RISK_PER_TRADE = 0.1
 MAX_POSITIONS = 3
-COOLDOWN_DAYS = 10
 
 
-# =========================
-# DATA
-# =========================
 def get_data(symbol):
     df = yf.download(symbol, period="5y", interval="1d", progress=False)
 
@@ -41,9 +34,6 @@ def get_data(symbol):
     return df[["o", "h", "l", "c", "v"]].dropna()
 
 
-# =========================
-# PREP
-# =========================
 def prepare(df):
     df["ma_200"] = df["c"].rolling(200).mean()
     df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
@@ -63,9 +53,6 @@ def prepare(df):
     return df.dropna()
 
 
-# =========================
-# PORTFOLIO ENGINE (COOLDOWN)
-# =========================
 @app.route("/portfolio")
 def portfolio():
 
@@ -86,19 +73,14 @@ def portfolio():
     peak_price = {}
     position_size = {}
 
-    last_exit_index = {s: -999 for s in SYMBOLS}
-
     trade_count = 0
 
-    for i, date in enumerate(all_dates):
+    for date in all_dates:
 
-        # =========================
         # EXITS
-        # =========================
         for symbol in list(positions.keys()):
 
             df = data[symbol]
-
             if date not in df.index:
                 continue
 
@@ -107,11 +89,11 @@ def portfolio():
             peak_price[symbol] = max(peak_price[symbol], row["c"])
             stop = peak_price[symbol] - (ATR_MULT * row["atr"])
 
-            if row["c"] < stop:
+            trend_break = row["c"] < row["ma_200"]
+
+            if row["c"] < stop or trend_break:
                 pct = (row["c"] - entry_price[symbol]) / entry_price[symbol]
                 capital += position_size[symbol] * pct
-
-                last_exit_index[symbol] = i
 
                 del positions[symbol]
                 del entry_price[symbol]
@@ -120,16 +102,10 @@ def portfolio():
 
                 trade_count += 1
 
-        # =========================
-        # FIND SIGNALS
-        # =========================
+        # ENTRIES
         signals = []
 
         for symbol, df in data.items():
-
-            # 🔥 COOLDOWN FILTER
-            if i - last_exit_index[symbol] < COOLDOWN_DAYS:
-                continue
 
             if symbol in positions:
                 continue
@@ -152,9 +128,6 @@ def portfolio():
 
                 signals.append((symbol, score, row))
 
-        # =========================
-        # TAKE BEST SIGNALS
-        # =========================
         signals = sorted(signals, key=lambda x: x[1], reverse=True)
 
         open_slots = MAX_POSITIONS - len(positions)
