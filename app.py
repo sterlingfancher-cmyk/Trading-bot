@@ -34,7 +34,7 @@ def compute_strategy(df):
 
     print("Signal min/max:", df["signal"].min(), df["signal"].max())
     # APPLY SCALING HERE
-    df["signal"] = (df["signal"] / 0.01).clip(0, 1)
+    df["signal"] = (df["signal"] / 0.04).clip(0, 1)
 
     #EXIT
     df.loc[
