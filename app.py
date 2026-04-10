@@ -56,11 +56,12 @@ def compute_strategy(df):
 
     strength = (df["ma_fast"] - df["ma_slow"]) / df["ma_slow"]
 
-    # ENTRY (STRONGER)
+    # 🔥 STRONG ENTRY FILTER
     df.loc[
         (df["ma_fast"] > df["ma_slow"]) &
-        (df["returns"] > 0.001) &
-        (strength > 0.002) &
+        (df["ma_fast"] > df["ma_fast"].shift(5)) &   # trend strengthening
+        (df["returns"] > 0.0015) &
+        (strength > 0.003) &
         (df["c"] > df["c"].rolling(20).mean()),
         "signal"
     ] = strength
@@ -68,14 +69,17 @@ def compute_strategy(df):
     # SCALE POSITION SIZE
     df["signal"] = (df["signal"] / 0.04).clip(0, 1)
 
-    # 🔥 COOLDOWN (REDUCES TRADES MASSIVELY)
-    df["cooldown"] = df["signal"].rolling(15).max().shift(1)
+    # 🔥 STRONG COOLDOWN (cuts trades HARD)
+    df["cooldown"] = df["signal"].rolling(25).max().shift(1)
     df.loc[df["cooldown"] > 0, "signal"] = 0
 
-    # EXIT
+    # 🔥 HOLD WINNERS LONGER
+    df["hold"] = df["signal"].replace(0, np.nan).ffill()
+
+    # EXIT (smarter)
     df.loc[
-        (df["returns"] < -0.003) |   # tighter stop
-        (df["returns"] > 0.008),     # bigger winners
+        (df["returns"] < -0.003) |
+        (df["returns"] > 0.012),   # let winners run longer
         "signal"
     ] = 0
 
@@ -84,14 +88,14 @@ def compute_strategy(df):
     if df.empty:
         return pd.DataFrame()
 
-    # POSITION (SIZED)
-    df["position"] = df["signal"].replace(0, np.nan).ffill().fillna(0)
+    # POSITION
+    df["position"] = df["hold"].fillna(0)
 
-    # RETURNS WITH POSITION SIZE
+    # RETURNS
     df["strategy_returns"] = df["returns"] * df["position"].shift(1)
 
     # CAP EXTREMES
-    df["strategy_returns"] = df["strategy_returns"].clip(-0.015, 0.03)
+    df["strategy_returns"] = df["strategy_returns"].clip(-0.02, 0.04)
 
     return df
 
