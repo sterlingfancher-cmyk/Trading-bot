@@ -35,7 +35,7 @@ DATA = None
 
 
 # =========================
-# LOAD DATA (LAZY + SAFE)
+# LOAD DATA (LAZY)
 # =========================
 def load_data():
     global DATA
@@ -64,7 +64,7 @@ def load_data():
             })
 
             # =========================
-            # INDICATORS (IMPROVED)
+            # INDICATORS
             # =========================
             df["ma_200"] = df["c"].rolling(100).mean()
             df["high_break"] = df["h"].rolling(LOOKBACK).max().shift(1)
@@ -78,7 +78,6 @@ def load_data():
             df["atr"] = tr.rolling(14).mean()
             df["atr_change"] = df["atr"].pct_change()
 
-            # 🔥 Better momentum
             df["momentum"] = df["c"] / df["c"].shift(30)
 
             data[symbol] = df.dropna()
@@ -95,7 +94,7 @@ def load_data():
 # =========================
 @app.route("/")
 def home():
-    return jsonify({"status": "optimized-system-live"})
+    return jsonify({"status": "dynamic-sizing-live"})
 
 
 @app.route("/portfolio")
@@ -126,7 +125,7 @@ def portfolio():
     for date in all_dates:
 
         # =========================
-        # MARKET REGIME FILTER
+        # MARKET REGIME
         # =========================
         if date not in spy_df.index:
             continue
@@ -194,7 +193,7 @@ def portfolio():
         available_risk = capital * MAX_TOTAL_RISK - total_allocated
 
         # =========================
-        # ENTRIES (IMPROVED)
+        # ENTRIES (DYNAMIC SIZING)
         # =========================
         for symbol in top_symbols:
 
@@ -215,15 +214,19 @@ def portfolio():
             trend = row["c"] > row["ma_200"]
             recent_breakout = breakout_age[symbol] <= BREAKOUT_LOOKBACK
 
-            # 🔥 IMPROVED PULLBACK
             pullback = row["c"] <= row["high_break"] * 1.05
-
             bounce = row["c"] > prev["c"]
             vol = row["atr_change"] > 0
 
             if trend and recent_breakout and pullback and bounce and vol:
 
-                risk = min(capital * RISK_PER_TRADE, available_risk)
+                # 🔥 DYNAMIC POSITION SIZING
+                breakout_strength = (row["c"] - row["high_break"]) / row["high_break"]
+
+                size_multiplier = breakout_strength / 0.02
+                size_multiplier = max(0.5, min(size_multiplier, 2))
+
+                risk = min(capital * RISK_PER_TRADE * size_multiplier, available_risk)
 
                 positions[symbol] = True
                 entry_price[symbol] = row["c"]
