@@ -35,7 +35,6 @@ if ALPACA_KEY and ALPACA_SECRET:
             api_version='v2'
         )
 
-        # Test connection on startup
         account = api.get_account()
         print("✅ Alpaca connected:", account.status)
 
@@ -173,6 +172,29 @@ def execute_trades(signals):
 def home():
     return {"status":"running"}
 
+@app.route("/env_check")
+def env_check():
+    return {
+        "key_exists": bool(os.environ.get("ALPACA_API_KEY")),
+        "secret_exists": bool(os.environ.get("ALPACA_SECRET_KEY")),
+        "base_url": os.environ.get("ALPACA_BASE_URL")
+    }
+
+@app.route("/alpaca_test")
+def alpaca_test():
+
+    if api is None:
+        return {"error":"alpaca not initialized"}
+
+    try:
+        account = api.get_account()
+        return {
+            "status": account.status,
+            "buying_power": account.buying_power
+        }
+    except Exception as e:
+        return {"error":str(e)}
+
 @app.route("/signals")
 def signals():
     data = load_data()
@@ -220,21 +242,6 @@ def portfolio():
 def history():
     df = pd.read_sql("SELECT * FROM trades", conn)
     return df.to_dict(orient="records")
-
-@app.route("/alpaca_test")
-def alpaca_test():
-
-    if api is None:
-        return {"error":"alpaca not initialized"}
-
-    try:
-        account = api.get_account()
-        return {
-            "status": account.status,
-            "buying_power": account.buying_power
-        }
-    except Exception as e:
-        return {"error":str(e)}
 
 # =========================
 # RUN
