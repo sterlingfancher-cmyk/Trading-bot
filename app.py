@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, request
 import pandas as pd
 import time
 import os
@@ -13,11 +13,8 @@ app = Flask(__name__)
 # CONFIG
 # =========================
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META","MSFT","AAPL"]
-REFRESH_INTERVAL = 300
+REFRESH_INTERVAL = 60
 MAX_POSITIONS = 3
-
-STOP_LOSS_PCT = 0.10
-TAKE_PROFIT_PCT = 0.20
 
 DB_NAME = "trades.db"
 
@@ -77,6 +74,7 @@ def get_open_positions():
 
     for _, t in trades.iterrows():
         sym = t["symbol"]
+
         if sym not in positions:
             positions[sym] = 0
 
@@ -90,17 +88,21 @@ def get_open_positions():
 init_db()
 
 # =========================
-# DATA
+# DATA STORAGE
 # =========================
 DATA = {}
+DATA_READY = False
 
 def process_data(df):
     df["ma"] = df["c"].rolling(50).mean()
     df["momentum"] = df["c"] / df["c"].shift(20)
     return df.dropna()
 
+# =========================
+# LOAD DATA (SAFE)
+# =========================
 def load_data():
-    global DATA
+    global DATA, DATA_READY
     new_data = {}
 
     for symbol in SYMBOLS:
@@ -108,7 +110,8 @@ def load_data():
             bars = api.get_bars(symbol, TimeFrame.Day, limit=200).df
 
             if bars is None or bars.empty:
-                raise Exception(f"No data for {symbol}")
+                print(f"❌ No data for {symbol}")
+                continue
 
             bars = bars.reset_index()
 
@@ -127,19 +130,23 @@ def load_data():
                 print(f"✅ Loaded: {symbol}")
 
         except Exception as e:
-            print(f"❌ Failed {symbol}: {e}")
+            print(f"❌ ERROR {symbol}: {e}")
 
-    if not new_data:
-        raise Exception("🚨 No data loaded from Alpaca")
+    if new_data:
+        DATA = new_data
+        DATA_READY = True
+    else:
+        print("🚨 No data loaded yet")
 
-    DATA = new_data
-
-# Initial load
-load_data()
-
+# =========================
+# BACKGROUND LOADER
+# =========================
 def background():
     while True:
-        load_data()
+        try:
+            load_data()
+        except Exception as e:
+            print(f"Background error: {e}")
         time.sleep(REFRESH_INTERVAL)
 
 threading.Thread(target=background, daemon=True).start()
@@ -149,12 +156,13 @@ threading.Thread(target=background, daemon=True).start()
 # =========================
 @app.route("/")
 def home():
-    return {"status":"live","symbols":len(DATA)}
+    return {"status":"live","data_ready":DATA_READY}
 
 @app.route("/debug")
 def debug():
     return {
         "alpaca_connected": True,
+        "data_ready": DATA_READY,
         "symbols_loaded": list(DATA.keys())
     }
 
@@ -164,13 +172,16 @@ def debug():
 @app.route("/signals")
 def signals():
 
-    if "SPY" not in DATA or DATA["SPY"].empty:
-        return {"error":"SPY data missing"}
+    if not DATA_READY:
+        return {"error":"Data loading... try again shortly"}
+
+    if "SPY" not in DATA:
+        return {"error":"SPY not loaded"}
 
     spy = DATA["SPY"]
 
-    if len(spy) == 0:
-        return {"error":"No SPY data"}
+    if spy.empty:
+        return {"error":"SPY empty"}
 
     last = spy.index[-1]
 
@@ -205,6 +216,9 @@ def auto_trade():
     if REQUIRE_CONFIRM and request.args.get("confirm")!="true":
         return {"error":"confirm required"}
 
+    if not DATA_READY:
+        return {"error":"data not ready"}
+
     executed = []
     open_positions = get_open_positions()
 
@@ -234,9 +248,7 @@ def auto_trade():
             try:
                 api.submit_order(symbol=s, qty=1, side="buy", type="market", time_in_force="gtc")
                 save_trade(s,"BUY",1,price)
-
                 executed.append({"symbol":s,"price":price})
-
             except Exception as e:
                 executed.append({"symbol":s,"error":str(e)})
 
@@ -247,6 +259,9 @@ def auto_trade():
 # =========================
 @app.route("/portfolio")
 def portfolio():
+
+    if not DATA_READY:
+        return {"error":"data not ready"}
 
     positions = get_open_positions()
     result = []
