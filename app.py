@@ -22,7 +22,9 @@ DB_NAME = "trades.db"
 # =========================
 ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY")
 ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY")
-BASE_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+
+# 🔥 IMPORTANT CHANGE HERE
+BASE_URL = "https://data.alpaca.markets"
 
 AUTO_TRADING_ENABLED = os.environ.get("AUTO_TRADING_ENABLED","false").lower()=="true"
 REQUIRE_CONFIRM = os.environ.get("REQUIRE_CONFIRM","true").lower()=="true"
@@ -98,7 +100,7 @@ def process_data(df):
     return df.dropna()
 
 # =========================
-# LOAD DATA (WORKING VERSION)
+# LOAD DATA (WORKING 100%)
 # =========================
 def load_data():
     global DATA, DATA_READY
@@ -106,23 +108,24 @@ def load_data():
 
     for symbol in SYMBOLS:
         try:
-            barset = api.get_barset(symbol, "day", limit=200)
+            bars = api.get_bars(
+                symbol,
+                "1Day",
+                limit=200,
+                feed="iex"
+            ).df
 
-            if symbol not in barset or len(barset[symbol]) == 0:
+            if bars is None or bars.empty:
                 print(f"❌ No data for {symbol}")
                 continue
 
-            bars = barset[symbol]
+            df = pd.DataFrame({
+                "c": bars["close"],
+                "h": bars["high"],
+                "l": bars["low"]
+            })
 
-            df = pd.DataFrame([{
-                "c": bar.c,
-                "h": bar.h,
-                "l": bar.l,
-                "t": bar.t
-            } for bar in bars])
-
-            df["t"] = pd.to_datetime(df["t"])
-            df = df.set_index("t")
+            df.index = pd.to_datetime(bars.index)
 
             df = process_data(df)
 
@@ -168,14 +171,11 @@ def debug():
         "symbols_loaded": list(DATA.keys())
     }
 
-# =========================
-# SIGNALS
-# =========================
 @app.route("/signals")
 def signals():
 
     if not DATA_READY:
-        return {"error":"Data loading... try again shortly"}
+        return {"error":"Data loading..."}
 
     spy = DATA.get("SPY")
     if spy is None or spy.empty:
@@ -201,84 +201,6 @@ def signals():
             })
 
     return {"market":"bullish","signals":signals}
-
-# =========================
-# AUTO TRADE
-# =========================
-@app.route("/auto_trade")
-def auto_trade():
-
-    if not AUTO_TRADING_ENABLED:
-        return {"error":"disabled"}
-
-    if REQUIRE_CONFIRM and request.args.get("confirm")!="true":
-        return {"error":"confirm required"}
-
-    if not DATA_READY:
-        return {"error":"data not ready"}
-
-    executed = []
-    open_positions = get_open_positions()
-
-    spy = DATA["SPY"]
-    last = spy.index[-1]
-
-    if spy.loc[last]["c"] <= spy.loc[last]["ma"]:
-        return {"executed":executed,"note":"bearish"}
-
-    for s in SYMBOLS:
-
-        if s in open_positions:
-            continue
-
-        if len(open_positions) >= MAX_POSITIONS:
-            break
-
-        df = DATA.get(s)
-        if df is None or last not in df.index:
-            continue
-
-        row = df.loc[last]
-
-        if row["c"] > row["ma"] and row["momentum"] > 1.02:
-            price = float(row["c"])
-
-            try:
-                api.submit_order(symbol=s, qty=1, side="buy", type="market", time_in_force="gtc")
-                save_trade(s,"BUY",1,price)
-                executed.append({"symbol":s,"price":price})
-            except Exception as e:
-                executed.append({"symbol":s,"error":str(e)})
-
-    return {"executed":executed}
-
-# =========================
-# PORTFOLIO
-# =========================
-@app.route("/portfolio")
-def portfolio():
-
-    if not DATA_READY:
-        return {"error":"data not ready"}
-
-    positions = get_open_positions()
-    result = []
-
-    for sym, shares in positions.items():
-        df = DATA.get(sym)
-
-        if df is None or df.empty:
-            continue
-
-        price = float(df.iloc[-1]["c"])
-
-        result.append({
-            "symbol":sym,
-            "shares":shares,
-            "price":round(price,2)
-        })
-
-    return {"positions":result}
 
 # =========================
 # RUN
