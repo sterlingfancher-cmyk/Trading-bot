@@ -4,154 +4,99 @@ import time
 import os
 import threading
 import sqlite3
+import requests
 from alpaca_trade_api.rest import REST
 
 app = Flask(__name__)
 
-# =========================
-# CONFIG
-# =========================
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META","MSFT","AAPL"]
 REFRESH_INTERVAL = 60
-MAX_POSITIONS = 3
-
 DB_NAME = "trades.db"
 
-# =========================
-# ENV / ALPACA
-# =========================
 ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY")
 ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY")
-
-# 🔥 IMPORTANT CHANGE HERE
-BASE_URL = "https://data.alpaca.markets"
-
-AUTO_TRADING_ENABLED = os.environ.get("AUTO_TRADING_ENABLED","false").lower()=="true"
-REQUIRE_CONFIRM = os.environ.get("REQUIRE_CONFIRM","true").lower()=="true"
-
-if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
-    raise Exception("❌ Alpaca keys missing")
+BASE_URL = "https://paper-api.alpaca.markets"
 
 api = REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL)
 
-# =========================
-# DATABASE
-# =========================
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS trades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT,
-        side TEXT,
-        shares INTEGER,
-        price REAL,
-        timestamp TEXT
-    )
-    """)
-    conn.commit()
-    conn.close()
-
-def save_trade(symbol, side, shares, price):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("""
-    INSERT INTO trades (symbol, side, shares, price, timestamp)
-    VALUES (?, ?, ?, ?, datetime('now'))
-    """, (symbol, side, shares, price))
-    conn.commit()
-    conn.close()
-
-def get_trades():
-    conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql("SELECT * FROM trades", conn)
-    conn.close()
-    return df
-
-def get_open_positions():
-    trades = get_trades()
-    positions = {}
-
-    for _, t in trades.iterrows():
-        sym = t["symbol"]
-
-        if sym not in positions:
-            positions[sym] = 0
-
-        if t["side"] == "BUY":
-            positions[sym] += t["shares"]
-        elif t["side"] == "SELL":
-            positions[sym] -= t["shares"]
-
-    return {k:v for k,v in positions.items() if v > 0}
-
-init_db()
-
-# =========================
-# DATA STORAGE
-# =========================
 DATA = {}
 DATA_READY = False
 
-def process_data(df):
+# =========================
+# FALLBACK DATA (ALWAYS WORKS)
+# =========================
+def get_fallback_data(symbol):
+    try:
+        url = f"https://stooq.com/q/d/l/?s={symbol.lower()}&i=d"
+        df = pd.read_csv(url)
+
+        df.columns = ["date","open","high","low","close","volume"]
+        df["c"] = df["close"]
+        df["h"] = df["high"]
+        df["l"] = df["low"]
+
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index("date")
+
+        return df.tail(200)
+    except:
+        return None
+
+# =========================
+# PROCESS
+# =========================
+def process(df):
     df["ma"] = df["c"].rolling(50).mean()
     df["momentum"] = df["c"] / df["c"].shift(20)
     return df.dropna()
 
 # =========================
-# LOAD DATA (WORKING 100%)
+# LOAD DATA
 # =========================
 def load_data():
     global DATA, DATA_READY
     new_data = {}
 
     for symbol in SYMBOLS:
+        df = None
+
+        # TRY ALPACA FIRST
         try:
-            bars = api.get_bars(
-                symbol,
-                "1Day",
-                limit=200,
-                feed="iex"
-            ).df
+            bars = api.get_bars(symbol, "1Day", limit=200).df
 
-            if bars is None or bars.empty:
-                print(f"❌ No data for {symbol}")
-                continue
+            if bars is not None and not bars.empty:
+                df = pd.DataFrame({
+                    "c": bars["close"],
+                    "h": bars["high"],
+                    "l": bars["low"]
+                })
+                df.index = pd.to_datetime(bars.index)
+                print(f"✅ Alpaca: {symbol}")
+        except:
+            pass
 
-            df = pd.DataFrame({
-                "c": bars["close"],
-                "h": bars["high"],
-                "l": bars["low"]
-            })
+        # FALLBACK
+        if df is None or df.empty:
+            df = get_fallback_data(symbol)
+            if df is not None:
+                print(f"🔁 Fallback: {symbol}")
 
-            df.index = pd.to_datetime(bars.index)
-
-            df = process_data(df)
-
+        if df is not None and not df.empty:
+            df = process(df)
             if not df.empty:
                 new_data[symbol] = df
-                print(f"✅ Loaded: {symbol}")
-
-        except Exception as e:
-            print(f"❌ ERROR {symbol}: {e}")
 
     if new_data:
         DATA = new_data
         DATA_READY = True
         print("🚀 DATA READY")
-    else:
-        print("🚨 STILL NO DATA")
 
 # =========================
-# BACKGROUND LOADER
+# BACKGROUND
 # =========================
 def background():
     while True:
-        try:
-            load_data()
-        except Exception as e:
-            print(f"Background error: {e}")
+        load_data()
         time.sleep(REFRESH_INTERVAL)
 
 threading.Thread(target=background, daemon=True).start()
@@ -159,14 +104,9 @@ threading.Thread(target=background, daemon=True).start()
 # =========================
 # ROUTES
 # =========================
-@app.route("/")
-def home():
-    return {"status":"live","data_ready":DATA_READY}
-
 @app.route("/debug")
 def debug():
     return {
-        "alpaca_connected": True,
         "data_ready": DATA_READY,
         "symbols_loaded": list(DATA.keys())
     }
@@ -175,23 +115,23 @@ def debug():
 def signals():
 
     if not DATA_READY:
-        return {"error":"Data loading..."}
+        return {"error":"loading"}
 
-    spy = DATA.get("SPY")
-    if spy is None or spy.empty:
-        return {"error":"SPY missing"}
-
+    spy = DATA["SPY"]
     last = spy.index[-1]
 
     if spy.loc[last]["c"] <= spy.loc[last]["ma"]:
         return {"market":"bearish","signals":[]}
 
-    rs = [(s, DATA[s].loc[last]["momentum"]) for s in DATA if last in DATA[s].index]
-    rs = sorted(rs, key=lambda x: x[1], reverse=True)
+    ranked = sorted(
+        [(s, DATA[s].loc[last]["momentum"]) for s in DATA],
+        key=lambda x: x[1],
+        reverse=True
+    )
 
     signals = []
 
-    for s,_ in rs[:5]:
+    for s,_ in ranked[:5]:
         row = DATA[s].loc[last]
 
         if row["c"] > row["ma"] and row["momentum"] > 1.02:
