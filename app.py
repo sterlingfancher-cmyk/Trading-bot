@@ -4,7 +4,7 @@ import time
 import os
 import threading
 import sqlite3
-import alpaca_trade_api as tradeapi
+from alpaca_trade_api.rest import REST
 
 app = Flask(__name__)
 
@@ -30,7 +30,7 @@ REQUIRE_CONFIRM = os.environ.get("REQUIRE_CONFIRM","true").lower()=="true"
 if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
     raise Exception("❌ Alpaca keys missing")
 
-api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL, api_version='v2')
+api = REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL)
 
 # =========================
 # DATABASE
@@ -98,7 +98,7 @@ def process_data(df):
     return df.dropna()
 
 # =========================
-# LOAD DATA (FIXED)
+# LOAD DATA (WORKING VERSION)
 # =========================
 def load_data():
     global DATA, DATA_READY
@@ -106,26 +106,23 @@ def load_data():
 
     for symbol in SYMBOLS:
         try:
-            bars = api.get_bars(
-                symbol,
-                "1Day",
-                start=pd.Timestamp.now(tz="America/New_York") - pd.Timedelta(days=365),
-                feed="iex"
-            ).df
+            barset = api.get_barset(symbol, "day", limit=200)
 
-            if bars is None or bars.empty:
+            if symbol not in barset or len(barset[symbol]) == 0:
                 print(f"❌ No data for {symbol}")
                 continue
 
-            bars = bars.reset_index()
+            bars = barset[symbol]
 
-            df = pd.DataFrame({
-                "c": bars["close"],
-                "h": bars["high"],
-                "l": bars["low"]
-            })
+            df = pd.DataFrame([{
+                "c": bar.c,
+                "h": bar.h,
+                "l": bar.l,
+                "t": bar.t
+            } for bar in bars])
 
-            df.index = pd.to_datetime(bars["timestamp"])
+            df["t"] = pd.to_datetime(df["t"])
+            df = df.set_index("t")
 
             df = process_data(df)
 
@@ -180,13 +177,9 @@ def signals():
     if not DATA_READY:
         return {"error":"Data loading... try again shortly"}
 
-    if "SPY" not in DATA:
-        return {"error":"SPY not loaded"}
-
-    spy = DATA["SPY"]
-
-    if spy.empty:
-        return {"error":"SPY empty"}
+    spy = DATA.get("SPY")
+    if spy is None or spy.empty:
+        return {"error":"SPY missing"}
 
     last = spy.index[-1]
 
