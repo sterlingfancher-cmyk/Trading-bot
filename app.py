@@ -16,16 +16,17 @@ MAX_POSITIONS = 3
 AUTO_TRADING_ENABLED = os.environ.get("AUTO_TRADING_ENABLED","false") == "true"
 
 # =========================
-# ALPACA INIT (SAFE + TESTED)
+# ALPACA INIT (NO SILENT FAIL)
 # =========================
 api = None
+alpaca_error = None
 
 ALPACA_KEY = os.environ.get("ALPACA_API_KEY")
 ALPACA_SECRET = os.environ.get("ALPACA_SECRET_KEY")
 ALPACA_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
 
-if ALPACA_KEY and ALPACA_SECRET:
-    try:
+try:
+    if ALPACA_KEY and ALPACA_SECRET:
         from alpaca_trade_api.rest import REST
 
         api = REST(
@@ -35,14 +36,17 @@ if ALPACA_KEY and ALPACA_SECRET:
             api_version='v2'
         )
 
+        # FORCE test (will throw real error)
         account = api.get_account()
         print("✅ Alpaca connected:", account.status)
 
-    except Exception as e:
-        print("❌ Alpaca failed:", str(e))
-        api = None
-else:
-    print("⚠️ Alpaca keys missing")
+    else:
+        alpaca_error = "Missing keys"
+
+except Exception as e:
+    alpaca_error = str(e)
+    api = None
+    print("❌ Alpaca init error:", alpaca_error)
 
 # =========================
 # DATABASE
@@ -63,7 +67,7 @@ CREATE TABLE IF NOT EXISTS trades (
 conn.commit()
 
 # =========================
-# DATA (ALWAYS WORKS)
+# DATA
 # =========================
 def load_data():
     dates = pd.date_range(end=pd.Timestamp.today(), periods=200)
@@ -116,75 +120,25 @@ def get_signals(data):
     return "bullish", signals
 
 # =========================
-# AUTO TRADE
-# =========================
-def execute_trades(signals):
-
-    if not AUTO_TRADING_ENABLED:
-        return {"status":"disabled"}
-
-    if api is None:
-        return {"error":"alpaca not connected"}
-
-    try:
-        positions = api.list_positions()
-        held = [p.symbol for p in positions]
-    except Exception as e:
-        return {"error":str(e)}
-
-    executed = []
-
-    for sig in signals:
-
-        if sig["symbol"] in held:
-            continue
-
-        if len(held) >= MAX_POSITIONS:
-            break
-
-        try:
-            api.submit_order(
-                symbol=sig["symbol"],
-                qty=1,
-                side="buy",
-                type="market",
-                time_in_force="gtc"
-            )
-
-            c.execute(
-                "INSERT INTO trades VALUES (NULL,?,?,?, ?,?)",
-                (sig["symbol"],"BUY",sig["price"],1,datetime.now())
-            )
-            conn.commit()
-
-            executed.append(sig)
-
-        except Exception as e:
-            executed.append({"symbol":sig["symbol"],"error":str(e)})
-
-    return {"executed":executed}
-
-# =========================
 # ROUTES
 # =========================
-
-@app.route("/")
-def home():
-    return {"status":"running"}
 
 @app.route("/env_check")
 def env_check():
     return {
-        "key_exists": bool(os.environ.get("ALPACA_API_KEY")),
-        "secret_exists": bool(os.environ.get("ALPACA_SECRET_KEY")),
-        "base_url": os.environ.get("ALPACA_BASE_URL")
+        "key_exists": bool(ALPACA_KEY),
+        "secret_exists": bool(ALPACA_SECRET),
+        "base_url": ALPACA_URL
     }
 
 @app.route("/alpaca_test")
 def alpaca_test():
 
     if api is None:
-        return {"error":"alpaca not initialized"}
+        return {
+            "error": "alpaca failed to initialize",
+            "details": alpaca_error
+        }
 
     try:
         account = api.get_account()
@@ -193,55 +147,14 @@ def alpaca_test():
             "buying_power": account.buying_power
         }
     except Exception as e:
-        return {"error":str(e)}
+        return {"error": str(e)}
 
 @app.route("/signals")
 def signals():
     data = load_data()
     market, sigs = get_signals(data)
 
-    return {
-        "market": market,
-        "signals": sigs
-    }
-
-@app.route("/auto_trade")
-def auto_trade():
-    data = load_data()
-    market, sigs = get_signals(data)
-
-    if market != "bullish":
-        return {"note":"bearish"}
-
-    return execute_trades(sigs)
-
-@app.route("/portfolio")
-def portfolio():
-
-    if api is None:
-        return {"error":"alpaca not connected"}
-
-    try:
-        positions = api.list_positions()
-
-        result = []
-        for p in positions:
-            result.append({
-                "symbol": p.symbol,
-                "qty": p.qty,
-                "price": float(p.current_price),
-                "pnl": float(p.unrealized_pl)
-            })
-
-        return {"positions":result}
-
-    except Exception as e:
-        return {"error":str(e)}
-
-@app.route("/history")
-def history():
-    df = pd.read_sql("SELECT * FROM trades", conn)
-    return df.to_dict(orient="records")
+    return {"market": market, "signals": sigs}
 
 # =========================
 # RUN
