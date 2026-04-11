@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask
 import pandas as pd
 import numpy as np
 import os
@@ -16,27 +16,26 @@ MAX_POSITIONS = 3
 AUTO_TRADING_ENABLED = os.environ.get("AUTO_TRADING_ENABLED","false") == "true"
 
 # =========================
-# ALPACA INIT (NO SILENT FAIL)
+# ALPACA INIT (FIXED)
 # =========================
 api = None
 alpaca_error = None
 
 ALPACA_KEY = os.environ.get("ALPACA_API_KEY")
 ALPACA_SECRET = os.environ.get("ALPACA_SECRET_KEY")
-ALPACA_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
 
 try:
     if ALPACA_KEY and ALPACA_SECRET:
         from alpaca_trade_api.rest import REST
 
+        # 🔥 HARD FIX — NO BASE_URL FROM ENV
         api = REST(
             ALPACA_KEY.strip(),
             ALPACA_SECRET.strip(),
-            ALPACA_URL.strip(),
+            "https://paper-api.alpaca.markets",  # <-- FIXED HERE
             api_version='v2'
         )
 
-        # FORCE test (will throw real error)
         account = api.get_account()
         print("✅ Alpaca connected:", account.status)
 
@@ -122,15 +121,6 @@ def get_signals(data):
 # =========================
 # ROUTES
 # =========================
-
-@app.route("/env_check")
-def env_check():
-    return {
-        "key_exists": bool(ALPACA_KEY),
-        "secret_exists": bool(ALPACA_SECRET),
-        "base_url": ALPACA_URL
-    }
-
 @app.route("/alpaca_test")
 def alpaca_test():
 
@@ -153,7 +143,6 @@ def alpaca_test():
 def signals():
     data = load_data()
     market, sigs = get_signals(data)
-
     return {"market": market, "signals": sigs}
 
 # =========================
