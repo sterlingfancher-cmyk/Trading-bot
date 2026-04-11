@@ -1,50 +1,78 @@
 from flask import Flask
 import pandas as pd
-import numpy as np
+import requests
 import os
 
 app = Flask(__name__)
 
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
-
 DATA = {}
 DATA_READY = False
 
 # =========================
-# LOCAL DATA GENERATOR (NO INTERNET NEEDED)
+# REAL DATA FETCH (ROBUST)
 # =========================
-def generate_data():
-    global DATA, DATA_READY
+def fetch_data(symbol):
+    try:
+        url = f"https://stooq.com/q/d/l/?s={symbol.lower()}&i=d"
+        r = requests.get(url, timeout=10)
 
-    dates = pd.date_range(end=pd.Timestamp.today(), periods=200)
+        if r.status_code != 200:
+            print(f"❌ HTTP error {symbol}")
+            return None
+
+        from io import StringIO
+        df = pd.read_csv(StringIO(r.text))
+
+        df.columns = ["date","open","high","low","close","volume"]
+
+        df["c"] = df["close"]
+        df["h"] = df["high"]
+        df["l"] = df["low"]
+
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index("date")
+
+        df["ma"] = df["c"].rolling(50).mean()
+        df["momentum"] = df["c"] / df["c"].shift(20)
+
+        return df.dropna().tail(200)
+
+    except Exception as e:
+        print(f"❌ Fetch failed {symbol}: {e}")
+        return None
+
+# =========================
+# LOAD DATA
+# =========================
+def load_data():
+    global DATA, DATA_READY
 
     new_data = {}
 
     for symbol in SYMBOLS:
-        price = np.linspace(100, 200, 200) + np.random.normal(0, 2, 200)
+        df = fetch_data(symbol)
 
-        df = pd.DataFrame({
-            "c": price,
-            "h": price + 1,
-            "l": price - 1
-        }, index=dates)
+        if df is not None and not df.empty:
+            new_data[symbol] = df
+            print(f"✅ Loaded {symbol}")
 
-        df["ma"] = df["c"].rolling(50).mean()
-        df["momentum"] = df["c"] / df["c"].shift(20)
-        df = df.dropna()
-
-        new_data[symbol] = df
-
-    DATA = new_data
-    DATA_READY = True
-
-generate_data()
+    if new_data:
+        DATA = new_data
+        DATA_READY = True
+        print("🚀 REAL DATA READY")
+    else:
+        print("🚨 FAILED TO LOAD DATA")
 
 # =========================
 # ROUTES
 # =========================
 @app.route("/debug")
 def debug():
+
+    if not DATA_READY:
+        load_data()
+
     return {
         "data_ready": DATA_READY,
         "symbols_loaded": list(DATA.keys())
@@ -54,7 +82,10 @@ def debug():
 def signals():
 
     if not DATA_READY:
-        return {"error":"no data"}
+        load_data()
+
+    if not DATA_READY:
+        return {"error":"data failed"}
 
     spy = DATA["SPY"]
     last = spy.index[-1]
@@ -70,7 +101,7 @@ def signals():
 
     signals = []
 
-    for s,_ in ranked:
+    for s,_ in ranked[:5]:
         row = DATA[s].loc[last]
 
         if row["c"] > row["ma"] and row["momentum"] > 1.02:
