@@ -5,7 +5,6 @@ import os
 import threading
 import sqlite3
 import alpaca_trade_api as tradeapi
-from alpaca_trade_api.rest import TimeFrame
 
 app = Flask(__name__)
 
@@ -99,7 +98,7 @@ def process_data(df):
     return df.dropna()
 
 # =========================
-# LOAD DATA (SAFE)
+# LOAD DATA (FIXED)
 # =========================
 def load_data():
     global DATA, DATA_READY
@@ -107,7 +106,12 @@ def load_data():
 
     for symbol in SYMBOLS:
         try:
-            bars = api.get_bars(symbol, TimeFrame.Day, limit=200).df
+            bars = api.get_bars(
+                symbol,
+                "1Day",
+                start=pd.Timestamp.now(tz="America/New_York") - pd.Timedelta(days=365),
+                feed="iex"
+            ).df
 
             if bars is None or bars.empty:
                 print(f"❌ No data for {symbol}")
@@ -135,8 +139,9 @@ def load_data():
     if new_data:
         DATA = new_data
         DATA_READY = True
+        print("🚀 DATA READY")
     else:
-        print("🚨 No data loaded yet")
+        print("🚨 STILL NO DATA")
 
 # =========================
 # BACKGROUND LOADER
