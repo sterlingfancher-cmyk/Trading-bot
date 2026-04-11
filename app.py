@@ -5,6 +5,7 @@ import os
 import threading
 import sqlite3
 import alpaca_trade_api as tradeapi
+from alpaca_trade_api.rest import TimeFrame
 
 app = Flask(__name__)
 
@@ -30,9 +31,8 @@ BASE_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
 AUTO_TRADING_ENABLED = os.environ.get("AUTO_TRADING_ENABLED","false").lower()=="true"
 REQUIRE_CONFIRM = os.environ.get("REQUIRE_CONFIRM","true").lower()=="true"
 
-# 🔥 HARD FAIL if missing keys
 if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
-    raise Exception("❌ Alpaca keys missing — check Railway variables")
+    raise Exception("❌ Alpaca keys missing")
 
 api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL, api_version='v2')
 
@@ -42,7 +42,6 @@ api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL, api_version='v2
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-
     c.execute("""
     CREATE TABLE IF NOT EXISTS trades (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,19 +52,16 @@ def init_db():
         timestamp TEXT
     )
     """)
-
     conn.commit()
     conn.close()
 
 def save_trade(symbol, side, shares, price):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-
     c.execute("""
     INSERT INTO trades (symbol, side, shares, price, timestamp)
     VALUES (?, ?, ?, ?, datetime('now'))
     """, (symbol, side, shares, price))
-
     conn.commit()
     conn.close()
 
@@ -81,7 +77,6 @@ def get_open_positions():
 
     for _, t in trades.iterrows():
         sym = t["symbol"]
-
         if sym not in positions:
             positions[sym] = 0
 
@@ -95,7 +90,7 @@ def get_open_positions():
 init_db()
 
 # =========================
-# DATA (ALPACA ONLY)
+# DATA
 # =========================
 DATA = {}
 
@@ -110,7 +105,7 @@ def load_data():
 
     for symbol in SYMBOLS:
         try:
-            bars = api.get_bars(symbol, "1Day", limit=200).df
+            bars = api.get_bars(symbol, TimeFrame.Day, limit=200).df
 
             if bars is None or bars.empty:
                 raise Exception(f"No data for {symbol}")
@@ -125,14 +120,17 @@ def load_data():
 
             df.index = pd.to_datetime(bars["timestamp"])
 
-            print(f"✅ Loaded REAL data for {symbol}")
+            df = process_data(df)
+
+            if not df.empty:
+                new_data[symbol] = df
+                print(f"✅ Loaded: {symbol}")
 
         except Exception as e:
-            print(f"❌ FAILED for {symbol}: {e}")
-            raise Exception("🚨 Alpaca data failed — stopping system")
+            print(f"❌ Failed {symbol}: {e}")
 
-        df = process_data(df)
-        new_data[symbol] = df
+    if not new_data:
+        raise Exception("🚨 No data loaded from Alpaca")
 
     DATA = new_data
 
@@ -166,13 +164,20 @@ def debug():
 @app.route("/signals")
 def signals():
 
+    if "SPY" not in DATA or DATA["SPY"].empty:
+        return {"error":"SPY data missing"}
+
     spy = DATA["SPY"]
+
+    if len(spy) == 0:
+        return {"error":"No SPY data"}
+
     last = spy.index[-1]
 
     if spy.loc[last]["c"] <= spy.loc[last]["ma"]:
         return {"market":"bearish","signals":[]}
 
-    rs = [(s,DATA[s].loc[last]["momentum"]) for s in DATA]
+    rs = [(s, DATA[s].loc[last]["momentum"]) for s in DATA if last in DATA[s].index]
     rs = sorted(rs, key=lambda x: x[1], reverse=True)
 
     signals = []
@@ -203,17 +208,6 @@ def auto_trade():
     executed = []
     open_positions = get_open_positions()
 
-    # SELL
-    for sym,shares in open_positions.items():
-        price = float(DATA[sym].iloc[-1]["c"])
-
-        # simple exit logic
-        if price > 0:
-            api.submit_order(symbol=sym, qty=shares, side="sell", type="market", time_in_force="gtc")
-            save_trade(sym,"SELL",shares,price)
-            executed.append({"symbol":sym,"action":"SELL","price":price})
-
-    # BUY
     spy = DATA["SPY"]
     last = spy.index[-1]
 
@@ -221,22 +215,30 @@ def auto_trade():
         return {"executed":executed,"note":"bearish"}
 
     for s in SYMBOLS:
+
         if s in open_positions:
             continue
 
         if len(open_positions) >= MAX_POSITIONS:
             break
 
-        row = DATA[s].loc[last]
+        df = DATA.get(s)
+        if df is None or last not in df.index:
+            continue
+
+        row = df.loc[last]
 
         if row["c"] > row["ma"] and row["momentum"] > 1.02:
             price = float(row["c"])
 
-            api.submit_order(symbol=s, qty=1, side="buy", type="market", time_in_force="gtc")
-            save_trade(s,"BUY",1,price)
+            try:
+                api.submit_order(symbol=s, qty=1, side="buy", type="market", time_in_force="gtc")
+                save_trade(s,"BUY",1,price)
 
-            executed.append({"symbol":s,"action":"BUY","price":price})
-            open_positions[s] = 1
+                executed.append({"symbol":s,"price":price})
+
+            except Exception as e:
+                executed.append({"symbol":s,"error":str(e)})
 
     return {"executed":executed}
 
@@ -250,7 +252,12 @@ def portfolio():
     result = []
 
     for sym, shares in positions.items():
-        price = float(DATA[sym].iloc[-1]["c"])
+        df = DATA.get(sym)
+
+        if df is None or df.empty:
+            continue
+
+        price = float(df.iloc[-1]["c"])
 
         result.append({
             "symbol":sym,
