@@ -5,34 +5,45 @@ import os
 import sqlite3
 from datetime import datetime
 
-# SAFE import (won't crash if keys bad)
-try:
-    from alpaca_trade_api.rest import REST
-    ALPACA_AVAILABLE = True
-except:
-    ALPACA_AVAILABLE = False
-
 app = Flask(__name__)
 
+# =========================
+# CONFIG
+# =========================
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
 MAX_POSITIONS = 3
 
 AUTO_TRADING_ENABLED = os.environ.get("AUTO_TRADING_ENABLED","false") == "true"
 
 # =========================
-# ALPACA SAFE INIT
+# ALPACA INIT (SAFE + TESTED)
 # =========================
 api = None
 
-if ALPACA_AVAILABLE:
+ALPACA_KEY = os.environ.get("ALPACA_API_KEY")
+ALPACA_SECRET = os.environ.get("ALPACA_SECRET_KEY")
+ALPACA_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+
+if ALPACA_KEY and ALPACA_SECRET:
     try:
+        from alpaca_trade_api.rest import REST
+
         api = REST(
-            os.environ.get("ALPACA_API_KEY"),
-            os.environ.get("ALPACA_SECRET_KEY"),
-            os.environ.get("ALPACA_BASE_URL","https://paper-api.alpaca.markets")
+            ALPACA_KEY.strip(),
+            ALPACA_SECRET.strip(),
+            ALPACA_URL.strip(),
+            api_version='v2'
         )
-    except:
+
+        # Test connection on startup
+        account = api.get_account()
+        print("✅ Alpaca connected:", account.status)
+
+    except Exception as e:
+        print("❌ Alpaca failed:", str(e))
         api = None
+else:
+    print("⚠️ Alpaca keys missing")
 
 # =========================
 # DATABASE
@@ -56,7 +67,6 @@ conn.commit()
 # DATA (ALWAYS WORKS)
 # =========================
 def load_data():
-
     dates = pd.date_range(end=pd.Timestamp.today(), periods=200)
     data = {}
 
@@ -67,9 +77,7 @@ def load_data():
 
         price = base + np.cumsum(np.random.normal(0,2,200))
 
-        df = pd.DataFrame({
-            "close": price
-        }, index=dates)
+        df = pd.DataFrame({"close": price}, index=dates)
 
         df["ma"] = df["close"].rolling(50).mean()
         df["momentum"] = df["close"] / df["close"].shift(20)
@@ -83,7 +91,6 @@ def load_data():
 # SIGNAL ENGINE
 # =========================
 def get_signals(data):
-
     spy = data["SPY"]
     last = spy.index[-1]
 
@@ -110,7 +117,7 @@ def get_signals(data):
     return "bullish", signals
 
 # =========================
-# AUTO TRADE (SAFE)
+# AUTO TRADE
 # =========================
 def execute_trades(signals):
 
@@ -118,13 +125,13 @@ def execute_trades(signals):
         return {"status":"disabled"}
 
     if api is None:
-        return {"error":"alpaca not configured"}
+        return {"error":"alpaca not connected"}
 
     try:
         positions = api.list_positions()
         held = [p.symbol for p in positions]
     except Exception as e:
-        return {"error":f"alpaca error: {str(e)}"}
+        return {"error":str(e)}
 
     executed = []
 
@@ -161,6 +168,7 @@ def execute_trades(signals):
 # =========================
 # ROUTES
 # =========================
+
 @app.route("/")
 def home():
     return {"status":"running"}
@@ -189,11 +197,22 @@ def auto_trade():
 def portfolio():
 
     if api is None:
-        return {"error":"alpaca not configured"}
+        return {"error":"alpaca not connected"}
 
     try:
         positions = api.list_positions()
-        return {"positions":[p.symbol for p in positions]}
+
+        result = []
+        for p in positions:
+            result.append({
+                "symbol": p.symbol,
+                "qty": p.qty,
+                "price": float(p.current_price),
+                "pnl": float(p.unrealized_pl)
+            })
+
+        return {"positions":result}
+
     except Exception as e:
         return {"error":str(e)}
 
@@ -201,6 +220,21 @@ def portfolio():
 def history():
     df = pd.read_sql("SELECT * FROM trades", conn)
     return df.to_dict(orient="records")
+
+@app.route("/alpaca_test")
+def alpaca_test():
+
+    if api is None:
+        return {"error":"alpaca not initialized"}
+
+    try:
+        account = api.get_account()
+        return {
+            "status": account.status,
+            "buying_power": account.buying_power
+        }
+    except Exception as e:
+        return {"error":str(e)}
 
 # =========================
 # RUN
