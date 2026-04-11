@@ -1,7 +1,10 @@
-from flask import Flask
+from flask import Flask, request
 import pandas as pd
-import numpy as np
+import requests
 import os
+import sqlite3
+from datetime import datetime
+from alpaca_trade_api.rest import REST
 
 app = Flask(__name__)
 
@@ -9,115 +12,210 @@ app = Flask(__name__)
 # CONFIG
 # =========================
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
-
-DATA = {}
-DATA_READY = False
+MAX_POSITIONS = 3
 
 # =========================
-# DATA GENERATOR (STABLE)
+# ENV
 # =========================
-def generate_data():
-    global DATA, DATA_READY
+ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY")
+ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY")
+BASE_URL = os.environ.get("ALPACA_BASE_URL")
 
-    dates = pd.date_range(end=pd.Timestamp.today(), periods=200)
-    new_data = {}
+AUTO_TRADING_ENABLED = os.environ.get("AUTO_TRADING_ENABLED","false") == "true"
 
-    for symbol in SYMBOLS:
-        # Base price per asset (more realistic)
-        base_price = {
-            "SPY": 500,
-            "QQQ": 450,
-            "NVDA": 900,
-            "AMD": 180,
-            "META": 500
-        }.get(symbol, 200)
-
-        # Generate realistic price movement
-        price = base_price + np.cumsum(np.random.normal(0, 2, 200))
-
-        df = pd.DataFrame({
-            "c": price,
-            "h": price + 1,
-            "l": price - 1
-        }, index=dates)
-
-        # Indicators
-        df["ma"] = df["c"].rolling(50).mean()
-        df["momentum"] = df["c"] / df["c"].shift(20)
-
-        df = df.dropna()
-
-        new_data[symbol] = df
-
-    DATA = new_data
-    DATA_READY = True
+api = REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, BASE_URL)
 
 # =========================
-# ROUTES
+# DATABASE
 # =========================
+conn = sqlite3.connect("trades.db", check_same_thread=False)
+c = conn.cursor()
 
-@app.route("/")
-def home():
-    return {
-        "status": "running",
-        "data_ready": DATA_READY
-    }
+c.execute("""
+CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY,
+    symbol TEXT,
+    side TEXT,
+    price REAL,
+    qty INTEGER,
+    timestamp TEXT
+)
+""")
+conn.commit()
 
-@app.route("/refresh")
-def refresh():
-    generate_data()
-    return {
-        "status": "data refreshed",
-        "symbols": list(DATA.keys())
-    }
+# =========================
+# DATA (REAL)
+# =========================
+def fetch_data(symbol):
+    url = f"https://stooq.com/q/d/l/?s={symbol.lower()}&i=d"
+    r = requests.get(url, timeout=10)
 
-@app.route("/debug")
-def debug():
-    return {
-        "data_ready": DATA_READY,
-        "symbols_loaded": list(DATA.keys())
-    }
+    df = pd.read_csv(pd.io.common.StringIO(r.text))
+    df.columns = ["date","open","high","low","close","volume"]
 
-@app.route("/signals")
-def signals():
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date")
 
-    if not DATA_READY:
-        return {"error": "Run /refresh first"}
+    df["ma"] = df["close"].rolling(50).mean()
+    df["momentum"] = df["close"] / df["close"].shift(20)
 
-    spy = DATA["SPY"]
+    return df.dropna()
+
+# =========================
+# LOAD ALL DATA
+# =========================
+def load_data():
+    data = {}
+
+    for s in SYMBOLS:
+        try:
+            df = fetch_data(s)
+            if not df.empty:
+                data[s] = df
+        except:
+            pass
+
+    return data
+
+# =========================
+# SIGNAL ENGINE
+# =========================
+def get_signals(data):
+
+    spy = data["SPY"]
     last = spy.index[-1]
 
-    # Market condition
-    if spy.loc[last]["c"] <= spy.loc[last]["ma"]:
-        return {"market": "bearish", "signals": []}
+    if spy.loc[last]["close"] <= spy.loc[last]["ma"]:
+        return "bearish", []
 
-    # Rank by momentum
     ranked = sorted(
-        [(s, DATA[s].loc[last]["momentum"]) for s in DATA],
+        [(s, data[s].loc[last]["momentum"]) for s in data],
         key=lambda x: x[1],
         reverse=True
     )
 
     signals = []
 
-    for symbol, _ in ranked:
-        row = DATA[symbol].loc[last]
+    for s,_ in ranked[:5]:
+        row = data[s].loc[last]
 
-        if row["c"] > row["ma"] and row["momentum"] > 1.02:
+        if row["close"] > row["ma"] and row["momentum"] > 1.02:
             signals.append({
-                "symbol": symbol,
-                "price": round(float(row["c"]), 2),
-                "momentum": round(float(row["momentum"]), 3)
+                "symbol": s,
+                "price": round(float(row["close"]),2)
             })
 
+    return "bullish", signals
+
+# =========================
+# AUTO TRADE
+# =========================
+def execute_trades(signals):
+
+    executed = []
+
+    if not AUTO_TRADING_ENABLED:
+        return {"error":"disabled"}
+
+    positions = api.list_positions()
+    held = [p.symbol for p in positions]
+
+    for sig in signals:
+
+        if sig["symbol"] in held:
+            continue
+
+        if len(held) >= MAX_POSITIONS:
+            break
+
+        try:
+            api.submit_order(
+                symbol=sig["symbol"],
+                qty=1,
+                side="buy",
+                type="market",
+                time_in_force="gtc"
+            )
+
+            c.execute(
+                "INSERT INTO trades VALUES (NULL,?,?,?, ?,?)",
+                (sig["symbol"],"BUY",sig["price"],1,datetime.now())
+            )
+            conn.commit()
+
+            executed.append(sig)
+
+        except Exception as e:
+            executed.append({"symbol":sig["symbol"],"error":str(e)})
+
+    return {"executed":executed}
+
+# =========================
+# PORTFOLIO
+# =========================
+@app.route("/portfolio")
+def portfolio():
+
+    try:
+        positions = api.list_positions()
+        result = []
+
+        for p in positions:
+            result.append({
+                "symbol": p.symbol,
+                "qty": p.qty,
+                "price": float(p.current_price),
+                "pnl": float(p.unrealized_pl)
+            })
+
+        return {"positions":result}
+
+    except Exception as e:
+        return {"error":str(e)}
+
+# =========================
+# TRADE HISTORY
+# =========================
+@app.route("/history")
+def history():
+    df = pd.read_sql("SELECT * FROM trades", conn)
+    return df.to_dict(orient="records")
+
+# =========================
+# SIGNALS
+# =========================
+@app.route("/signals")
+def signals():
+
+    data = load_data()
+
+    if "SPY" not in data:
+        return {"error":"data failed"}
+
+    market, sigs = get_signals(data)
+
     return {
-        "market": "bullish",
-        "signals": signals
+        "market": market,
+        "signals": sigs
     }
+
+# =========================
+# AUTO TRADE ENDPOINT
+# =========================
+@app.route("/auto_trade")
+def auto_trade():
+
+    data = load_data()
+    market, sigs = get_signals(data)
+
+    if market != "bullish":
+        return {"note":"bearish market"}
+
+    return execute_trades(sigs)
 
 # =========================
 # RUN
 # =========================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT",5000))
     app.run(host="0.0.0.0", port=port)
