@@ -1,7 +1,17 @@
 from flask import Flask
 import os
+import subprocess
+import sys
 
 app = Flask(__name__)
+
+# =========================
+# FORCE INSTALL (CRITICAL FIX)
+# =========================
+try:
+    import alpaca
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "alpaca-py"])
 
 # =========================
 # ROOT
@@ -18,20 +28,6 @@ def env_check():
     return {
         "key_exists": bool(os.environ.get("ALPACA_API_KEY")),
         "secret_exists": bool(os.environ.get("ALPACA_SECRET_KEY"))
-    }
-
-# =========================
-# RAW KEY CHECK
-# =========================
-@app.route("/raw_key")
-def raw_key():
-    key = os.environ.get("ALPACA_API_KEY", "")
-    secret = os.environ.get("ALPACA_SECRET_KEY", "")
-
-    return {
-        "key_length": len(key),
-        "secret_length": len(secret),
-        "key_starts_with": key[:4]
     }
 
 # =========================
