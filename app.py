@@ -35,7 +35,7 @@ RISK_PER_TRADE = 0.1
 STOP_LOSS = 0.93
 TAKE_PROFIT = 1.18
 
-# 🔥 ENV CONTROL
+# 🔥 ENV CONTROL (this is what we are debugging)
 AUTO_TRADING = os.environ.get("AUTO_TRADING", "false").lower() == "true"
 
 # =========================
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS trades (
 conn.commit()
 
 # =========================
-# MARKET HOURS CHECK
+# MARKET HOURS
 # =========================
 def market_is_open():
     clock = trading_client.get_clock()
@@ -126,7 +126,6 @@ def get_signals():
             scores.append((symbol, momentum, price))
 
     ranked = sorted(scores, key=lambda x: x[1], reverse=True)
-
     signals = [{"symbol": s, "price": p} for s,_,p in ranked[:3]]
 
     return "bullish", signals
@@ -207,7 +206,7 @@ def auto_trader():
         except Exception as e:
             print("AUTO ERROR:", e)
 
-        time.sleep(300)  # 5 minutes
+        time.sleep(300)
 
 # =========================
 # START THREAD
@@ -223,6 +222,13 @@ def home():
         "status":"running",
         "auto_trading":AUTO_TRADING,
         "market_open": market_is_open()
+    }
+
+@app.route("/env")
+def env():
+    return {
+        "AUTO_TRADING_raw": os.environ.get("AUTO_TRADING"),
+        "AUTO_TRADING_eval": os.environ.get("AUTO_TRADING", "false").lower() == "true"
     }
 
 @app.route("/portfolio")
