@@ -1,5 +1,6 @@
 flask
 alpaca-py
-pytz
+yfinance
 pandas
 numpy
+pytz
