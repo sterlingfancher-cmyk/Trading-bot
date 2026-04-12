@@ -14,17 +14,19 @@ app = Flask(__name__)
 # =========================
 try:
     from alpaca.trading.client import TradingClient
+    from alpaca.trading.requests import MarketOrderRequest
+    from alpaca.trading.enums import OrderSide, TimeInForce
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "alpaca-py"])
     from alpaca.trading.client import TradingClient
+    from alpaca.trading.requests import MarketOrderRequest
+    from alpaca.trading.enums import OrderSide, TimeInForce
 
 # =========================
 # CONFIG
 # =========================
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
 MAX_POSITIONS = 3
-
-AUTO_TRADING_ENABLED = os.environ.get("AUTO_TRADING_ENABLED","false") == "true"
 
 # =========================
 # ALPACA
@@ -54,7 +56,7 @@ CREATE TABLE IF NOT EXISTS trades (
 conn.commit()
 
 # =========================
-# DATA (SIMULATED FOR NOW)
+# DATA (SIMULATED)
 # =========================
 def load_data():
     dates = pd.date_range(end=pd.Timestamp.today(), periods=200)
@@ -109,7 +111,7 @@ def get_signals():
     return "bullish", signals
 
 # =========================
-# EXECUTE TRADE (MANUAL)
+# EXECUTE TRADE (FIXED)
 # =========================
 def execute_trade(symbol):
 
@@ -123,13 +125,15 @@ def execute_trade(symbol):
         if len(held) >= MAX_POSITIONS:
             return {"error":"max positions reached"}
 
-        order = client.submit_order(
+        # 🔥 NEW SDK ORDER FORMAT
+        order_data = MarketOrderRequest(
             symbol=symbol,
             qty=1,
-            side="buy",
-            type="market",
-            time_in_force="gtc"
+            side=OrderSide.BUY,
+            time_in_force=TimeInForce.GTC
         )
+
+        client.submit_order(order_data)
 
         c.execute(
             "INSERT INTO trades VALUES (NULL,?,?,?,?,?)",
@@ -145,7 +149,6 @@ def execute_trade(symbol):
 # =========================
 # ROUTES
 # =========================
-
 @app.route("/")
 def home():
     return {"status":"running"}
