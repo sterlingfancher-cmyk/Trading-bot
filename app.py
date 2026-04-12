@@ -9,7 +9,7 @@ import sys
 app = Flask(__name__)
 
 # =========================
-# INSTALL DEPENDENCIES
+# FORCE INSTALL DEPENDENCIES
 # =========================
 try:
     from alpaca.trading.client import TradingClient
@@ -17,7 +17,7 @@ try:
     from alpaca.trading.enums import OrderSide, TimeInForce
     import yfinance as yf
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "alpaca-py yfinance pandas"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "alpaca-py", "yfinance", "pandas"])
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import MarketOrderRequest
     from alpaca.trading.enums import OrderSide, TimeInForce
@@ -28,10 +28,10 @@ except ImportError:
 # =========================
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
 MAX_POSITIONS = 3
-RISK_PER_TRADE = 0.1
+RISK_PER_TRADE = 0.1  # 10%
 
 # =========================
-# CLIENT
+# ALPACA CLIENT
 # =========================
 trading_client = TradingClient(
     os.environ.get("ALPACA_API_KEY"),
@@ -58,13 +58,13 @@ CREATE TABLE IF NOT EXISTS trades (
 conn.commit()
 
 # =========================
-# DATA (YAHOO — RELIABLE)
+# DATA LOADER (YFINANCE)
 # =========================
 def load_data(symbol):
     try:
         df = yf.download(symbol, period="6mo", interval="1d")
 
-        if df.empty or len(df) < 30:
+        if df is None or df.empty or len(df) < 30:
             return None
 
         df["ma"] = df["Close"].rolling(20).mean()
@@ -194,23 +194,38 @@ def trade():
 
 @app.route("/portfolio")
 def portfolio():
-    positions = trading_client.get_all_positions()
+    try:
+        positions = trading_client.get_all_positions()
 
-    return {
-        "positions":[
-            {
-                "symbol":p.symbol,
-                "qty":p.qty,
-                "price":float(p.current_price),
-                "pnl":float(p.unrealized_pl)
-            } for p in positions
-        ]
-    }
+        return {
+            "positions":[
+                {
+                    "symbol":p.symbol,
+                    "qty":p.qty,
+                    "price":float(p.current_price),
+                    "pnl":float(p.unrealized_pl)
+                } for p in positions
+            ]
+        }
+
+    except Exception as e:
+        return {"error":str(e)}
 
 @app.route("/history")
 def history():
     df = pd.read_sql("SELECT * FROM trades", conn)
     return df.to_dict(orient="records")
+
+# =========================
+# DEBUG ROUTE
+# =========================
+@app.route("/test_data")
+def test_data():
+    try:
+        df = yf.download("SPY", period="1mo")
+        return {"rows": len(df)}
+    except Exception as e:
+        return {"error": str(e)}
 
 # =========================
 # RUN
