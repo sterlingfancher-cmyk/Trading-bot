@@ -1,10 +1,12 @@
-from flask import Flask, request
+from flask import Flask
 import pandas as pd
 import os
 import sqlite3
 from datetime import datetime
 import subprocess
 import sys
+import threading
+import time
 
 app = Flask(__name__)
 
@@ -26,12 +28,18 @@ except ImportError:
 # =========================
 # CONFIG
 # =========================
-SYMBOLS = ["SPY", "QQQ", "NVDA", "AMD", "META"]
+SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
 MAX_POSITIONS = 3
 RISK_PER_TRADE = 0.1
 
+STOP_LOSS = 0.93
+TAKE_PROFIT = 1.18
+
+# 🔥 ENV CONTROL
+AUTO_TRADING = os.environ.get("AUTO_TRADING", "false").lower() == "true"
+
 # =========================
-# ALPACA CLIENT
+# CLIENT
 # =========================
 trading_client = TradingClient(
     os.environ.get("ALPACA_API_KEY"),
@@ -58,7 +66,14 @@ CREATE TABLE IF NOT EXISTS trades (
 conn.commit()
 
 # =========================
-# DATA LOADER (CLEAN + SAFE)
+# MARKET HOURS CHECK
+# =========================
+def market_is_open():
+    clock = trading_client.get_clock()
+    return clock.is_open
+
+# =========================
+# DATA
 # =========================
 def load_data(symbol):
     try:
@@ -67,28 +82,25 @@ def load_data(symbol):
         if df is None or df.empty:
             return None
 
-        # Flatten columns if MultiIndex appears
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
         if "Close" not in df.columns or len(df) < 30:
             return None
 
-        # Indicators
         df["ma"] = df["Close"].rolling(20).mean()
         df["momentum"] = df["Close"] / df["Close"].shift(10)
         df = df.dropna()
 
-        return df if not df.empty else None
+        return df
 
-    except Exception:
+    except:
         return None
 
 # =========================
-# SIGNAL ENGINE
+# SIGNALS
 # =========================
 def get_signals():
-
     spy = load_data("SPY")
     if spy is None:
         return "error", []
@@ -96,7 +108,6 @@ def get_signals():
     spy_close = float(spy["Close"].values[-1])
     spy_ma = float(spy["ma"].values[-1])
 
-    # Market filter
     if spy_close <= spy_ma:
         return "bearish", []
 
@@ -114,131 +125,119 @@ def get_signals():
         if price > ma:
             scores.append((symbol, momentum, price))
 
-    if not scores:
-        return "no_data", []
-
     ranked = sorted(scores, key=lambda x: x[1], reverse=True)
 
-    signals = [
-        {"symbol": s, "price": round(p, 2)}
-        for s, _, p in ranked[:3]
-    ]
+    signals = [{"symbol": s, "price": p} for s,_,p in ranked[:3]]
 
     return "bullish", signals
 
 # =========================
-# POSITION SIZING
+# POSITION SIZE
 # =========================
-def calculate_position_size(price):
+def calculate_qty(price):
     account = trading_client.get_account()
     buying_power = float(account.buying_power)
-
     allocation = buying_power * RISK_PER_TRADE
-    qty = int(allocation // price)
-
-    return max(qty, 1)
+    return max(int(allocation // price), 1)
 
 # =========================
-# EXECUTE TRADE
+# BUY
 # =========================
-def execute_trade(symbol):
+def buy(symbol, price):
+    qty = calculate_qty(price)
 
-    try:
-        positions = trading_client.get_all_positions()
-        held = [p.symbol for p in positions]
+    order = MarketOrderRequest(
+        symbol=symbol,
+        qty=qty,
+        side=OrderSide.BUY,
+        time_in_force=TimeInForce.GTC
+    )
 
-        if symbol in held:
-            return {"error": "already holding"}
+    trading_client.submit_order(order)
 
-        if len(held) >= MAX_POSITIONS:
-            return {"error": "max positions reached"}
+    c.execute(
+        "INSERT INTO trades VALUES (NULL,?,?,?,?,?)",
+        (symbol,"BUY",price,qty,datetime.now())
+    )
+    conn.commit()
 
-        df = load_data(symbol)
-        if df is None:
-            return {"error": "no data available"}
+# =========================
+# MANAGE POSITIONS
+# =========================
+def manage_positions():
+    positions = trading_client.get_all_positions()
 
-        price = float(df["Close"].values[-1])
-        qty = calculate_position_size(price)
+    for p in positions:
+        symbol = p.symbol
+        entry = float(p.avg_entry_price)
+        current = float(p.current_price)
+        change = current / entry
 
-        order = MarketOrderRequest(
-            symbol=symbol,
-            qty=qty,
-            side=OrderSide.BUY,
-            time_in_force=TimeInForce.GTC
-        )
+        if change <= STOP_LOSS or change >= TAKE_PROFIT:
 
-        trading_client.submit_order(order)
+            order = MarketOrderRequest(
+                symbol=symbol,
+                qty=int(float(p.qty)),
+                side=OrderSide.SELL,
+                time_in_force=TimeInForce.GTC
+            )
 
-        c.execute(
-            "INSERT INTO trades VALUES (NULL,?,?,?,?,?)",
-            (symbol, "BUY", price, qty, datetime.now())
-        )
-        conn.commit()
+            trading_client.submit_order(order)
 
-        return {
-            "status": "executed",
-            "symbol": symbol,
-            "qty": qty,
-            "price": round(price, 2)
-        }
+# =========================
+# AUTO LOOP
+# =========================
+def auto_trader():
+    while True:
+        try:
+            if AUTO_TRADING and market_is_open():
 
-    except Exception as e:
-        return {"error": str(e)}
+                market, signals = get_signals()
+
+                if market == "bullish":
+                    positions = trading_client.get_all_positions()
+                    held = [p.symbol for p in positions]
+
+                    for s in signals:
+                        if s["symbol"] not in held and len(held) < MAX_POSITIONS:
+                            buy(s["symbol"], s["price"])
+
+                manage_positions()
+
+        except Exception as e:
+            print("AUTO ERROR:", e)
+
+        time.sleep(300)  # 5 minutes
+
+# =========================
+# START THREAD
+# =========================
+threading.Thread(target=auto_trader, daemon=True).start()
 
 # =========================
 # ROUTES
 # =========================
 @app.route("/")
 def home():
-    return {"status": "running"}
-
-@app.route("/signals")
-def signals():
-    market, sigs = get_signals()
-    return {"market": market, "signals": sigs}
-
-@app.route("/trade")
-def trade():
-    symbol = request.args.get("symbol")
-    if not symbol:
-        return {"error": "symbol required"}
-    return execute_trade(symbol.upper())
+    return {
+        "status":"running",
+        "auto_trading":AUTO_TRADING,
+        "market_open": market_is_open()
+    }
 
 @app.route("/portfolio")
 def portfolio():
-    try:
-        positions = trading_client.get_all_positions()
-
-        return {
-            "positions": [
-                {
-                    "symbol": p.symbol,
-                    "qty": p.qty,
-                    "price": float(p.current_price),
-                    "pnl": float(p.unrealized_pl)
-                } for p in positions
-            ]
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
+    positions = trading_client.get_all_positions()
+    return {"positions":[p.symbol for p in positions]}
 
 @app.route("/history")
 def history():
     df = pd.read_sql("SELECT * FROM trades", conn)
     return df.to_dict(orient="records")
 
-@app.route("/test_data")
-def test_data():
-    try:
-        df = yf.download("SPY", period="1mo")
-        return {"rows": len(df)}
-    except Exception as e:
-        return {"error": str(e)}
-
 # =========================
 # RUN
 # =========================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT",5000))
     app.run(host="0.0.0.0", port=port)
