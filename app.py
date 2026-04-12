@@ -9,7 +9,7 @@ import sys
 app = Flask(__name__)
 
 # =========================
-# INSTALL
+# INSTALL DEPENDENCIES
 # =========================
 try:
     from alpaca.trading.client import TradingClient
@@ -32,7 +32,7 @@ except ImportError:
 # =========================
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
 MAX_POSITIONS = 3
-RISK_PER_TRADE = 0.1  # 10% of buying power
+RISK_PER_TRADE = 0.1  # 10%
 
 # =========================
 # CLIENTS
@@ -67,29 +67,37 @@ CREATE TABLE IF NOT EXISTS trades (
 conn.commit()
 
 # =========================
-# REAL DATA LOADER
+# SAFE DATA LOADER
 # =========================
 def load_data(symbol):
-    request = StockBarsRequest(
-        symbol_or_symbols=symbol,
-        timeframe=TimeFrame.Day,
-        limit=100
-    )
+    try:
+        request = StockBarsRequest(
+            symbol_or_symbols=symbol,
+            timeframe=TimeFrame.Day,
+            limit=100
+        )
 
-    bars = data_client.get_stock_bars(request).df
+        bars = data_client.get_stock_bars(request).df
 
-    if bars.empty:
+        if bars.empty or symbol not in bars.index.get_level_values(0):
+            return None
+
+        df = bars.xs(symbol)
+
+        if df.empty or len(df) < 20:
+            return None
+
+        df["ma"] = df["close"].rolling(20).mean()
+        df["momentum"] = df["close"] / df["close"].shift(10)
+        df = df.dropna()
+
+        return df if not df.empty else None
+
+    except Exception:
         return None
 
-    df = bars.xs(symbol)
-    df["ma"] = df["close"].rolling(20).mean()
-    df["momentum"] = df["close"] / df["close"].shift(10)
-    df = df.dropna()
-
-    return df
-
 # =========================
-# SIGNAL ENGINE (REAL DATA)
+# SIGNAL ENGINE
 # =========================
 def get_signals():
 
@@ -113,6 +121,9 @@ def get_signals():
 
         if row["close"] > row["ma"]:
             scores.append((symbol, row["momentum"], row["close"]))
+
+    if not scores:
+        return "no_data", []
 
     ranked = sorted(scores, key=lambda x: x[1], reverse=True)
 
@@ -150,10 +161,11 @@ def execute_trade(symbol):
         if len(held) >= MAX_POSITIONS:
             return {"error":"max positions reached"}
 
-        # get latest price
         df = load_data(symbol)
-        price = df.iloc[-1]["close"]
+        if df is None:
+            return {"error":"no data available"}
 
+        price = df.iloc[-1]["close"]
         qty = calculate_position_size(price)
 
         order_data = MarketOrderRequest(
@@ -196,22 +208,28 @@ def signals():
 @app.route("/trade")
 def trade():
     symbol = request.args.get("symbol")
+    if not symbol:
+        return {"error":"symbol required"}
     return execute_trade(symbol.upper())
 
 @app.route("/portfolio")
 def portfolio():
-    positions = trading_client.get_all_positions()
+    try:
+        positions = trading_client.get_all_positions()
 
-    return {
-        "positions":[
-            {
-                "symbol":p.symbol,
-                "qty":p.qty,
-                "price":float(p.current_price),
-                "pnl":float(p.unrealized_pl)
-            } for p in positions
-        ]
-    }
+        return {
+            "positions":[
+                {
+                    "symbol":p.symbol,
+                    "qty":p.qty,
+                    "price":float(p.current_price),
+                    "pnl":float(p.unrealized_pl)
+                } for p in positions
+            ]
+        }
+
+    except Exception as e:
+        return {"error":str(e)}
 
 @app.route("/history")
 def history():
