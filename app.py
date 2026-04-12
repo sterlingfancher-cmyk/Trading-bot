@@ -28,7 +28,7 @@ except ImportError:
 # =========================
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
 MAX_POSITIONS = 3
-RISK_PER_TRADE = 0.1  # 10%
+RISK_PER_TRADE = 0.1
 
 # =========================
 # ALPACA CLIENT
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS trades (
 conn.commit()
 
 # =========================
-# DATA LOADER (YFINANCE)
+# DATA LOADER
 # =========================
 def load_data(symbol):
     try:
@@ -77,7 +77,7 @@ def load_data(symbol):
         return None
 
 # =========================
-# SIGNAL ENGINE
+# SIGNAL ENGINE (FIXED)
 # =========================
 def get_signals():
 
@@ -85,9 +85,10 @@ def get_signals():
     if spy is None:
         return "error", []
 
-    last = spy.index[-1]
+    last_close = float(spy["Close"].iloc[-1])
+    last_ma = float(spy["ma"].iloc[-1])
 
-    if spy.loc[last]["Close"] <= spy.loc[last]["ma"]:
+    if last_close <= last_ma:
         return "bearish", []
 
     scores = []
@@ -97,10 +98,12 @@ def get_signals():
         if df is None:
             continue
 
-        row = df.iloc[-1]
+        price = float(df["Close"].iloc[-1])
+        ma = float(df["ma"].iloc[-1])
+        momentum = float(df["momentum"].iloc[-1])
 
-        if row["Close"] > row["ma"]:
-            scores.append((symbol, row["momentum"], row["Close"]))
+        if price > ma:
+            scores.append((symbol, momentum, price))
 
     if not scores:
         return "no_data", []
@@ -108,7 +111,7 @@ def get_signals():
     ranked = sorted(scores, key=lambda x: x[1], reverse=True)
 
     signals = [
-        {"symbol": s, "price": round(float(p),2)}
+        {"symbol": s, "price": round(p,2)}
         for s,_,p in ranked[:3]
     ]
 
@@ -127,7 +130,7 @@ def calculate_position_size(price):
     return max(qty, 1)
 
 # =========================
-# EXECUTE TRADE
+# EXECUTE TRADE (FIXED)
 # =========================
 def execute_trade(symbol):
 
@@ -145,7 +148,7 @@ def execute_trade(symbol):
         if df is None:
             return {"error":"no data available"}
 
-        price = float(df.iloc[-1]["Close"])
+        price = float(df["Close"].iloc[-1])
         qty = calculate_position_size(price)
 
         order_data = MarketOrderRequest(
