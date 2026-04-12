@@ -2,7 +2,7 @@ from flask import Flask, request
 import pandas as pd
 import os
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 import subprocess
 import sys
 
@@ -15,17 +15,13 @@ try:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import MarketOrderRequest
     from alpaca.trading.enums import OrderSide, TimeInForce
-    from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.requests import StockBarsRequest
-    from alpaca.data.timeframe import TimeFrame
+    import yfinance as yf
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "alpaca-py"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "alpaca-py yfinance pandas"])
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import MarketOrderRequest
     from alpaca.trading.enums import OrderSide, TimeInForce
-    from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.requests import StockBarsRequest
-    from alpaca.data.timeframe import TimeFrame
+    import yfinance as yf
 
 # =========================
 # CONFIG
@@ -35,18 +31,12 @@ MAX_POSITIONS = 3
 RISK_PER_TRADE = 0.1
 
 # =========================
-# CLIENTS
+# CLIENT
 # =========================
 trading_client = TradingClient(
     os.environ.get("ALPACA_API_KEY"),
     os.environ.get("ALPACA_SECRET_KEY"),
     paper=True
-)
-
-data_client = StockHistoricalDataClient(
-    os.environ.get("ALPACA_API_KEY"),
-    os.environ.get("ALPACA_SECRET_KEY"),
-    raw_data=True
 )
 
 # =========================
@@ -68,33 +58,17 @@ CREATE TABLE IF NOT EXISTS trades (
 conn.commit()
 
 # =========================
-# DATA LOADER (FIXED)
+# DATA (YAHOO — RELIABLE)
 # =========================
 def load_data(symbol):
     try:
-        end = datetime.utcnow()
-        start = end - timedelta(days=120)
+        df = yf.download(symbol, period="6mo", interval="1d")
 
-        request = StockBarsRequest(
-            symbol_or_symbols=symbol,
-            timeframe=TimeFrame.Day,
-            start=start,
-            end=end,
-            feed="iex"   # 🔥 CRITICAL FIX
-        )
-
-        bars = data_client.get_stock_bars(request).df
-
-        if bars.empty:
+        if df.empty or len(df) < 30:
             return None
 
-        df = bars.xs(symbol)
-
-        if df.empty or len(df) < 20:
-            return None
-
-        df["ma"] = df["close"].rolling(20).mean()
-        df["momentum"] = df["close"] / df["close"].shift(10)
+        df["ma"] = df["Close"].rolling(20).mean()
+        df["momentum"] = df["Close"] / df["Close"].shift(10)
         df = df.dropna()
 
         return df if not df.empty else None
@@ -113,7 +87,7 @@ def get_signals():
 
     last = spy.index[-1]
 
-    if spy.loc[last]["close"] <= spy.loc[last]["ma"]:
+    if spy.loc[last]["Close"] <= spy.loc[last]["ma"]:
         return "bearish", []
 
     scores = []
@@ -125,8 +99,8 @@ def get_signals():
 
         row = df.iloc[-1]
 
-        if row["close"] > row["ma"]:
-            scores.append((symbol, row["momentum"], row["close"]))
+        if row["Close"] > row["ma"]:
+            scores.append((symbol, row["momentum"], row["Close"]))
 
     if not scores:
         return "no_data", []
@@ -134,7 +108,7 @@ def get_signals():
     ranked = sorted(scores, key=lambda x: x[1], reverse=True)
 
     signals = [
-        {"symbol": s, "price": round(p,2)}
+        {"symbol": s, "price": round(float(p),2)}
         for s,_,p in ranked[:3]
     ]
 
@@ -171,7 +145,7 @@ def execute_trade(symbol):
         if df is None:
             return {"error":"no data available"}
 
-        price = df.iloc[-1]["close"]
+        price = float(df.iloc[-1]["Close"])
         qty = calculate_position_size(price)
 
         order_data = MarketOrderRequest(
@@ -220,22 +194,18 @@ def trade():
 
 @app.route("/portfolio")
 def portfolio():
-    try:
-        positions = trading_client.get_all_positions()
+    positions = trading_client.get_all_positions()
 
-        return {
-            "positions":[
-                {
-                    "symbol":p.symbol,
-                    "qty":p.qty,
-                    "price":float(p.current_price),
-                    "pnl":float(p.unrealized_pl)
-                } for p in positions
-            ]
-        }
-
-    except Exception as e:
-        return {"error":str(e)}
+    return {
+        "positions":[
+            {
+                "symbol":p.symbol,
+                "qty":p.qty,
+                "price":float(p.current_price),
+                "pnl":float(p.unrealized_pl)
+            } for p in positions
+        ]
+    }
 
 @app.route("/history")
 def history():
