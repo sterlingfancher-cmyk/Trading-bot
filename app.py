@@ -2,7 +2,7 @@ from flask import Flask, request
 import pandas as pd
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 import subprocess
 import sys
 
@@ -67,19 +67,23 @@ CREATE TABLE IF NOT EXISTS trades (
 conn.commit()
 
 # =========================
-# SAFE DATA LOADER
+# DATA LOADER (FIXED)
 # =========================
 def load_data(symbol):
     try:
+        end = datetime.utcnow()
+        start = end - timedelta(days=120)
+
         request = StockBarsRequest(
             symbol_or_symbols=symbol,
             timeframe=TimeFrame.Day,
-            limit=100
+            start=start,
+            end=end
         )
 
         bars = data_client.get_stock_bars(request).df
 
-        if bars.empty or symbol not in bars.index.get_level_values(0):
+        if bars.empty:
             return None
 
         df = bars.xs(symbol)
