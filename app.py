@@ -4,14 +4,14 @@ import os
 app = Flask(__name__)
 
 # =========================
-# ROOT (MUST WORK FIRST)
+# ROOT
 # =========================
 @app.route("/")
 def home():
     return {"status": "running"}
 
 # =========================
-# ENV CHECK (VERIFY VARIABLES)
+# ENV CHECK
 # =========================
 @app.route("/env_check")
 def env_check():
@@ -19,6 +19,22 @@ def env_check():
         "key_exists": bool(os.environ.get("ALPACA_API_KEY")),
         "secret_exists": bool(os.environ.get("ALPACA_SECRET_KEY")),
         "base_url": os.environ.get("ALPACA_BASE_URL")
+    }
+
+# =========================
+# RAW KEY DEBUG (IMPORTANT)
+# =========================
+@app.route("/raw_key")
+def raw_key():
+    key = os.environ.get("ALPACA_API_KEY", "")
+    secret = os.environ.get("ALPACA_SECRET_KEY", "")
+
+    return {
+        "key_length": len(key),
+        "secret_length": len(secret),
+        "key_starts_with": key[:4],   # should be "PK.."
+        "has_trailing_space_key": key.endswith(" "),
+        "has_trailing_space_secret": secret.endswith(" ")
     }
 
 # =========================
