@@ -1,6 +1,5 @@
 from flask import Flask, request
 import pandas as pd
-import numpy as np
 import os
 import sqlite3
 from datetime import datetime
@@ -10,31 +9,43 @@ import sys
 app = Flask(__name__)
 
 # =========================
-# FORCE INSTALL
+# INSTALL
 # =========================
 try:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import MarketOrderRequest
     from alpaca.trading.enums import OrderSide, TimeInForce
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "alpaca-py"])
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import MarketOrderRequest
     from alpaca.trading.enums import OrderSide, TimeInForce
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
 
 # =========================
 # CONFIG
 # =========================
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
 MAX_POSITIONS = 3
+RISK_PER_TRADE = 0.1  # 10% of buying power
 
 # =========================
-# ALPACA
+# CLIENTS
 # =========================
-client = TradingClient(
-    api_key=os.environ.get("ALPACA_API_KEY"),
-    secret_key=os.environ.get("ALPACA_SECRET_KEY"),
+trading_client = TradingClient(
+    os.environ.get("ALPACA_API_KEY"),
+    os.environ.get("ALPACA_SECRET_KEY"),
     paper=True
+)
+
+data_client = StockHistoricalDataClient(
+    os.environ.get("ALPACA_API_KEY"),
+    os.environ.get("ALPACA_SECRET_KEY")
 )
 
 # =========================
@@ -56,67 +67,81 @@ CREATE TABLE IF NOT EXISTS trades (
 conn.commit()
 
 # =========================
-# DATA (SIMULATED)
+# REAL DATA LOADER
 # =========================
-def load_data():
-    dates = pd.date_range(end=pd.Timestamp.today(), periods=200)
-    data = {}
+def load_data(symbol):
+    request = StockBarsRequest(
+        symbol_or_symbols=symbol,
+        timeframe=TimeFrame.Day,
+        limit=100
+    )
 
-    for symbol in SYMBOLS:
-        base = {
-            "SPY":500,"QQQ":450,"NVDA":900,"AMD":180,"META":500
-        }.get(symbol,200)
+    bars = data_client.get_stock_bars(request).df
 
-        price = base + np.cumsum(np.random.normal(0,2,200))
+    if bars.empty:
+        return None
 
-        df = pd.DataFrame({"close": price}, index=dates)
+    df = bars.xs(symbol)
+    df["ma"] = df["close"].rolling(20).mean()
+    df["momentum"] = df["close"] / df["close"].shift(10)
+    df = df.dropna()
 
-        df["ma"] = df["close"].rolling(50).mean()
-        df["momentum"] = df["close"] / df["close"].shift(20)
-        df = df.dropna()
-
-        data[symbol] = df
-
-    return data
+    return df
 
 # =========================
-# SIGNAL ENGINE
+# SIGNAL ENGINE (REAL DATA)
 # =========================
 def get_signals():
-    data = load_data()
 
-    spy = data["SPY"]
+    spy = load_data("SPY")
+    if spy is None:
+        return "error", []
+
     last = spy.index[-1]
 
     if spy.loc[last]["close"] <= spy.loc[last]["ma"]:
         return "bearish", []
 
-    ranked = sorted(
-        [(s, data[s].loc[last]["momentum"]) for s in data],
-        key=lambda x: x[1],
-        reverse=True
-    )
+    scores = []
 
-    signals = []
+    for symbol in SYMBOLS:
+        df = load_data(symbol)
+        if df is None:
+            continue
 
-    for s,_ in ranked[:5]:
-        row = data[s].loc[last]
+        row = df.iloc[-1]
 
-        if row["close"] > row["ma"] and row["momentum"] > 1.02:
-            signals.append({
-                "symbol": s,
-                "price": round(float(row["close"]),2)
-            })
+        if row["close"] > row["ma"]:
+            scores.append((symbol, row["momentum"], row["close"]))
+
+    ranked = sorted(scores, key=lambda x: x[1], reverse=True)
+
+    signals = [
+        {"symbol": s, "price": round(p,2)}
+        for s,_,p in ranked[:3]
+    ]
 
     return "bullish", signals
 
 # =========================
-# EXECUTE TRADE (FIXED)
+# POSITION SIZING
+# =========================
+def calculate_position_size(price):
+    account = trading_client.get_account()
+    buying_power = float(account.buying_power)
+
+    allocation = buying_power * RISK_PER_TRADE
+    qty = int(allocation // price)
+
+    return max(qty, 1)
+
+# =========================
+# EXECUTE TRADE
 # =========================
 def execute_trade(symbol):
 
     try:
-        positions = client.get_all_positions()
+        positions = trading_client.get_all_positions()
         held = [p.symbol for p in positions]
 
         if symbol in held:
@@ -125,23 +150,33 @@ def execute_trade(symbol):
         if len(held) >= MAX_POSITIONS:
             return {"error":"max positions reached"}
 
-        # 🔥 NEW SDK ORDER FORMAT
+        # get latest price
+        df = load_data(symbol)
+        price = df.iloc[-1]["close"]
+
+        qty = calculate_position_size(price)
+
         order_data = MarketOrderRequest(
             symbol=symbol,
-            qty=1,
+            qty=qty,
             side=OrderSide.BUY,
             time_in_force=TimeInForce.GTC
         )
 
-        client.submit_order(order_data)
+        trading_client.submit_order(order_data)
 
         c.execute(
             "INSERT INTO trades VALUES (NULL,?,?,?,?,?)",
-            (symbol,"BUY",0,1,datetime.now())
+            (symbol,"BUY",price,qty,datetime.now())
         )
         conn.commit()
 
-        return {"status":"executed","symbol":symbol}
+        return {
+            "status":"executed",
+            "symbol":symbol,
+            "qty":qty,
+            "price":round(price,2)
+        }
 
     except Exception as e:
         return {"error":str(e)}
@@ -161,30 +196,22 @@ def signals():
 @app.route("/trade")
 def trade():
     symbol = request.args.get("symbol")
-
-    if not symbol:
-        return {"error":"symbol required"}
-
     return execute_trade(symbol.upper())
 
 @app.route("/portfolio")
 def portfolio():
-    try:
-        positions = client.get_all_positions()
+    positions = trading_client.get_all_positions()
 
-        result = []
-        for p in positions:
-            result.append({
-                "symbol": p.symbol,
-                "qty": p.qty,
-                "price": float(p.current_price),
-                "pnl": float(p.unrealized_pl)
-            })
-
-        return {"positions":result}
-
-    except Exception as e:
-        return {"error":str(e)}
+    return {
+        "positions":[
+            {
+                "symbol":p.symbol,
+                "qty":p.qty,
+                "price":float(p.current_price),
+                "pnl":float(p.unrealized_pl)
+            } for p in positions
+        ]
+    }
 
 @app.route("/history")
 def history():
