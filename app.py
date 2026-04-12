@@ -17,12 +17,11 @@ def home():
 def env_check():
     return {
         "key_exists": bool(os.environ.get("ALPACA_API_KEY")),
-        "secret_exists": bool(os.environ.get("ALPACA_SECRET_KEY")),
-        "base_url": os.environ.get("ALPACA_BASE_URL")
+        "secret_exists": bool(os.environ.get("ALPACA_SECRET_KEY"))
     }
 
 # =========================
-# RAW KEY DEBUG (IMPORTANT)
+# RAW KEY CHECK
 # =========================
 @app.route("/raw_key")
 def raw_key():
@@ -32,27 +31,24 @@ def raw_key():
     return {
         "key_length": len(key),
         "secret_length": len(secret),
-        "key_starts_with": key[:4],   # should be "PK.."
-        "has_trailing_space_key": key.endswith(" "),
-        "has_trailing_space_secret": secret.endswith(" ")
+        "key_starts_with": key[:4]
     }
 
 # =========================
-# ALPACA TEST
+# ALPACA TEST (NEW SDK)
 # =========================
 @app.route("/alpaca_test")
 def alpaca_test():
     try:
-        from alpaca_trade_api.rest import REST
+        from alpaca.trading.client import TradingClient
 
-        api = REST(
-            os.environ.get("ALPACA_API_KEY"),
-            os.environ.get("ALPACA_SECRET_KEY"),
-            "https://paper-api.alpaca.markets",
-            api_version="v2"
+        client = TradingClient(
+            api_key=os.environ.get("ALPACA_API_KEY"),
+            secret_key=os.environ.get("ALPACA_SECRET_KEY"),
+            paper=True
         )
 
-        account = api.get_account()
+        account = client.get_account()
 
         return {
             "status": account.status,
