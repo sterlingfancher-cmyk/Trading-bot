@@ -35,8 +35,11 @@ RISK_PER_TRADE = 0.1
 STOP_LOSS = 0.93
 TAKE_PROFIT = 1.18
 
-# 🔥 ENV CONTROL (this is what we are debugging)
-AUTO_TRADING = os.environ.get("AUTO_TRADING", "false").lower() == "true"
+# =========================
+# ENV (DYNAMIC — FIXED)
+# =========================
+def is_auto_trading():
+    return os.environ.get("AUTO_TRADING", "false").lower() == "true"
 
 # =========================
 # CLIENT
@@ -189,7 +192,7 @@ def manage_positions():
 def auto_trader():
     while True:
         try:
-            if AUTO_TRADING and market_is_open():
+            if is_auto_trading() and market_is_open():
 
                 market, signals = get_signals()
 
@@ -220,7 +223,7 @@ threading.Thread(target=auto_trader, daemon=True).start()
 def home():
     return {
         "status":"running",
-        "auto_trading":AUTO_TRADING,
+        "auto_trading": is_auto_trading(),
         "market_open": market_is_open()
     }
 
@@ -228,7 +231,7 @@ def home():
 def env():
     return {
         "AUTO_TRADING_raw": os.environ.get("AUTO_TRADING"),
-        "AUTO_TRADING_eval": os.environ.get("AUTO_TRADING", "false").lower() == "true"
+        "AUTO_TRADING_eval": is_auto_trading()
     }
 
 @app.route("/portfolio")
