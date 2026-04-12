@@ -32,7 +32,7 @@ except ImportError:
 # =========================
 SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
 MAX_POSITIONS = 3
-RISK_PER_TRADE = 0.1  # 10%
+RISK_PER_TRADE = 0.1
 
 # =========================
 # CLIENTS
@@ -45,7 +45,8 @@ trading_client = TradingClient(
 
 data_client = StockHistoricalDataClient(
     os.environ.get("ALPACA_API_KEY"),
-    os.environ.get("ALPACA_SECRET_KEY")
+    os.environ.get("ALPACA_SECRET_KEY"),
+    raw_data=True
 )
 
 # =========================
@@ -78,7 +79,8 @@ def load_data(symbol):
             symbol_or_symbols=symbol,
             timeframe=TimeFrame.Day,
             start=start,
-            end=end
+            end=end,
+            feed="iex"   # 🔥 CRITICAL FIX
         )
 
         bars = data_client.get_stock_bars(request).df
