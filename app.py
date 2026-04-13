@@ -28,15 +28,38 @@ except ImportError:
 # =========================
 # CONFIG
 # =========================
-SYMBOLS = ["SPY","QQQ","NVDA","AMD","META"]
+
+# 🔥 EXPANDED STOCK UNIVERSE (OPTIMIZED)
+SYMBOLS = [
+    # ETFs (market direction)
+    "SPY","QQQ",
+
+    # Mega caps
+    "AAPL","MSFT","GOOGL","AMZN",
+
+    # AI / Tech leaders
+    "NVDA","AMD","META","AVGO","TSLA",
+
+    # Growth / momentum
+    "NFLX","CRM","ADBE","INTC",
+
+    # Financial / industrial strength
+    "JPM","GS","CAT","BA"
+]
+
 MAX_POSITIONS = 3
-RISK_PER_TRADE = 0.1
+
+LONG_RISK = 0.1
+SHORT_RISK = 0.05
 
 STOP_LOSS = 0.93
 TAKE_PROFIT = 1.18
 
+SHORT_STOP_LOSS = 1.04
+SHORT_TAKE_PROFIT = 0.92
+
 # =========================
-# ENV (DYNAMIC — FIXED)
+# ENV
 # =========================
 def is_auto_trading():
     return os.environ.get("AUTO_TRADING", "false").lower() == "true"
@@ -72,8 +95,7 @@ conn.commit()
 # MARKET HOURS
 # =========================
 def market_is_open():
-    clock = trading_client.get_clock()
-    return clock.is_open
+    return trading_client.get_clock().is_open
 
 # =========================
 # DATA
@@ -88,15 +110,11 @@ def load_data(symbol):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        if "Close" not in df.columns or len(df) < 30:
-            return None
-
         df["ma"] = df["Close"].rolling(20).mean()
         df["momentum"] = df["Close"] / df["Close"].shift(10)
         df = df.dropna()
 
         return df
-
     except:
         return None
 
@@ -111,9 +129,6 @@ def get_signals():
     spy_close = float(spy["Close"].values[-1])
     spy_ma = float(spy["ma"].values[-1])
 
-    if spy_close <= spy_ma:
-        return "bearish", []
-
     scores = []
 
     for symbol in SYMBOLS:
@@ -125,33 +140,51 @@ def get_signals():
         ma = float(df["ma"].values[-1])
         momentum = float(df["momentum"].values[-1])
 
-        if price > ma:
-            scores.append((symbol, momentum, price))
+        scores.append((symbol, momentum, price, ma))
 
-    ranked = sorted(scores, key=lambda x: x[1], reverse=True)
-    signals = [{"symbol": s, "price": p} for s,_,p in ranked[:3]]
+    # =========================
+    # BULLISH
+    # =========================
+    if spy_close > spy_ma:
+        strong = [s for s in scores if s[2] > s[3]]
+        ranked = sorted(strong, key=lambda x: x[1], reverse=True)
 
-    return "bullish", signals
+        return "bullish", [
+            {"symbol": s, "price": p}
+            for s, _, p, _ in ranked[:3]
+        ]
+
+    # =========================
+    # BEARISH
+    # =========================
+    else:
+        weak = [s for s in scores if s[2] < s[3]]
+        ranked = sorted(weak, key=lambda x: x[1])
+
+        return "bearish", [
+            {"symbol": s, "price": p}
+            for s, _, p, _ in ranked[:3]
+        ]
 
 # =========================
 # POSITION SIZE
 # =========================
-def calculate_qty(price):
+def calculate_qty(price, risk):
     account = trading_client.get_account()
     buying_power = float(account.buying_power)
-    allocation = buying_power * RISK_PER_TRADE
+    allocation = buying_power * risk
     return max(int(allocation // price), 1)
 
 # =========================
-# BUY
+# ORDER EXECUTION
 # =========================
-def buy(symbol, price):
-    qty = calculate_qty(price)
+def place_order(symbol, price, side, risk):
+    qty = calculate_qty(price, risk)
 
     order = MarketOrderRequest(
         symbol=symbol,
         qty=qty,
-        side=OrderSide.BUY,
+        side=side,
         time_in_force=TimeInForce.GTC
     )
 
@@ -159,12 +192,12 @@ def buy(symbol, price):
 
     c.execute(
         "INSERT INTO trades VALUES (NULL,?,?,?,?,?)",
-        (symbol,"BUY",price,qty,datetime.now())
+        (symbol, side.name, price, qty, datetime.now())
     )
     conn.commit()
 
 # =========================
-# MANAGE POSITIONS
+# POSITION MANAGEMENT
 # =========================
 def manage_positions():
     positions = trading_client.get_all_positions()
@@ -173,21 +206,32 @@ def manage_positions():
         symbol = p.symbol
         entry = float(p.avg_entry_price)
         current = float(p.current_price)
+        side = p.side
+
         change = current / entry
 
-        if change <= STOP_LOSS or change >= TAKE_PROFIT:
+        # LONG
+        if side == "long":
+            if change <= STOP_LOSS or change >= TAKE_PROFIT:
+                trading_client.submit_order(MarketOrderRequest(
+                    symbol=symbol,
+                    qty=int(float(p.qty)),
+                    side=OrderSide.SELL,
+                    time_in_force=TimeInForce.GTC
+                ))
 
-            order = MarketOrderRequest(
-                symbol=symbol,
-                qty=int(float(p.qty)),
-                side=OrderSide.SELL,
-                time_in_force=TimeInForce.GTC
-            )
-
-            trading_client.submit_order(order)
+        # SHORT
+        elif side == "short":
+            if change >= SHORT_STOP_LOSS or change <= SHORT_TAKE_PROFIT:
+                trading_client.submit_order(MarketOrderRequest(
+                    symbol=symbol,
+                    qty=int(float(p.qty)),
+                    side=OrderSide.BUY,
+                    time_in_force=TimeInForce.GTC
+                ))
 
 # =========================
-# AUTO LOOP
+# AUTO TRADER
 # =========================
 def auto_trader():
     while True:
@@ -196,13 +240,17 @@ def auto_trader():
 
                 market, signals = get_signals()
 
-                if market == "bullish":
-                    positions = trading_client.get_all_positions()
-                    held = [p.symbol for p in positions]
+                positions = trading_client.get_all_positions()
+                held = [p.symbol for p in positions]
 
-                    for s in signals:
-                        if s["symbol"] not in held and len(held) < MAX_POSITIONS:
-                            buy(s["symbol"], s["price"])
+                for s in signals:
+                    if s["symbol"] not in held and len(held) < MAX_POSITIONS:
+
+                        if market == "bullish":
+                            place_order(s["symbol"], s["price"], OrderSide.BUY, LONG_RISK)
+
+                        elif market == "bearish":
+                            place_order(s["symbol"], s["price"], OrderSide.SELL, SHORT_RISK)
 
                 manage_positions()
 
@@ -222,22 +270,10 @@ threading.Thread(target=auto_trader, daemon=True).start()
 @app.route("/")
 def home():
     return {
-        "status":"running",
+        "status": "running",
         "auto_trading": is_auto_trading(),
         "market_open": market_is_open()
     }
-
-@app.route("/env")
-def env():
-    return {
-        "AUTO_TRADING_raw": os.environ.get("AUTO_TRADING"),
-        "AUTO_TRADING_eval": is_auto_trading()
-    }
-
-@app.route("/portfolio")
-def portfolio():
-    positions = trading_client.get_all_positions()
-    return {"positions":[p.symbol for p in positions]}
 
 @app.route("/history")
 def history():
@@ -248,5 +284,5 @@ def history():
 # RUN
 # =========================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT",5000))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
