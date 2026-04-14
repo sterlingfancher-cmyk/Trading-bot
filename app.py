@@ -28,22 +28,11 @@ except ImportError:
 # =========================
 # CONFIG
 # =========================
-
-# 🔥 EXPANDED STOCK UNIVERSE (OPTIMIZED)
 SYMBOLS = [
-    # ETFs (market direction)
     "SPY","QQQ",
-
-    # Mega caps
     "AAPL","MSFT","GOOGL","AMZN",
-
-    # AI / Tech leaders
     "NVDA","AMD","META","AVGO","TSLA",
-
-    # Growth / momentum
     "NFLX","CRM","ADBE","INTC",
-
-    # Financial / industrial strength
     "JPM","GS","CAT","BA"
 ]
 
@@ -53,10 +42,10 @@ LONG_RISK = 0.1
 SHORT_RISK = 0.05
 
 STOP_LOSS = 0.93
-TAKE_PROFIT = 1.18
+TRAILING_STOP = 0.90
 
 SHORT_STOP_LOSS = 1.04
-SHORT_TAKE_PROFIT = 0.92
+SHORT_TRAILING_STOP = 1.10
 
 # =========================
 # ENV
@@ -90,6 +79,12 @@ CREATE TABLE IF NOT EXISTS trades (
 )
 """)
 conn.commit()
+
+# =========================
+# TRAILING STORAGE
+# =========================
+peak_prices = {}
+low_prices = {}
 
 # =========================
 # MARKET HOURS
@@ -142,29 +137,15 @@ def get_signals():
 
         scores.append((symbol, momentum, price, ma))
 
-    # =========================
-    # BULLISH
-    # =========================
     if spy_close > spy_ma:
         strong = [s for s in scores if s[2] > s[3]]
         ranked = sorted(strong, key=lambda x: x[1], reverse=True)
+        return "bullish", [{"symbol": s, "price": p} for s,_,p,_ in ranked[:3]]
 
-        return "bullish", [
-            {"symbol": s, "price": p}
-            for s, _, p, _ in ranked[:3]
-        ]
-
-    # =========================
-    # BEARISH
-    # =========================
     else:
         weak = [s for s in scores if s[2] < s[3]]
         ranked = sorted(weak, key=lambda x: x[1])
-
-        return "bearish", [
-            {"symbol": s, "price": p}
-            for s, _, p, _ in ranked[:3]
-        ]
+        return "bearish", [{"symbol": s, "price": p} for s,_,p,_ in ranked[:3]]
 
 # =========================
 # POSITION SIZE
@@ -208,11 +189,11 @@ def manage_positions():
         current = float(p.current_price)
         side = p.side
 
-        change = current / entry
-
         # LONG
         if side == "long":
-            if change <= STOP_LOSS or change >= TAKE_PROFIT:
+            peak_prices[symbol] = max(peak_prices.get(symbol, entry), current)
+
+            if current <= entry * STOP_LOSS or current <= peak_prices[symbol] * TRAILING_STOP:
                 trading_client.submit_order(MarketOrderRequest(
                     symbol=symbol,
                     qty=int(float(p.qty)),
@@ -222,7 +203,9 @@ def manage_positions():
 
         # SHORT
         elif side == "short":
-            if change >= SHORT_STOP_LOSS or change <= SHORT_TAKE_PROFIT:
+            low_prices[symbol] = min(low_prices.get(symbol, entry), current)
+
+            if current >= entry * SHORT_STOP_LOSS or current >= low_prices[symbol] * SHORT_TRAILING_STOP:
                 trading_client.submit_order(MarketOrderRequest(
                     symbol=symbol,
                     qty=int(float(p.qty)),
