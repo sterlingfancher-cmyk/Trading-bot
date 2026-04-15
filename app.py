@@ -110,7 +110,8 @@ def load_data(symbol):
         df = df.dropna()
 
         return df
-    except:
+    except Exception as e:
+        print("DATA ERROR:", symbol, e)
         return None
 
 # =========================
@@ -178,13 +179,13 @@ def place_order(symbol, price, side, risk):
     conn.commit()
 
 # =========================
-# POSITION MANAGEMENT (FIXED)
+# POSITION MANAGEMENT
 # =========================
 def manage_positions():
     positions = trading_client.get_all_positions()
     active_symbols = [p.symbol for p in positions]
 
-    # Clean up memory for closed positions
+    # CLEANUP (important fix)
     for symbol in list(peak_prices.keys()):
         if symbol not in active_symbols:
             del peak_prices[symbol]
@@ -199,7 +200,6 @@ def manage_positions():
         current = float(p.current_price)
         side = p.side
 
-        # LONG
         if side == "long":
             peak_prices[symbol] = max(peak_prices.get(symbol, entry), current)
 
@@ -211,7 +211,6 @@ def manage_positions():
                     time_in_force=TimeInForce.GTC
                 ))
 
-        # SHORT
         elif side == "short":
             low_prices[symbol] = min(low_prices.get(symbol, entry), current)
 
@@ -236,6 +235,10 @@ def auto_trader():
                 positions = trading_client.get_all_positions()
                 held = [p.symbol for p in positions]
 
+                print("MARKET:", market)
+                print("SIGNALS:", signals)
+                print("HELD:", held)
+
                 for s in signals:
                     if s["symbol"] not in held and len(held) < MAX_POSITIONS:
 
@@ -253,12 +256,16 @@ def auto_trader():
         time.sleep(300)
 
 # =========================
-# START THREAD
+# START THREAD (SAFE START)
 # =========================
-threading.Thread(target=auto_trader, daemon=True).start()
+def start_trader():
+    time.sleep(10)
+    auto_trader()
+
+threading.Thread(target=start_trader, daemon=True).start()
 
 # =========================
-# ROUTES
+# DEBUG ROUTES
 # =========================
 @app.route("/")
 def home():
@@ -272,6 +279,41 @@ def home():
 def history():
     df = pd.read_sql("SELECT * FROM trades", conn)
     return df.to_dict(orient="records")
+
+@app.route("/signals")
+def debug_signals():
+    market, signals = get_signals()
+    return {
+        "market": market,
+        "signals": signals
+    }
+
+@app.route("/positions")
+def debug_positions():
+    positions = trading_client.get_all_positions()
+    return [
+        {
+            "symbol": p.symbol,
+            "qty": p.qty,
+            "side": p.side,
+            "entry_price": p.avg_entry_price,
+            "current_price": p.current_price
+        }
+        for p in positions
+    ]
+
+@app.route("/debug")
+def full_debug():
+    market, signals = get_signals()
+    positions = trading_client.get_all_positions()
+
+    return {
+        "market": market,
+        "signals": signals,
+        "positions": [p.symbol for p in positions],
+        "auto_trading": is_auto_trading(),
+        "market_open": market_is_open()
+    }
 
 # =========================
 # RUN
