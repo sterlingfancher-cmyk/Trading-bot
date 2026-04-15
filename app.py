@@ -178,10 +178,20 @@ def place_order(symbol, price, side, risk):
     conn.commit()
 
 # =========================
-# POSITION MANAGEMENT
+# POSITION MANAGEMENT (FIXED)
 # =========================
 def manage_positions():
     positions = trading_client.get_all_positions()
+    active_symbols = [p.symbol for p in positions]
+
+    # Clean up memory for closed positions
+    for symbol in list(peak_prices.keys()):
+        if symbol not in active_symbols:
+            del peak_prices[symbol]
+
+    for symbol in list(low_prices.keys()):
+        if symbol not in active_symbols:
+            del low_prices[symbol]
 
     for p in positions:
         symbol = p.symbol
