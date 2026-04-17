@@ -2,6 +2,9 @@ import os
 import requests
 from datetime import datetime
 import pytz
+from flask import Flask, jsonify
+
+app = Flask(__name__)
 
 # ==============================
 # CONFIG
@@ -23,7 +26,7 @@ HEADERS = {
 highest_price_tracker = {}
 
 # ==============================
-# LOGGING SYSTEM (NEW)
+# LOGGING
 # ==============================
 
 def log(message, data=None):
@@ -33,10 +36,13 @@ def log(message, data=None):
     if data:
         entry += f" | {data}"
 
-    print(entry)  # shows in Railway logs
+    print(entry)
 
-    with open("bot_log.txt", "a") as f:
-        f.write(entry + "\n")
+    try:
+        with open("bot_log.txt", "a") as f:
+            f.write(entry + "\n")
+    except:
+        pass
 
 # ==============================
 # MARKET HOURS
@@ -79,10 +85,22 @@ def api_post(endpoint, data):
 # ==============================
 
 def get_positions():
-    return api_get("/v2/positions")
+    data = api_get("/v2/positions")
+
+    if isinstance(data, list):
+        return data
+
+    log("POSITIONS ERROR", data)
+    return []
 
 def get_account():
-    return api_get("/v2/account")
+    data = api_get("/v2/account")
+
+    if isinstance(data, dict) and "cash" in data:
+        return data
+
+    log("ACCOUNT ERROR", data)
+    return {"cash": 0}
 
 def get_price(symbol):
     try:
@@ -135,9 +153,14 @@ def manage_positions():
     positions = get_positions()
 
     for pos in positions:
-        symbol = pos["symbol"]
-        qty = int(float(pos["qty"]))
-        entry_price = float(pos["avg_entry_price"])
+
+        if not isinstance(pos, dict):
+            log("BAD POSITION FORMAT", pos)
+            continue
+
+        symbol = pos.get("symbol")
+        qty = int(float(pos.get("qty", 0)))
+        entry_price = float(pos.get("avg_entry_price", 0))
         current_price = get_price(symbol)
 
         if not current_price:
@@ -171,7 +194,7 @@ def manage_positions():
 
 def find_new_trades():
     positions = get_positions()
-    held_symbols = [p["symbol"] for p in positions]
+    held_symbols = [p["symbol"] for p in positions if isinstance(p, dict)]
 
     if len(held_symbols) >= MAX_POSITIONS:
         log("MAX POSITIONS REACHED")
@@ -204,24 +227,56 @@ def find_new_trades():
         held_symbols.append(symbol)
 
 # ==============================
-# MAIN
+# CORE RUN
 # ==============================
 
-def run():
+def run_bot():
     log("BOT START")
 
     market_open = is_market_open()
     log("MARKET STATUS", market_open)
 
-    # ALWAYS run exits
     manage_positions()
 
-    # ONLY run entries when open
     if market_open:
         find_new_trades()
 
     log("CYCLE COMPLETE")
 
+# ==============================
+# WEB TEST ENDPOINTS
+# ==============================
+
+@app.route("/")
+def home():
+    return {"status": "bot running"}
+
+@app.route("/run")
+def run_once():
+    run_bot()
+    return {"status": "ran once"}
+
+@app.route("/debug")
+def debug():
+    return jsonify({
+        "market_open": is_market_open(),
+        "positions": get_positions(),
+        "signals": get_signals()
+    })
+
+@app.route("/force-exit")
+def force_exit():
+    positions = get_positions()
+
+    for pos in positions:
+        if isinstance(pos, dict):
+            place_order(pos["symbol"], int(float(pos["qty"])), "sell")
+
+    return {"status": "force exit executed"}
+
+# ==============================
+# START SERVER
+# ==============================
 
 if __name__ == "__main__":
-    run()
+    app.run(host="0.0.0.0", port=3000)
