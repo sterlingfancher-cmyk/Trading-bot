@@ -1,323 +1,227 @@
-from flask import Flask
-import pandas as pd
 import os
-import sqlite3
+import requests
 from datetime import datetime
-import subprocess
-import sys
-import threading
-import time
+import pytz
 
-app = Flask(__name__)
-
-# =========================
-# DEPENDENCIES
-# =========================
-try:
-    from alpaca.trading.client import TradingClient
-    from alpaca.trading.requests import MarketOrderRequest
-    from alpaca.trading.enums import OrderSide, TimeInForce
-    import yfinance as yf
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "alpaca-py", "yfinance", "pandas"])
-    from alpaca.trading.client import TradingClient
-    from alpaca.trading.requests import MarketOrderRequest
-    from alpaca.trading.enums import OrderSide, TimeInForce
-    import yfinance as yf
-
-# =========================
+# ==============================
 # CONFIG
-# =========================
-SYMBOLS = [
-    "SPY","QQQ",
-    "AAPL","MSFT","GOOGL","AMZN",
-    "NVDA","AMD","META","AVGO","TSLA",
-    "NFLX","CRM","ADBE","INTC",
-    "JPM","GS","CAT","BA"
-]
+# ==============================
+
+API_KEY = os.getenv("APCA_API_KEY_ID")
+SECRET_KEY = os.getenv("APCA_API_SECRET_KEY")
+BASE_URL = "https://paper-api.alpaca.markets"
 
 MAX_POSITIONS = 3
+RISK_PER_TRADE = 0.02
+TRAILING_STOP = 0.95
 
-LONG_RISK = 0.1
-SHORT_RISK = 0.05
+HEADERS = {
+    "APCA-API-KEY-ID": API_KEY,
+    "APCA-API-SECRET-KEY": SECRET_KEY
+}
 
-STOP_LOSS = 0.93
-TRAILING_STOP = 0.90
+highest_price_tracker = {}
 
-SHORT_STOP_LOSS = 1.04
-SHORT_TRAILING_STOP = 1.10
+# ==============================
+# LOGGING SYSTEM (NEW)
+# ==============================
 
-# =========================
-# ENV
-# =========================
-def is_auto_trading():
-    return os.environ.get("AUTO_TRADING", "false").lower() == "true"
+def log(message, data=None):
+    timestamp = datetime.utcnow().isoformat()
+    entry = f"{timestamp} | {message}"
 
-# =========================
-# CLIENT
-# =========================
-trading_client = TradingClient(
-    os.environ.get("ALPACA_API_KEY"),
-    os.environ.get("ALPACA_SECRET_KEY"),
-    paper=True
-)
+    if data:
+        entry += f" | {data}"
 
-# =========================
-# DATABASE
-# =========================
-conn = sqlite3.connect("trades.db", check_same_thread=False)
-c = conn.cursor()
+    print(entry)  # shows in Railway logs
 
-c.execute("""
-CREATE TABLE IF NOT EXISTS trades (
-    id INTEGER PRIMARY KEY,
-    symbol TEXT,
-    side TEXT,
-    price REAL,
-    qty INTEGER,
-    timestamp TEXT
-)
-""")
-conn.commit()
+    with open("bot_log.txt", "a") as f:
+        f.write(entry + "\n")
 
-# =========================
-# TRAILING STORAGE
-# =========================
-peak_prices = {}
-low_prices = {}
-
-# =========================
+# ==============================
 # MARKET HOURS
-# =========================
-def market_is_open():
-    return trading_client.get_clock().is_open
+# ==============================
 
-# =========================
-# DATA
-# =========================
-def load_data(symbol):
+def is_market_open():
+    tz = pytz.timezone("US/Central")
+    now = datetime.now(tz)
+
+    if now.weekday() >= 5:
+        return False
+
+    open_time = now.replace(hour=8, minute=30, second=0)
+    close_time = now.replace(hour=15, minute=0, second=0)
+
+    return open_time <= now <= close_time
+
+# ==============================
+# API HELPERS
+# ==============================
+
+def api_get(endpoint):
     try:
-        df = yf.download(symbol, period="6mo", interval="1d", auto_adjust=True)
-
-        if df is None or df.empty:
-            return None
-
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
-        df["ma"] = df["Close"].rolling(20).mean()
-        df["momentum"] = df["Close"] / df["Close"].shift(10)
-        df = df.dropna()
-
-        return df
+        r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS)
+        return r.json()
     except Exception as e:
-        print("DATA ERROR:", symbol, e)
+        log("API GET ERROR", str(e))
+        return {}
+
+def api_post(endpoint, data):
+    try:
+        r = requests.post(f"{BASE_URL}{endpoint}", json=data, headers=HEADERS)
+        return r.json()
+    except Exception as e:
+        log("API POST ERROR", str(e))
+        return {}
+
+# ==============================
+# DATA
+# ==============================
+
+def get_positions():
+    return api_get("/v2/positions")
+
+def get_account():
+    return api_get("/v2/account")
+
+def get_price(symbol):
+    try:
+        r = requests.get(
+            f"https://data.alpaca.markets/v2/stocks/{symbol}/trades/latest",
+            headers=HEADERS
+        )
+        return float(r.json()["trade"]["p"])
+    except:
+        log("PRICE ERROR", symbol)
         return None
 
-# =========================
+# ==============================
+# ORDERS
+# ==============================
+
+def place_order(symbol, qty, side):
+    order = {
+        "symbol": symbol,
+        "qty": qty,
+        "side": side,
+        "type": "market",
+        "time_in_force": "day"
+    }
+
+    result = api_post("/v2/orders", order)
+    log("ORDER PLACED", result)
+
+# ==============================
 # SIGNALS
-# =========================
+# ==============================
+
+WATCHLIST = ["AMD", "NVDA", "META", "AVGO", "INTC"]
+
 def get_signals():
-    spy = load_data("SPY")
-    if spy is None:
-        return "error", []
+    signals = []
 
-    spy_close = float(spy["Close"].values[-1])
-    spy_ma = float(spy["ma"].values[-1])
+    for symbol in WATCHLIST:
+        price = get_price(symbol)
+        if price:
+            signals.append({"symbol": symbol, "price": price})
 
-    scores = []
+    return signals
 
-    for symbol in SYMBOLS:
-        df = load_data(symbol)
-        if df is None:
+# ==============================
+# POSITION MANAGEMENT (FIXED)
+# ==============================
+
+def manage_positions():
+    positions = get_positions()
+
+    for pos in positions:
+        symbol = pos["symbol"]
+        qty = int(float(pos["qty"]))
+        entry_price = float(pos["avg_entry_price"])
+        current_price = get_price(symbol)
+
+        if not current_price:
             continue
 
-        price = float(df["Close"].values[-1])
-        ma = float(df["ma"].values[-1])
-        momentum = float(df["momentum"].values[-1])
+        if symbol not in highest_price_tracker:
+            highest_price_tracker[symbol] = current_price
 
-        scores.append((symbol, momentum, price, ma))
+        if current_price > highest_price_tracker[symbol]:
+            highest_price_tracker[symbol] = current_price
 
-    if spy_close > spy_ma:
-        strong = [s for s in scores if s[2] > s[3]]
-        ranked = sorted(strong, key=lambda x: x[1], reverse=True)
-        return "bullish", [{"symbol": s, "price": p} for s,_,p,_ in ranked[:3]]
+        highest = highest_price_tracker[symbol]
+        stop_price = highest * TRAILING_STOP
 
-    else:
-        weak = [s for s in scores if s[2] < s[3]]
-        ranked = sorted(weak, key=lambda x: x[1])
-        return "bearish", [{"symbol": s, "price": p} for s,_,p,_ in ranked[:3]]
+        log("POSITION CHECK", {
+            "symbol": symbol,
+            "entry": entry_price,
+            "current": current_price,
+            "highest": highest,
+            "stop": stop_price
+        })
 
-# =========================
-# POSITION SIZE
-# =========================
-def calculate_qty(price, risk):
-    account = trading_client.get_account()
-    buying_power = float(account.buying_power)
-    allocation = buying_power * risk
-    return max(int(allocation // price), 1)
+        if current_price <= stop_price:
+            log("TRAILING STOP HIT", symbol)
+            place_order(symbol, qty, "sell")
+            highest_price_tracker.pop(symbol, None)
 
-# =========================
-# ORDER EXECUTION
-# =========================
-def place_order(symbol, price, side, risk):
-    qty = calculate_qty(price, risk)
+# ==============================
+# ENTRY ENGINE
+# ==============================
 
-    order = MarketOrderRequest(
-        symbol=symbol,
-        qty=qty,
-        side=side,
-        time_in_force=TimeInForce.GTC
-    )
+def find_new_trades():
+    positions = get_positions()
+    held_symbols = [p["symbol"] for p in positions]
 
-    trading_client.submit_order(order)
+    if len(held_symbols) >= MAX_POSITIONS:
+        log("MAX POSITIONS REACHED")
+        return
 
-    c.execute(
-        "INSERT INTO trades VALUES (NULL,?,?,?,?,?)",
-        (symbol, side.name, price, qty, datetime.now())
-    )
-    conn.commit()
+    signals = get_signals()
+    account = get_account()
 
-# =========================
-# POSITION MANAGEMENT
-# =========================
-def manage_positions():
-    positions = trading_client.get_all_positions()
-    active_symbols = [p.symbol for p in positions]
+    buying_power = float(account.get("cash", 0))
 
-    # CLEANUP (important fix)
-    for symbol in list(peak_prices.keys()):
-        if symbol not in active_symbols:
-            del peak_prices[symbol]
+    for s in signals:
+        symbol = s["symbol"]
+        price = s["price"]
 
-    for symbol in list(low_prices.keys()):
-        if symbol not in active_symbols:
-            del low_prices[symbol]
+        if symbol in held_symbols:
+            continue
 
-    for p in positions:
-        symbol = p.symbol
-        entry = float(p.avg_entry_price)
-        current = float(p.current_price)
-        side = p.side
+        if len(held_symbols) >= MAX_POSITIONS:
+            break
 
-        if side == "long":
-            peak_prices[symbol] = max(peak_prices.get(symbol, entry), current)
+        position_size = buying_power * RISK_PER_TRADE
+        qty = int(position_size / price)
 
-            if current <= entry * STOP_LOSS or current <= peak_prices[symbol] * TRAILING_STOP:
-                trading_client.submit_order(MarketOrderRequest(
-                    symbol=symbol,
-                    qty=int(float(p.qty)),
-                    side=OrderSide.SELL,
-                    time_in_force=TimeInForce.GTC
-                ))
+        if qty <= 0:
+            continue
 
-        elif side == "short":
-            low_prices[symbol] = min(low_prices.get(symbol, entry), current)
+        log("BUY SIGNAL", {"symbol": symbol, "qty": qty})
+        place_order(symbol, qty, "buy")
 
-            if current >= entry * SHORT_STOP_LOSS or current >= low_prices[symbol] * SHORT_TRAILING_STOP:
-                trading_client.submit_order(MarketOrderRequest(
-                    symbol=symbol,
-                    qty=int(float(p.qty)),
-                    side=OrderSide.BUY,
-                    time_in_force=TimeInForce.GTC
-                ))
+        held_symbols.append(symbol)
 
-# =========================
-# AUTO TRADER
-# =========================
-def auto_trader():
-    while True:
-        try:
-            if is_auto_trading() and market_is_open():
+# ==============================
+# MAIN
+# ==============================
 
-                market, signals = get_signals()
+def run():
+    log("BOT START")
 
-                positions = trading_client.get_all_positions()
-                held = [p.symbol for p in positions]
+    market_open = is_market_open()
+    log("MARKET STATUS", market_open)
 
-                print("MARKET:", market)
-                print("SIGNALS:", signals)
-                print("HELD:", held)
+    # ALWAYS run exits
+    manage_positions()
 
-                for s in signals:
-                    if s["symbol"] not in held and len(held) < MAX_POSITIONS:
+    # ONLY run entries when open
+    if market_open:
+        find_new_trades()
 
-                        if market == "bullish":
-                            place_order(s["symbol"], s["price"], OrderSide.BUY, LONG_RISK)
+    log("CYCLE COMPLETE")
 
-                        elif market == "bearish":
-                            place_order(s["symbol"], s["price"], OrderSide.SELL, SHORT_RISK)
 
-                manage_positions()
-
-        except Exception as e:
-            print("AUTO ERROR:", e)
-
-        time.sleep(300)
-
-# =========================
-# START THREAD (SAFE START)
-# =========================
-def start_trader():
-    time.sleep(10)
-    auto_trader()
-
-threading.Thread(target=start_trader, daemon=True).start()
-
-# =========================
-# DEBUG ROUTES
-# =========================
-@app.route("/")
-def home():
-    return {
-        "status": "running",
-        "auto_trading": is_auto_trading(),
-        "market_open": market_is_open()
-    }
-
-@app.route("/history")
-def history():
-    df = pd.read_sql("SELECT * FROM trades", conn)
-    return df.to_dict(orient="records")
-
-@app.route("/signals")
-def debug_signals():
-    market, signals = get_signals()
-    return {
-        "market": market,
-        "signals": signals
-    }
-
-@app.route("/positions")
-def debug_positions():
-    positions = trading_client.get_all_positions()
-    return [
-        {
-            "symbol": p.symbol,
-            "qty": p.qty,
-            "side": p.side,
-            "entry_price": p.avg_entry_price,
-            "current_price": p.current_price
-        }
-        for p in positions
-    ]
-
-@app.route("/debug")
-def full_debug():
-    market, signals = get_signals()
-    positions = trading_client.get_all_positions()
-
-    return {
-        "market": market,
-        "signals": signals,
-        "positions": [p.symbol for p in positions],
-        "auto_trading": is_auto_trading(),
-        "market_open": market_is_open()
-    }
-
-# =========================
-# RUN
-# =========================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    run()
