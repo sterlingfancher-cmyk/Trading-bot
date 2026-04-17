@@ -14,7 +14,7 @@ API_KEY = os.getenv("APCA_API_KEY_ID")
 SECRET_KEY = os.getenv("APCA_API_SECRET_KEY")
 BASE_URL = "https://paper-api.alpaca.markets"
 
-MAX_POSITIONS = 3
+MAX_POSITIONS = 5
 RISK_PER_TRADE = 0.02
 TRAILING_STOP = 0.95
 
