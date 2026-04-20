@@ -14,9 +14,8 @@ API_KEY = os.getenv("APCA_API_KEY_ID")
 SECRET_KEY = os.getenv("APCA_API_SECRET_KEY")
 BASE_URL = "https://paper-api.alpaca.markets"
 
-MAX_POSITIONS = 5
+MAX_POSITIONS = 3
 RISK_PER_TRADE = 0.02
-TRAILING_STOP = 0.95
 
 HEADERS = {
     "APCA-API-KEY-ID": API_KEY,
@@ -114,6 +113,22 @@ def get_price(symbol):
         return None
 
 # ==============================
+# TRAILING STOP LOGIC (UPGRADED)
+# ==============================
+
+def get_trailing_stop(entry_price, highest_price):
+    gain = (highest_price - entry_price) / entry_price
+
+    if gain < 0.03:
+        return 0.97
+    elif gain < 0.07:
+        return 0.95
+    elif gain < 0.15:
+        return 0.93
+    else:
+        return 0.90
+
+# ==============================
 # ORDERS
 # ==============================
 
@@ -146,7 +161,7 @@ def get_signals():
     return signals
 
 # ==============================
-# POSITION MANAGEMENT (FIXED)
+# POSITION MANAGEMENT (FINAL)
 # ==============================
 
 def manage_positions():
@@ -166,6 +181,7 @@ def manage_positions():
         if not current_price:
             continue
 
+        # Track highest price
         if symbol not in highest_price_tracker:
             highest_price_tracker[symbol] = current_price
 
@@ -173,7 +189,14 @@ def manage_positions():
             highest_price_tracker[symbol] = current_price
 
         highest = highest_price_tracker[symbol]
-        stop_price = highest * TRAILING_STOP
+
+        # Dynamic trailing stop
+        trailing = get_trailing_stop(entry_price, highest)
+        stop_price = highest * trailing
+
+        # Break-even protection
+        if current_price > entry_price * 1.03:
+            stop_price = max(stop_price, entry_price)
 
         log("POSITION CHECK", {
             "symbol": symbol,
@@ -183,6 +206,7 @@ def manage_positions():
             "stop": stop_price
         })
 
+        # Sell condition
         if current_price <= stop_price:
             log("TRAILING STOP HIT", symbol)
             place_order(symbol, qty, "sell")
@@ -227,7 +251,7 @@ def find_new_trades():
         held_symbols.append(symbol)
 
 # ==============================
-# CORE RUN
+# CORE ENGINE
 # ==============================
 
 def run_bot():
@@ -244,7 +268,7 @@ def run_bot():
     log("CYCLE COMPLETE")
 
 # ==============================
-# WEB TEST ENDPOINTS
+# WEB ENDPOINTS (TESTING)
 # ==============================
 
 @app.route("/")
