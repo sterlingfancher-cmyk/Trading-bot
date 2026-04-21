@@ -4,9 +4,10 @@ import threading
 import numpy as np
 import yfinance as yf
 from datetime import datetime
-from flask import Flask, jsonify
+from flask import Flask, jsonify, Response
 from alpaca_trade_api import REST
 import pytz
+import json
 
 app = Flask(__name__)
 
@@ -38,6 +39,7 @@ peak_prices = {}
 trade_log = []
 equity_history = []
 start_equity = None
+closed_trades = []
 
 # =========================
 # UTIL
@@ -202,90 +204,47 @@ def get_signals():
             continue
 
     ranked.sort(key=lambda x: x["score"], reverse=True)
-
-    return ranked if ranked else [{"symbol":"AMD","score":1,"price":100,"vol":1}]
-
-# =========================
-# ENTRY FILTER
-# =========================
-def valid_entry(symbol):
-    prices = get_prices(symbol)
-    if prices is None:
-        return False
-
-    smooth = ema(prices)
-    pullback = (prices[-1] - smooth[-1]) / smooth[-1]
-
-    return pullback < PULLBACK_THRESHOLD
+    return ranked if ranked else []
 
 # =========================
-# LOGGING
+# TRADE LOGGING
 # =========================
-def log_trade(symbol, side, qty):
+def log_trade(symbol, side, qty, price):
     trade_log.append({
         "time": str(datetime.utcnow()),
         "symbol": symbol,
         "side": side,
-        "qty": qty
+        "qty": qty,
+        "price": price
     })
-    if len(trade_log) > 100:
-        trade_log.pop(0)
 
 # =========================
-# TRAILING
+# ANALYTICS
 # =========================
-def handle_trailing():
-    for p in api.list_positions():
-        sym = p.symbol
-        price = float(p.current_price)
+def get_stats():
+    wins = 0
+    losses = 0
+    profits = []
 
-        peak_prices[sym] = max(peak_prices.get(sym, price), price)
+    for t in closed_trades:
+        pnl = t["pnl"]
+        profits.append(pnl)
+        if pnl > 0:
+            wins += 1
+        else:
+            losses += 1
 
-        drawdown = (price - peak_prices[sym]) / peak_prices[sym]
+    total = wins + losses
 
-        if drawdown <= -TRAILING_STOP:
-            api.submit_order(symbol=sym, qty=p.qty, side="sell", type="market", time_in_force="day")
-            log_trade(sym, "sell", p.qty)
-            peak_prices.pop(sym, None)
-
-# =========================
-# ENTRY
-# =========================
-def handle_entries(signals):
-    if not market_open():
-        return
-
-    if get_market_regime() == "bear":
-        return
-
-    account = api.get_account()
-    equity = float(account.equity)
-
-    positions = api.list_positions()
-    current = [p.symbol for p in positions]
-
-    top = [s for s in signals if s["score"] >= MIN_SCORE][:MAX_POSITIONS]
-
-    scores = np.array([s["score"] for s in top])
-    weights = scores / np.sum(scores)
-
-    for s, w in zip(top, weights):
-        if s["symbol"] in current:
-            continue
-
-        if not valid_entry(s["symbol"]):
-            continue
-
-        position_value = equity * TARGET_VOL / s["vol"]
-        qty = int(position_value / s["price"])
-        qty = min(qty, 100)
-
-        if qty > 0:
-            api.submit_order(symbol=s["symbol"], qty=qty, side="buy", type="market", time_in_force="day")
-            log_trade(s["symbol"], "buy", qty)
+    return {
+        "total_trades": total,
+        "win_rate": round((wins / total)*100, 2) if total > 0 else 0,
+        "avg_pnl": round(np.mean(profits), 2) if profits else 0,
+        "max_drawdown": round(min(profits), 2) if profits else 0
+    }
 
 # =========================
-# BOT
+# BOT CORE
 # =========================
 def run_bot():
     global start_equity
@@ -296,18 +255,11 @@ def run_bot():
     if start_equity is None:
         start_equity = equity
 
-    equity_history.append({
-        "time": str(datetime.utcnow()),
-        "equity": equity
-    })
-
+    equity_history.append(equity)
     if len(equity_history) > 200:
         equity_history.pop(0)
 
     signals = get_signals()
-
-    handle_trailing()
-    handle_entries(signals)
 
     return signals[:5]
 
@@ -322,46 +274,51 @@ def scheduler():
 threading.Thread(target=scheduler, daemon=True).start()
 
 # =========================
+# DASHBOARD UI
+# =========================
+@app.route("/dashboard")
+def dashboard():
+    stats = get_stats()
+    signals = get_signals()[:5]
+    regime = get_market_regime()
+
+    html = f"""
+    <html>
+    <head><title>Trading Dashboard</title></head>
+    <body>
+    <h1>🚀 Trading Dashboard</h1>
+    <p><b>Regime:</b> {regime}</p>
+
+    <h2>📊 Performance</h2>
+    <p>Trades: {stats['total_trades']}</p>
+    <p>Win Rate: {stats['win_rate']}%</p>
+    <p>Avg PnL: {stats['avg_pnl']}</p>
+
+    <h2>📈 Signals</h2>
+    {json.dumps(signals, indent=2)}
+
+    <h2>🧾 Trades</h2>
+    {json.dumps(trade_log[-10:], indent=2)}
+
+    </body>
+    </html>
+    """
+    return Response(html, mimetype='text/html')
+
+# =========================
 # ROUTES
 # =========================
+@app.route("/health")
+def health():
+    return {"status": "running"}
+
 @app.route("/debug")
 def debug():
     return {
         "regime": get_market_regime(),
-        "signals": get_signals()[:10]
+        "signals": get_signals()[:10],
+        "stats": get_stats()
     }
-
-@app.route("/monitor")
-def monitor():
-    account = api.get_account()
-    positions = api.list_positions()
-
-    equity = float(account.equity)
-    pnl = 0
-
-    if start_equity:
-        pnl = (equity - start_equity) / start_equity
-
-    return {
-        "equity": equity,
-        "pnl_percent": round(pnl * 100, 2),
-        "regime": get_market_regime(),
-        "positions": [
-            {
-                "symbol": p.symbol,
-                "qty": p.qty,
-                "value": float(p.market_value),
-                "unrealized_pl": float(p.unrealized_pl)
-            }
-            for p in positions
-        ],
-        "top_signals": get_signals()[:5],
-        "recent_trades": trade_log[-10:]
-    }
-
-@app.route("/health")
-def health():
-    return {"status": "running"}
 
 # =========================
 # RUN
