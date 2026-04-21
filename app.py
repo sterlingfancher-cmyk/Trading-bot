@@ -6,7 +6,7 @@ from datetime import datetime
 import pytz
 import yfinance as yf
 
-# SAFE IMPORT (prevents crash if package missing during build)
+# SAFE IMPORT
 try:
     from alpaca_trade_api import REST
 except:
@@ -22,16 +22,24 @@ API_SECRET = os.getenv("APCA_API_SECRET_KEY")
 BASE_URL = "https://paper-api.alpaca.markets"
 
 api = None
-if API_KEY and API_SECRET and REST:
-    api = REST(API_KEY, API_SECRET, BASE_URL)
+
+def init_api():
+    global api
+    if API_KEY and API_SECRET and REST:
+        try:
+            api = REST(API_KEY, API_SECRET, BASE_URL)
+            print("API initialized")
+        except Exception as e:
+            print("API INIT FAILED:", e)
+            api = None
 
 # ==============================
 # CONFIG
 # ==============================
 WATCHLIST = ["AMD", "NVDA", "META", "AVGO", "INTC"]
-POSITION_SIZE = 0.20  # 20% per trade
-TRAILING_STOP = 0.06  # 6%
-WEAKNESS_EXIT = -0.015  # -1.5% intraday
+POSITION_SIZE = 0.20
+TRAILING_STOP = 0.06
+WEAKNESS_EXIT = -0.015
 
 # ==============================
 # HELPERS
@@ -77,59 +85,48 @@ def should_exit(pos):
         price = float(pos.current_price)
         change = (price - entry) / entry
 
-        # 1. TRAILING STOP
         if change < -TRAILING_STOP:
-            print(f"EXIT (TRAILING STOP): {pos.symbol}")
+            print(f"EXIT (TRAIL): {pos.symbol}")
             return True
 
-        # 2. WEAKNESS EXIT (NEW)
         intraday = float(pos.unrealized_intraday_plpc)
         if intraday < WEAKNESS_EXIT:
-            print(f"EXIT (WEAKNESS): {pos.symbol}")
+            print(f"EXIT (WEAK): {pos.symbol}")
             return True
 
         return False
-
-    except Exception as e:
-        print("Exit error:", e)
+    except:
         return False
 
 
 # ==============================
-# SIGNAL ENGINE
+# SIGNALS
 # ==============================
 def generate_signals():
     signals = []
-
-    for symbol in WATCHLIST:
-        price = get_price(symbol)
+    for s in WATCHLIST:
+        price = get_price(s)
         if price:
-            signals.append({
-                "symbol": symbol,
-                "price": price
-            })
-
-    # Simple ranking (price momentum placeholder)
+            signals.append({"symbol": s, "price": price})
     return sorted(signals, key=lambda x: x["price"], reverse=True)
 
 
 # ==============================
-# POSITION MANAGEMENT
+# TRADING ENGINE
 # ==============================
 def manage_positions():
     if not api:
-        print("No API - skipping trading")
+        print("No API")
         return
 
     positions = get_positions()
     account = get_account()
-
     if not account:
         return
 
     equity = float(account.equity)
 
-    # ===== EXIT FIRST =====
+    # SELL
     for pos in positions:
         if should_exit(pos):
             try:
@@ -140,72 +137,66 @@ def manage_positions():
                     type="market",
                     time_in_force="gtc"
                 )
-                print(f"SOLD {pos.symbol}")
+                print("Sold", pos.symbol)
             except Exception as e:
                 print("Sell error:", e)
 
-    # ===== REFRESH POSITIONS AFTER SELL =====
+    # REFRESH
     positions = get_positions()
-    held_symbols = [p.symbol for p in positions]
+    held = [p.symbol for p in positions]
 
-    # ===== FIND NEW ENTRIES =====
-    signals = generate_signals()
-
-    for sig in signals:
-        symbol = sig["symbol"]
-
-        if symbol in held_symbols:
+    # BUY
+    for sig in generate_signals():
+        if sig["symbol"] in held:
             continue
-
         try:
-            cash_to_use = equity * POSITION_SIZE
-            qty = int(cash_to_use / sig["price"])
-
+            qty = int((equity * POSITION_SIZE) / sig["price"])
             if qty <= 0:
                 continue
 
             api.submit_order(
-                symbol=symbol,
+                symbol=sig["symbol"],
                 qty=qty,
                 side="buy",
                 type="market",
                 time_in_force="gtc"
             )
-
-            print(f"BOUGHT {symbol}")
-            break  # one trade per cycle
-
+            print("Bought", sig["symbol"])
+            break
         except Exception as e:
             print("Buy error:", e)
 
 
 # ==============================
-# MAIN LOOP (AUTO RUN EVERY 5 MIN)
+# BOT LOOP (SAFE START)
 # ==============================
 def bot_loop():
+    print("Bot loop started")
     while True:
         try:
             if market_open():
-                print("Bot running...")
                 manage_positions()
             else:
                 print("Market closed")
-
         except Exception as e:
             print("Loop error:", e)
 
-        time.sleep(300)  # 5 minutes
+        time.sleep(300)
 
 
-# Start background thread
-threading.Thread(target=bot_loop, daemon=True).start()
+def start_bot():
+    init_api()
+    thread = threading.Thread(target=bot_loop)
+    thread.daemon = True
+    thread.start()
+
 
 # ==============================
 # ROUTES
 # ==============================
 @app.route("/")
 def home():
-    return "Bot is running"
+    return "OK"
 
 
 @app.route("/health")
@@ -244,7 +235,15 @@ def force_exit():
                 type="market",
                 time_in_force="gtc"
             )
-        except Exception as e:
-            print(e)
+        except:
+            pass
 
-    return jsonify({"status": "liquidated"})
+    return jsonify({"status": "done"})
+
+
+# ==============================
+# START BOT AFTER APP BOOTS
+# ==============================
+@app.before_first_request
+def startup():
+    start_bot()
