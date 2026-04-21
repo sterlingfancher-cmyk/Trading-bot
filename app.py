@@ -22,7 +22,12 @@ SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK_URL")
 api = REST(API_KEY, API_SECRET, BASE_URL)
 
 CHECK_INTERVAL = 300
-CACHE_TTL = 120
+
+# 🔥 RISK SETTINGS
+MAX_DAILY_LOSS = -0.05      # -5%
+MAX_DRAWDOWN = -0.10        # -10%
+MAX_EXPOSURE = 0.80         # 80% capital deployed
+MAX_TRADES_PER_CYCLE = 3
 
 # =========================
 # DATABASE
@@ -30,101 +35,22 @@ CACHE_TTL = 120
 conn = sqlite3.connect("trading.db", check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS trades (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    time TEXT,
-    symbol TEXT,
-    side TEXT,
-    qty REAL,
-    price REAL
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS equity (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    time TEXT,
-    equity REAL
-)
-""")
-
+cursor.execute("""CREATE TABLE IF NOT EXISTS equity (time TEXT, equity REAL)""")
+cursor.execute("""CREATE TABLE IF NOT EXISTS trades (time TEXT, symbol TEXT, side TEXT, qty REAL, price REAL)""")
 conn.commit()
 
 # =========================
-# CACHE
+# STATE
 # =========================
-price_cache = {}
-
-def clean_array(arr):
-    arr = np.array(arr, dtype=float)
-    arr = arr[np.isfinite(arr)]
-    return arr if len(arr) > 30 else None
-
-def get_prices(symbol):
-    now = time.time()
-
-    if symbol in price_cache:
-        data, ts = price_cache[symbol]
-        if now - ts < CACHE_TTL:
-            return data
-
-    try:
-        df = yf.download(symbol, period="5d", interval="1h", progress=False)
-        if df is None or df.empty:
-            return None
-
-        prices = clean_array(df["Close"])
-        if prices is None:
-            return None
-
-        price_cache[symbol] = (prices, now)
-        return prices
-    except:
-        return None
-
-def ema(prices, span=20):
-    alpha = 2/(span+1)
-    e = [prices[0]]
-    for p in prices[1:]:
-        e.append(alpha*p + (1-alpha)*e[-1])
-    return np.array(e)
+start_equity = None
+peak_equity = None
+last_trade_cycle = 0
 
 # =========================
-# REGIME
+# ALERT
 # =========================
-def get_regime():
-    prices = get_prices("SPY")
-    if prices is None:
-        return "neutral"
-
-    smooth = ema(prices)
-    return "bull" if smooth[-1] > smooth[-10] else "bear"
-
-# =========================
-# SIGNALS
-# =========================
-def get_signals():
-    symbols = ["CRWD","CAT","MDB","NET","AMD","PANW","ZS","MSFT","SHOP","ROKU"]
-    results = []
-
-    for s in symbols:
-        prices = get_prices(s)
-        if prices is None:
-            continue
-
-        score = prices[-1] - prices[-10]
-        results.append({"symbol": s, "score": float(score)})
-
-    results.sort(key=lambda x: x["score"], reverse=True)
-    return results
-
-# =========================
-# ALERTS
-# =========================
-def send_alert(msg):
+def alert(msg):
     print(msg)
-
     if SLACK_WEBHOOK:
         try:
             requests.post(SLACK_WEBHOOK, json={"text": msg})
@@ -134,60 +60,137 @@ def send_alert(msg):
 # =========================
 # LOGGING
 # =========================
-def log_trade(symbol, side, qty, price):
-    cursor.execute(
-        "INSERT INTO trades (time, symbol, side, qty, price) VALUES (?, ?, ?, ?, ?)",
-        (datetime.utcnow().isoformat(), symbol, side, qty, price)
-    )
+def log_equity(value):
+    cursor.execute("INSERT INTO equity VALUES (?,?)", (datetime.utcnow().isoformat(), value))
     conn.commit()
 
-    send_alert(f"{side.upper()} {symbol} qty={qty} @ {price}")
-
-def log_equity(value):
-    cursor.execute(
-        "INSERT INTO equity (time, equity) VALUES (?, ?)",
-        (datetime.utcnow().isoformat(), value)
-    )
+def log_trade(symbol, side, qty, price):
+    cursor.execute("INSERT INTO trades VALUES (?,?,?,?,?)",
+                   (datetime.utcnow().isoformat(), symbol, side, qty, price))
     conn.commit()
 
 # =========================
 # ANALYTICS
 # =========================
-def get_equity_curve():
-    cursor.execute("SELECT equity FROM equity ORDER BY id ASC")
-    return [row[0] for row in cursor.fetchall()]
+def get_equity_history():
+    cursor.execute("SELECT equity FROM equity ORDER BY rowid ASC")
+    return [r[0] for r in cursor.fetchall()]
 
 def get_drawdown(equity):
     peak = equity[0] if equity else 0
     dd = []
     for e in equity:
         peak = max(peak, e)
-        dd.append((e - peak) / peak if peak > 0 else 0)
+        dd.append((e - peak)/peak if peak else 0)
     return dd
+
+# =========================
+# RISK ENGINE
+# =========================
+def risk_check():
+    global start_equity, peak_equity
+
+    account = api.get_account()
+    equity = float(account.equity)
+
+    if start_equity is None:
+        start_equity = equity
+        peak_equity = equity
+
+    # update peak
+    peak_equity = max(peak_equity, equity)
+
+    daily_change = (equity - start_equity) / start_equity
+    drawdown = (equity - peak_equity) / peak_equity
+
+    # exposure
+    positions = api.list_positions()
+    exposure = sum(float(p.market_value) for p in positions) / equity if equity > 0 else 0
+
+    if daily_change <= MAX_DAILY_LOSS:
+        alert("🚨 Max daily loss hit. Trading halted.")
+        return False
+
+    if drawdown <= MAX_DRAWDOWN:
+        alert("🚨 Max drawdown hit. Liquidating.")
+        liquidate_all()
+        return False
+
+    if exposure >= MAX_EXPOSURE:
+        alert("⚠️ Exposure too high. Blocking new trades.")
+        return False
+
+    return True
+
+# =========================
+# LIQUIDATION
+# =========================
+def liquidate_all():
+    for p in api.list_positions():
+        try:
+            api.submit_order(
+                symbol=p.symbol,
+                qty=p.qty,
+                side="sell",
+                type="market",
+                time_in_force="day"
+            )
+        except:
+            pass
+
+# =========================
+# SIGNALS (SIMPLE)
+# =========================
+def get_signals():
+    symbols = ["CRWD","CAT","MDB","NET","AMD","PANW","ZS","MSFT"]
+    data = []
+
+    for s in symbols:
+        try:
+            df = yf.download(s, period="2d", interval="1h", progress=False)
+            if df.empty:
+                continue
+
+            move = df["Close"].iloc[-1] - df["Close"].iloc[0]
+            data.append({"symbol": s, "score": float(move)})
+        except:
+            continue
+
+    return sorted(data, key=lambda x: x["score"], reverse=True)
 
 # =========================
 # BOT
 # =========================
 def run_bot():
+    global last_trade_cycle
+
+    if not risk_check():
+        return
+
     signals = get_signals()
 
-    if get_regime() == "bull":
-        for s in signals[:2]:
-            try:
-                price = api.get_latest_trade(s["symbol"]).price
+    trades = 0
 
-                api.submit_order(
-                    symbol=s["symbol"],
-                    qty=1,
-                    side="buy",
-                    type="market",
-                    time_in_force="day"
-                )
+    for s in signals[:3]:
+        if trades >= MAX_TRADES_PER_CYCLE:
+            break
 
-                log_trade(s["symbol"], "buy", 1, price)
+        try:
+            price = api.get_latest_trade(s["symbol"]).price
 
-            except:
-                continue
+            api.submit_order(
+                symbol=s["symbol"],
+                qty=1,
+                side="buy",
+                type="market",
+                time_in_force="day"
+            )
+
+            log_trade(s["symbol"], "buy", 1, price)
+            trades += 1
+
+        except:
+            continue
 
     # log equity
     try:
@@ -211,18 +214,13 @@ threading.Thread(target=scheduler, daemon=True).start()
 # =========================
 @app.route("/data")
 def data():
-    equity = get_equity_curve()
+    equity = get_equity_history()
     drawdown = get_drawdown(equity)
-
-    cursor.execute("SELECT symbol, side, qty, price FROM trades ORDER BY id DESC LIMIT 20")
-    trades = cursor.fetchall()
 
     return jsonify({
         "equity": equity,
         "drawdown": drawdown,
-        "signals": get_signals(),
-        "trades": trades,
-        "regime": get_regime()
+        "signals": get_signals()
     })
 
 # =========================
@@ -232,14 +230,9 @@ def data():
 def dashboard():
     return Response("""
 <html>
-<head>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
+<head><script src="https://cdn.jsdelivr.net/npm/chart.js"></script></head>
 <body>
-
-<h1>🚀 Pro Trading Dashboard</h1>
-<h2 id="stats"></h2>
-
+<h1>🚀 Risk-Aware Dashboard</h1>
 <canvas id="equity"></canvas>
 <canvas id="dd"></canvas>
 
@@ -248,19 +241,16 @@ async function load(){
     const r = await fetch('/data');
     const d = await r.json();
 
-    document.getElementById("stats").innerHTML =
-        "Regime: " + d.regime;
-
-    draw('equity', d.equity, 'Equity');
-    draw('dd', d.drawdown, 'Drawdown');
+    draw('equity', d.equity);
+    draw('dd', d.drawdown);
 }
 
-function draw(id,data,label){
+function draw(id,data){
     new Chart(document.getElementById(id), {
         type:'line',
         data:{
             labels:data.map((_,i)=>i),
-            datasets:[{label:label,data:data}]
+            datasets:[{data:data}]
         }
     });
 }
@@ -268,7 +258,6 @@ function draw(id,data,label){
 setInterval(load,5000);
 load();
 </script>
-
 </body>
 </html>
 """, mimetype="text/html")
