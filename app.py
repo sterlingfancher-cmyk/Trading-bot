@@ -1,8 +1,8 @@
 import os
 import pytz
-import requests
 import numpy as np
-from datetime import datetime, timedelta
+import yfinance as yf
+from datetime import datetime
 from flask import Flask, jsonify
 from alpaca_trade_api import REST
 
@@ -16,79 +16,91 @@ api = REST(API_KEY, API_SECRET, BASE_URL)
 app = Flask(__name__)
 
 # =========================
-# GET PRICES (NO FILTERS)
+# MARKET CHECK
+# =========================
+def market_open():
+    now = datetime.now(pytz.timezone("US/Eastern"))
+    return now.weekday() < 5 and 9 <= now.hour < 16
+
+# =========================
+# GET PRICES (YFINANCE)
 # =========================
 def get_prices(symbol):
-    url = f"https://data.alpaca.markets/v2/stocks/{symbol}/bars"
+    try:
+        df = yf.download(symbol, period="10d", interval="1h", progress=False)
 
-    headers = {
-        "APCA-API-KEY-ID": API_KEY,
-        "APCA-API-SECRET-KEY": API_SECRET
-    }
+        if df is None or df.empty:
+            return None
 
-    end = datetime.utcnow()
-    start = end - timedelta(days=10)
+        prices = df["Close"].dropna().values
 
-    params = {
-        "timeframe": "1Hour",
-        "start": start.isoformat() + "Z",
-        "end": end.isoformat() + "Z",
-        "limit": 500
-    }
+        if len(prices) < 20:
+            return None
 
-    res = requests.get(url, headers=headers, params=params)
-    data = res.json()
+        return prices
 
-    bars = data.get("bars", [])
-
-    if not bars:
+    except Exception as e:
+        print(f"Data error {symbol}: {e}")
         return None
 
-    bars = sorted(bars, key=lambda x: x["t"])
-    prices = np.array([bar["c"] for bar in bars])
-
-    return prices
-
 # =========================
-# MOMENTUM (FORCED NON-ZERO)
+# MOMENTUM (SLOPE)
 # =========================
 def get_momentum_score(symbol):
     prices = get_prices(symbol)
 
-    if prices is None or len(prices) < 10:
-        return {
-            "score": 0,
-            "reason": "no_data"
-        }
+    if prices is None:
+        return 0
 
-    # FORCE simple movement calc
-    change = prices[-1] - prices[0]
+    try:
+        x = np.arange(len(prices))
+        y = np.log(prices)
 
-    return {
-        "score": float(change),  # 🔥 IMPOSSIBLE TO BE ALWAYS ZERO
-        "first_price": float(prices[0]),
-        "last_price": float(prices[-1]),
-        "bars": len(prices)
-    }
+        slope, _ = np.polyfit(x, y, 1)
+
+        returns = np.diff(prices) / prices[:-1]
+        vol = np.std(returns[-20:])
+
+        score = slope / (vol + 1e-6)
+
+        return float(score)
+
+    except:
+        return 0
 
 # =========================
-# DEBUG ROUTE (FULL VISIBILITY)
+# SIGNAL ENGINE
+# =========================
+def get_signals():
+    ranked = []
+
+    for s in SYMBOLS:
+        score = get_momentum_score(s)
+
+        try:
+            price = api.get_latest_trade(s).price
+
+            ranked.append({
+                "symbol": s,
+                "score": score,
+                "price": float(price)
+            })
+
+        except:
+            pass
+
+    ranked.sort(key=lambda x: x["score"], reverse=True)
+    return ranked
+
+# =========================
+# ROUTES
 # =========================
 @app.route("/debug")
 def debug():
-    results = {}
+    return {
+        "signals": get_signals()
+    }
 
-    for s in SYMBOLS:
-        try:
-            results[s] = get_momentum_score(s)
-        except Exception as e:
-            results[s] = {"error": str(e)}
-
-    return jsonify(results)
-
-# =========================
-# HEALTH
-# =========================
 @app.route("/health")
 def health():
     return {"status": "running"}
