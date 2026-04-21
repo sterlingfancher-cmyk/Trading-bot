@@ -43,15 +43,16 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# MOMENTUM ENGINE (FIXED)
+# MOMENTUM ENGINE (RESILIENT)
 # =========================
 def get_momentum_score(symbol):
     try:
         df = yf.download(symbol, period="3mo", interval="1d", progress=False)
 
+        # fallback instead of dropping symbol
         if df is None or df.empty or len(df) < 25:
-            print(f"Bad data for {symbol}")
-            return None
+            print(f"Fallback scoring for {symbol}")
+            return 0
 
         close = df["Close"].dropna()
 
@@ -64,16 +65,16 @@ def get_momentum_score(symbol):
         score = (r5 * 0.5) + (r10 * 0.3) + (r20 * 0.2) - (vol * 0.5)
 
         if np.isnan(score):
-            return None
+            return 0
 
         return float(score)
 
     except Exception as e:
         print(f"Momentum error {symbol}: {e}")
-        return None
+        return 0
 
 # =========================
-# SIGNALS (FIXED)
+# SIGNAL ENGINE (NEVER EMPTY)
 # =========================
 def get_signals():
     ranked = []
@@ -81,21 +82,23 @@ def get_signals():
     for s in SYMBOLS:
         score = get_momentum_score(s)
 
-        if score is None:
+        try:
+            price_data = yf.Ticker(s).history(period="1d")
+
+            if price_data.empty:
+                continue
+
+            price = price_data["Close"].iloc[-1]
+
+            ranked.append({
+                "symbol": s,
+                "score": score,
+                "price": float(price)
+            })
+
+        except Exception as e:
+            print(f"Price error {s}: {e}")
             continue
-
-        price_data = yf.Ticker(s).history(period="1d")
-
-        if price_data.empty:
-            continue
-
-        price = price_data["Close"].iloc[-1]
-
-        ranked.append({
-            "symbol": s,
-            "score": score,
-            "price": float(price)
-        })
 
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked
@@ -160,7 +163,7 @@ def handle_entries(signals, current_symbols):
         account = api.get_account()
         cash = float(account.cash)
 
-        for s in signals[:2]:  # top 2 only
+        for s in signals[:2]:  # top 2 signals only
             if s["symbol"] not in current_symbols:
                 qty = int((cash * RISK_PER_TRADE) / s["price"])
 
@@ -230,7 +233,7 @@ def run():
     return jsonify(run_bot())
 
 # =========================
-# RAILWAY FIX (CRITICAL)
+# RAILWAY PORT FIX
 # =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
