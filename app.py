@@ -1,7 +1,8 @@
 import os
 import pytz
+import requests
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, jsonify
 from alpaca_trade_api import REST
 
@@ -31,26 +32,36 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# GET PRICES (HARD FIX)
+# RAW DATA FETCH (ALPACA V2)
 # =========================
 def get_prices(symbol):
     try:
-        bars = api.get_bars(symbol, "1Day", limit=30)
+        url = f"https://data.alpaca.markets/v2/stocks/{symbol}/bars"
 
-        closes = [(bar.t, bar.c) for bar in bars]
+        headers = {
+            "APCA-API-KEY-ID": API_KEY,
+            "APCA-API-SECRET-KEY": API_SECRET
+        }
 
-        if not closes:
-            print(f"No bars for {symbol}")
+        params = {
+            "timeframe": "1Day",
+            "limit": 30
+        }
+
+        res = requests.get(url, headers=headers, params=params)
+        data = res.json()
+
+        bars = data.get("bars", [])
+
+        if len(bars) < 25:
+            print(f"Not enough data for {symbol}")
             return None
 
-        # 🔥 SORT BY TIME (CRITICAL)
-        closes = sorted(closes, key=lambda x: x[0])
+        prices = np.array([bar["c"] for bar in bars])
 
-        prices = np.array([c[1] for c in closes])
-
-        # 🔴 DEBUG CHECK
+        # 🔥 HARD CHECK FOR FLAT DATA
         if len(set(prices)) <= 2:
-            print(f"Flat data detected for {symbol}: {prices[-5:]}")
+            print(f"Flat data for {symbol}: {prices[-5:]}")
             return None
 
         return prices
@@ -60,12 +71,12 @@ def get_prices(symbol):
         return None
 
 # =========================
-# MOMENTUM
+# MOMENTUM ENGINE
 # =========================
 def get_momentum_score(symbol):
     prices = get_prices(symbol)
 
-    if prices is None or len(prices) < 25:
+    if prices is None:
         return 0
 
     try:
