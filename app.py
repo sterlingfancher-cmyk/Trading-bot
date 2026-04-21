@@ -1,13 +1,13 @@
 import os
 import time
 import threading
+import sqlite3
 import numpy as np
 import yfinance as yf
 from datetime import datetime
 from flask import Flask, jsonify, Response
 from alpaca_trade_api import REST
-import pytz
-import json
+import requests
 
 app = Flask(__name__)
 
@@ -17,27 +17,45 @@ app = Flask(__name__)
 BASE_URL = "https://paper-api.alpaca.markets"
 API_KEY = os.getenv("APCA_API_KEY_ID")
 API_SECRET = os.getenv("APCA_API_SECRET_KEY")
+SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK_URL")
 
 api = REST(API_KEY, API_SECRET, BASE_URL)
 
 CHECK_INTERVAL = 300
 CACHE_TTL = 120
-TRAILING_STOP = 0.03
 
 # =========================
-# STATE
+# DATABASE
+# =========================
+conn = sqlite3.connect("trading.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    time TEXT,
+    symbol TEXT,
+    side TEXT,
+    qty REAL,
+    price REAL
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS equity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    time TEXT,
+    equity REAL
+)
+""")
+
+conn.commit()
+
+# =========================
+# CACHE
 # =========================
 price_cache = {}
-equity_history = []
-pnl_curve = []
-drawdown_curve = []
-trade_log = []
-start_equity = None
-peak_equity = None
 
-# =========================
-# DATA
-# =========================
 def clean_array(arr):
     arr = np.array(arr, dtype=float)
     arr = arr[np.isfinite(arr)]
@@ -45,6 +63,7 @@ def clean_array(arr):
 
 def get_prices(symbol):
     now = time.time()
+
     if symbol in price_cache:
         data, ts = price_cache[symbol]
         if now - ts < CACHE_TTL:
@@ -78,6 +97,7 @@ def get_regime():
     prices = get_prices("SPY")
     if prices is None:
         return "neutral"
+
     smooth = ema(prices)
     return "bull" if smooth[-1] > smooth[-10] else "bear"
 
@@ -100,58 +120,62 @@ def get_signals():
     return results
 
 # =========================
-# TRADE LOGGING
+# ALERTS
+# =========================
+def send_alert(msg):
+    print(msg)
+
+    if SLACK_WEBHOOK:
+        try:
+            requests.post(SLACK_WEBHOOK, json={"text": msg})
+        except:
+            pass
+
+# =========================
+# LOGGING
 # =========================
 def log_trade(symbol, side, qty, price):
-    trade_log.append({
-        "time": datetime.utcnow().isoformat(),
-        "symbol": symbol,
-        "side": side,
-        "qty": qty,
-        "price": price
-    })
+    cursor.execute(
+        "INSERT INTO trades (time, symbol, side, qty, price) VALUES (?, ?, ?, ?, ?)",
+        (datetime.utcnow().isoformat(), symbol, side, qty, price)
+    )
+    conn.commit()
 
-    if len(trade_log) > 200:
-        trade_log.pop(0)
+    send_alert(f"{side.upper()} {symbol} qty={qty} @ {price}")
+
+def log_equity(value):
+    cursor.execute(
+        "INSERT INTO equity (time, equity) VALUES (?, ?)",
+        (datetime.utcnow().isoformat(), value)
+    )
+    conn.commit()
 
 # =========================
 # ANALYTICS
 # =========================
-def update_equity():
-    global start_equity, peak_equity
+def get_equity_curve():
+    cursor.execute("SELECT equity FROM equity ORDER BY id ASC")
+    return [row[0] for row in cursor.fetchall()]
 
-    account = api.get_account()
-    equity = float(account.equity)
-
-    if start_equity is None:
-        start_equity = equity
-        peak_equity = equity
-
-    equity_history.append(equity)
-
-    pnl = (equity - start_equity)
-    pnl_curve.append(pnl)
-
-    peak_equity = max(peak_equity, equity)
-    drawdown = (equity - peak_equity) / peak_equity
-    drawdown_curve.append(drawdown)
-
-    if len(equity_history) > 200:
-        equity_history.pop(0)
-        pnl_curve.pop(0)
-        drawdown_curve.pop(0)
+def get_drawdown(equity):
+    peak = equity[0] if equity else 0
+    dd = []
+    for e in equity:
+        peak = max(peak, e)
+        dd.append((e - peak) / peak if peak > 0 else 0)
+    return dd
 
 # =========================
-# BOT (CONNECTED)
+# BOT
 # =========================
 def run_bot():
     signals = get_signals()
 
-    # Example trade logic (simple)
     if get_regime() == "bull":
         for s in signals[:2]:
             try:
                 price = api.get_latest_trade(s["symbol"]).price
+
                 api.submit_order(
                     symbol=s["symbol"],
                     qty=1,
@@ -159,11 +183,18 @@ def run_bot():
                     type="market",
                     time_in_force="day"
                 )
+
                 log_trade(s["symbol"], "buy", 1, price)
+
             except:
                 continue
 
-    update_equity()
+    # log equity
+    try:
+        account = api.get_account()
+        log_equity(float(account.equity))
+    except:
+        pass
 
 # =========================
 # LOOP
@@ -180,12 +211,17 @@ threading.Thread(target=scheduler, daemon=True).start()
 # =========================
 @app.route("/data")
 def data():
+    equity = get_equity_curve()
+    drawdown = get_drawdown(equity)
+
+    cursor.execute("SELECT symbol, side, qty, price FROM trades ORDER BY id DESC LIMIT 20")
+    trades = cursor.fetchall()
+
     return jsonify({
-        "equity": equity_history,
-        "pnl": pnl_curve,
-        "drawdown": drawdown_curve,
+        "equity": equity,
+        "drawdown": drawdown,
         "signals": get_signals(),
-        "trades": trade_log,
+        "trades": trades,
         "regime": get_regime()
     })
 
@@ -201,11 +237,10 @@ def dashboard():
 </head>
 <body>
 
-<h1>📊 Trading Dashboard</h1>
+<h1>🚀 Pro Trading Dashboard</h1>
 <h2 id="stats"></h2>
 
 <canvas id="equity"></canvas>
-<canvas id="pnl"></canvas>
 <canvas id="dd"></canvas>
 
 <script>
@@ -216,12 +251,11 @@ async function load(){
     document.getElementById("stats").innerHTML =
         "Regime: " + d.regime;
 
-    drawChart('equity', d.equity, 'Equity');
-    drawChart('pnl', d.pnl, 'PnL');
-    drawChart('dd', d.drawdown, 'Drawdown');
+    draw('equity', d.equity, 'Equity');
+    draw('dd', d.drawdown, 'Drawdown');
 }
 
-function drawChart(id,data,label){
+function draw(id,data,label){
     new Chart(document.getElementById(id), {
         type:'line',
         data:{
