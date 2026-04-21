@@ -46,36 +46,44 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# MOMENTUM ENGINE (FIXED)
+# MOMENTUM ENGINE (ROBUST)
 # =========================
 def get_momentum_score(symbol):
     try:
         df = yf.download(symbol, period="3mo", interval="1d", progress=False)
 
-        if df is None or df.empty or len(df) < 30:
-            print(f"Fallback scoring for {symbol}")
+        if df is None or df.empty:
+            print(f"No data for {symbol}")
             return 0
 
         close = df["Close"].dropna()
 
-        if len(close) < 25:
+        if len(close) < 30:
+            print(f"Not enough data for {symbol}")
             return 0
 
-        # Direct return calculations (no pct_change instability)
-        r5 = (close.iloc[-1] / close.iloc[-6]) - 1
-        r10 = (close.iloc[-1] / close.iloc[-11]) - 1
-        r20 = (close.iloc[-1] / close.iloc[-21]) - 1
+        # Use safe rolling windows instead of fixed indexing
+        recent_5 = close.tail(6)
+        recent_10 = close.tail(11)
+        recent_20 = close.tail(21)
+
+        if len(recent_20) < 21:
+            return 0
+
+        r5 = (recent_5.iloc[-1] / recent_5.iloc[0]) - 1
+        r10 = (recent_10.iloc[-1] / recent_10.iloc[0]) - 1
+        r20 = (recent_20.iloc[-1] / recent_20.iloc[0]) - 1
 
         returns = close.pct_change().dropna()
 
         if len(returns) < 20:
             return 0
 
-        vol = returns.iloc[-20:].std()
+        vol = returns.tail(20).std()
 
         score = (r5 * 0.5) + (r10 * 0.3) + (r20 * 0.2) - (vol * 0.5)
 
-        if score is None or np.isnan(score) or np.isinf(score):
+        if not np.isfinite(score):
             return 0
 
         return float(score)
@@ -172,7 +180,7 @@ def handle_entries(signals, current_symbols):
         account = api.get_account()
         cash = float(account.cash)
 
-        for s in signals[:2]:  # top 2 signals
+        for s in signals[:2]:
             if s["symbol"] not in current_symbols:
                 qty = int((cash * RISK_PER_TRADE) / s["price"])
 
