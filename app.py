@@ -14,7 +14,7 @@ SYMBOLS = ["AMD", "NVDA", "META", "AVGO", "INTC"]
 RISK_PER_TRADE = 0.02
 TRAILING_STOP = 0.06
 WEAK_EXIT = -0.015
-PROFIT_LOCK = 0.07   # 7% profit → partial sell
+PROFIT_LOCK = 0.07
 
 BASE_URL = "https://paper-api.alpaca.markets"
 
@@ -22,7 +22,7 @@ API_KEY = os.getenv("APCA_API_KEY_ID")
 API_SECRET = os.getenv("APCA_API_SECRET_KEY")
 
 # =========================
-# SAFE ALPACA IMPORT
+# SAFE ALPACA INIT
 # =========================
 api = None
 try:
@@ -45,7 +45,7 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# MOMENTUM ENGINE
+# MOMENTUM
 # =========================
 def get_momentum_score(symbol):
     try:
@@ -54,30 +54,18 @@ def get_momentum_score(symbol):
         if len(df) < 30:
             return 0
 
-        df["returns"] = df["Close"].pct_change()
-
-        # Multi-timeframe momentum
         r5 = df["Close"].pct_change(5).iloc[-1]
         r10 = df["Close"].pct_change(10).iloc[-1]
         r20 = df["Close"].pct_change(20).iloc[-1]
 
-        # Volatility penalty
-        vol = df["returns"].rolling(20).std().iloc[-1]
+        vol = df["Close"].pct_change().rolling(20).std().iloc[-1]
 
-        score = (r5 * 0.5) + (r10 * 0.3) + (r20 * 0.2) - (vol * 0.5)
-
-        return float(score)
-
-    except Exception as e:
-        print(f"Momentum error {symbol}:", e)
+        return float((r5*0.5)+(r10*0.3)+(r20*0.2)-(vol*0.5))
+    except:
         return 0
 
-# =========================
-# GET SIGNALS (RANKED)
-# =========================
 def get_signals():
     ranked = []
-
     for s in SYMBOLS:
         score = get_momentum_score(s)
         price = yf.Ticker(s).history(period="1d")["Close"].iloc[-1]
@@ -92,30 +80,25 @@ def get_signals():
     return ranked
 
 # =========================
-# GET POSITIONS
+# POSITIONS
 # =========================
 def get_positions():
     if not api:
         return []
-
     try:
         return api.list_positions()
     except:
         return []
 
 # =========================
-# PROFIT LOCKING
+# PROFIT LOCK
 # =========================
-def handle_profit_lock(position):
-    unrealized = float(position.unrealized_plpc)
-
-    if unrealized >= PROFIT_LOCK:
-        qty = int(float(position.qty) * 0.5)
-
+def handle_profit_lock(p):
+    if float(p.unrealized_plpc) >= PROFIT_LOCK:
+        qty = int(float(p.qty) * 0.5)
         if qty > 0:
-            print(f"🔒 Profit lock: Selling half {position.symbol}")
             api.submit_order(
-                symbol=position.symbol,
+                symbol=p.symbol,
                 qty=qty,
                 side="sell",
                 type="market",
@@ -123,37 +106,31 @@ def handle_profit_lock(position):
             )
 
 # =========================
-# EXIT LOGIC
+# EXITS
 # =========================
-def handle_exits(position):
-    pl = float(position.unrealized_plpc)
-
-    if pl <= WEAK_EXIT:
-        print(f"❌ Weak exit {position.symbol}")
+def handle_exits(p):
+    if float(p.unrealized_plpc) <= WEAK_EXIT:
         api.submit_order(
-            symbol=position.symbol,
-            qty=position.qty,
+            symbol=p.symbol,
+            qty=p.qty,
             side="sell",
             type="market",
             time_in_force="day"
         )
 
 # =========================
-# ENTRY LOGIC
+# ENTRIES
 # =========================
-def handle_entries(signals, current_symbols):
+def handle_entries(signals, current):
     if not api:
         return
 
-    account = api.get_account()
-    buying_power = float(account.cash)
+    cash = float(api.get_account().cash)
 
-    for s in signals[:2]:  # top 2 only
-        if s["symbol"] not in current_symbols:
-            qty = int((buying_power * RISK_PER_TRADE) / s["price"])
-
+    for s in signals[:2]:
+        if s["symbol"] not in current:
+            qty = int((cash * RISK_PER_TRADE) / s["price"])
             if qty > 0:
-                print(f"🚀 Buying {s['symbol']}")
                 api.submit_order(
                     symbol=s["symbol"],
                     qty=qty,
@@ -163,7 +140,7 @@ def handle_entries(signals, current_symbols):
                 )
 
 # =========================
-# MAIN BOT LOOP
+# BOT
 # =========================
 def run_bot():
     if not api:
@@ -175,19 +152,15 @@ def run_bot():
     positions = get_positions()
     signals = get_signals()
 
-    current_symbols = [p.symbol for p in positions]
+    current = [p.symbol for p in positions]
 
     for p in positions:
         handle_profit_lock(p)
         handle_exits(p)
 
-    handle_entries(signals, current_symbols)
+    handle_entries(signals, current)
 
-    return {
-        "status": "ran",
-        "positions": current_symbols,
-        "top_signal": signals[0] if signals else None
-    }
+    return {"status": "ran"}
 
 # =========================
 # ROUTES
@@ -213,3 +186,10 @@ def debug():
 @app.route("/run")
 def run():
     return jsonify(run_bot())
+
+# =========================
+# CRITICAL FIX (DO NOT REMOVE)
+# =========================
+if __name__ == "__main__":
+    PORT = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=PORT)
