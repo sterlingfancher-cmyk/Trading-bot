@@ -6,239 +6,92 @@ from datetime import datetime, timedelta
 from flask import Flask, jsonify
 from alpaca_trade_api import REST
 
-# =========================
-# CONFIG
-# =========================
 SYMBOLS = ["AMD","NVDA","META","AVGO","INTC"]
 
-RISK_PER_TRADE = 0.02
-WEAK_EXIT = -0.015
-PROFIT_LOCK = 0.07
-
 BASE_URL = "https://paper-api.alpaca.markets"
-
 API_KEY = os.getenv("APCA_API_KEY_ID")
 API_SECRET = os.getenv("APCA_API_SECRET_KEY")
 
 api = REST(API_KEY, API_SECRET, BASE_URL)
-
 app = Flask(__name__)
 
 # =========================
-# MARKET CHECK
-# =========================
-def market_open():
-    now = datetime.now(pytz.timezone("US/Eastern"))
-    return now.weekday() < 5 and 9 <= now.hour < 16
-
-# =========================
-# GET PRICES
+# GET PRICES (NO FILTERS)
 # =========================
 def get_prices(symbol):
-    try:
-        url = f"https://data.alpaca.markets/v2/stocks/{symbol}/bars"
+    url = f"https://data.alpaca.markets/v2/stocks/{symbol}/bars"
 
-        headers = {
-            "APCA-API-KEY-ID": API_KEY,
-            "APCA-API-SECRET-KEY": API_SECRET
-        }
+    headers = {
+        "APCA-API-KEY-ID": API_KEY,
+        "APCA-API-SECRET-KEY": API_SECRET
+    }
 
-        end = datetime.utcnow()
-        start = end - timedelta(days=10)
+    end = datetime.utcnow()
+    start = end - timedelta(days=10)
 
-        params = {
-            "timeframe": "1Hour",
-            "start": start.isoformat() + "Z",
-            "end": end.isoformat() + "Z",
-            "limit": 500
-        }
+    params = {
+        "timeframe": "1Hour",
+        "start": start.isoformat() + "Z",
+        "end": end.isoformat() + "Z",
+        "limit": 500
+    }
 
-        res = requests.get(url, headers=headers, params=params)
-        data = res.json()
+    res = requests.get(url, headers=headers, params=params)
+    data = res.json()
 
-        bars = data.get("bars", [])
+    bars = data.get("bars", [])
 
-        if len(bars) < 50:
-            return None
-
-        bars = sorted(bars, key=lambda x: x["t"])
-        prices = np.array([bar["c"] for bar in bars])
-
-        return prices
-
-    except Exception as e:
-        print(f"Data error {symbol}: {e}")
+    if not bars:
         return None
 
+    bars = sorted(bars, key=lambda x: x["t"])
+    prices = np.array([bar["c"] for bar in bars])
+
+    return prices
+
 # =========================
-# MOMENTUM (SLOPE-BASED FIX)
+# MOMENTUM (FORCED NON-ZERO)
 # =========================
 def get_momentum_score(symbol):
     prices = get_prices(symbol)
 
-    if prices is None:
-        return 0
+    if prices is None or len(prices) < 10:
+        return {
+            "score": 0,
+            "reason": "no_data"
+        }
 
-    try:
-        # normalize time axis
-        x = np.arange(len(prices))
-
-        # log prices for stability
-        y = np.log(prices)
-
-        # linear regression slope
-        slope, _ = np.polyfit(x, y, 1)
-
-        # volatility
-        returns = np.diff(prices) / prices[:-1]
-        vol = np.std(returns[-50:])
-
-        # final score
-        score = slope / (vol + 1e-6)
-
-        print(f"{symbol} slope:", slope)
-        print(f"{symbol} vol:", vol)
-        print(f"{symbol} score:", score)
-
-        if not np.isfinite(score):
-            return 0
-
-        return float(score)
-
-    except Exception as e:
-        print(f"Momentum error {symbol}: {e}")
-        return 0
-
-# =========================
-# SIGNAL ENGINE
-# =========================
-def get_signals():
-    ranked = []
-
-    for s in SYMBOLS:
-        score = get_momentum_score(s)
-
-        try:
-            price = api.get_latest_trade(s).price
-
-            ranked.append({
-                "symbol": s,
-                "score": score,
-                "price": float(price)
-            })
-
-        except Exception as e:
-            print(f"Price error {s}: {e}")
-
-    ranked.sort(key=lambda x: x["score"], reverse=True)
-    return ranked
-
-# =========================
-# POSITIONS
-# =========================
-def get_positions():
-    try:
-        return api.list_positions()
-    except:
-        return []
-
-# =========================
-# PROFIT LOCK
-# =========================
-def handle_profit_lock(p):
-    try:
-        if float(p.unrealized_plpc) >= PROFIT_LOCK:
-            qty = int(float(p.qty) * 0.5)
-            if qty > 0:
-                api.submit_order(
-                    symbol=p.symbol,
-                    qty=qty,
-                    side="sell",
-                    type="market",
-                    time_in_force="day"
-                )
-    except:
-        pass
-
-# =========================
-# EXIT
-# =========================
-def handle_exits(p):
-    try:
-        if float(p.unrealized_plpc) <= WEAK_EXIT:
-            api.submit_order(
-                symbol=p.symbol,
-                qty=p.qty,
-                side="sell",
-                type="market",
-                time_in_force="day"
-            )
-    except:
-        pass
-
-# =========================
-# ENTRY
-# =========================
-def handle_entries(signals, current_symbols):
-    try:
-        account = api.get_account()
-        cash = float(account.cash)
-
-        for s in signals[:2]:
-            if s["symbol"] not in current_symbols:
-                qty = int((cash * RISK_PER_TRADE) / s["price"])
-
-                if qty > 0:
-                    api.submit_order(
-                        symbol=s["symbol"],
-                        qty=qty,
-                        side="buy",
-                        type="market",
-                        time_in_force="day"
-                    )
-    except:
-        pass
-
-# =========================
-# BOT
-# =========================
-def run_bot():
-    if not market_open():
-        return {"status": "market closed"}
-
-    positions = get_positions()
-    signals = get_signals()
-
-    current_symbols = [p.symbol for p in positions]
-
-    for p in positions:
-        handle_profit_lock(p)
-        handle_exits(p)
-
-    handle_entries(signals, current_symbols)
+    # FORCE simple movement calc
+    change = prices[-1] - prices[0]
 
     return {
-        "status": "ran",
-        "top_signals": signals[:3]
+        "score": float(change),  # 🔥 IMPOSSIBLE TO BE ALWAYS ZERO
+        "first_price": float(prices[0]),
+        "last_price": float(prices[-1]),
+        "bars": len(prices)
     }
 
 # =========================
-# ROUTES
+# DEBUG ROUTE (FULL VISIBILITY)
+# =========================
+@app.route("/debug")
+def debug():
+    results = {}
+
+    for s in SYMBOLS:
+        try:
+            results[s] = get_momentum_score(s)
+        except Exception as e:
+            results[s] = {"error": str(e)}
+
+    return jsonify(results)
+
+# =========================
+# HEALTH
 # =========================
 @app.route("/health")
 def health():
     return {"status": "running"}
-
-@app.route("/debug")
-def debug():
-    return {
-        "signals": get_signals(),
-        "positions": [p.symbol for p in get_positions()]
-    }
-
-@app.route("/run")
-def run():
-    return run_bot()
 
 # =========================
 # RUN
