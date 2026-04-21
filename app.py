@@ -2,10 +2,11 @@ import os
 import time
 import threading
 from flask import Flask, jsonify
+from datetime import datetime
+import pytz
+import yfinance as yf
 
-# =========================
-# SAFE ALPACA IMPORT
-# =========================
+# SAFE IMPORT (prevents crash if package missing during build)
 try:
     from alpaca_trade_api import REST
 except:
@@ -13,163 +14,237 @@ except:
 
 app = Flask(__name__)
 
-# =========================
+# ==============================
 # ENV VARIABLES
-# =========================
-def get_env():
-    return {
-        "API_KEY": os.getenv("APCA_API_KEY_ID"),
-        "API_SECRET": os.getenv("APCA_API_SECRET_KEY"),
-        "BASE_URL": os.getenv("APCA_API_BASE_URL", "https://paper-api.alpaca.markets")
-    }
+# ==============================
+API_KEY = os.getenv("APCA_API_KEY_ID")
+API_SECRET = os.getenv("APCA_API_SECRET_KEY")
+BASE_URL = "https://paper-api.alpaca.markets"
 
-# =========================
-# SAFE API INIT
-# =========================
-def get_api():
-    env = get_env()
+api = None
+if API_KEY and API_SECRET and REST:
+    api = REST(API_KEY, API_SECRET, BASE_URL)
 
-    if not env["API_KEY"] or not env["API_SECRET"]:
-        print("⚠️ Missing Alpaca API keys")
-        return None
+# ==============================
+# CONFIG
+# ==============================
+WATCHLIST = ["AMD", "NVDA", "META", "AVGO", "INTC"]
+POSITION_SIZE = 0.20  # 20% per trade
+TRAILING_STOP = 0.06  # 6%
+WEAKNESS_EXIT = -0.015  # -1.5% intraday
 
-    if REST is None:
-        print("⚠️ alpaca_trade_api not installed")
-        return None
+# ==============================
+# HELPERS
+# ==============================
+def market_open():
+    est = pytz.timezone("US/Eastern")
+    now = datetime.now(est)
+    return now.weekday() < 5 and 9 <= now.hour < 16
 
+
+def get_price(symbol):
     try:
-        return REST(env["API_KEY"], env["API_SECRET"], env["BASE_URL"])
-    except Exception as e:
-        print(f"❌ API INIT ERROR: {e}")
-        return None
-
-# =========================
-# MARKET CHECK
-# =========================
-def is_market_open():
-    api = get_api()
-    if not api:
-        return False
-
-    try:
-        clock = api.get_clock()
-        return clock.is_open
+        data = yf.Ticker(symbol).history(period="1d")
+        return float(data["Close"].iloc[-1])
     except:
+        return None
+
+
+def get_positions():
+    if not api:
+        return []
+    try:
+        return api.list_positions()
+    except:
+        return []
+
+
+def get_account():
+    if not api:
+        return None
+    try:
+        return api.get_account()
+    except:
+        return None
+
+
+# ==============================
+# EXIT LOGIC
+# ==============================
+def should_exit(pos):
+    try:
+        entry = float(pos.avg_entry_price)
+        price = float(pos.current_price)
+        change = (price - entry) / entry
+
+        # 1. TRAILING STOP
+        if change < -TRAILING_STOP:
+            print(f"EXIT (TRAILING STOP): {pos.symbol}")
+            return True
+
+        # 2. WEAKNESS EXIT (NEW)
+        intraday = float(pos.unrealized_intraday_plpc)
+        if intraday < WEAKNESS_EXIT:
+            print(f"EXIT (WEAKNESS): {pos.symbol}")
+            return True
+
         return False
 
-# =========================
-# GET POSITIONS
-# =========================
-def get_positions():
-    api = get_api()
-    if not api:
-        return []
-
-    try:
-        positions = api.list_positions()
-        return [p._raw for p in positions]
     except Exception as e:
-        print(f"❌ Position error: {e}")
-        return []
+        print("Exit error:", e)
+        return False
 
-# =========================
-# MOCK SIGNALS (replace later)
-# =========================
-def get_signals():
-    return [
-        {"symbol": "AMD", "price": 275},
-        {"symbol": "NVDA", "price": 200},
-        {"symbol": "META", "price": 670},
-        {"symbol": "AVGO", "price": 400},
-        {"symbol": "INTC", "price": 65},
-    ]
 
-# =========================
-# CORE BOT LOGIC
-# =========================
-def run_bot():
-    print("🚀 BOT RUN STARTED")
+# ==============================
+# SIGNAL ENGINE
+# ==============================
+def generate_signals():
+    signals = []
 
-    api = get_api()
+    for symbol in WATCHLIST:
+        price = get_price(symbol)
+        if price:
+            signals.append({
+                "symbol": symbol,
+                "price": price
+            })
+
+    # Simple ranking (price momentum placeholder)
+    return sorted(signals, key=lambda x: x["price"], reverse=True)
+
+
+# ==============================
+# POSITION MANAGEMENT
+# ==============================
+def manage_positions():
     if not api:
-        print("❌ API not available")
-        return {"status": "no_api"}
-
-    if not is_market_open():
-        print("🕒 Market closed")
-        return {"status": "market_closed"}
+        print("No API - skipping trading")
+        return
 
     positions = get_positions()
-    signals = get_signals()
+    account = get_account()
 
-    print(f"📊 Positions: {len(positions)}")
-    print(f"📡 Signals: {len(signals)}")
+    if not account:
+        return
 
-    # (PLACE YOUR STRATEGY LOGIC HERE)
+    equity = float(account.equity)
 
-    return {"status": "ran"}
+    # ===== EXIT FIRST =====
+    for pos in positions:
+        if should_exit(pos):
+            try:
+                api.submit_order(
+                    symbol=pos.symbol,
+                    qty=pos.qty,
+                    side="sell",
+                    type="market",
+                    time_in_force="gtc"
+                )
+                print(f"SOLD {pos.symbol}")
+            except Exception as e:
+                print("Sell error:", e)
 
-# =========================
-# AUTO LOOP (5 MIN)
-# =========================
-def bot_loop():
-    while True:
+    # ===== REFRESH POSITIONS AFTER SELL =====
+    positions = get_positions()
+    held_symbols = [p.symbol for p in positions]
+
+    # ===== FIND NEW ENTRIES =====
+    signals = generate_signals()
+
+    for sig in signals:
+        symbol = sig["symbol"]
+
+        if symbol in held_symbols:
+            continue
+
         try:
-            run_bot()
-        except Exception as e:
-            print(f"❌ LOOP ERROR: {e}")
-        time.sleep(300)  # 5 minutes
+            cash_to_use = equity * POSITION_SIZE
+            qty = int(cash_to_use / sig["price"])
 
-# =========================
-# START BACKGROUND THREAD
-# =========================
-threading.Thread(target=bot_loop, daemon=True).start()
+            if qty <= 0:
+                continue
 
-# =========================
-# ROUTES
-# =========================
-@app.route("/")
-def home():
-    return run_bot()
-
-@app.route("/health")
-def health():
-    return {"status": "running"}
-
-@app.route("/debug")
-def debug():
-    env = get_env()
-
-    return {
-        "has_key": bool(env["API_KEY"]),
-        "has_secret": bool(env["API_SECRET"]),
-        "market_open": is_market_open(),
-        "positions": get_positions(),
-        "signals": get_signals()
-    }
-
-@app.route("/force-exit")
-def force_exit():
-    api = get_api()
-    if not api:
-        return {"error": "API not initialized"}
-
-    try:
-        positions = api.list_positions()
-        for p in positions:
             api.submit_order(
-                symbol=p.symbol,
-                qty=p.qty,
-                side="sell" if p.side == "long" else "buy",
+                symbol=symbol,
+                qty=qty,
+                side="buy",
                 type="market",
                 time_in_force="gtc"
             )
-        return {"status": "positions closed"}
-    except Exception as e:
-        return {"error": str(e)}
 
-# =========================
-# RUN SERVER
-# =========================
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+            print(f"BOUGHT {symbol}")
+            break  # one trade per cycle
+
+        except Exception as e:
+            print("Buy error:", e)
+
+
+# ==============================
+# MAIN LOOP (AUTO RUN EVERY 5 MIN)
+# ==============================
+def bot_loop():
+    while True:
+        try:
+            if market_open():
+                print("Bot running...")
+                manage_positions()
+            else:
+                print("Market closed")
+
+        except Exception as e:
+            print("Loop error:", e)
+
+        time.sleep(300)  # 5 minutes
+
+
+# Start background thread
+threading.Thread(target=bot_loop, daemon=True).start()
+
+# ==============================
+# ROUTES
+# ==============================
+@app.route("/")
+def home():
+    return "Bot is running"
+
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "running"})
+
+
+@app.route("/debug")
+def debug():
+    return jsonify({
+        "has_key": bool(API_KEY),
+        "has_secret": bool(API_SECRET),
+        "market_open": market_open(),
+        "positions": [p.symbol for p in get_positions()],
+        "signals": generate_signals()
+    })
+
+
+@app.route("/run")
+def run_once():
+    manage_positions()
+    return jsonify({"status": "ran"})
+
+
+@app.route("/force-exit")
+def force_exit():
+    if not api:
+        return jsonify({"error": "no api"})
+
+    for pos in get_positions():
+        try:
+            api.submit_order(
+                symbol=pos.symbol,
+                qty=pos.qty,
+                side="sell",
+                type="market",
+                time_in_force="gtc"
+            )
+        except Exception as e:
+            print(e)
+
+    return jsonify({"status": "liquidated"})
