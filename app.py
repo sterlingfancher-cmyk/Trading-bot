@@ -32,7 +32,7 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# GET PRICES (FIXED)
+# GET PRICES
 # =========================
 def get_prices(symbol):
     try:
@@ -58,15 +58,11 @@ def get_prices(symbol):
 
         bars = data.get("bars", [])
 
-        print(f"{symbol} bars:", len(bars))
-
-        if len(bars) < 30:
+        if len(bars) < 50:
             return None
 
         bars = sorted(bars, key=lambda x: x["t"])
         prices = np.array([bar["c"] for bar in bars])
-
-        print(f"{symbol} sample:", prices[-5:])
 
         return prices
 
@@ -75,7 +71,7 @@ def get_prices(symbol):
         return None
 
 # =========================
-# MOMENTUM ENGINE
+# MOMENTUM (SLOPE-BASED FIX)
 # =========================
 def get_momentum_score(symbol):
     prices = get_prices(symbol)
@@ -84,17 +80,24 @@ def get_momentum_score(symbol):
         return 0
 
     try:
-        r5 = (prices[-1] / prices[-6]) - 1
-        r10 = (prices[-1] / prices[-11]) - 1
-        r20 = (prices[-1] / prices[-21]) - 1
+        # normalize time axis
+        x = np.arange(len(prices))
 
-        momentum = (r5 + r10 + r20) / 3
+        # log prices for stability
+        y = np.log(prices)
 
+        # linear regression slope
+        slope, _ = np.polyfit(x, y, 1)
+
+        # volatility
         returns = np.diff(prices) / prices[:-1]
-        vol = np.std(returns[-20:])
+        vol = np.std(returns[-50:])
 
-        score = momentum / (vol + 1e-6)
+        # final score
+        score = slope / (vol + 1e-6)
 
+        print(f"{symbol} slope:", slope)
+        print(f"{symbol} vol:", vol)
         print(f"{symbol} score:", score)
 
         if not np.isfinite(score):
