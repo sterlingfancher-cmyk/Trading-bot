@@ -2,7 +2,7 @@ import os
 import pytz
 import requests
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, jsonify
 from alpaca_trade_api import REST
 
@@ -32,7 +32,7 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# RAW DATA FETCH (DEBUG ENABLED)
+# HISTORICAL DATA (FIXED)
 # =========================
 def get_prices(symbol):
     try:
@@ -43,9 +43,15 @@ def get_prices(symbol):
             "APCA-API-SECRET-KEY": API_SECRET
         }
 
+        # 🔥 CRITICAL FIX
+        end = datetime.utcnow()
+        start = end - timedelta(days=60)
+
         params = {
             "timeframe": "1Day",
-            "limit": 30
+            "start": start.isoformat() + "Z",
+            "end": end.isoformat() + "Z",
+            "limit": 100
         }
 
         res = requests.get(url, headers=headers, params=params)
@@ -62,11 +68,6 @@ def get_prices(symbol):
         prices = np.array([bar["c"] for bar in bars])
 
         print(f"{symbol} last 5 closes:", prices[-5:])
-
-        # detect flat data
-        if len(set(prices)) <= 2:
-            print(f"❌ Flat data detected for {symbol}")
-            return None
 
         return prices
 
@@ -89,7 +90,6 @@ def get_momentum_score(symbol):
         r20 = (prices[-1] / prices[-21]) - 1
 
         returns = np.diff(prices) / prices[:-1]
-
         vol = np.std(returns[-20:])
 
         score = (r5 * 0.5) + (r10 * 0.3) + (r20 * 0.2) - (vol * 0.5)
@@ -158,7 +158,7 @@ def handle_profit_lock(p):
         pass
 
 # =========================
-# EXIT
+# EXIT LOGIC
 # =========================
 def handle_exits(p):
     try:
@@ -175,7 +175,7 @@ def handle_exits(p):
         pass
 
 # =========================
-# ENTRY
+# ENTRY LOGIC
 # =========================
 def handle_entries(signals, current_symbols):
     try:
@@ -218,11 +218,11 @@ def run_bot():
 
     return {
         "status": "ran",
-        "signals": signals[:3]
+        "top_signals": signals[:3]
     }
 
 # =========================
-# DEBUG ROUTE (CRITICAL)
+# DEBUG ROUTES
 # =========================
 @app.route("/bars-test")
 def bars_test():
@@ -233,8 +233,13 @@ def bars_test():
         "APCA-API-SECRET-KEY": API_SECRET
     }
 
+    end = datetime.utcnow()
+    start = end - timedelta(days=60)
+
     params = {
         "timeframe": "1Day",
+        "start": start.isoformat() + "Z",
+        "end": end.isoformat() + "Z",
         "limit": 10
     }
 
@@ -260,7 +265,7 @@ def run():
     return run_bot()
 
 # =========================
-# RUN
+# RUN SERVER
 # =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
