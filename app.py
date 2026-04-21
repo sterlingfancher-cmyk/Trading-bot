@@ -32,7 +32,7 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# GET HISTORICAL PRICES
+# GET INTRADAY PRICES (FINAL FIX)
 # =========================
 def get_prices(symbol):
     try:
@@ -44,13 +44,13 @@ def get_prices(symbol):
         }
 
         end = datetime.utcnow()
-        start = end - timedelta(days=60)
+        start = end - timedelta(days=5)
 
         params = {
-            "timeframe": "1Day",
+            "timeframe": "15Min",  # 🔥 KEY FIX
             "start": start.isoformat() + "Z",
             "end": end.isoformat() + "Z",
-            "limit": 100
+            "limit": 200
         }
 
         res = requests.get(url, headers=headers, params=params)
@@ -58,18 +58,18 @@ def get_prices(symbol):
 
         bars = data.get("bars", [])
 
-        if len(bars) < 25:
-            print(f"Not enough data for {symbol}")
+        if len(bars) < 50:
+            print(f"Not enough intraday data for {symbol}")
             return None
 
-        # SORT BY TIME (critical)
+        # sort chronologically
         bars = sorted(bars, key=lambda x: x["t"])
 
         prices = np.array([bar["c"] for bar in bars])
 
         # sanity check
-        if np.std(prices) == 0:
-            print(f"Flat data for {symbol}")
+        if np.std(prices) < 0.001:
+            print(f"Flat intraday data for {symbol}")
             return None
 
         return prices
@@ -79,7 +79,7 @@ def get_prices(symbol):
         return None
 
 # =========================
-# MOMENTUM ENGINE (FIXED)
+# MOMENTUM ENGINE (FINAL)
 # =========================
 def get_momentum_score(symbol):
     prices = get_prices(symbol)
@@ -97,13 +97,13 @@ def get_momentum_score(symbol):
         returns = np.diff(prices) / prices[:-1]
         vol = np.std(returns[-20:])
 
-        # 🔥 FIX: ratio instead of subtraction
+        # 🔥 CRITICAL FIX
         score = momentum / (vol + 1e-6)
-
-        print(f"{symbol} score:", score)
 
         if not np.isfinite(score):
             return 0
+
+        print(f"{symbol} score:", score)
 
         return float(score)
 
