@@ -12,12 +12,10 @@ app = Flask(__name__)
 # =========================
 # CONFIG
 # =========================
-MAX_UNIVERSE = 300
-FILTERED_UNIVERSE = 60
 MAX_POSITIONS = 5
+FILTERED_UNIVERSE = 20
 
 RISK_PER_TRADE = 0.02
-MIN_SCORE = 1.0
 TRAILING_STOP = 0.03
 CHECK_INTERVAL = 300
 
@@ -30,27 +28,25 @@ api = REST(API_KEY, API_SECRET, BASE_URL)
 peak_prices = {}
 
 # =========================
-# STEP 1: BUILD UNIVERSE
+# SAFE EXPANDED UNIVERSE
 # =========================
 def get_universe():
-    try:
-        assets = api.list_assets(status='active')
-
-        symbols = [
-            a.symbol for a in assets
-            if a.tradable and a.easy_to_borrow and a.shortable
-        ]
-
-        return symbols[:MAX_UNIVERSE]
-
-    except:
-        return []
+    return [
+        "AMD","NVDA","META","AVGO","INTC",
+        "AAPL","MSFT","GOOGL","AMZN","TSLA",
+        "SMCI","ARM","TSM","NFLX","CRM",
+        "QCOM","ADBE","NOW","PANW","SNOW",
+        "PLTR","UBER","COIN","SQ","PYPL",
+        "SHOP","ROKU","DDOG","NET","CRWD",
+        "ZS","OKTA","TEAM","MDB","F","GM",
+        "BA","CAT","GE"
+    ]
 
 # =========================
-# STEP 2: FAST FILTER
+# FAST SAFE FILTER
 # =========================
 def fast_filter(symbols):
-    filtered = []
+    results = []
 
     for s in symbols:
         try:
@@ -59,30 +55,41 @@ def fast_filter(symbols):
             if df is None or df.empty:
                 continue
 
-            price = df["Close"].iloc[-1]
-            volume = df["Volume"].iloc[-1]
+            closes = df["Close"]
+            vols = df["Volume"]
 
-            # 🔥 FILTER RULES
+            if len(closes) < 5:
+                continue
+
+            price = closes.iloc[-1]
+            avg_volume = vols.tail(10).mean()
+
+            # relaxed but meaningful filters
             if price < 10:
                 continue
 
-            if volume < 1_000_000:
+            if avg_volume < 200_000:
                 continue
 
-            move = abs(df["Close"].iloc[-1] - df["Close"].iloc[0])
+            move = abs(closes.iloc[-1] - closes.iloc[0])
 
-            filtered.append((s, move))
+            results.append((s, move))
 
         except:
             continue
 
-    # sort by movement (fast momentum proxy)
-    filtered.sort(key=lambda x: x[1], reverse=True)
+    results.sort(key=lambda x: x[1], reverse=True)
 
-    return [s[0] for s in filtered[:FILTERED_UNIVERSE]]
+    filtered = [r[0] for r in results[:FILTERED_UNIVERSE]]
+
+    # 🔥 fallback safety
+    if len(filtered) == 0:
+        return symbols[:FILTERED_UNIVERSE]
+
+    return filtered
 
 # =========================
-# STEP 3: GET PRICES
+# DATA
 # =========================
 def get_prices(symbol):
     try:
@@ -107,7 +114,7 @@ def get_prices(symbol):
 def get_score(symbol):
     prices = get_prices(symbol)
     if prices is None:
-        return 0
+        return None
 
     short = prices[-1] - prices[-10]
     medium = prices[-1] - prices[-20]
@@ -126,7 +133,7 @@ def get_vol(symbol):
     return max(np.std(returns[-20:]), 0.001)
 
 # =========================
-# SIGNAL ENGINE
+# SIGNAL ENGINE (WITH SCANNER)
 # =========================
 def get_signals():
     universe = get_universe()
@@ -137,6 +144,9 @@ def get_signals():
     for s in candidates:
         try:
             score = get_score(s)
+            if score is None:
+                continue
+
             price = api.get_latest_trade(s).price
 
             ranked.append({
@@ -150,7 +160,33 @@ def get_signals():
             continue
 
     ranked.sort(key=lambda x: x["score"], reverse=True)
+
+    # 🔥 fallback safety
+    if len(ranked) == 0:
+        print("Fallback triggered")
+        return [{
+            "symbol": "AMD",
+            "score": 1,
+            "price": 100,
+            "vol": 1
+        }]
+
     return ranked
+
+# =========================
+# PREFLIGHT
+# =========================
+def preflight(signals):
+    if len(signals) == 0:
+        return False
+
+    scores = [s["score"] for s in signals]
+
+    if np.std(scores) < 0.01:
+        print("Low signal variance")
+        return False
+
+    return True
 
 # =========================
 # TRAILING STOP
@@ -208,6 +244,8 @@ def handle_rotation(signals):
                     time_in_force="day"
                 )
 
+                peak_prices.pop(p.symbol, None)
+
     except:
         pass
 
@@ -229,8 +267,10 @@ def handle_entries(signals):
             risk = cash * RISK_PER_TRADE
             qty = int(risk / (s["vol"] * s["price"]))
 
+            qty = min(qty, 100)
+
             if qty > 0:
-                print(f"Buying {s['symbol']}")
+                print(f"Buying {s['symbol']} qty {qty}")
 
                 api.submit_order(
                     symbol=s["symbol"],
@@ -247,9 +287,13 @@ def handle_entries(signals):
 # BOT
 # =========================
 def run_bot():
-    print(f"Running at {datetime.utcnow()}")
+    print(f"Run: {datetime.utcnow()}")
 
     signals = get_signals()
+
+    if not preflight(signals):
+        print("Blocked by preflight")
+        return {"status": "blocked"}
 
     handle_trailing()
     handle_rotation(signals)
