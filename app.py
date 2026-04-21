@@ -2,7 +2,7 @@ import os
 import pytz
 import requests
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, jsonify
 from alpaca_trade_api import REST
 
@@ -32,7 +32,7 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# RAW DATA FETCH (ALPACA V2)
+# RAW DATA FETCH (DEBUG ENABLED)
 # =========================
 def get_prices(symbol):
     try:
@@ -53,21 +53,25 @@ def get_prices(symbol):
 
         bars = data.get("bars", [])
 
+        print(f"{symbol} bars received:", len(bars))
+
         if len(bars) < 25:
-            print(f"Not enough data for {symbol}")
+            print(f"❌ Not enough data for {symbol}")
             return None
 
         prices = np.array([bar["c"] for bar in bars])
 
-        # 🔥 HARD CHECK FOR FLAT DATA
+        print(f"{symbol} last 5 closes:", prices[-5:])
+
+        # detect flat data
         if len(set(prices)) <= 2:
-            print(f"Flat data for {symbol}: {prices[-5:]}")
+            print(f"❌ Flat data detected for {symbol}")
             return None
 
         return prices
 
     except Exception as e:
-        print(f"Data error {symbol}: {e}")
+        print(f"❌ Data error {symbol}: {e}")
         return None
 
 # =========================
@@ -90,13 +94,15 @@ def get_momentum_score(symbol):
 
         score = (r5 * 0.5) + (r10 * 0.3) + (r20 * 0.2) - (vol * 0.5)
 
+        print(f"{symbol} score:", score)
+
         if not np.isfinite(score):
             return 0
 
         return float(score)
 
     except Exception as e:
-        print(f"Momentum error {symbol}: {e}")
+        print(f"❌ Momentum error {symbol}: {e}")
         return 0
 
 # =========================
@@ -118,7 +124,7 @@ def get_signals():
             })
 
         except Exception as e:
-            print(f"Price error {s}: {e}")
+            print(f"❌ Price error {s}: {e}")
 
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked
@@ -140,6 +146,7 @@ def handle_profit_lock(p):
         if float(p.unrealized_plpc) >= PROFIT_LOCK:
             qty = int(float(p.qty) * 0.5)
             if qty > 0:
+                print(f"🔒 Profit lock {p.symbol}")
                 api.submit_order(
                     symbol=p.symbol,
                     qty=qty,
@@ -156,6 +163,7 @@ def handle_profit_lock(p):
 def handle_exits(p):
     try:
         if float(p.unrealized_plpc) <= WEAK_EXIT:
+            print(f"❌ Weak exit {p.symbol}")
             api.submit_order(
                 symbol=p.symbol,
                 qty=p.qty,
@@ -179,6 +187,7 @@ def handle_entries(signals, current_symbols):
                 qty = int((cash * RISK_PER_TRADE) / s["price"])
 
                 if qty > 0:
+                    print(f"🚀 Buying {s['symbol']}")
                     api.submit_order(
                         symbol=s["symbol"],
                         qty=qty,
@@ -211,6 +220,26 @@ def run_bot():
         "status": "ran",
         "signals": signals[:3]
     }
+
+# =========================
+# DEBUG ROUTE (CRITICAL)
+# =========================
+@app.route("/bars-test")
+def bars_test():
+    url = "https://data.alpaca.markets/v2/stocks/AMD/bars"
+
+    headers = {
+        "APCA-API-KEY-ID": API_KEY,
+        "APCA-API-SECRET-KEY": API_SECRET
+    }
+
+    params = {
+        "timeframe": "1Day",
+        "limit": 10
+    }
+
+    res = requests.get(url, headers=headers, params=params)
+    return res.json()
 
 # =========================
 # ROUTES
