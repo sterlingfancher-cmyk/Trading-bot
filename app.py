@@ -14,7 +14,7 @@ API_KEY = os.getenv("APCA_API_KEY_ID")
 SECRET_KEY = os.getenv("APCA_API_SECRET_KEY")
 BASE_URL = "https://paper-api.alpaca.markets"
 
-MAX_POSITIONS = 3
+MAX_POSITIONS = 5
 RISK_PER_TRADE = 0.02
 
 HEADERS = {
@@ -113,7 +113,7 @@ def get_price(symbol):
         return None
 
 # ==============================
-# TRAILING STOP LOGIC (UPGRADED)
+# TRAILING STOP LOGIC
 # ==============================
 
 def get_trailing_stop(entry_price, highest_price):
@@ -161,7 +161,7 @@ def get_signals():
     return signals
 
 # ==============================
-# POSITION MANAGEMENT (FINAL)
+# POSITION MANAGEMENT
 # ==============================
 
 def manage_positions():
@@ -181,7 +181,6 @@ def manage_positions():
         if not current_price:
             continue
 
-        # Track highest price
         if symbol not in highest_price_tracker:
             highest_price_tracker[symbol] = current_price
 
@@ -190,7 +189,6 @@ def manage_positions():
 
         highest = highest_price_tracker[symbol]
 
-        # Dynamic trailing stop
         trailing = get_trailing_stop(entry_price, highest)
         stop_price = highest * trailing
 
@@ -206,7 +204,6 @@ def manage_positions():
             "stop": stop_price
         })
 
-        # Sell condition
         if current_price <= stop_price:
             log("TRAILING STOP HIT", symbol)
             place_order(symbol, qty, "sell")
@@ -268,7 +265,7 @@ def run_bot():
     log("CYCLE COMPLETE")
 
 # ==============================
-# WEB ENDPOINTS (TESTING)
+# WEB ROUTES
 # ==============================
 
 @app.route("/")
@@ -299,8 +296,9 @@ def force_exit():
     return {"status": "force exit executed"}
 
 # ==============================
-# START SERVER
+# 🚨 CRITICAL FIX (RAILWAY PORT)
 # ==============================
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000)
+    port = int(os.environ.get("PORT", 3000))
+    app.run(host="0.0.0.0", port=port)
