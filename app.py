@@ -1,9 +1,10 @@
 import os
 import pytz
 import numpy as np
-import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, jsonify
+
+from alpaca_trade_api import REST
 
 # =========================
 # CONFIG
@@ -19,23 +20,8 @@ BASE_URL = "https://paper-api.alpaca.markets"
 API_KEY = os.getenv("APCA_API_KEY_ID")
 API_SECRET = os.getenv("APCA_API_SECRET_KEY")
 
-# =========================
-# SAFE ALPACA INIT
-# =========================
-api = None
-try:
-    from alpaca_trade_api import REST
-    if API_KEY and API_SECRET:
-        api = REST(API_KEY, API_SECRET, BASE_URL)
-        print("✅ Alpaca connected")
-    else:
-        print("⚠️ Missing API keys")
-except Exception as e:
-    print("❌ Alpaca init failed:", e)
+api = REST(API_KEY, API_SECRET, BASE_URL)
 
-# =========================
-# APP
-# =========================
 app = Flask(__name__)
 
 # =========================
@@ -46,40 +32,45 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# MOMENTUM ENGINE (ROBUST)
+# GET HISTORICAL DATA (ALPACA)
+# =========================
+def get_prices(symbol):
+    try:
+        bars = api.get_bars(
+            symbol,
+            "1Day",
+            limit=30
+        ).df
+
+        if bars.empty:
+            return None
+
+        return bars["close"].values
+
+    except Exception as e:
+        print(f"Data error {symbol}: {e}")
+        return None
+
+# =========================
+# MOMENTUM ENGINE (ALPACA DATA)
 # =========================
 def get_momentum_score(symbol):
+    prices = get_prices(symbol)
+
+    if prices is None or len(prices) < 25:
+        return 0
+
     try:
-        df = yf.download(symbol, period="3mo", interval="1d", progress=False)
+        r5 = (prices[-1] / prices[-6]) - 1
+        r10 = (prices[-1] / prices[-11]) - 1
+        r20 = (prices[-1] / prices[-21]) - 1
 
-        if df is None or df.empty:
-            print(f"No data for {symbol}")
-            return 0
-
-        close = df["Close"].dropna()
-
-        if len(close) < 30:
-            print(f"Not enough data for {symbol}")
-            return 0
-
-        # Use safe rolling windows instead of fixed indexing
-        recent_5 = close.tail(6)
-        recent_10 = close.tail(11)
-        recent_20 = close.tail(21)
-
-        if len(recent_20) < 21:
-            return 0
-
-        r5 = (recent_5.iloc[-1] / recent_5.iloc[0]) - 1
-        r10 = (recent_10.iloc[-1] / recent_10.iloc[0]) - 1
-        r20 = (recent_20.iloc[-1] / recent_20.iloc[0]) - 1
-
-        returns = close.pct_change().dropna()
+        returns = np.diff(prices) / prices[:-1]
 
         if len(returns) < 20:
             return 0
 
-        vol = returns.tail(20).std()
+        vol = np.std(returns[-20:])
 
         score = (r5 * 0.5) + (r10 * 0.3) + (r20 * 0.2) - (vol * 0.5)
 
@@ -102,12 +93,7 @@ def get_signals():
         score = get_momentum_score(s)
 
         try:
-            price_data = yf.Ticker(s).history(period="1d")
-
-            if price_data.empty:
-                continue
-
-            price = price_data["Close"].iloc[-1]
+            price = api.get_latest_trade(s).price
 
             ranked.append({
                 "symbol": s,
@@ -125,12 +111,9 @@ def get_signals():
 # POSITIONS
 # =========================
 def get_positions():
-    if not api:
-        return []
     try:
         return api.list_positions()
-    except Exception as e:
-        print("Position error:", e)
+    except:
         return []
 
 # =========================
@@ -141,7 +124,6 @@ def handle_profit_lock(p):
         if float(p.unrealized_plpc) >= PROFIT_LOCK:
             qty = int(float(p.qty) * 0.5)
             if qty > 0:
-                print(f"🔒 Profit lock: {p.symbol}")
                 api.submit_order(
                     symbol=p.symbol,
                     qty=qty,
@@ -149,8 +131,8 @@ def handle_profit_lock(p):
                     type="market",
                     time_in_force="day"
                 )
-    except Exception as e:
-        print("Profit lock error:", e)
+    except:
+        pass
 
 # =========================
 # EXIT LOGIC
@@ -158,7 +140,6 @@ def handle_profit_lock(p):
 def handle_exits(p):
     try:
         if float(p.unrealized_plpc) <= WEAK_EXIT:
-            print(f"❌ Weak exit: {p.symbol}")
             api.submit_order(
                 symbol=p.symbol,
                 qty=p.qty,
@@ -166,16 +147,13 @@ def handle_exits(p):
                 type="market",
                 time_in_force="day"
             )
-    except Exception as e:
-        print("Exit error:", e)
+    except:
+        pass
 
 # =========================
 # ENTRY LOGIC
 # =========================
 def handle_entries(signals, current_symbols):
-    if not api or not signals:
-        return
-
     try:
         account = api.get_account()
         cash = float(account.cash)
@@ -185,7 +163,6 @@ def handle_entries(signals, current_symbols):
                 qty = int((cash * RISK_PER_TRADE) / s["price"])
 
                 if qty > 0:
-                    print(f"🚀 Buying {s['symbol']}")
                     api.submit_order(
                         symbol=s["symbol"],
                         qty=qty,
@@ -193,17 +170,13 @@ def handle_entries(signals, current_symbols):
                         type="market",
                         time_in_force="day"
                     )
-
-    except Exception as e:
-        print("Entry error:", e)
+    except:
+        pass
 
 # =========================
 # BOT
 # =========================
 def run_bot():
-    if not api:
-        return {"error": "no api"}
-
     if not market_open():
         return {"status": "market closed"}
 
@@ -220,37 +193,29 @@ def run_bot():
 
     return {
         "status": "ran",
-        "positions": current_symbols,
         "top_signals": signals[:3]
     }
 
 # =========================
 # ROUTES
 # =========================
-@app.route("/")
-def home():
-    return "Bot running"
-
 @app.route("/health")
 def health():
-    return jsonify({"status": "running"})
+    return {"status": "running"}
 
 @app.route("/debug")
 def debug():
-    return jsonify({
-        "has_key": bool(API_KEY),
-        "has_secret": bool(API_SECRET),
-        "market_open": market_open(),
-        "positions": [p.symbol for p in get_positions()],
-        "signals": get_signals()
-    })
+    return {
+        "signals": get_signals(),
+        "positions": [p.symbol for p in get_positions()]
+    }
 
 @app.route("/run")
 def run():
-    return jsonify(run_bot())
+    return run_bot()
 
 # =========================
-# RAILWAY PORT FIX
+# RUN SERVER
 # =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
