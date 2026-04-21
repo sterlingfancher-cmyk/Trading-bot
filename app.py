@@ -32,7 +32,7 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# GET PRICES (FINAL FIX)
+# GET PRICES (FIXED)
 # =========================
 def get_prices(symbol):
     try:
@@ -44,10 +44,10 @@ def get_prices(symbol):
         }
 
         end = datetime.utcnow()
-        start = end - timedelta(days=10)  # 🔥 longer window
+        start = end - timedelta(days=10)
 
         params = {
-            "timeframe": "1Hour",         # 🔥 KEY CHANGE
+            "timeframe": "1Hour",
             "start": start.isoformat() + "Z",
             "end": end.isoformat() + "Z",
             "limit": 500
@@ -60,21 +60,13 @@ def get_prices(symbol):
 
         print(f"{symbol} bars:", len(bars))
 
-        if len(bars) < 100:
-            print(f"❌ Not enough data for {symbol}")
+        if len(bars) < 30:
             return None
 
-        # sort
         bars = sorted(bars, key=lambda x: x["t"])
-
         prices = np.array([bar["c"] for bar in bars])
 
-        print(f"{symbol} last 10:", prices[-10:])
-
-        # sanity check
-        if np.std(prices) < 0.01:
-            print(f"❌ Still flat for {symbol}")
-            return None
+        print(f"{symbol} sample:", prices[-5:])
 
         return prices
 
