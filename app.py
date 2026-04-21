@@ -16,15 +16,13 @@ app = Flask(__name__)
 MAX_POSITIONS = 5
 FILTERED_UNIVERSE = 20
 
-TARGET_VOL = 0.02           # 🔥 portfolio risk target
-REBALANCE_THRESHOLD = 0.25  # 🔥 only rebalance if weight drift > 25%
-PULLBACK_THRESHOLD = 0.02   # 🔥 require small pullback to enter
-
+TARGET_VOL = 0.02
 TRAILING_STOP = 0.03
 CHECK_INTERVAL = 300
 
 MIN_SCORE = 1.0
 CACHE_TTL = 120
+PULLBACK_THRESHOLD = 0.02
 
 BASE_URL = "https://paper-api.alpaca.markets"
 API_KEY = os.getenv("APCA_API_KEY_ID")
@@ -32,19 +30,22 @@ API_SECRET = os.getenv("APCA_API_SECRET_KEY")
 
 api = REST(API_KEY, API_SECRET, BASE_URL)
 
+# =========================
+# STATE
+# =========================
 price_cache = {}
 peak_prices = {}
+trade_log = []
+equity_history = []
+start_equity = None
 
 # =========================
-# MARKET HOURS
+# UTIL
 # =========================
 def market_open():
     now = datetime.now(pytz.timezone("US/Eastern"))
     return now.weekday() < 5 and 9 <= now.hour < 16
 
-# =========================
-# CLEAN DATA
-# =========================
 def clean_array(arr):
     arr = np.array(arr, dtype=float)
     arr = arr[np.isfinite(arr)]
@@ -205,7 +206,7 @@ def get_signals():
     return ranked if ranked else [{"symbol":"AMD","score":1,"price":100,"vol":1}]
 
 # =========================
-# ENTRY FILTER (PULLBACK)
+# ENTRY FILTER
 # =========================
 def valid_entry(symbol):
     prices = get_prices(symbol)
@@ -216,6 +217,19 @@ def valid_entry(symbol):
     pullback = (prices[-1] - smooth[-1]) / smooth[-1]
 
     return pullback < PULLBACK_THRESHOLD
+
+# =========================
+# LOGGING
+# =========================
+def log_trade(symbol, side, qty):
+    trade_log.append({
+        "time": str(datetime.utcnow()),
+        "symbol": symbol,
+        "side": side,
+        "qty": qty
+    })
+    if len(trade_log) > 100:
+        trade_log.pop(0)
 
 # =========================
 # TRAILING
@@ -231,10 +245,11 @@ def handle_trailing():
 
         if drawdown <= -TRAILING_STOP:
             api.submit_order(symbol=sym, qty=p.qty, side="sell", type="market", time_in_force="day")
+            log_trade(sym, "sell", p.qty)
             peak_prices.pop(sym, None)
 
 # =========================
-# ENTRY (OPTIMIZED)
+# ENTRY
 # =========================
 def handle_entries(signals):
     if not market_open():
@@ -261,19 +276,34 @@ def handle_entries(signals):
         if not valid_entry(s["symbol"]):
             continue
 
-        # 🔥 volatility targeting
         position_value = equity * TARGET_VOL / s["vol"]
-
         qty = int(position_value / s["price"])
         qty = min(qty, 100)
 
         if qty > 0:
             api.submit_order(symbol=s["symbol"], qty=qty, side="buy", type="market", time_in_force="day")
+            log_trade(s["symbol"], "buy", qty)
 
 # =========================
 # BOT
 # =========================
 def run_bot():
+    global start_equity
+
+    account = api.get_account()
+    equity = float(account.equity)
+
+    if start_equity is None:
+        start_equity = equity
+
+    equity_history.append({
+        "time": str(datetime.utcnow()),
+        "equity": equity
+    })
+
+    if len(equity_history) > 200:
+        equity_history.pop(0)
+
     signals = get_signals()
 
     handle_trailing()
@@ -301,9 +331,33 @@ def debug():
         "signals": get_signals()[:10]
     }
 
-@app.route("/run")
-def run():
-    return {"top": run_bot()}
+@app.route("/monitor")
+def monitor():
+    account = api.get_account()
+    positions = api.list_positions()
+
+    equity = float(account.equity)
+    pnl = 0
+
+    if start_equity:
+        pnl = (equity - start_equity) / start_equity
+
+    return {
+        "equity": equity,
+        "pnl_percent": round(pnl * 100, 2),
+        "regime": get_market_regime(),
+        "positions": [
+            {
+                "symbol": p.symbol,
+                "qty": p.qty,
+                "value": float(p.market_value),
+                "unrealized_pl": float(p.unrealized_pl)
+            }
+            for p in positions
+        ],
+        "top_signals": get_signals()[:5],
+        "recent_trades": trade_log[-10:]
+    }
 
 @app.route("/health")
 def health():
