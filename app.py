@@ -6,6 +6,9 @@ from datetime import datetime
 import pytz
 import yfinance as yf
 
+# ==============================
+# SAFE IMPORT (prevents crash)
+# ==============================
 try:
     from alpaca_trade_api import REST
 except:
@@ -27,10 +30,12 @@ def init_api():
     if API_KEY and API_SECRET and REST:
         try:
             api = REST(API_KEY, API_SECRET, BASE_URL)
-            print("API initialized")
+            print("✅ API initialized")
         except Exception as e:
-            print("API INIT FAILED:", e)
+            print("❌ API INIT FAILED:", e)
             api = None
+    else:
+        print("⚠️ Missing API keys or package")
 
 # ==============================
 # CONFIG
@@ -83,13 +88,15 @@ def should_exit(pos):
         price = float(pos.current_price)
         change = (price - entry) / entry
 
+        # Trailing stop
         if change < -TRAILING_STOP:
-            print(f"EXIT TRAIL: {pos.symbol}")
+            print(f"🔴 EXIT TRAIL: {pos.symbol}")
             return True
 
+        # Weakness exit
         intraday = float(pos.unrealized_intraday_plpc)
         if intraday < WEAKNESS_EXIT:
-            print(f"EXIT WEAK: {pos.symbol}")
+            print(f"⚠️ EXIT WEAK: {pos.symbol}")
             return True
 
         return False
@@ -112,7 +119,7 @@ def generate_signals():
 # ==============================
 def manage_positions():
     if not api:
-        print("No API")
+        print("⚠️ No API - skipping trading")
         return
 
     positions = get_positions()
@@ -122,7 +129,7 @@ def manage_positions():
 
     equity = float(account.equity)
 
-    # SELL
+    # SELL FIRST
     for pos in positions:
         if should_exit(pos):
             try:
@@ -133,7 +140,7 @@ def manage_positions():
                     type="market",
                     time_in_force="gtc"
                 )
-                print("Sold", pos.symbol)
+                print(f"✅ SOLD {pos.symbol}")
             except Exception as e:
                 print("Sell error:", e)
 
@@ -141,10 +148,11 @@ def manage_positions():
     positions = get_positions()
     held = [p.symbol for p in positions]
 
-    # BUY
+    # BUY NEW
     for sig in generate_signals():
         if sig["symbol"] in held:
             continue
+
         try:
             qty = int((equity * POSITION_SIZE) / sig["price"])
             if qty <= 0:
@@ -157,37 +165,42 @@ def manage_positions():
                 type="market",
                 time_in_force="gtc"
             )
-            print("Bought", sig["symbol"])
+
+            print(f"✅ BOUGHT {sig['symbol']}")
             break
+
         except Exception as e:
             print("Buy error:", e)
 
 # ==============================
-# BOT LOOP
+# BOT LOOP (EVERY 5 MIN)
 # ==============================
 def bot_loop():
-    print("Bot started")
+    print("🚀 Bot loop started")
+
     while True:
         try:
             if market_open():
+                print("📈 Market open → running strategy")
                 manage_positions()
             else:
-                print("Market closed")
+                print("⏰ Market closed")
+
         except Exception as e:
             print("Loop error:", e)
 
-        time.sleep(300)
+        time.sleep(300)  # 5 minutes
 
 # ==============================
-# START BOT (NO FLASK HOOKS)
+# START BACKGROUND BOT
 # ==============================
-def start_background_bot():
+def start_bot():
     init_api()
     thread = threading.Thread(target=bot_loop)
     thread.daemon = True
     thread.start()
 
-start_background_bot()
+start_bot()
 
 # ==============================
 # ROUTES
@@ -233,3 +246,10 @@ def force_exit():
             pass
 
     return jsonify({"status": "done"})
+
+# ==============================
+# SERVER START (CRITICAL FIX)
+# ==============================
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
