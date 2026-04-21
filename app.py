@@ -6,6 +6,7 @@ import yfinance as yf
 from datetime import datetime
 from flask import Flask, jsonify
 from alpaca_trade_api import REST
+import pytz
 
 app = Flask(__name__)
 
@@ -15,17 +16,15 @@ app = Flask(__name__)
 MAX_POSITIONS = 5
 FILTERED_UNIVERSE = 20
 
-RISK_PER_TRADE = 0.02
+TARGET_VOL = 0.02           # 🔥 portfolio risk target
+REBALANCE_THRESHOLD = 0.25  # 🔥 only rebalance if weight drift > 25%
+PULLBACK_THRESHOLD = 0.02   # 🔥 require small pullback to enter
+
 TRAILING_STOP = 0.03
 CHECK_INTERVAL = 300
 
 MIN_SCORE = 1.0
-ROTATION_BUFFER = 0.5
-TRADE_COOLDOWN = 900
 CACHE_TTL = 120
-
-ENABLE_SHORTS = True
-MAX_SHORTS = 2
 
 BASE_URL = "https://paper-api.alpaca.markets"
 API_KEY = os.getenv("APCA_API_KEY_ID")
@@ -33,24 +32,28 @@ API_SECRET = os.getenv("APCA_API_SECRET_KEY")
 
 api = REST(API_KEY, API_SECRET, BASE_URL)
 
-peak_prices = {}
-last_trade_time = {}
 price_cache = {}
+peak_prices = {}
 
 # =========================
-# SAFE ARRAY
+# MARKET HOURS
+# =========================
+def market_open():
+    now = datetime.now(pytz.timezone("US/Eastern"))
+    return now.weekday() < 5 and 9 <= now.hour < 16
+
+# =========================
+# CLEAN DATA
 # =========================
 def clean_array(arr):
     arr = np.array(arr, dtype=float)
     arr = arr[np.isfinite(arr)]
-    if len(arr) < 30:
-        return None
-    return arr
+    return arr if len(arr) > 30 else None
 
 # =========================
 # CACHE
 # =========================
-def get_cached_prices(symbol):
+def get_prices(symbol):
     now = time.time()
 
     if symbol in price_cache:
@@ -87,7 +90,7 @@ def ema(prices, span=20):
 # REGIME
 # =========================
 def get_market_regime():
-    prices = get_cached_prices("SPY")
+    prices = get_prices("SPY")
     if prices is None:
         return "neutral"
 
@@ -121,27 +124,25 @@ def fast_filter(symbols):
     results = []
 
     for s in symbols:
-        prices = get_cached_prices(s)
+        prices = get_prices(s)
         if prices is None:
             continue
 
         move = abs(prices[-1] - prices[-10])
+
         if prices[-1] < 10:
             continue
 
         results.append((s, move))
 
     results.sort(key=lambda x: x[1], reverse=True)
-
-    filtered = [r[0] for r in results[:FILTERED_UNIVERSE]]
-
-    return filtered if filtered else symbols[:FILTERED_UNIVERSE]
+    return [r[0] for r in results[:FILTERED_UNIVERSE]] or symbols[:FILTERED_UNIVERSE]
 
 # =========================
 # SCORE
 # =========================
 def get_score(symbol):
-    prices = get_cached_prices(symbol)
+    prices = get_prices(symbol)
     if prices is None:
         return None
 
@@ -152,16 +153,13 @@ def get_score(symbol):
 
     score = (short * 0.6) + (medium * 0.4)
 
-    if not np.isfinite(score):
-        return None
-
-    return float(score)
+    return float(score) if np.isfinite(score) else None
 
 # =========================
 # VOL
 # =========================
 def get_vol(symbol):
-    prices = get_cached_prices(symbol)
+    prices = get_prices(symbol)
     if prices is None:
         return None
 
@@ -171,15 +169,10 @@ def get_vol(symbol):
     if len(returns) < 10:
         return None
 
-    vol = np.std(returns[-20:])
-
-    if not np.isfinite(vol):
-        return None
-
-    return max(vol, 0.001)
+    return max(np.std(returns[-20:]), 0.001)
 
 # =========================
-# SIGNALS (CLEANED)
+# SIGNALS
 # =========================
 def get_signals():
     universe = get_universe()
@@ -207,26 +200,28 @@ def get_signals():
         except:
             continue
 
-    # 🔥 REMOVE ANY NaNs JUST IN CASE
-    ranked = [
-        r for r in ranked
-        if np.isfinite(r["score"]) and np.isfinite(r["vol"])
-    ]
-
     ranked.sort(key=lambda x: x["score"], reverse=True)
 
-    if len(ranked) == 0:
-        return [{"symbol":"AMD","score":1,"price":100,"vol":1}]
+    return ranked if ranked else [{"symbol":"AMD","score":1,"price":100,"vol":1}]
 
-    return ranked
+# =========================
+# ENTRY FILTER (PULLBACK)
+# =========================
+def valid_entry(symbol):
+    prices = get_prices(symbol)
+    if prices is None:
+        return False
+
+    smooth = ema(prices)
+    pullback = (prices[-1] - smooth[-1]) / smooth[-1]
+
+    return pullback < PULLBACK_THRESHOLD
 
 # =========================
 # TRAILING
 # =========================
 def handle_trailing():
-    positions = api.list_positions()
-
-    for p in positions:
+    for p in api.list_positions():
         sym = p.symbol
         price = float(p.current_price)
 
@@ -235,35 +230,21 @@ def handle_trailing():
         drawdown = (price - peak_prices[sym]) / peak_prices[sym]
 
         if drawdown <= -TRAILING_STOP:
-            print(f"Trailing stop: {sym}")
             api.submit_order(symbol=sym, qty=p.qty, side="sell", type="market", time_in_force="day")
             peak_prices.pop(sym, None)
 
 # =========================
-# ROTATION
-# =========================
-def handle_rotation(signals):
-    positions = api.list_positions()
-    top = signals[:MAX_POSITIONS]
-
-    top_symbols = [s["symbol"] for s in top]
-
-    for p in positions:
-        if p.symbol not in top_symbols:
-            api.submit_order(symbol=p.symbol, qty=p.qty, side="sell", type="market", time_in_force="day")
-            peak_prices.pop(p.symbol, None)
-
-# =========================
-# ENTRY (LONG)
+# ENTRY (OPTIMIZED)
 # =========================
 def handle_entries(signals):
-    regime = get_market_regime()
+    if not market_open():
+        return
 
-    if regime == "bear":
+    if get_market_regime() == "bear":
         return
 
     account = api.get_account()
-    cash = float(account.cash)
+    equity = float(account.equity)
 
     positions = api.list_positions()
     current = [p.symbol for p in positions]
@@ -277,49 +258,26 @@ def handle_entries(signals):
         if s["symbol"] in current:
             continue
 
-        qty = int((cash * w) / s["price"])
+        if not valid_entry(s["symbol"]):
+            continue
+
+        # 🔥 volatility targeting
+        position_value = equity * TARGET_VOL / s["vol"]
+
+        qty = int(position_value / s["price"])
         qty = min(qty, 100)
 
         if qty > 0:
             api.submit_order(symbol=s["symbol"], qty=qty, side="buy", type="market", time_in_force="day")
 
 # =========================
-# SHORTS (REGIME BASED)
-# =========================
-def handle_shorts(signals):
-    if not ENABLE_SHORTS:
-        return
-
-    regime = get_market_regime()
-
-    if regime != "bear":
-        return
-
-    weakest = sorted(signals, key=lambda x: x["score"])[:MAX_SHORTS]
-
-    for s in weakest:
-        print(f"Shorting {s['symbol']}")
-
-        api.submit_order(
-            symbol=s["symbol"],
-            qty=1,
-            side="sell",
-            type="market",
-            time_in_force="day"
-        )
-
-# =========================
 # BOT
 # =========================
 def run_bot():
-    print(f"Run: {datetime.utcnow()}")
-
     signals = get_signals()
 
     handle_trailing()
-    handle_rotation(signals)
     handle_entries(signals)
-    handle_shorts(signals)
 
     return signals[:5]
 
