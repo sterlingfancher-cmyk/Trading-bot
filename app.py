@@ -6,7 +6,6 @@ from datetime import datetime
 import pytz
 import yfinance as yf
 
-# SAFE IMPORT
 try:
     from alpaca_trade_api import REST
 except:
@@ -75,7 +74,6 @@ def get_account():
     except:
         return None
 
-
 # ==============================
 # EXIT LOGIC
 # ==============================
@@ -86,18 +84,17 @@ def should_exit(pos):
         change = (price - entry) / entry
 
         if change < -TRAILING_STOP:
-            print(f"EXIT (TRAIL): {pos.symbol}")
+            print(f"EXIT TRAIL: {pos.symbol}")
             return True
 
         intraday = float(pos.unrealized_intraday_plpc)
         if intraday < WEAKNESS_EXIT:
-            print(f"EXIT (WEAK): {pos.symbol}")
+            print(f"EXIT WEAK: {pos.symbol}")
             return True
 
         return False
     except:
         return False
-
 
 # ==============================
 # SIGNALS
@@ -109,7 +106,6 @@ def generate_signals():
         if price:
             signals.append({"symbol": s, "price": price})
     return sorted(signals, key=lambda x: x["price"], reverse=True)
-
 
 # ==============================
 # TRADING ENGINE
@@ -166,12 +162,11 @@ def manage_positions():
         except Exception as e:
             print("Buy error:", e)
 
-
 # ==============================
-# BOT LOOP (SAFE START)
+# BOT LOOP
 # ==============================
 def bot_loop():
-    print("Bot loop started")
+    print("Bot started")
     while True:
         try:
             if market_open():
@@ -183,13 +178,16 @@ def bot_loop():
 
         time.sleep(300)
 
-
-def start_bot():
+# ==============================
+# START BOT (NO FLASK HOOKS)
+# ==============================
+def start_background_bot():
     init_api()
     thread = threading.Thread(target=bot_loop)
     thread.daemon = True
     thread.start()
 
+start_background_bot()
 
 # ==============================
 # ROUTES
@@ -198,11 +196,9 @@ def start_bot():
 def home():
     return "OK"
 
-
 @app.route("/health")
 def health():
     return jsonify({"status": "running"})
-
 
 @app.route("/debug")
 def debug():
@@ -214,12 +210,10 @@ def debug():
         "signals": generate_signals()
     })
 
-
 @app.route("/run")
 def run_once():
     manage_positions()
     return jsonify({"status": "ran"})
-
 
 @app.route("/force-exit")
 def force_exit():
@@ -239,11 +233,3 @@ def force_exit():
             pass
 
     return jsonify({"status": "done"})
-
-
-# ==============================
-# START BOT AFTER APP BOOTS
-# ==============================
-@app.before_first_request
-def startup():
-    start_bot()
