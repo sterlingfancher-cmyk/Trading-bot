@@ -1,15 +1,14 @@
 import os
 import pytz
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, jsonify
-
 from alpaca_trade_api import REST
 
 # =========================
 # CONFIG
 # =========================
-SYMBOLS = ["AMD", "NVDA", "META", "AVGO", "INTC"]
+SYMBOLS = ["AMD","NVDA","META","AVGO","INTC"]
 
 RISK_PER_TRADE = 0.02
 WEAK_EXIT = -0.015
@@ -32,32 +31,31 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# GET HISTORICAL DATA (ALPACA)
+# GET PRICES (FIXED)
 # =========================
 def get_prices(symbol):
     try:
-        bars = api.get_bars(
-            symbol,
-            "1Day",
-            limit=30
-        ).df
+        bars = api.get_bars(symbol, "1Day", limit=30)
 
-        if bars.empty:
+        closes = [bar.c for bar in bars]
+
+        if len(closes) < 25:
+            print(f"Not enough bars for {symbol}")
             return None
 
-        return bars["close"].values
+        return np.array(closes)
 
     except Exception as e:
         print(f"Data error {symbol}: {e}")
         return None
 
 # =========================
-# MOMENTUM ENGINE (ALPACA DATA)
+# MOMENTUM (FINAL FIX)
 # =========================
 def get_momentum_score(symbol):
     prices = get_prices(symbol)
 
-    if prices is None or len(prices) < 25:
+    if prices is None:
         return 0
 
     try:
@@ -124,6 +122,7 @@ def handle_profit_lock(p):
         if float(p.unrealized_plpc) >= PROFIT_LOCK:
             qty = int(float(p.qty) * 0.5)
             if qty > 0:
+                print(f"Profit lock {p.symbol}")
                 api.submit_order(
                     symbol=p.symbol,
                     qty=qty,
@@ -135,11 +134,12 @@ def handle_profit_lock(p):
         pass
 
 # =========================
-# EXIT LOGIC
+# EXIT
 # =========================
 def handle_exits(p):
     try:
         if float(p.unrealized_plpc) <= WEAK_EXIT:
+            print(f"Weak exit {p.symbol}")
             api.submit_order(
                 symbol=p.symbol,
                 qty=p.qty,
@@ -151,7 +151,7 @@ def handle_exits(p):
         pass
 
 # =========================
-# ENTRY LOGIC
+# ENTRY
 # =========================
 def handle_entries(signals, current_symbols):
     try:
@@ -163,6 +163,7 @@ def handle_entries(signals, current_symbols):
                 qty = int((cash * RISK_PER_TRADE) / s["price"])
 
                 if qty > 0:
+                    print(f"Buying {s['symbol']}")
                     api.submit_order(
                         symbol=s["symbol"],
                         qty=qty,
@@ -193,7 +194,7 @@ def run_bot():
 
     return {
         "status": "ran",
-        "top_signals": signals[:3]
+        "signals": signals[:3]
     }
 
 # =========================
@@ -215,7 +216,7 @@ def run():
     return run_bot()
 
 # =========================
-# RUN SERVER
+# RUN
 # =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
