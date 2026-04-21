@@ -1,7 +1,6 @@
 import os
 import pytz
 import numpy as np
-import pandas as pd
 import yfinance as yf
 from datetime import datetime
 from flask import Flask, jsonify
@@ -12,7 +11,6 @@ from flask import Flask, jsonify
 SYMBOLS = ["AMD", "NVDA", "META", "AVGO", "INTC"]
 
 RISK_PER_TRADE = 0.02
-TRAILING_STOP = 0.06
 WEAK_EXIT = -0.015
 PROFIT_LOCK = 0.07
 
@@ -45,30 +43,53 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# MOMENTUM
+# MOMENTUM ENGINE (FIXED)
 # =========================
 def get_momentum_score(symbol):
     try:
         df = yf.download(symbol, period="3mo", interval="1d", progress=False)
 
-        if len(df) < 30:
-            return 0
+        if df is None or df.empty or len(df) < 25:
+            print(f"Bad data for {symbol}")
+            return None
 
-        r5 = df["Close"].pct_change(5).iloc[-1]
-        r10 = df["Close"].pct_change(10).iloc[-1]
-        r20 = df["Close"].pct_change(20).iloc[-1]
+        close = df["Close"].dropna()
 
-        vol = df["Close"].pct_change().rolling(20).std().iloc[-1]
+        r5 = close.pct_change(5).iloc[-1]
+        r10 = close.pct_change(10).iloc[-1]
+        r20 = close.pct_change(20).iloc[-1]
 
-        return float((r5*0.5)+(r10*0.3)+(r20*0.2)-(vol*0.5))
-    except:
-        return 0
+        vol = close.pct_change().rolling(20).std().iloc[-1]
 
+        score = (r5 * 0.5) + (r10 * 0.3) + (r20 * 0.2) - (vol * 0.5)
+
+        if np.isnan(score):
+            return None
+
+        return float(score)
+
+    except Exception as e:
+        print(f"Momentum error {symbol}: {e}")
+        return None
+
+# =========================
+# SIGNALS (FIXED)
+# =========================
 def get_signals():
     ranked = []
+
     for s in SYMBOLS:
         score = get_momentum_score(s)
-        price = yf.Ticker(s).history(period="1d")["Close"].iloc[-1]
+
+        if score is None:
+            continue
+
+        price_data = yf.Ticker(s).history(period="1d")
+
+        if price_data.empty:
+            continue
+
+        price = price_data["Close"].iloc[-1]
 
         ranked.append({
             "symbol": s,
@@ -87,60 +108,77 @@ def get_positions():
         return []
     try:
         return api.list_positions()
-    except:
+    except Exception as e:
+        print("Position error:", e)
         return []
 
 # =========================
 # PROFIT LOCK
 # =========================
 def handle_profit_lock(p):
-    if float(p.unrealized_plpc) >= PROFIT_LOCK:
-        qty = int(float(p.qty) * 0.5)
-        if qty > 0:
+    try:
+        if float(p.unrealized_plpc) >= PROFIT_LOCK:
+            qty = int(float(p.qty) * 0.5)
+
+            if qty > 0:
+                print(f"🔒 Profit lock: {p.symbol}")
+                api.submit_order(
+                    symbol=p.symbol,
+                    qty=qty,
+                    side="sell",
+                    type="market",
+                    time_in_force="day"
+                )
+    except Exception as e:
+        print("Profit lock error:", e)
+
+# =========================
+# EXIT LOGIC
+# =========================
+def handle_exits(p):
+    try:
+        if float(p.unrealized_plpc) <= WEAK_EXIT:
+            print(f"❌ Weak exit: {p.symbol}")
             api.submit_order(
                 symbol=p.symbol,
-                qty=qty,
+                qty=p.qty,
                 side="sell",
                 type="market",
                 time_in_force="day"
             )
+    except Exception as e:
+        print("Exit error:", e)
 
 # =========================
-# EXITS
+# ENTRY LOGIC
 # =========================
-def handle_exits(p):
-    if float(p.unrealized_plpc) <= WEAK_EXIT:
-        api.submit_order(
-            symbol=p.symbol,
-            qty=p.qty,
-            side="sell",
-            type="market",
-            time_in_force="day"
-        )
-
-# =========================
-# ENTRIES
-# =========================
-def handle_entries(signals, current):
-    if not api:
+def handle_entries(signals, current_symbols):
+    if not api or not signals:
         return
 
-    cash = float(api.get_account().cash)
+    try:
+        account = api.get_account()
+        cash = float(account.cash)
 
-    for s in signals[:2]:
-        if s["symbol"] not in current:
-            qty = int((cash * RISK_PER_TRADE) / s["price"])
-            if qty > 0:
-                api.submit_order(
-                    symbol=s["symbol"],
-                    qty=qty,
-                    side="buy",
-                    type="market",
-                    time_in_force="day"
-                )
+        for s in signals[:2]:  # top 2 only
+            if s["symbol"] not in current_symbols:
+                qty = int((cash * RISK_PER_TRADE) / s["price"])
+
+                if qty > 0:
+                    print(f"🚀 Buying {s['symbol']}")
+                    api.submit_order(
+                        symbol=s["symbol"],
+                        qty=qty,
+                        side="buy",
+                        type="market",
+                        time_in_force="day"
+                    )
+
+    except Exception as e:
+        print("Entry error:", e)
 
 # =========================
-# BOT
+# BOT LOOP
 # =========================
 def run_bot():
     if not api:
@@ -152,15 +190,19 @@ def run_bot():
     positions = get_positions()
     signals = get_signals()
 
-    current = [p.symbol for p in positions]
+    current_symbols = [p.symbol for p in positions]
 
     for p in positions:
         handle_profit_lock(p)
         handle_exits(p)
 
-    handle_entries(signals, current)
+    handle_entries(signals, current_symbols)
 
-    return {"status": "ran"}
+    return {
+        "status": "ran",
+        "positions": current_symbols,
+        "signals": signals[:3]
+    }
 
 # =========================
 # ROUTES
@@ -188,7 +230,7 @@ def run():
     return jsonify(run_bot())
 
 # =========================
-# CRITICAL FIX (DO NOT REMOVE)
+# RAILWAY FIX (CRITICAL)
 # =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
