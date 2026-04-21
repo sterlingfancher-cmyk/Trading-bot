@@ -14,58 +14,44 @@ app = Flask(__name__)
 # =========================
 # CONFIG
 # =========================
-MAX_POSITIONS = 5
-FILTERED_UNIVERSE = 20
-
-TARGET_VOL = 0.02
-TRAILING_STOP = 0.03
-CHECK_INTERVAL = 300
-
-MIN_SCORE = 1.0
-CACHE_TTL = 120
-PULLBACK_THRESHOLD = 0.02
-
 BASE_URL = "https://paper-api.alpaca.markets"
 API_KEY = os.getenv("APCA_API_KEY_ID")
 API_SECRET = os.getenv("APCA_API_SECRET_KEY")
 
 api = REST(API_KEY, API_SECRET, BASE_URL)
 
+CHECK_INTERVAL = 300
+CACHE_TTL = 120
+TRAILING_STOP = 0.03
+
 # =========================
 # STATE
 # =========================
 price_cache = {}
-peak_prices = {}
-trade_log = []
 equity_history = []
+pnl_curve = []
+drawdown_curve = []
+trade_log = []
 start_equity = None
-closed_trades = []
+peak_equity = None
 
 # =========================
-# UTIL
+# DATA
 # =========================
-def market_open():
-    now = datetime.now(pytz.timezone("US/Eastern"))
-    return now.weekday() < 5 and 9 <= now.hour < 16
-
 def clean_array(arr):
     arr = np.array(arr, dtype=float)
     arr = arr[np.isfinite(arr)]
     return arr if len(arr) > 30 else None
 
-# =========================
-# CACHE
-# =========================
 def get_prices(symbol):
     now = time.time()
-
     if symbol in price_cache:
         data, ts = price_cache[symbol]
         if now - ts < CACHE_TTL:
             return data
 
     try:
-        df = yf.download(symbol, period="5d", interval="1h", progress=False, threads=False)
+        df = yf.download(symbol, period="5d", interval="1h", progress=False)
         if df is None or df.empty:
             return None
 
@@ -75,55 +61,31 @@ def get_prices(symbol):
 
         price_cache[symbol] = (prices, now)
         return prices
-
     except:
         return None
 
-# =========================
-# EMA
-# =========================
 def ema(prices, span=20):
-    alpha = 2 / (span + 1)
-    ema_vals = [prices[0]]
+    alpha = 2/(span+1)
+    e = [prices[0]]
     for p in prices[1:]:
-        ema_vals.append(alpha * p + (1 - alpha) * ema_vals[-1])
-    return np.array(ema_vals)
+        e.append(alpha*p + (1-alpha)*e[-1])
+    return np.array(e)
 
 # =========================
 # REGIME
 # =========================
-def get_market_regime():
+def get_regime():
     prices = get_prices("SPY")
     if prices is None:
         return "neutral"
-
     smooth = ema(prices)
-
-    if smooth[-1] > smooth[-10]:
-        return "bull"
-    elif smooth[-1] < smooth[-10]:
-        return "bear"
-    return "neutral"
+    return "bull" if smooth[-1] > smooth[-10] else "bear"
 
 # =========================
-# UNIVERSE
+# SIGNALS
 # =========================
-def get_universe():
-    return [
-        "AMD","NVDA","META","AVGO","INTC",
-        "AAPL","MSFT","GOOGL","AMZN","TSLA",
-        "SMCI","ARM","TSM","NFLX","CRM",
-        "QCOM","ADBE","NOW","PANW","SNOW",
-        "PLTR","UBER","COIN","SQ","PYPL",
-        "SHOP","ROKU","DDOG","NET","CRWD",
-        "ZS","OKTA","TEAM","MDB","F","GM",
-        "BA","CAT","GE"
-    ]
-
-# =========================
-# FILTER
-# =========================
-def fast_filter(symbols):
+def get_signals():
+    symbols = ["CRWD","CAT","MDB","NET","AMD","PANW","ZS","MSFT","SHOP","ROKU"]
     results = []
 
     for s in symbols:
@@ -131,137 +93,77 @@ def fast_filter(symbols):
         if prices is None:
             continue
 
-        move = abs(prices[-1] - prices[-10])
+        score = prices[-1] - prices[-10]
+        results.append({"symbol": s, "score": float(score)})
 
-        if prices[-1] < 10:
-            continue
-
-        results.append((s, move))
-
-    results.sort(key=lambda x: x[1], reverse=True)
-    return [r[0] for r in results[:FILTERED_UNIVERSE]] or symbols[:FILTERED_UNIVERSE]
-
-# =========================
-# SCORE
-# =========================
-def get_score(symbol):
-    prices = get_prices(symbol)
-    if prices is None:
-        return None
-
-    smooth = ema(prices)
-
-    short = smooth[-1] - smooth[-10]
-    medium = smooth[-1] - smooth[-20]
-
-    score = (short * 0.6) + (medium * 0.4)
-
-    return float(score) if np.isfinite(score) else None
-
-# =========================
-# VOL
-# =========================
-def get_vol(symbol):
-    prices = get_prices(symbol)
-    if prices is None:
-        return None
-
-    returns = np.diff(prices) / prices[:-1]
-    returns = returns[np.isfinite(returns)]
-
-    if len(returns) < 10:
-        return None
-
-    return max(np.std(returns[-20:]), 0.001)
-
-# =========================
-# SIGNALS
-# =========================
-def get_signals():
-    universe = get_universe()
-    candidates = fast_filter(universe)
-
-    ranked = []
-
-    for s in candidates:
-        try:
-            score = get_score(s)
-            vol = get_vol(s)
-
-            if score is None or vol is None:
-                continue
-
-            price = api.get_latest_trade(s).price
-
-            ranked.append({
-                "symbol": s,
-                "score": score,
-                "price": float(price),
-                "vol": vol
-            })
-
-        except:
-            continue
-
-    ranked.sort(key=lambda x: x["score"], reverse=True)
-    return ranked if ranked else []
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results
 
 # =========================
 # TRADE LOGGING
 # =========================
 def log_trade(symbol, side, qty, price):
     trade_log.append({
-        "time": str(datetime.utcnow()),
+        "time": datetime.utcnow().isoformat(),
         "symbol": symbol,
         "side": side,
         "qty": qty,
         "price": price
     })
 
+    if len(trade_log) > 200:
+        trade_log.pop(0)
+
 # =========================
 # ANALYTICS
 # =========================
-def get_stats():
-    wins = 0
-    losses = 0
-    profits = []
-
-    for t in closed_trades:
-        pnl = t["pnl"]
-        profits.append(pnl)
-        if pnl > 0:
-            wins += 1
-        else:
-            losses += 1
-
-    total = wins + losses
-
-    return {
-        "total_trades": total,
-        "win_rate": round((wins / total)*100, 2) if total > 0 else 0,
-        "avg_pnl": round(np.mean(profits), 2) if profits else 0,
-        "max_drawdown": round(min(profits), 2) if profits else 0
-    }
-
-# =========================
-# BOT CORE
-# =========================
-def run_bot():
-    global start_equity
+def update_equity():
+    global start_equity, peak_equity
 
     account = api.get_account()
     equity = float(account.equity)
 
     if start_equity is None:
         start_equity = equity
+        peak_equity = equity
 
     equity_history.append(equity)
+
+    pnl = (equity - start_equity)
+    pnl_curve.append(pnl)
+
+    peak_equity = max(peak_equity, equity)
+    drawdown = (equity - peak_equity) / peak_equity
+    drawdown_curve.append(drawdown)
+
     if len(equity_history) > 200:
         equity_history.pop(0)
+        pnl_curve.pop(0)
+        drawdown_curve.pop(0)
 
+# =========================
+# BOT (CONNECTED)
+# =========================
+def run_bot():
     signals = get_signals()
 
-    return signals[:5]
+    # Example trade logic (simple)
+    if get_regime() == "bull":
+        for s in signals[:2]:
+            try:
+                price = api.get_latest_trade(s["symbol"]).price
+                api.submit_order(
+                    symbol=s["symbol"],
+                    qty=1,
+                    side="buy",
+                    type="market",
+                    time_in_force="day"
+                )
+                log_trade(s["symbol"], "buy", 1, price)
+            except:
+                continue
+
+    update_equity()
 
 # =========================
 # LOOP
@@ -274,51 +176,75 @@ def scheduler():
 threading.Thread(target=scheduler, daemon=True).start()
 
 # =========================
-# DASHBOARD UI
+# DATA API
+# =========================
+@app.route("/data")
+def data():
+    return jsonify({
+        "equity": equity_history,
+        "pnl": pnl_curve,
+        "drawdown": drawdown_curve,
+        "signals": get_signals(),
+        "trades": trade_log,
+        "regime": get_regime()
+    })
+
+# =========================
+# DASHBOARD
 # =========================
 @app.route("/dashboard")
 def dashboard():
-    stats = get_stats()
-    signals = get_signals()[:5]
-    regime = get_market_regime()
+    return Response("""
+<html>
+<head>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
 
-    html = f"""
-    <html>
-    <head><title>Trading Dashboard</title></head>
-    <body>
-    <h1>🚀 Trading Dashboard</h1>
-    <p><b>Regime:</b> {regime}</p>
+<h1>📊 Trading Dashboard</h1>
+<h2 id="stats"></h2>
 
-    <h2>📊 Performance</h2>
-    <p>Trades: {stats['total_trades']}</p>
-    <p>Win Rate: {stats['win_rate']}%</p>
-    <p>Avg PnL: {stats['avg_pnl']}</p>
+<canvas id="equity"></canvas>
+<canvas id="pnl"></canvas>
+<canvas id="dd"></canvas>
 
-    <h2>📈 Signals</h2>
-    {json.dumps(signals, indent=2)}
+<script>
+async function load(){
+    const r = await fetch('/data');
+    const d = await r.json();
 
-    <h2>🧾 Trades</h2>
-    {json.dumps(trade_log[-10:], indent=2)}
+    document.getElementById("stats").innerHTML =
+        "Regime: " + d.regime;
 
-    </body>
-    </html>
-    """
-    return Response(html, mimetype='text/html')
+    drawChart('equity', d.equity, 'Equity');
+    drawChart('pnl', d.pnl, 'PnL');
+    drawChart('dd', d.drawdown, 'Drawdown');
+}
+
+function drawChart(id,data,label){
+    new Chart(document.getElementById(id), {
+        type:'line',
+        data:{
+            labels:data.map((_,i)=>i),
+            datasets:[{label:label,data:data}]
+        }
+    });
+}
+
+setInterval(load,5000);
+load();
+</script>
+
+</body>
+</html>
+""", mimetype="text/html")
 
 # =========================
-# ROUTES
+# HEALTH
 # =========================
 @app.route("/health")
 def health():
-    return {"status": "running"}
-
-@app.route("/debug")
-def debug():
-    return {
-        "regime": get_market_regime(),
-        "signals": get_signals()[:10],
-        "stats": get_stats()
-    }
+    return {"status":"running"}
 
 # =========================
 # RUN
