@@ -1,248 +1,199 @@
 import os
-import requests
-from datetime import datetime
-import pytz
+import time
+import threading
 from flask import Flask, jsonify
+from alpaca_trade_api import REST
+from datetime import datetime
 
 app = Flask(__name__)
 
-# ==============================
-# 🔥 BULLETPROOF ENV LOADING
-# ==============================
-
-API_KEY = (
-    os.getenv("APCA_API_KEY_ID") or
-    os.getenv("ALPACA_API_KEY") or
-    os.getenv("API_KEY")
-)
-
-SECRET_KEY = (
-    os.getenv("APCA_API_SECRET_KEY") or
-    os.getenv("ALPACA_SECRET_KEY") or
-    os.getenv("SECRET_KEY")
-)
-
+# =========================
+# CONFIG
+# =========================
+API_KEY = os.getenv("APCA_API_KEY_ID")
+API_SECRET = os.getenv("APCA_API_SECRET_KEY")
 BASE_URL = "https://paper-api.alpaca.markets"
 
-HEADERS = {
-    "APCA-API-KEY-ID": API_KEY,
-    "APCA-API-SECRET-KEY": SECRET_KEY
-}
-
+TRAILING_STOP_PCT = 0.06
 MAX_POSITIONS = 5
-RISK_PER_TRADE = 0.02
+POSITION_SIZE = 0.20
 
-highest_price_tracker = {}
+AUTO_RUN_INTERVAL = 300  # 🔥 5 minutes
 
-# ==============================
-# LOGGING
-# ==============================
+api = REST(API_KEY, API_SECRET, BASE_URL)
 
-def log(msg, data=None):
-    print(f"{datetime.utcnow()} | {msg} | {data if data else ''}")
-
-# ==============================
-# MARKET HOURS
-# ==============================
-
+# =========================
+# HELPERS
+# =========================
 def is_market_open():
-    tz = pytz.timezone("US/Central")
-    now = datetime.now(tz)
-
-    if now.weekday() >= 5:
-        return False
-
-    open_time = now.replace(hour=8, minute=30, second=0)
-    close_time = now.replace(hour=15, minute=0, second=0)
-
-    return open_time <= now <= close_time
-
-# ==============================
-# API
-# ==============================
-
-def api_get(endpoint):
-    try:
-        r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS)
-        log("API GET", {"endpoint": endpoint, "status": r.status_code})
-        return r.json()
-    except Exception as e:
-        log("API ERROR", str(e))
-        return {}
+    return api.get_clock().is_open
 
 def get_positions():
-    data = api_get("/v2/positions")
-    return data if isinstance(data, list) else []
+    try:
+        return [p._raw for p in api.list_positions()]
+    except Exception as e:
+        print("ERROR positions:", e)
+        return []
 
 def get_account():
-    data = api_get("/v2/account")
-    return data if isinstance(data, dict) else {"cash": 0}
-
-def get_price(symbol):
-    try:
-        r = requests.get(
-            f"https://data.alpaca.markets/v2/stocks/{symbol}/trades/latest",
-            headers=HEADERS
-        )
-        return float(r.json()["trade"]["p"])
-    except:
-        log("PRICE ERROR", symbol)
-        return None
-
-# ==============================
-# TRAILING STOP
-# ==============================
-
-def get_trailing_stop(entry, high):
-    gain = (high - entry) / entry
-
-    if gain < 0.03:
-        return 0.97
-    elif gain < 0.07:
-        return 0.95
-    elif gain < 0.15:
-        return 0.93
-    else:
-        return 0.90
-
-# ==============================
-# ORDERS
-# ==============================
-
-def place_order(symbol, qty, side):
-    order = {
-        "symbol": symbol,
-        "qty": qty,
-        "side": side,
-        "type": "market",
-        "time_in_force": "day"
-    }
-
-    r = requests.post(f"{BASE_URL}/v2/orders", json=order, headers=HEADERS)
-    log("ORDER", r.json())
-
-# ==============================
-# SIGNALS
-# ==============================
-
-WATCHLIST = ["AMD", "NVDA", "META", "AVGO", "INTC"]
+    return api.get_account()
 
 def get_signals():
-    signals = []
-    for s in WATCHLIST:
-        p = get_price(s)
-        if p:
-            signals.append({"symbol": s, "price": p})
-    return signals
+    return [
+        {"symbol": "AMD"},
+        {"symbol": "NVDA"},
+        {"symbol": "META"},
+        {"symbol": "AVGO"},
+        {"symbol": "INTC"},
+    ]
 
-# ==============================
+# =========================
 # POSITION MANAGEMENT
-# ==============================
-
+# =========================
 def manage_positions():
     positions = get_positions()
 
-    for p in positions:
-        symbol = p["symbol"]
-        qty = int(float(p["qty"]))
-        entry = float(p["avg_entry_price"])
-        current = get_price(symbol)
+    for pos in positions:
+        try:
+            symbol = pos.get("symbol")
+            entry = float(pos.get("avg_entry_price", 0))
+            current = float(pos.get("current_price", 0))
 
-        if not current:
-            continue
+            if entry == 0:
+                continue
 
-        if symbol not in highest_price_tracker:
-            highest_price_tracker[symbol] = current
+            drawdown = (entry - current) / entry
 
-        if current > highest_price_tracker[symbol]:
-            highest_price_tracker[symbol] = current
+            if drawdown >= TRAILING_STOP_PCT:
+                print(f"SELL: {symbol}")
 
-        high = highest_price_tracker[symbol]
+                api.submit_order(
+                    symbol=symbol,
+                    qty=pos.get("qty"),
+                    side="sell",
+                    type="market",
+                    time_in_force="gtc"
+                )
 
-        trailing = get_trailing_stop(entry, high)
-        stop = high * trailing
+        except Exception as e:
+            print("ERROR manage:", e)
 
-        if current > entry * 1.03:
-            stop = max(stop, entry)
+# =========================
+# ENTRY LOGIC
+# =========================
+def place_trades():
+    account = get_account()
+    buying_power = float(account.buying_power)
 
-        log("CHECK", {"symbol": symbol, "current": current, "stop": stop})
-
-        if current <= stop:
-            log("SELL TRIGGER", symbol)
-            place_order(symbol, qty, "sell")
-            highest_price_tracker.pop(symbol, None)
-
-# ==============================
-# ENTRY
-# ==============================
-
-def find_new_trades():
     positions = get_positions()
-    held = [p["symbol"] for p in positions]
+    held = [p.get("symbol") for p in positions]
 
-    if len(held) >= MAX_POSITIONS:
-        return
-
-    signals = get_signals()
-    cash = float(get_account().get("cash", 0))
-
-    for s in signals:
-        if s["symbol"] in held:
-            continue
-
+    for signal in get_signals():
         if len(held) >= MAX_POSITIONS:
             break
 
-        qty = int((cash * RISK_PER_TRADE) / s["price"])
+        symbol = signal["symbol"]
 
-        if qty > 0:
-            place_order(s["symbol"], qty, "buy")
-            held.append(s["symbol"])
+        if symbol in held:
+            continue
 
-# ==============================
-# CORE
-# ==============================
+        try:
+            price = api.get_latest_trade(symbol).price
+            qty = int((buying_power * POSITION_SIZE) / price)
 
+            if qty <= 0:
+                continue
+
+            print(f"BUY: {symbol}")
+
+            api.submit_order(
+                symbol=symbol,
+                qty=qty,
+                side="buy",
+                type="market",
+                time_in_force="gtc"
+            )
+
+            held.append(symbol)
+
+        except Exception as e:
+            print("ERROR buy:", e)
+
+# =========================
+# MAIN BOT
+# =========================
 def run_bot():
-    log("START")
+    print("RUN:", datetime.now())
 
-    log("ENV CHECK", {
-        "key_loaded": API_KEY is not None,
-        "secret_loaded": SECRET_KEY is not None
-    })
+    if not is_market_open():
+        print("Market closed")
+        return {"status": "closed"}
 
     manage_positions()
+    place_trades()
 
-    if is_market_open():
-        find_new_trades()
+    return {"status": "ran"}
 
-# ==============================
+# =========================
+# AUTO LOOP
+# =========================
+def auto_loop():
+    print("AUTO LOOP STARTED")
+
+    while True:
+        try:
+            run_bot()
+        except Exception as e:
+            print("AUTO LOOP ERROR:", e)
+
+        time.sleep(AUTO_RUN_INTERVAL)
+
+# Start background thread ONCE
+thread_started = False
+
+def start_auto_loop():
+    global thread_started
+    if not thread_started:
+        thread = threading.Thread(target=auto_loop, daemon=True)
+        thread.start()
+        thread_started = True
+
+# =========================
 # ROUTES
-# ==============================
-
+# =========================
 @app.route("/")
 def home():
-    return {"status": "running"}
+    start_auto_loop()
+    return "Bot running with auto-loop"
 
 @app.route("/run")
 def run():
-    run_bot()
-    return {"status": "ran"}
+    return jsonify(run_bot())
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "running"})
 
 @app.route("/debug")
 def debug():
     return jsonify({
-        "has_key": API_KEY is not None,
-        "has_secret": SECRET_KEY is not None,
+        "market_open": is_market_open(),
         "positions": get_positions(),
-        "signals": get_signals(),
-        "market_open": is_market_open()
+        "signals": get_signals()
     })
 
-# ==============================
-# START
-# ==============================
+@app.route("/force-exit")
+def force_exit():
+    for pos in get_positions():
+        try:
+            api.submit_order(
+                symbol=pos.get("symbol"),
+                qty=pos.get("qty"),
+                side="sell",
+                type="market",
+                time_in_force="gtc"
+            )
+        except Exception as e:
+            print("ERROR exit:", e)
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 3000))
-    app.run(host="0.0.0.0", port=port)
+    return jsonify({"status": "exited"})
