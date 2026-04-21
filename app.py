@@ -14,7 +14,7 @@ API_KEY = os.getenv("APCA_API_KEY_ID")
 SECRET_KEY = os.getenv("APCA_API_SECRET_KEY")
 BASE_URL = "https://paper-api.alpaca.markets"
 
-MAX_POSITIONS = 5
+MAX_POSITIONS = 3
 RISK_PER_TRADE = 0.02
 
 HEADERS = {
@@ -36,12 +36,6 @@ def log(message, data=None):
         entry += f" | {data}"
 
     print(entry)
-
-    try:
-        with open("bot_log.txt", "a") as f:
-            f.write(entry + "\n")
-    except:
-        pass
 
 # ==============================
 # MARKET HOURS
@@ -66,7 +60,14 @@ def is_market_open():
 def api_get(endpoint):
     try:
         r = requests.get(f"{BASE_URL}{endpoint}", headers=HEADERS)
-        return r.json()
+        log("API GET", {"endpoint": endpoint, "status": r.status_code})
+
+        try:
+            return r.json()
+        except:
+            log("API JSON ERROR", r.text)
+            return {}
+
     except Exception as e:
         log("API GET ERROR", str(e))
         return {}
@@ -74,6 +75,7 @@ def api_get(endpoint):
 def api_post(endpoint, data):
     try:
         r = requests.post(f"{BASE_URL}{endpoint}", json=data, headers=HEADERS)
+        log("API POST", {"endpoint": endpoint, "status": r.status_code})
         return r.json()
     except Exception as e:
         log("API POST ERROR", str(e))
@@ -107,13 +109,19 @@ def get_price(symbol):
             f"https://data.alpaca.markets/v2/stocks/{symbol}/trades/latest",
             headers=HEADERS
         )
-        return float(r.json()["trade"]["p"])
-    except:
-        log("PRICE ERROR", symbol)
+
+        log("PRICE FETCH", {"symbol": symbol, "status": r.status_code})
+
+        data = r.json()
+
+        return float(data["trade"]["p"])
+
+    except Exception as e:
+        log("PRICE ERROR", {"symbol": symbol, "error": str(e)})
         return None
 
 # ==============================
-# TRAILING STOP LOGIC
+# TRAILING STOP
 # ==============================
 
 def get_trailing_stop(entry_price, highest_price):
@@ -155,9 +163,14 @@ def get_signals():
 
     for symbol in WATCHLIST:
         price = get_price(symbol)
-        if price:
-            signals.append({"symbol": symbol, "price": price})
 
+        if price:
+            signals.append({
+                "symbol": symbol,
+                "price": price
+            })
+
+    log("SIGNALS GENERATED", signals)
     return signals
 
 # ==============================
@@ -192,7 +205,6 @@ def manage_positions():
         trailing = get_trailing_stop(entry_price, highest)
         stop_price = highest * trailing
 
-        # Break-even protection
         if current_price > entry_price * 1.03:
             stop_price = max(stop_price, entry_price)
 
@@ -254,6 +266,11 @@ def find_new_trades():
 def run_bot():
     log("BOT START")
 
+    log("ENV CHECK", {
+        "has_key": API_KEY is not None,
+        "has_secret": SECRET_KEY is not None
+    })
+
     market_open = is_market_open()
     log("MARKET STATUS", market_open)
 
@@ -282,7 +299,9 @@ def debug():
     return jsonify({
         "market_open": is_market_open(),
         "positions": get_positions(),
-        "signals": get_signals()
+        "signals": get_signals(),
+        "has_key": API_KEY is not None,
+        "has_secret": SECRET_KEY is not None
     })
 
 @app.route("/force-exit")
@@ -296,7 +315,7 @@ def force_exit():
     return {"status": "force exit executed"}
 
 # ==============================
-# 🚨 CRITICAL FIX (RAILWAY PORT)
+# PORT FIX
 # ==============================
 
 if __name__ == "__main__":
