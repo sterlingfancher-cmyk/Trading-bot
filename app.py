@@ -3,7 +3,7 @@ import time
 import threading
 import numpy as np
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, jsonify
 from alpaca_trade_api import REST
 
@@ -19,6 +19,12 @@ RISK_PER_TRADE = 0.02
 TRAILING_STOP = 0.03
 CHECK_INTERVAL = 300
 
+MIN_SCORE = 1.0
+ROTATION_BUFFER = 0.5       # 🔥 require better score to rotate
+TRADE_COOLDOWN = 900        # 🔥 15 min per symbol
+
+CACHE_TTL = 120             # seconds
+
 BASE_URL = "https://paper-api.alpaca.markets"
 API_KEY = os.getenv("APCA_API_KEY_ID")
 API_SECRET = os.getenv("APCA_API_SECRET_KEY")
@@ -26,9 +32,48 @@ API_SECRET = os.getenv("APCA_API_SECRET_KEY")
 api = REST(API_KEY, API_SECRET, BASE_URL)
 
 peak_prices = {}
+last_trade_time = {}
+price_cache = {}
 
 # =========================
-# SAFE EXPANDED UNIVERSE
+# CACHE
+# =========================
+def get_cached_prices(symbol):
+    now = time.time()
+
+    if symbol in price_cache:
+        data, ts = price_cache[symbol]
+        if now - ts < CACHE_TTL:
+            return data
+
+    try:
+        df = yf.download(symbol, period="5d", interval="1h", progress=False, threads=False)
+        if df is None or df.empty:
+            return None
+
+        prices = np.array(df["Close"]).astype(float).flatten()
+
+        if len(prices) < 30:
+            return None
+
+        price_cache[symbol] = (prices, now)
+        return prices
+
+    except:
+        return None
+
+# =========================
+# EMA
+# =========================
+def ema(prices, span=10):
+    alpha = 2 / (span + 1)
+    ema_vals = [prices[0]]
+    for p in prices[1:]:
+        ema_vals.append(alpha * p + (1 - alpha) * ema_vals[-1])
+    return np.array(ema_vals)
+
+# =========================
+# UNIVERSE
 # =========================
 def get_universe():
     return [
@@ -43,89 +88,53 @@ def get_universe():
     ]
 
 # =========================
-# FAST SAFE FILTER
+# FAST FILTER (OPTIMIZED)
 # =========================
 def fast_filter(symbols):
     results = []
 
     for s in symbols:
-        try:
-            df = yf.download(s, period="2d", interval="1h", progress=False, threads=False)
-
-            if df is None or df.empty:
-                continue
-
-            closes = df["Close"]
-            vols = df["Volume"]
-
-            if len(closes) < 5:
-                continue
-
-            price = closes.iloc[-1]
-            avg_volume = vols.tail(10).mean()
-
-            # relaxed but meaningful filters
-            if price < 10:
-                continue
-
-            if avg_volume < 200_000:
-                continue
-
-            move = abs(closes.iloc[-1] - closes.iloc[0])
-
-            results.append((s, move))
-
-        except:
+        prices = get_cached_prices(s)
+        if prices is None:
             continue
+
+        price = prices[-1]
+        move = abs(prices[-1] - prices[-10])
+
+        if price < 10:
+            continue
+
+        results.append((s, move))
 
     results.sort(key=lambda x: x[1], reverse=True)
 
     filtered = [r[0] for r in results[:FILTERED_UNIVERSE]]
 
-    # 🔥 fallback safety
     if len(filtered) == 0:
         return symbols[:FILTERED_UNIVERSE]
 
     return filtered
 
 # =========================
-# DATA
-# =========================
-def get_prices(symbol):
-    try:
-        df = yf.download(symbol, period="5d", interval="1h", progress=False, threads=False)
-
-        if df is None or df.empty:
-            return None
-
-        prices = np.array(df["Close"]).astype(float).flatten()
-
-        if len(prices) < 30:
-            return None
-
-        return prices
-
-    except:
-        return None
-
-# =========================
-# MOMENTUM
+# SCORE (SMOOTHED)
 # =========================
 def get_score(symbol):
-    prices = get_prices(symbol)
+    prices = get_cached_prices(symbol)
     if prices is None:
         return None
 
-    short = prices[-1] - prices[-10]
-    medium = prices[-1] - prices[-20]
+    smooth = ema(prices)
+
+    short = smooth[-1] - smooth[-10]
+    medium = smooth[-1] - smooth[-20]
 
     return float((short * 0.6) + (medium * 0.4))
 
 # =========================
-# VOLATILITY
+# VOL
 # =========================
 def get_vol(symbol):
-    prices = get_prices(symbol)
+    prices = get_cached_prices(symbol)
     if prices is None:
         return 0.01
 
@@ -133,7 +142,7 @@ def get_vol(symbol):
     return max(np.std(returns[-20:]), 0.001)
 
 # =========================
-# SIGNAL ENGINE (WITH SCANNER)
+# SIGNALS
 # =========================
 def get_signals():
     universe = get_universe()
@@ -155,21 +164,13 @@ def get_signals():
                 "price": float(price),
                 "vol": get_vol(s)
             })
-
         except:
             continue
 
     ranked.sort(key=lambda x: x["score"], reverse=True)
 
-    # 🔥 fallback safety
     if len(ranked) == 0:
-        print("Fallback triggered")
-        return [{
-            "symbol": "AMD",
-            "score": 1,
-            "price": 100,
-            "vol": 1
-        }]
+        return [{"symbol":"AMD","score":1,"price":100,"vol":1}]
 
     return ranked
 
@@ -183,7 +184,6 @@ def preflight(signals):
     scores = [s["score"] for s in signals]
 
     if np.std(scores) < 0.01:
-        print("Low signal variance")
         return False
 
     return True
@@ -194,22 +194,53 @@ def preflight(signals):
 def handle_trailing():
     global peak_prices
 
-    try:
-        positions = api.list_positions()
+    positions = api.list_positions()
 
-        for p in positions:
-            sym = p.symbol
-            price = float(p.current_price)
+    for p in positions:
+        sym = p.symbol
+        price = float(p.current_price)
 
-            if sym not in peak_prices:
-                peak_prices[sym] = price
+        if sym not in peak_prices:
+            peak_prices[sym] = price
 
-            peak_prices[sym] = max(peak_prices[sym], price)
+        peak_prices[sym] = max(peak_prices[sym], price)
 
-            drawdown = (price - peak_prices[sym]) / peak_prices[sym]
+        drawdown = (price - peak_prices[sym]) / peak_prices[sym]
 
-            if drawdown <= -TRAILING_STOP:
-                print(f"Trailing stop: {sym}")
+        if drawdown <= -TRAILING_STOP:
+            print(f"Trailing stop: {sym}")
+
+            api.submit_order(
+                symbol=sym,
+                qty=p.qty,
+                side="sell",
+                type="market",
+                time_in_force="day"
+            )
+
+            peak_prices.pop(sym, None)
+
+# =========================
+# ROTATION (ANTI-CHURN)
+# =========================
+def handle_rotation(signals):
+    positions = api.list_positions()
+    top = signals[:MAX_POSITIONS]
+
+    top_symbols = [s["symbol"] for s in top]
+    signal_map = {s["symbol"]: s for s in signals}
+
+    for p in positions:
+        sym = p.symbol
+
+        if sym not in top_symbols:
+            current_score = signal_map.get(sym, {}).get("score", -999)
+
+            best_score = top[-1]["score"]
+
+            # 🔥 rotation buffer
+            if best_score - current_score > ROTATION_BUFFER:
+                print(f"Rotating out: {sym}")
 
                 api.submit_order(
                     symbol=sym,
@@ -221,67 +252,48 @@ def handle_trailing():
 
                 peak_prices.pop(sym, None)
 
-    except:
-        pass
-
 # =========================
-# ROTATION
-# =========================
-def handle_rotation(signals):
-    try:
-        positions = api.list_positions()
-        top = [s["symbol"] for s in signals[:MAX_POSITIONS]]
-
-        for p in positions:
-            if p.symbol not in top:
-                print(f"Rotating out: {p.symbol}")
-
-                api.submit_order(
-                    symbol=p.symbol,
-                    qty=p.qty,
-                    side="sell",
-                    type="market",
-                    time_in_force="day"
-                )
-
-                peak_prices.pop(p.symbol, None)
-
-    except:
-        pass
-
-# =========================
-# ENTRY
+# ENTRY (COOLDOWN)
 # =========================
 def handle_entries(signals):
-    try:
-        account = api.get_account()
-        cash = float(account.cash)
+    account = api.get_account()
+    cash = float(account.cash)
 
-        positions = api.list_positions()
-        current = [p.symbol for p in positions]
+    positions = api.list_positions()
+    current = [p.symbol for p in positions]
 
-        for s in signals[:MAX_POSITIONS]:
-            if s["symbol"] in current:
+    now = time.time()
+
+    for s in signals[:MAX_POSITIONS]:
+        sym = s["symbol"]
+
+        if s["score"] < MIN_SCORE:
+            continue
+
+        if sym in current:
+            continue
+
+        # 🔥 cooldown check
+        if sym in last_trade_time:
+            if now - last_trade_time[sym] < TRADE_COOLDOWN:
                 continue
 
-            risk = cash * RISK_PER_TRADE
-            qty = int(risk / (s["vol"] * s["price"]))
+        risk = cash * RISK_PER_TRADE
+        qty = int(risk / (s["vol"] * s["price"]))
+        qty = min(qty, 100)
 
-            qty = min(qty, 100)
+        if qty > 0:
+            print(f"Buying {sym} qty {qty}")
 
-            if qty > 0:
-                print(f"Buying {s['symbol']} qty {qty}")
+            api.submit_order(
+                symbol=sym,
+                qty=qty,
+                side="buy",
+                type="market",
+                time_in_force="day"
+            )
 
-                api.submit_order(
-                    symbol=s["symbol"],
-                    qty=qty,
-                    side="buy",
-                    type="market",
-                    time_in_force="day"
-                )
-
-    except:
-        pass
+            last_trade_time[sym] = now
 
 # =========================
 # BOT
