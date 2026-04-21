@@ -31,31 +31,41 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# GET PRICES (FIXED)
+# GET PRICES (HARD FIX)
 # =========================
 def get_prices(symbol):
     try:
         bars = api.get_bars(symbol, "1Day", limit=30)
 
-        closes = [bar.c for bar in bars]
+        closes = [(bar.t, bar.c) for bar in bars]
 
-        if len(closes) < 25:
-            print(f"Not enough bars for {symbol}")
+        if not closes:
+            print(f"No bars for {symbol}")
             return None
 
-        return np.array(closes)
+        # 🔥 SORT BY TIME (CRITICAL)
+        closes = sorted(closes, key=lambda x: x[0])
+
+        prices = np.array([c[1] for c in closes])
+
+        # 🔴 DEBUG CHECK
+        if len(set(prices)) <= 2:
+            print(f"Flat data detected for {symbol}: {prices[-5:]}")
+            return None
+
+        return prices
 
     except Exception as e:
         print(f"Data error {symbol}: {e}")
         return None
 
 # =========================
-# MOMENTUM (FINAL FIX)
+# MOMENTUM
 # =========================
 def get_momentum_score(symbol):
     prices = get_prices(symbol)
 
-    if prices is None:
+    if prices is None or len(prices) < 25:
         return 0
 
     try:
@@ -64,9 +74,6 @@ def get_momentum_score(symbol):
         r20 = (prices[-1] / prices[-21]) - 1
 
         returns = np.diff(prices) / prices[:-1]
-
-        if len(returns) < 20:
-            return 0
 
         vol = np.std(returns[-20:])
 
@@ -122,7 +129,6 @@ def handle_profit_lock(p):
         if float(p.unrealized_plpc) >= PROFIT_LOCK:
             qty = int(float(p.qty) * 0.5)
             if qty > 0:
-                print(f"Profit lock {p.symbol}")
                 api.submit_order(
                     symbol=p.symbol,
                     qty=qty,
@@ -139,7 +145,6 @@ def handle_profit_lock(p):
 def handle_exits(p):
     try:
         if float(p.unrealized_plpc) <= WEAK_EXIT:
-            print(f"Weak exit {p.symbol}")
             api.submit_order(
                 symbol=p.symbol,
                 qty=p.qty,
@@ -163,7 +168,6 @@ def handle_entries(signals, current_symbols):
                 qty = int((cash * RISK_PER_TRADE) / s["price"])
 
                 if qty > 0:
-                    print(f"Buying {s['symbol']}")
                     api.submit_order(
                         symbol=s["symbol"],
                         qty=qty,
