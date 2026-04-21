@@ -29,7 +29,7 @@ HEADERS = {
     "APCA-API-SECRET-KEY": SECRET_KEY
 }
 
-MAX_POSITIONS = 3
+MAX_POSITIONS = 5
 RISK_PER_TRADE = 0.02
 
 highest_price_tracker = {}
