@@ -1,112 +1,96 @@
 import os
-import pytz
 import numpy as np
 import yfinance as yf
 from datetime import datetime
 from flask import Flask, jsonify
-from alpaca_trade_api import REST
 
-SYMBOLS = ["AMD","NVDA","META","AVGO","INTC"]
-
-BASE_URL = "https://paper-api.alpaca.markets"
-API_KEY = os.getenv("APCA_API_KEY_ID")
-API_SECRET = os.getenv("APCA_API_SECRET_KEY")
-
-api = REST(API_KEY, API_SECRET, BASE_URL)
 app = Flask(__name__)
 
 # =========================
-# MARKET CHECK
+# CONFIG
+# =========================
+SYMBOLS = ["AMD","NVDA","META","AVGO","INTC"]
+
+# =========================
+# MARKET CHECK (optional)
 # =========================
 def market_open():
-    now = datetime.now(pytz.timezone("US/Eastern"))
-    return now.weekday() < 5 and 9 <= now.hour < 16
+    now = datetime.utcnow()
+    return now.weekday() < 5
 
 # =========================
-# GET PRICES (YFINANCE)
+# TEST DATA FETCH
 # =========================
-def get_prices(symbol):
+def test_data(symbol):
     try:
-        df = yf.download(symbol, period="10d", interval="1h", progress=False)
+        df = yf.download(
+            symbol,
+            period="5d",
+            interval="1h",
+            progress=False,
+            threads=False  # 🔥 important for Railway stability
+        )
 
-        if df is None or df.empty:
-            return None
+        # 🔴 HARD DEBUG
+        if df is None:
+            return {"status": "fail", "reason": "df is None"}
 
-        prices = df["Close"].dropna().values
+        if df.empty:
+            return {"status": "fail", "reason": "df EMPTY"}
 
-        if len(prices) < 20:
-            return None
+        closes = df["Close"].dropna()
 
-        return prices
+        if closes.empty:
+            return {"status": "fail", "reason": "no close data"}
+
+        prices = closes.values
+
+        return {
+            "status": "success",
+            "bars": len(prices),
+            "first_price": float(prices[0]),
+            "last_price": float(prices[-1]),
+            "change": float(prices[-1] - prices[0])
+        }
 
     except Exception as e:
-        print(f"Data error {symbol}: {e}")
-        return None
+        return {"status": "error", "message": str(e)}
 
 # =========================
-# MOMENTUM (SLOPE)
-# =========================
-def get_momentum_score(symbol):
-    prices = get_prices(symbol)
-
-    if prices is None:
-        return 0
-
-    try:
-        x = np.arange(len(prices))
-        y = np.log(prices)
-
-        slope, _ = np.polyfit(x, y, 1)
-
-        returns = np.diff(prices) / prices[:-1]
-        vol = np.std(returns[-20:])
-
-        score = slope / (vol + 1e-6)
-
-        return float(score)
-
-    except:
-        return 0
-
-# =========================
-# SIGNAL ENGINE
-# =========================
-def get_signals():
-    ranked = []
-
-    for s in SYMBOLS:
-        score = get_momentum_score(s)
-
-        try:
-            price = api.get_latest_trade(s).price
-
-            ranked.append({
-                "symbol": s,
-                "score": score,
-                "price": float(price)
-            })
-
-        except:
-            pass
-
-    ranked.sort(key=lambda x: x["score"], reverse=True)
-    return ranked
-
-# =========================
-# ROUTES
+# DEBUG ROUTE
 # =========================
 @app.route("/debug")
 def debug():
-    return {
-        "signals": get_signals()
-    }
+    results = {}
 
+    for s in SYMBOLS:
+        results[s] = test_data(s)
+
+    return jsonify({
+        "timestamp": datetime.utcnow().isoformat(),
+        "market_open": market_open(),
+        "results": results
+    })
+
+# =========================
+# HEALTH CHECK
+# =========================
 @app.route("/health")
 def health():
     return {"status": "running"}
 
 # =========================
-# RUN
+# ROOT (optional)
+# =========================
+@app.route("/")
+def home():
+    return {
+        "message": "Trading bot diagnostic running",
+        "endpoints": ["/health", "/debug"]
+    }
+
+# =========================
+# RUN SERVER
 # =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
