@@ -32,7 +32,7 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# HISTORICAL DATA (FIXED)
+# GET HISTORICAL PRICES (FINAL FIX)
 # =========================
 def get_prices(symbol):
     try:
@@ -43,7 +43,6 @@ def get_prices(symbol):
             "APCA-API-SECRET-KEY": API_SECRET
         }
 
-        # 🔥 CRITICAL FIX
         end = datetime.utcnow()
         start = end - timedelta(days=60)
 
@@ -59,13 +58,19 @@ def get_prices(symbol):
 
         bars = data.get("bars", [])
 
-        print(f"{symbol} bars received:", len(bars))
-
         if len(bars) < 25:
-            print(f"❌ Not enough data for {symbol}")
+            print(f"❌ Not enough bars for {symbol}")
             return None
 
+        # 🔥 CRITICAL FIX: SORT BY TIME
+        bars = sorted(bars, key=lambda x: x["t"])
+
         prices = np.array([bar["c"] for bar in bars])
+
+        # sanity check
+        if np.std(prices) == 0:
+            print(f"❌ Flat data for {symbol}")
+            return None
 
         print(f"{symbol} last 5 closes:", prices[-5:])
 
@@ -146,7 +151,6 @@ def handle_profit_lock(p):
         if float(p.unrealized_plpc) >= PROFIT_LOCK:
             qty = int(float(p.qty) * 0.5)
             if qty > 0:
-                print(f"🔒 Profit lock {p.symbol}")
                 api.submit_order(
                     symbol=p.symbol,
                     qty=qty,
@@ -158,12 +162,11 @@ def handle_profit_lock(p):
         pass
 
 # =========================
-# EXIT LOGIC
+# EXIT
 # =========================
 def handle_exits(p):
     try:
         if float(p.unrealized_plpc) <= WEAK_EXIT:
-            print(f"❌ Weak exit {p.symbol}")
             api.submit_order(
                 symbol=p.symbol,
                 qty=p.qty,
@@ -175,7 +178,7 @@ def handle_exits(p):
         pass
 
 # =========================
-# ENTRY LOGIC
+# ENTRY
 # =========================
 def handle_entries(signals, current_symbols):
     try:
@@ -187,7 +190,6 @@ def handle_entries(signals, current_symbols):
                 qty = int((cash * RISK_PER_TRADE) / s["price"])
 
                 if qty > 0:
-                    print(f"🚀 Buying {s['symbol']}")
                     api.submit_order(
                         symbol=s["symbol"],
                         qty=qty,
@@ -222,31 +224,6 @@ def run_bot():
     }
 
 # =========================
-# DEBUG ROUTES
-# =========================
-@app.route("/bars-test")
-def bars_test():
-    url = "https://data.alpaca.markets/v2/stocks/AMD/bars"
-
-    headers = {
-        "APCA-API-KEY-ID": API_KEY,
-        "APCA-API-SECRET-KEY": API_SECRET
-    }
-
-    end = datetime.utcnow()
-    start = end - timedelta(days=60)
-
-    params = {
-        "timeframe": "1Day",
-        "start": start.isoformat() + "Z",
-        "end": end.isoformat() + "Z",
-        "limit": 10
-    }
-
-    res = requests.get(url, headers=headers, params=params)
-    return res.json()
-
-# =========================
 # ROUTES
 # =========================
 @app.route("/health")
@@ -265,7 +242,7 @@ def run():
     return run_bot()
 
 # =========================
-# RUN SERVER
+# RUN
 # =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
