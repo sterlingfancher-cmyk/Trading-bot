@@ -6,20 +6,17 @@ from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-# =========================
-# CONFIG
-# =========================
 SYMBOLS = ["AMD","NVDA","META","AVGO","INTC"]
 
 # =========================
-# MARKET CHECK (optional)
+# MARKET CHECK
 # =========================
 def market_open():
     now = datetime.utcnow()
     return now.weekday() < 5
 
 # =========================
-# TEST DATA FETCH
+# SAFE DATA FETCH
 # =========================
 def test_data(symbol):
     try:
@@ -28,33 +25,33 @@ def test_data(symbol):
             period="5d",
             interval="1h",
             progress=False,
-            threads=False  # 🔥 important for Railway stability
+            threads=False
         )
 
-        # 🔴 HARD DEBUG
-        if df is None:
-            return {"status": "fail", "reason": "df is None"}
+        if df is None or df.empty:
+            return {"status": "fail", "reason": "no data"}
 
-        if df.empty:
-            return {"status": "fail", "reason": "df EMPTY"}
+        closes = df["Close"]
 
-        closes = df["Close"].dropna()
+        # 🔥 FORCE SAFE NUMERIC ARRAY
+        prices = np.array(closes).astype(float).flatten()
 
-        if closes.empty:
-            return {"status": "fail", "reason": "no close data"}
-
-        prices = closes.values
+        if len(prices) == 0:
+            return {"status": "fail", "reason": "empty prices"}
 
         return {
             "status": "success",
-            "bars": len(prices),
+            "bars": int(len(prices)),
             "first_price": float(prices[0]),
             "last_price": float(prices[-1]),
             "change": float(prices[-1] - prices[0])
         }
 
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 # =========================
 # DEBUG ROUTE
@@ -73,24 +70,24 @@ def debug():
     })
 
 # =========================
-# HEALTH CHECK
+# HEALTH
 # =========================
 @app.route("/health")
 def health():
     return {"status": "running"}
 
 # =========================
-# ROOT (optional)
+# ROOT
 # =========================
 @app.route("/")
 def home():
     return {
-        "message": "Trading bot diagnostic running",
+        "message": "Diagnostic running",
         "endpoints": ["/health", "/debug"]
     }
 
 # =========================
-# RUN SERVER
+# RUN
 # =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
