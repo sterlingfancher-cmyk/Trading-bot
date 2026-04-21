@@ -23,8 +23,8 @@ MAX_POSITIONS = 5
 RISK_PER_TRADE = 0.02
 MIN_SCORE = 1.0
 
-TRAILING_STOP = 0.03   # 3% trailing stop
-CHECK_INTERVAL = 300   # 5 minutes
+TRAILING_STOP = 0.03
+CHECK_INTERVAL = 300  # 5 min
 
 BASE_URL = "https://paper-api.alpaca.markets"
 API_KEY = os.getenv("APCA_API_KEY_ID")
@@ -32,7 +32,7 @@ API_SECRET = os.getenv("APCA_API_SECRET_KEY")
 
 api = REST(API_KEY, API_SECRET, BASE_URL)
 
-# store peak prices
+# Track peak prices for trailing stop
 peak_prices = {}
 
 # =========================
@@ -40,7 +40,13 @@ peak_prices = {}
 # =========================
 def get_prices(symbol):
     try:
-        df = yf.download(symbol, period="5d", interval="1h", progress=False, threads=False)
+        df = yf.download(
+            symbol,
+            period="5d",
+            interval="1h",
+            progress=False,
+            threads=False
+        )
 
         if df is None or df.empty:
             return None
@@ -60,7 +66,6 @@ def get_prices(symbol):
 # =========================
 def get_momentum_score(symbol):
     prices = get_prices(symbol)
-
     if prices is None:
         return 0
 
@@ -74,7 +79,6 @@ def get_momentum_score(symbol):
 # =========================
 def get_volatility(symbol):
     prices = get_prices(symbol)
-
     if prices is None:
         return 0.01
 
@@ -105,7 +109,7 @@ def get_signals():
     return ranked
 
 # =========================
-# TRAILING STOP LOGIC
+# TRAILING STOP
 # =========================
 def handle_trailing_stops():
     global peak_prices
@@ -117,7 +121,6 @@ def handle_trailing_stops():
             symbol = p.symbol
             current_price = float(p.current_price)
 
-            # update peak
             if symbol not in peak_prices:
                 peak_prices[symbol] = current_price
 
@@ -126,7 +129,7 @@ def handle_trailing_stops():
             drawdown = (current_price - peak_prices[symbol]) / peak_prices[symbol]
 
             if drawdown <= -TRAILING_STOP:
-                print(f"Trailing stop hit: {symbol}")
+                print(f"Trailing stop: {symbol}")
 
                 api.submit_order(
                     symbol=symbol,
@@ -137,6 +140,31 @@ def handle_trailing_stops():
                 )
 
                 peak_prices.pop(symbol, None)
+
+    except:
+        pass
+
+# =========================
+# HARD ROTATION (KEY FIX)
+# =========================
+def handle_exits(signals):
+    try:
+        positions = api.list_positions()
+        top_symbols = [s["symbol"] for s in signals[:MAX_POSITIONS]]
+
+        for p in positions:
+            if p.symbol not in top_symbols:
+                print(f"Rotating out of {p.symbol}")
+
+                api.submit_order(
+                    symbol=p.symbol,
+                    qty=p.qty,
+                    side="sell",
+                    type="market",
+                    time_in_force="day"
+                )
+
+                peak_prices.pop(p.symbol, None)
 
     except:
         pass
@@ -168,7 +196,7 @@ def handle_entries(signals):
             qty = int(risk / (vol * s["price"]))
 
             if qty > 0:
-                print(f"Buying {s['symbol']}")
+                print(f"Buying {s['symbol']} qty {qty}")
 
                 api.submit_order(
                     symbol=s["symbol"],
@@ -184,34 +212,7 @@ def handle_entries(signals):
         pass
 
 # =========================
-# EXIT (WEAK SIGNALS)
-# =========================
-def handle_exits(signals):
-    try:
-        positions = api.list_positions()
-        signal_map = {s["symbol"]: s for s in signals}
-
-        for p in positions:
-            sym = p.symbol
-
-            if sym not in signal_map or signal_map[sym]["score"] < 0:
-                print(f"Exiting weak: {sym}")
-
-                api.submit_order(
-                    symbol=sym,
-                    qty=p.qty,
-                    side="sell",
-                    type="market",
-                    time_in_force="day"
-                )
-
-                peak_prices.pop(sym, None)
-
-    except:
-        pass
-
-# =========================
-# MAIN LOOP
+# BOT
 # =========================
 def run_bot():
     print(f"Running bot at {datetime.utcnow()}")
@@ -222,8 +223,10 @@ def run_bot():
     handle_exits(signals)
     handle_entries(signals)
 
+    return signals[:5]
+
 # =========================
-# AUTO RUN THREAD
+# AUTO LOOP
 # =========================
 def scheduler():
     while True:
@@ -241,15 +244,14 @@ def debug():
 
 @app.route("/run")
 def run():
-    run_bot()
-    return {"status": "ran"}
+    return {"ran": run_bot()}
 
 @app.route("/health")
 def health():
     return {"status": "running"}
 
 # =========================
-# RUN SERVER
+# RUN
 # =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
