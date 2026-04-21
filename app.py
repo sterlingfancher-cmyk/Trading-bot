@@ -32,7 +32,7 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# GET INTRADAY PRICES (FINAL FIX)
+# GET PRICES (FINAL FIX)
 # =========================
 def get_prices(symbol):
     try:
@@ -44,13 +44,13 @@ def get_prices(symbol):
         }
 
         end = datetime.utcnow()
-        start = end - timedelta(days=5)
+        start = end - timedelta(days=10)  # 🔥 longer window
 
         params = {
-            "timeframe": "15Min",  # 🔥 KEY FIX
+            "timeframe": "1Hour",         # 🔥 KEY CHANGE
             "start": start.isoformat() + "Z",
             "end": end.isoformat() + "Z",
-            "limit": 200
+            "limit": 500
         }
 
         res = requests.get(url, headers=headers, params=params)
@@ -58,18 +58,22 @@ def get_prices(symbol):
 
         bars = data.get("bars", [])
 
-        if len(bars) < 50:
-            print(f"Not enough intraday data for {symbol}")
+        print(f"{symbol} bars:", len(bars))
+
+        if len(bars) < 100:
+            print(f"❌ Not enough data for {symbol}")
             return None
 
-        # sort chronologically
+        # sort
         bars = sorted(bars, key=lambda x: x["t"])
 
         prices = np.array([bar["c"] for bar in bars])
 
+        print(f"{symbol} last 10:", prices[-10:])
+
         # sanity check
-        if np.std(prices) < 0.001:
-            print(f"Flat intraday data for {symbol}")
+        if np.std(prices) < 0.01:
+            print(f"❌ Still flat for {symbol}")
             return None
 
         return prices
@@ -79,7 +83,7 @@ def get_prices(symbol):
         return None
 
 # =========================
-# MOMENTUM ENGINE (FINAL)
+# MOMENTUM ENGINE
 # =========================
 def get_momentum_score(symbol):
     prices = get_prices(symbol)
@@ -97,13 +101,12 @@ def get_momentum_score(symbol):
         returns = np.diff(prices) / prices[:-1]
         vol = np.std(returns[-20:])
 
-        # 🔥 CRITICAL FIX
         score = momentum / (vol + 1e-6)
+
+        print(f"{symbol} score:", score)
 
         if not np.isfinite(score):
             return 0
-
-        print(f"{symbol} score:", score)
 
         return float(score)
 
@@ -152,7 +155,6 @@ def handle_profit_lock(p):
         if float(p.unrealized_plpc) >= PROFIT_LOCK:
             qty = int(float(p.qty) * 0.5)
             if qty > 0:
-                print(f"Profit lock {p.symbol}")
                 api.submit_order(
                     symbol=p.symbol,
                     qty=qty,
@@ -164,12 +166,11 @@ def handle_profit_lock(p):
         pass
 
 # =========================
-# EXIT LOGIC
+# EXIT
 # =========================
 def handle_exits(p):
     try:
         if float(p.unrealized_plpc) <= WEAK_EXIT:
-            print(f"Weak exit {p.symbol}")
             api.submit_order(
                 symbol=p.symbol,
                 qty=p.qty,
@@ -181,7 +182,7 @@ def handle_exits(p):
         pass
 
 # =========================
-# ENTRY LOGIC
+# ENTRY
 # =========================
 def handle_entries(signals, current_symbols):
     try:
@@ -193,7 +194,6 @@ def handle_entries(signals, current_symbols):
                 qty = int((cash * RISK_PER_TRADE) / s["price"])
 
                 if qty > 0:
-                    print(f"Buying {s['symbol']}")
                     api.submit_order(
                         symbol=s["symbol"],
                         qty=qty,
@@ -246,7 +246,7 @@ def run():
     return run_bot()
 
 # =========================
-# RUN SERVER
+# RUN
 # =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
