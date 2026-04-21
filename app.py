@@ -3,7 +3,7 @@ import time
 import threading
 import numpy as np
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, jsonify
 from alpaca_trade_api import REST
 
@@ -20,10 +20,9 @@ TRAILING_STOP = 0.03
 CHECK_INTERVAL = 300
 
 MIN_SCORE = 1.0
-ROTATION_BUFFER = 0.5       # 🔥 require better score to rotate
-TRADE_COOLDOWN = 900        # 🔥 15 min per symbol
-
-CACHE_TTL = 120             # seconds
+ROTATION_BUFFER = 0.5
+TRADE_COOLDOWN = 900
+CACHE_TTL = 120
 
 BASE_URL = "https://paper-api.alpaca.markets"
 API_KEY = os.getenv("APCA_API_KEY_ID")
@@ -65,12 +64,31 @@ def get_cached_prices(symbol):
 # =========================
 # EMA
 # =========================
-def ema(prices, span=10):
+def ema(prices, span=20):
     alpha = 2 / (span + 1)
     ema_vals = [prices[0]]
     for p in prices[1:]:
         ema_vals.append(alpha * p + (1 - alpha) * ema_vals[-1])
     return np.array(ema_vals)
+
+# =========================
+# REGIME FILTER (SPY)
+# =========================
+def get_market_regime():
+    prices = get_cached_prices("SPY")
+
+    if prices is None:
+        return "neutral"
+
+    smooth = ema(prices, span=20)
+
+    if smooth[-1] > smooth[-10]:
+        return "bull"
+
+    if smooth[-1] < smooth[-10]:
+        return "bear"
+
+    return "neutral"
 
 # =========================
 # UNIVERSE
@@ -88,7 +106,7 @@ def get_universe():
     ]
 
 # =========================
-# FAST FILTER (OPTIMIZED)
+# FAST FILTER
 # =========================
 def fast_filter(symbols):
     results = []
@@ -116,7 +134,7 @@ def fast_filter(symbols):
     return filtered
 
 # =========================
-# SCORE (SMOOTHED)
+# SCORE
 # =========================
 def get_score(symbol):
     prices = get_cached_prices(symbol)
@@ -189,11 +207,9 @@ def preflight(signals):
     return True
 
 # =========================
-# TRAILING STOP
+# TRAILING
 # =========================
 def handle_trailing():
-    global peak_prices
-
     positions = api.list_positions()
 
     for p in positions:
@@ -221,7 +237,7 @@ def handle_trailing():
             peak_prices.pop(sym, None)
 
 # =========================
-# ROTATION (ANTI-CHURN)
+# ROTATION
 # =========================
 def handle_rotation(signals):
     positions = api.list_positions()
@@ -235,10 +251,8 @@ def handle_rotation(signals):
 
         if sym not in top_symbols:
             current_score = signal_map.get(sym, {}).get("score", -999)
-
             best_score = top[-1]["score"]
 
-            # 🔥 rotation buffer
             if best_score - current_score > ROTATION_BUFFER:
                 print(f"Rotating out: {sym}")
 
@@ -253,37 +267,49 @@ def handle_rotation(signals):
                 peak_prices.pop(sym, None)
 
 # =========================
-# ENTRY (COOLDOWN)
+# ENTRY (WEIGHTED + REGIME)
 # =========================
 def handle_entries(signals):
+    regime = get_market_regime()
+
+    if regime == "bear":
+        print("Bear regime — skipping entries")
+        return
+
     account = api.get_account()
     cash = float(account.cash)
 
     positions = api.list_positions()
     current = [p.symbol for p in positions]
 
+    top = [s for s in signals if s["score"] >= MIN_SCORE][:MAX_POSITIONS]
+
+    scores = np.array([max(s["score"], 0) for s in top])
+    total_score = np.sum(scores)
+
+    if total_score == 0:
+        return
+
     now = time.time()
 
-    for s in signals[:MAX_POSITIONS]:
+    for s, score in zip(top, scores):
         sym = s["symbol"]
-
-        if s["score"] < MIN_SCORE:
-            continue
 
         if sym in current:
             continue
 
-        # 🔥 cooldown check
         if sym in last_trade_time:
             if now - last_trade_time[sym] < TRADE_COOLDOWN:
                 continue
 
-        risk = cash * RISK_PER_TRADE
-        qty = int(risk / (s["vol"] * s["price"]))
+        weight = score / total_score
+
+        allocation = cash * weight
+        qty = int(allocation / s["price"])
         qty = min(qty, 100)
 
         if qty > 0:
-            print(f"Buying {sym} qty {qty}")
+            print(f"Buying {sym} weight {round(weight,2)}")
 
             api.submit_order(
                 symbol=sym,
@@ -328,7 +354,10 @@ threading.Thread(target=scheduler, daemon=True).start()
 # =========================
 @app.route("/debug")
 def debug():
-    return {"signals": get_signals()[:10]}
+    return {
+        "signals": get_signals()[:10],
+        "regime": get_market_regime()
+    }
 
 @app.route("/run")
 def run():
