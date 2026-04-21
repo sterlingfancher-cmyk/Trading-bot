@@ -27,8 +27,11 @@ try:
     from alpaca_trade_api import REST
     if API_KEY and API_SECRET:
         api = REST(API_KEY, API_SECRET, BASE_URL)
+        print("✅ Alpaca connected")
+    else:
+        print("⚠️ Missing API keys")
 except Exception as e:
-    print("Alpaca init failed:", e)
+    print("❌ Alpaca init failed:", e)
 
 # =========================
 # APP
@@ -43,28 +46,36 @@ def market_open():
     return now.weekday() < 5 and 9 <= now.hour < 16
 
 # =========================
-# MOMENTUM ENGINE (RESILIENT)
+# MOMENTUM ENGINE (FIXED)
 # =========================
 def get_momentum_score(symbol):
     try:
         df = yf.download(symbol, period="3mo", interval="1d", progress=False)
 
-        # fallback instead of dropping symbol
-        if df is None or df.empty or len(df) < 25:
+        if df is None or df.empty or len(df) < 30:
             print(f"Fallback scoring for {symbol}")
             return 0
 
         close = df["Close"].dropna()
 
-        r5 = close.pct_change(5).iloc[-1]
-        r10 = close.pct_change(10).iloc[-1]
-        r20 = close.pct_change(20).iloc[-1]
+        if len(close) < 25:
+            return 0
 
-        vol = close.pct_change().rolling(20).std().iloc[-1]
+        # Direct return calculations (no pct_change instability)
+        r5 = (close.iloc[-1] / close.iloc[-6]) - 1
+        r10 = (close.iloc[-1] / close.iloc[-11]) - 1
+        r20 = (close.iloc[-1] / close.iloc[-21]) - 1
+
+        returns = close.pct_change().dropna()
+
+        if len(returns) < 20:
+            return 0
+
+        vol = returns.iloc[-20:].std()
 
         score = (r5 * 0.5) + (r10 * 0.3) + (r20 * 0.2) - (vol * 0.5)
 
-        if np.isnan(score):
+        if score is None or np.isnan(score) or np.isinf(score):
             return 0
 
         return float(score)
@@ -74,7 +85,7 @@ def get_momentum_score(symbol):
         return 0
 
 # =========================
-# SIGNAL ENGINE (NEVER EMPTY)
+# SIGNAL ENGINE
 # =========================
 def get_signals():
     ranked = []
@@ -98,7 +109,6 @@ def get_signals():
 
         except Exception as e:
             print(f"Price error {s}: {e}")
-            continue
 
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked
@@ -122,7 +132,6 @@ def handle_profit_lock(p):
     try:
         if float(p.unrealized_plpc) >= PROFIT_LOCK:
             qty = int(float(p.qty) * 0.5)
-
             if qty > 0:
                 print(f"🔒 Profit lock: {p.symbol}")
                 api.submit_order(
@@ -163,7 +172,7 @@ def handle_entries(signals, current_symbols):
         account = api.get_account()
         cash = float(account.cash)
 
-        for s in signals[:2]:  # top 2 signals only
+        for s in signals[:2]:  # top 2 signals
             if s["symbol"] not in current_symbols:
                 qty = int((cash * RISK_PER_TRADE) / s["price"])
 
@@ -181,7 +190,7 @@ def handle_entries(signals, current_symbols):
         print("Entry error:", e)
 
 # =========================
-# BOT LOOP
+# BOT
 # =========================
 def run_bot():
     if not api:
@@ -204,7 +213,7 @@ def run_bot():
     return {
         "status": "ran",
         "positions": current_symbols,
-        "signals": signals[:3]
+        "top_signals": signals[:3]
     }
 
 # =========================
