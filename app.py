@@ -2,9 +2,14 @@ import os
 import numpy as np
 import yfinance as yf
 from datetime import datetime
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 
 app = Flask(__name__)
+
+# =========================
+# SECURITY
+# =========================
+SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 
 # =========================
 # SETTINGS
@@ -65,7 +70,7 @@ def load_data():
                 continue
 
             data[s] = prices
-        except Exception:
+        except:
             continue
     return data
 
@@ -200,7 +205,6 @@ def run_paper():
 
     data = load_data()
     signals, regime = generate_signals_with_data(data)
-
     portfolio["last_signals"] = signals
 
     if not data:
@@ -221,7 +225,7 @@ def run_paper():
                 "pnl":round(pnl,2)
             })
 
-    # reset
+    # reset positions
     portfolio["cash"]=portfolio["equity"]
     portfolio["positions"]={}
 
@@ -232,10 +236,8 @@ def run_paper():
             continue
 
         price=data[s][idx]
-
         alloc = portfolio["cash"] * min(sig["weight"], MAX_POSITION_SIZE)
         alloc = min(alloc, portfolio["equity"]*MAX_POSITION_RISK)
-
         shares=alloc/price
 
         new_pos[s]={"shares":shares,"entry_price":price,"side":sig["side"]}
@@ -258,6 +260,8 @@ def run_paper():
     portfolio["last_run"]=str(datetime.utcnow())
     portfolio["last_equity"]=portfolio["equity"]
     portfolio["strategy"]=regime
+
+    print("RUN:", datetime.utcnow(), "Equity:", portfolio["equity"])
 
     return {"equity":round(portfolio["equity"],2),"strategy":regime}
 
@@ -293,7 +297,7 @@ def get_metrics():
 # =========================
 @app.route("/dashboard")
 def dashboard():
-    return render_template_string("<h2>Dashboard Running</h2>")
+    return render_template_string("<h2>System Running - Dashboard Active</h2>")
 
 # =========================
 # ROUTES
@@ -315,6 +319,9 @@ def signals():
 
 @app.route("/paper/run")
 def run():
+    key = request.args.get("key")
+    if key != SECRET_KEY:
+        return {"error":"unauthorized"}
     return jsonify(run_paper())
 
 @app.route("/paper/status")
