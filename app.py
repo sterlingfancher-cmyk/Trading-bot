@@ -37,31 +37,38 @@ portfolio = {
     "trades":[],
     "step":80,
     "universe":[],
-    "last_run":None
+    "last_run":None,
+    "regime":None
 }
 
 def sf(x): return float(np.asarray(x).item())
 
-# ===== UNIVERSE =====
+# ================= UNIVERSE =================
 def build_universe():
     pool = CORE + CRYPTO + EXPANSION
     scores = []
+
     for s in pool:
         try:
             df = yf.download(s, period="3mo", progress=False)
             if df.empty: continue
+
             p = np.array(df["Close"], float)
             ret = (p[-1]/p[-20])-1
             vol = np.std(np.diff(p[-20:])/p[-20:-1])
-            scores.append((s, ret/(vol+1e-6)))
-        except: continue
+
+            score = ret/(vol+1e-6)
+            scores.append((s,score))
+        except:
+            continue
 
     scores = sorted(scores, key=lambda x:x[1], reverse=True)
     selected = [s for s,_ in scores[:20]]
+
     portfolio["universe"] = selected
     return selected
 
-# ===== DATA =====
+# ================= DATA =================
 def load(symbols):
     data={}
     for s in symbols:
@@ -69,55 +76,93 @@ def load(symbols):
             df=yf.download(s,period="6mo",progress=False)
             if df.empty: continue
             p=np.array(df["Close"],float)
-            if len(p)>80: data[s]=p
-        except: continue
+            if len(p)>80:
+                data[s]=p
+        except:
+            continue
     return data
 
-# ===== REGIME =====
+# ================= REGIME =================
 def regime(data):
     spy=data.get("SPY")
-    if spy is None: return "neutral"
+    if spy is None:
+        return "neutral"
+
     ma20=np.mean(spy[-20:])
     ma50=np.mean(spy[-50:])
-    if ma20>ma50*1.01: return "bull"
-    if ma20<ma50*0.99: return "bear"
+
+    if ma20>ma50*1.01:
+        return "bull"
+    elif ma20<ma50*0.99:
+        return "bear"
     return "neutral"
 
-# ===== SIGNAL =====
-def signals(data,idx,reg):
+# ================= SIGNAL ENGINE =================
+def signals(data, idx, reg):
     raw=[]
+
     for s,p in data.items():
         try:
             price=p[idx]
             ma50=np.mean(p[idx-50:idx])
             ret=(p[idx]/p[idx-20])-1
-            vol=np.std(np.diff(p[idx-20:idx])/p[idx-20:idx-1])
-            score=ret/(vol+1e-6)
+            vol=np.std(np.diff(p[idx-20:idx])/p[idx-20:idx-1])+1e-6
 
-            if reg=="bull" and price>ma50 and ret>0.03:
+            score=ret/vol
+
+            # ===== BULL =====
+            if reg=="bull" and price>ma50 and ret>0.02:
                 raw.append((s,score,vol))
-            elif reg=="bear" and price<ma50 and ret<-0.03:
+
+            # ===== BEAR =====
+            elif reg=="bear" and price<ma50 and ret<-0.02:
                 raw.append((s,-score,vol))
-        except: continue
+
+            # ===== NEUTRAL =====
+            elif reg=="neutral":
+                mean=np.mean(p[idx-20:idx])
+                std=np.std(p[idx-20:idx])+1e-6
+                z=(price-mean)/std
+
+                if z < -1:
+                    raw.append((s,abs(z),vol))
+                elif z > 1:
+                    raw.append((s,abs(z),vol))
+
+        except:
+            continue
 
     raw=sorted(raw,key=lambda x:x[1],reverse=True)
+
+    # ALWAYS TRADE FIX
+    if not raw:
+        syms=list(data.keys())
+        np.random.shuffle(syms)
+        return [(s,0.01,0.02) for s in syms[:MAX_POSITIONS]]
+
     return raw[:MAX_POSITIONS]
 
-# ===== EXECUTION =====
+# ================= EXECUTION =================
 def run_engine():
     global portfolio
 
     universe=build_universe()+["SPY","QQQ"]
     data=load(universe)
-    if not data: return {"error":"no data"}
+
+    if not data:
+        return {"error":"no data"}
 
     idx=portfolio["step"]
     portfolio["step"]+=1
 
     reg=regime(data)
+    portfolio["regime"]=reg
+
     sig=signals(data,idx,reg)
 
+    # ===== MARK TO MARKET =====
     equity=portfolio["cash"]
+
     for s,pos in portfolio["positions"].items():
         if s in data:
             price=sf(data[s][idx])
@@ -138,19 +183,41 @@ def run_engine():
 
     max_allowed=portfolio["equity"]*MAX_HEAT
 
-    # STOP LOSS
+    # ===== STOP LOSS =====
     for s,pos in list(portfolio["positions"].items()):
         price=sf(data[s][idx])
+
         loss=(price-pos["entry"])/pos["entry"]
         if pos["side"]=="short":
             loss=(pos["entry"]-price)/pos["entry"]
 
         if loss<-STOP_LOSS:
             portfolio["cash"]+=pos["shares"]*price
+            portfolio["trades"].append({"symbol":s,"pnl":round(loss*100,2)})
             del portfolio["positions"][s]
 
-    # ENTRY
+    # ===== ROTATION =====
+    current=set(portfolio["positions"].keys())
+    target=set(s[0] for s in sig)
+
+    for s in list(current):
+        if s not in target:
+            pos=portfolio["positions"][s]
+            price=sf(data[s][idx])
+
+            pnl=(price-pos["entry"])*pos["shares"]
+            if pos["side"]=="short":
+                pnl=(pos["entry"]-price)*pos["shares"]
+
+            portfolio["cash"]+=pos["shares"]*price
+            portfolio["trades"].append({"symbol":s,"pnl":round(pnl,2)})
+            del portfolio["positions"][s]
+
+    # ===== ENTRY =====
     for s,score,vol in sig:
+        if s in portfolio["positions"]:
+            continue
+
         price=sf(data[s][idx])
         size=portfolio["equity"]*BASE_RISK/(vol*5)
 
@@ -158,7 +225,7 @@ def run_engine():
             continue
 
         shares=size/price
-        side="long" if reg=="bull" else "short"
+        side="long" if reg!="bear" else "short"
 
         if portfolio["cash"]>=size:
             portfolio["cash"]-=size
@@ -171,9 +238,35 @@ def run_engine():
     portfolio["history"].append(portfolio["equity"])
     portfolio["last_run"]=str(datetime.utcnow())
 
-    return {"equity":round(portfolio["equity"],2),"regime":reg}
+    return {
+        "equity":round(portfolio["equity"],2),
+        "regime":reg,
+        "positions":list(portfolio["positions"].keys())
+    }
 
-# ===== DASHBOARD =====
+# ================= METRICS =================
+@app.route("/paper/metrics")
+def metrics():
+    eq=portfolio["history"]
+    if len(eq)<10:
+        return {"message":"not enough data"}
+
+    r=np.diff(eq)/eq[:-1]
+    sharpe=np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
+
+    peak=eq[0]
+    dd=0
+    for e in eq:
+        peak=max(peak,e)
+        dd=min(dd,(e-peak)/peak)
+
+    return {
+        "sharpe":round(sharpe,2),
+        "drawdown_pct":round(dd*100,2),
+        "trades":len(portfolio["trades"])
+    }
+
+# ================= DASHBOARD =================
 @app.route("/dashboard")
 def dashboard():
     return render_template_string("""
@@ -194,8 +287,8 @@ body {background:#0f172a;color:white;font-family:Arial}
 <div class="card"><canvas id="eq"></canvas></div>
 <div class="card"><canvas id="dd"></canvas></div>
 <div class="card"><pre id="positions"></pre></div>
-<div class="card"><pre id="universe"></pre></div>
 <div class="card"><pre id="metrics"></pre></div>
+<div class="card"><pre id="regime"></pre></div>
 </div>
 
 <script>
@@ -216,11 +309,11 @@ async function load(){
  document.getElementById('positions').innerText =
   JSON.stringify(p.positions,null,2);
 
- document.getElementById('universe').innerText =
-  JSON.stringify(p.universe,null,2);
-
  document.getElementById('metrics').innerText =
   JSON.stringify(m,null,2);
+
+ document.getElementById('regime').innerText =
+  "Regime: " + p.regime;
 
  let eq = (p.history.length>1) ? p.history : [10000,10000];
  let dd = calcDD(eq);
@@ -246,10 +339,10 @@ setInterval(load,10000);
 </html>
 """)
 
-# ===== ROUTES =====
+# ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"SYSTEM + DASHBOARD LIVE"}
+    return {"status":"FINAL SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run_api():
@@ -260,25 +353,6 @@ def run_api():
 @app.route("/paper/status")
 def status():
     return jsonify(portfolio)
-
-@app.route("/paper/metrics")
-def metrics():
-    eq=portfolio["history"]
-    if len(eq)<10: return {"message":"not enough data"}
-
-    r=np.diff(eq)/eq[:-1]
-    sharpe=np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
-
-    peak=eq[0]
-    dd=0
-    for e in eq:
-        peak=max(peak,e)
-        dd=min(dd,(e-peak)/peak)
-
-    return {
-        "sharpe":round(sharpe,2),
-        "drawdown_pct":round(dd*100,2)
-    }
 
 if __name__=="__main__":
     app.run(host="0.0.0.0",port=int(os.environ.get("PORT",8080)))
