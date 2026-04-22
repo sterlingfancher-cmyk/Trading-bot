@@ -6,51 +6,72 @@ from flask import Flask, jsonify
 app = Flask(__name__)
 
 # =========================
+# UNIVERSE
+# =========================
+SYMBOLS = [
+    "AAPL","MSFT","NVDA","AMD","META",
+    "AMZN","GOOGL","TSLA","AVGO","CRM"
+]
+
+# =========================
 # DATA
 # =========================
-def get_prices(symbol="AAPL"):
-    df = yf.download(symbol, period="1y", interval="1d", progress=False)
+def get_data():
+    data = {}
 
-    if df is None or df.empty:
-        return None
+    for s in SYMBOLS:
+        try:
+            df = yf.download(s, period="1y", interval="1d", progress=False)
+            if df is None or df.empty:
+                continue
 
-    prices = np.array(df["Close"]).reshape(-1)
-    prices = prices[np.isfinite(prices)]
+            prices = np.array(df["Close"]).reshape(-1)
+            prices = prices[np.isfinite(prices)]
 
-    return prices.astype(float)
+            if len(prices) > 100:
+                data[s] = prices.astype(float)
+
+        except:
+            continue
+
+    return data
 
 # =========================
-# BREAKOUT STRATEGY
+# STRATEGY (RELATIVE STRENGTH)
 # =========================
-def simulate(prices):
+def simulate():
+    data = get_data()
+
+    if len(data) < 5:
+        return {"error": "not enough data"}
+
+    length = min(len(p) for p in data.values())
+
     cash = 10000
-    position = 0
     equity_curve = []
 
-    for i in range(30, len(prices)):
-        price = prices[i]
+    for i in range(30, length):
 
-        # 🔥 breakout level
-        recent_high = np.max(prices[i-20:i])
+        scores = []
 
-        # 🔥 volatility expansion
-        returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
-        vol = np.std(returns)
+        for s, prices in data.items():
+            ret = (prices[i] - prices[i-20]) / prices[i-20]
+            scores.append((s, ret))
 
-        # ENTRY: breakout + expansion
-        if price > recent_high and vol > 0.01:
-            if position == 0:
-                position = cash / price
-                cash = 0
+        # rank by strength
+        scores.sort(key=lambda x: x[1], reverse=True)
 
-        # EXIT: momentum loss
-        elif price < np.mean(prices[i-10:i]):
-            if position > 0:
-                cash = position * price
-                position = 0
+        top = scores[:3]
 
-        equity = cash + position * price
-        equity_curve.append(equity)
+        # equal weight top 3
+        value = 0
+
+        for s, _ in top:
+            price = data[s][i]
+            value += cash / 3
+
+        cash = value
+        equity_curve.append(cash)
 
     if len(equity_curve) < 5:
         return None
@@ -70,31 +91,18 @@ def simulate(prices):
 # WALKFORWARD
 # =========================
 def walk_forward():
-    prices = get_prices()
-
-    if prices is None or len(prices) < 100:
-        return {"error": "not enough data"}
-
-    window = 60
-    step = 20
-
     results = []
-    i = 0
 
-    while i + window < len(prices):
-        segment = prices[i:i+window]
-        res = simulate(segment)
-
+    for _ in range(5):
+        res = simulate()
         if res:
             results.append(res)
-
-        i += step
 
     returns = [r["return"] for r in results]
     dds = [r["drawdown"] for r in results]
 
     return {
-        "segments": len(results),
+        "runs": len(results),
         "avg_return_pct": round(np.mean(returns)*100, 2),
         "worst_drawdown_pct": round(min(dds)*100, 2),
         "consistency_pct": round(
@@ -114,7 +122,7 @@ def health():
     return {"status": "running"}
 
 @app.route("/walkforward")
-def walkforward():
+def wf():
     return jsonify(walk_forward())
 
 # =========================
