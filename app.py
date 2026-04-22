@@ -30,7 +30,7 @@ def simulate_segment(data, start, end):
     equity_curve = []
     positions = {}
 
-    holding_period = 2  # 🔥 faster exits
+    holding_period = 3
     rebalance_counter = 0
     cost = 0.001
 
@@ -55,8 +55,8 @@ def simulate_segment(data, start, end):
 
                 z = (prices[i] - mean) / std
 
-                # 🔥 ONLY STRONG SIGNALS
-                if z < -1.0:
+                # 🔥 BALANCED THRESHOLD
+                if z < -0.7:
                     scores.append((s, z))
 
             if len(scores) < 2:
@@ -64,7 +64,7 @@ def simulate_segment(data, start, end):
                 continue
 
             scores.sort(key=lambda x: x[1])
-            bottom = scores[:2]  # 🔥 concentrate
+            bottom = scores[:3]
 
             positions = {}
             allocation = capital / len(bottom)
@@ -141,7 +141,7 @@ def walk_forward():
 
 @app.route("/")
 def home():
-    return {"status": "high efficiency mean reversion"}
+    return {"status": "balanced mean reversion"}
 
 @app.route("/health")
 def health():
