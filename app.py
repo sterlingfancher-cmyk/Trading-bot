@@ -20,25 +20,38 @@ def get_prices(symbol="AAPL"):
     return prices.astype(float)
 
 # =========================
-# STRATEGY (ALWAYS ACTIVE)
+# IMPROVED STRATEGY
 # =========================
 def simulate(prices):
     cash = 10000
     position = 0
     equity_curve = []
 
-    for i in range(30, len(prices)):
+    for i in range(50, len(prices)):
         price = prices[i]
 
         ma_fast = np.mean(prices[i-10:i])
         ma_slow = np.mean(prices[i-30:i])
 
-        # ALWAYS IN OR OUT (no dead zone)
-        if ma_fast > ma_slow:
+        # 🔥 momentum strength
+        momentum = (price - prices[i-20]) / prices[i-20]
+
+        # 🔥 volatility filter
+        returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
+        vol = np.std(returns)
+
+        # ENTRY CONDITIONS
+        if (
+            ma_fast > ma_slow and
+            momentum > 0.02 and      # strong move
+            vol < 0.03              # not chaotic
+        ):
             if position == 0:
                 position = cash / price
                 cash = 0
-        else:
+
+        # EXIT
+        elif ma_fast < ma_slow:
             if position > 0:
                 cash = position * price
                 position = 0
