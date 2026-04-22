@@ -25,6 +25,10 @@ def load_data():
 
     return data
 
+def get_vol(prices, i):
+    returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
+    return np.std(returns) + 1e-6
+
 def simulate_segment(data, start, end):
     capital = 10000
     equity_curve = []
@@ -55,9 +59,9 @@ def simulate_segment(data, start, end):
 
                 z = (prices[i] - mean) / std
 
-                # 🔥 BALANCED THRESHOLD
                 if z < -0.7:
-                    scores.append((s, z))
+                    vol = get_vol(prices, i)
+                    scores.append((s, z, vol))
 
             if len(scores) < 2:
                 equity_curve.append(capital)
@@ -66,10 +70,15 @@ def simulate_segment(data, start, end):
             scores.sort(key=lambda x: x[1])
             bottom = scores[:3]
 
-            positions = {}
-            allocation = capital / len(bottom)
+            # 🔥 VOL-ADJUSTED WEIGHTS
+            inv_vols = [1 / x[2] for x in bottom]
+            total = sum(inv_vols)
 
-            for s, _ in bottom:
+            positions = {}
+
+            for idx, (s, _, vol) in enumerate(bottom):
+                weight = inv_vols[idx] / total
+                allocation = capital * weight
                 price = data[s][i]
                 shares = allocation / price
                 positions[s] = shares
@@ -141,7 +150,7 @@ def walk_forward():
 
 @app.route("/")
 def home():
-    return {"status": "balanced mean reversion"}
+    return {"status": "production MR v1"}
 
 @app.route("/health")
 def health():
