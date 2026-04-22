@@ -7,7 +7,6 @@ from flask import Flask, jsonify, request, render_template_string
 app = Flask(__name__)
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 
-# ===== SYMBOLS =====
 CORE = [
     "NVDA","AMD","AVGO","MU","LRCX","TER","TSM",
     "GEV","HWM","CAT","BWXT",
@@ -23,10 +22,11 @@ EXPANSION = [
     "XOM","CVX","LLY"
 ]
 
-BASE_RISK = 0.012
+BASE_RISK = 0.01
 MAX_HEAT = 0.20
 STOP_LOSS = 0.05
 MAX_POSITIONS = 3
+MIN_SCORE = 0.5
 
 portfolio = {
     "cash":10000,
@@ -43,29 +43,39 @@ portfolio = {
 
 def sf(x): return float(np.asarray(x).item())
 
+# ================= CAPITAL SCALING =================
+def capital_scaler():
+    growth = portfolio["equity"] / 10000
+
+    if growth > 1.2:
+        return 1.2
+    elif growth < 0.95:
+        return 0.7
+    return 1.0
+
 # ================= UNIVERSE =================
 def build_universe():
     pool = CORE + CRYPTO + EXPANSION
-    scores = []
+    scores=[]
 
     for s in pool:
         try:
-            df = yf.download(s, period="3mo", progress=False)
+            df=yf.download(s,period="3mo",progress=False)
             if df.empty: continue
 
-            p = np.array(df["Close"], float)
-            ret = (p[-1]/p[-20])-1
-            vol = np.std(np.diff(p[-20:])/p[-20:-1])
+            p=np.array(df["Close"],float)
+            ret=(p[-1]/p[-20])-1
+            vol=np.std(np.diff(p[-20:])/p[-20:-1])
+            score=ret/(vol+1e-6)
 
-            score = ret/(vol+1e-6)
             scores.append((s,score))
         except:
             continue
 
-    scores = sorted(scores, key=lambda x:x[1], reverse=True)
-    selected = [s for s,_ in scores[:20]]
+    scores=sorted(scores,key=lambda x:x[1],reverse=True)
+    selected=[s for s,_ in scores[:20]]
 
-    portfolio["universe"] = selected
+    portfolio["universe"]=selected
     return selected
 
 # ================= DATA =================
@@ -110,23 +120,18 @@ def signals(data, idx, reg):
 
             score=ret/vol
 
-            # ===== BULL =====
             if reg=="bull" and price>ma50 and ret>0.02:
                 raw.append((s,score,vol))
 
-            # ===== BEAR =====
             elif reg=="bear" and price<ma50 and ret<-0.02:
                 raw.append((s,-score,vol))
 
-            # ===== NEUTRAL =====
             elif reg=="neutral":
                 mean=np.mean(p[idx-20:idx])
                 std=np.std(p[idx-20:idx])+1e-6
                 z=(price-mean)/std
 
-                if z < -1:
-                    raw.append((s,abs(z),vol))
-                elif z > 1:
+                if abs(z)>1:
                     raw.append((s,abs(z),vol))
 
         except:
@@ -134,11 +139,13 @@ def signals(data, idx, reg):
 
     raw=sorted(raw,key=lambda x:x[1],reverse=True)
 
-    # ALWAYS TRADE FIX
+    # QUALITY FILTER
+    raw=[r for r in raw if r[1] > MIN_SCORE]
+
     if not raw:
         syms=list(data.keys())
         np.random.shuffle(syms)
-        return [(s,0.01,0.02) for s in syms[:MAX_POSITIONS]]
+        return [(s,0.5,0.02) for s in syms[:MAX_POSITIONS]]
 
     return raw[:MAX_POSITIONS]
 
@@ -160,7 +167,8 @@ def run_engine():
 
     sig=signals(data,idx,reg)
 
-    # ===== MARK TO MARKET =====
+    scale=capital_scaler()
+
     equity=portfolio["cash"]
 
     for s,pos in portfolio["positions"].items():
@@ -183,7 +191,7 @@ def run_engine():
 
     max_allowed=portfolio["equity"]*MAX_HEAT
 
-    # ===== STOP LOSS =====
+    # STOP LOSS
     for s,pos in list(portfolio["positions"].items()):
         price=sf(data[s][idx])
 
@@ -196,7 +204,7 @@ def run_engine():
             portfolio["trades"].append({"symbol":s,"pnl":round(loss*100,2)})
             del portfolio["positions"][s]
 
-    # ===== ROTATION =====
+    # ROTATION
     current=set(portfolio["positions"].keys())
     target=set(s[0] for s in sig)
 
@@ -213,13 +221,13 @@ def run_engine():
             portfolio["trades"].append({"symbol":s,"pnl":round(pnl,2)})
             del portfolio["positions"][s]
 
-    # ===== ENTRY =====
+    # ENTRY
     for s,score,vol in sig:
         if s in portfolio["positions"]:
             continue
 
         price=sf(data[s][idx])
-        size=portfolio["equity"]*BASE_RISK/(vol*5)
+        size=portfolio["equity"]*BASE_RISK*scale/(vol*5)
 
         if total_exposure+size>max_allowed:
             continue
@@ -244,28 +252,6 @@ def run_engine():
         "positions":list(portfolio["positions"].keys())
     }
 
-# ================= METRICS =================
-@app.route("/paper/metrics")
-def metrics():
-    eq=portfolio["history"]
-    if len(eq)<10:
-        return {"message":"not enough data"}
-
-    r=np.diff(eq)/eq[:-1]
-    sharpe=np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
-
-    peak=eq[0]
-    dd=0
-    for e in eq:
-        peak=max(peak,e)
-        dd=min(dd,(e-peak)/peak)
-
-    return {
-        "sharpe":round(sharpe,2),
-        "drawdown_pct":round(dd*100,2),
-        "trades":len(portfolio["trades"])
-    }
-
 # ================= DASHBOARD =================
 @app.route("/dashboard")
 def dashboard():
@@ -281,7 +267,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 Institutional Dashboard</h2>
+<h2>📊 Final Institutional Dashboard</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -342,7 +328,7 @@ setInterval(load,10000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"FINAL SYSTEM LIVE"}
+    return {"status":"FINAL SYSTEM READY"}
 
 @app.route("/paper/run")
 def run_api():
@@ -353,6 +339,27 @@ def run_api():
 @app.route("/paper/status")
 def status():
     return jsonify(portfolio)
+
+@app.route("/paper/metrics")
+def metrics():
+    eq=portfolio["history"]
+    if len(eq)<10:
+        return {"message":"not enough data"}
+
+    r=np.diff(eq)/eq[:-1]
+    sharpe=np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
+
+    peak=eq[0]
+    dd=0
+    for e in eq:
+        peak=max(peak,e)
+        dd=min(dd,(e-peak)/peak)
+
+    return {
+        "sharpe":round(sharpe,2),
+        "drawdown_pct":round(dd*100,2),
+        "trades":len(portfolio["trades"])
+    }
 
 if __name__=="__main__":
     app.run(host="0.0.0.0",port=int(os.environ.get("PORT",8080)))
