@@ -6,19 +6,33 @@ from flask import Flask, jsonify
 app = Flask(__name__)
 
 # =========================
-# DATA
+# SAFE DATA LOADER
 # =========================
 def get_prices(symbol, period="1y"):
     try:
         df = yf.download(symbol, period=period, interval="1d", progress=False)
+
         if df is None or df.empty:
             return None
-        return df["Close"].dropna().values.astype(float)
-    except Exception as e:
+
+        close = df["Close"]
+
+        # 🔥 FORCE 1D ARRAY (fixes your error)
+        arr = np.array(close).reshape(-1)
+
+        # remove bad values
+        arr = arr[np.isfinite(arr)]
+
+        if len(arr) < 100:
+            return None
+
+        return arr.astype(float)
+
+    except Exception:
         return None
 
 # =========================
-# STRATEGY
+# STRATEGY (MA CROSS)
 # =========================
 def simulate(prices, short_window=10, long_window=20):
     if prices is None or len(prices) < long_window:
@@ -29,26 +43,33 @@ def simulate(prices, short_window=10, long_window=20):
     equity_curve = []
 
     for i in range(long_window, len(prices)):
-        short_ma = np.mean(prices[i - short_window:i])
-        long_ma = np.mean(prices[i - long_window:i])
-        price = prices[i]
+        try:
+            short_ma = np.mean(prices[i - short_window:i])
+            long_ma = np.mean(prices[i - long_window:i])
+            price = float(prices[i])
 
-        if short_ma > long_ma and position == 0:
-            position = cash / price
-            cash = 0
+            # BUY
+            if short_ma > long_ma and position == 0:
+                position = cash / price
+                cash = 0
 
-        elif short_ma < long_ma and position > 0:
-            cash = position * price
-            position = 0
+            # SELL
+            elif short_ma < long_ma and position > 0:
+                cash = position * price
+                position = 0
 
-        equity = cash + position * price
-        equity_curve.append(equity)
+            equity = cash + position * price
+            equity_curve.append(float(equity))
 
-    if not equity_curve:
+        except Exception:
+            continue
+
+    if len(equity_curve) == 0:
         return None
 
     total_return = (equity_curve[-1] - 10000.0) / 10000.0
 
+    # drawdown
     peak = equity_curve[0]
     max_dd = 0
 
@@ -63,13 +84,13 @@ def simulate(prices, short_window=10, long_window=20):
     }
 
 # =========================
-# WALK-FORWARD
+# WALK-FORWARD ENGINE
 # =========================
 def walk_forward(symbol="AAPL"):
     prices = get_prices(symbol)
 
-    if prices is None or len(prices) < 200:
-        return {"error": "Not enough data"}
+    if prices is None:
+        return {"error": "No usable data returned from yfinance"}
 
     train_window = 60
     test_window = 20
@@ -85,6 +106,7 @@ def walk_forward(symbol="AAPL"):
         best_params = None
         best_return = -999
 
+        # 🔥 OPTIMIZATION STEP
         for short in [5, 10, 15]:
             for long in [20, 30, 50]:
                 if short >= long:
@@ -100,6 +122,7 @@ def walk_forward(symbol="AAPL"):
             i += test_window
             continue
 
+        # 🔥 OUT-OF-SAMPLE TEST
         out = simulate(test_data, best_params[0], best_params[1])
 
         if out:
@@ -107,13 +130,14 @@ def walk_forward(symbol="AAPL"):
 
         i += test_window
 
-    if not results:
-        return {"error": "No valid results"}
+    if len(results) == 0:
+        return {"error": "Walk-forward produced no valid segments"}
 
     returns = [r["return"] for r in results]
     drawdowns = [r["drawdown"] for r in results]
 
     return {
+        "symbol": symbol,
         "segments": len(results),
         "avg_return_pct": round(np.mean(returns) * 100, 2),
         "worst_drawdown_pct": round(min(drawdowns) * 100, 2),
@@ -127,9 +151,9 @@ def walk_forward(symbol="AAPL"):
 # ROUTES
 # =========================
 @app.route("/walkforward")
-def walkforward():
+def walkforward_route():
     try:
-        return jsonify(walk_forward())
+        return jsonify(walk_forward("AAPL"))
     except Exception as e:
         return jsonify({"error": str(e)})
 
