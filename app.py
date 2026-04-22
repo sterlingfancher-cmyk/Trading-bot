@@ -10,15 +10,10 @@ SYMBOLS = [
     "AMZN","GOOGL","TSLA","AVGO","CRM"
 ]
 
-# =========================
-# LOAD DATA
-# =========================
 def load_data():
     data = {}
-
     for s in SYMBOLS:
         df = yf.download(s, period="1y", interval="1d", progress=False)
-
         if df is None or df.empty:
             continue
 
@@ -30,15 +25,12 @@ def load_data():
 
     return data
 
-# =========================
-# MEAN REVERSION (Z-SCORE)
-# =========================
 def simulate_segment(data, start, end):
     capital = 10000
     equity_curve = []
     positions = {}
 
-    holding_period = 3
+    holding_period = 2  # 🔥 faster exits
     rebalance_counter = 0
     cost = 0.001
 
@@ -62,11 +54,17 @@ def simulate_segment(data, start, end):
                     continue
 
                 z = (prices[i] - mean) / std
-                scores.append((s, z))
 
-            # 🔥 MOST OVERSOLD (lowest z-score)
+                # 🔥 ONLY STRONG SIGNALS
+                if z < -1.0:
+                    scores.append((s, z))
+
+            if len(scores) < 2:
+                equity_curve.append(capital)
+                continue
+
             scores.sort(key=lambda x: x[1])
-            bottom = scores[:3]
+            bottom = scores[:2]  # 🔥 concentrate
 
             positions = {}
             allocation = capital / len(bottom)
@@ -102,9 +100,6 @@ def simulate_segment(data, start, end):
 
     return {"return": ret, "drawdown": dd}
 
-# =========================
-# WALKFORWARD
-# =========================
 def walk_forward():
     data = load_data()
 
@@ -144,12 +139,9 @@ def walk_forward():
         )
     }
 
-# =========================
-# ROUTES
-# =========================
 @app.route("/")
 def home():
-    return {"status": "mean reversion z-score system"}
+    return {"status": "high efficiency mean reversion"}
 
 @app.route("/health")
 def health():
@@ -159,9 +151,6 @@ def health():
 def wf():
     return jsonify(walk_forward())
 
-# =========================
-# RUN
-# =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=PORT)
