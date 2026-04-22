@@ -17,49 +17,42 @@ def get_data():
     data = {}
 
     for s in SYMBOLS:
-        try:
-            df = yf.download(s, period="1y", interval="1d", progress=False)
-            if df is None or df.empty:
-                continue
+        df = yf.download(s, period="1y", interval="1d", progress=False)
 
-            prices = np.array(df["Close"]).reshape(-1)
-            prices = prices[np.isfinite(prices)]
-
-            if len(prices) > 100:
-                data[s] = prices.astype(float)
-
-        except:
+        if df is None or df.empty:
             continue
+
+        prices = np.array(df["Close"]).reshape(-1)
+        prices = prices[np.isfinite(prices)]
+
+        if len(prices) > 100:
+            data[s] = prices.astype(float)
 
     return data
 
 # =========================
-# SIMULATION (REAL PNL)
+# SIMULATION (WITH COSTS)
 # =========================
-def simulate():
-    data = get_data()
-
-    if len(data) < 5:
-        return {"error": "not enough data"}
-
-    length = min(len(p) for p in data.values())
-
+def simulate_segment(data, start, end):
     capital = 10000
+    positions = {}
     equity_curve = []
 
-    positions = {}
-    holding_period = 5   # 🔥 HOLD FOR 5 DAYS
+    holding_period = 5
     rebalance_counter = 0
 
-    for i in range(30, length):
+    cost_rate = 0.001  # 0.1% per rebalance
 
+    for i in range(start, end):
         rebalance_counter += 1
 
-        # 🔁 REBALANCE ONLY EVERY N DAYS
         if rebalance_counter >= holding_period:
 
             scores = []
             for s, prices in data.items():
+                if i < 20:
+                    continue
+
                 ret = (prices[i] - prices[i-20]) / prices[i-20]
                 scores.append((s, ret))
 
@@ -74,9 +67,11 @@ def simulate():
                 shares = allocation / price
                 positions[s] = shares
 
+            # 🔥 APPLY COST
+            capital *= (1 - cost_rate)
+
             rebalance_counter = 0
 
-        # 📈 MARK TO MARKET (THIS IS THE FIX)
         total_value = 0
         for s, shares in positions.items():
             price = data[s][i]
@@ -102,15 +97,33 @@ def simulate():
     return {"return": ret, "drawdown": dd}
 
 # =========================
-# WALKFORWARD
+# TRUE WALK-FORWARD
 # =========================
 def walk_forward():
-    results = []
+    data = get_data()
 
-    for _ in range(5):
-        res = simulate()
+    if len(data) < 5:
+        return {"error": "not enough data"}
+
+    length = min(len(p) for p in data.values())
+
+    train = 60
+    test = 20
+
+    results = []
+    i = 30
+
+    while i + train + test < length:
+
+        start = i + train
+        end = start + test
+
+        res = simulate_segment(data, start, end)
+
         if res:
             results.append(res)
+
+        i += test
 
     if not results:
         return {"error": "no results"}
@@ -119,7 +132,7 @@ def walk_forward():
     dds = [r["drawdown"] for r in results]
 
     return {
-        "runs": len(results),
+        "segments": len(results),
         "avg_return_pct": round(np.mean(returns)*100, 2),
         "worst_drawdown_pct": round(min(dds)*100, 2),
         "consistency_pct": round(
