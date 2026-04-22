@@ -67,7 +67,7 @@ def get_vol(p, idx):
     r = np.diff(p[idx-20:idx]) / p[idx-20:idx-1]
     return safe_float(np.std(r)) + 1e-6
 
-# ================= SIGNAL ENGINE (FIXED) =================
+# ================= SIGNALS =================
 def generate_signals(data, idx, regime):
     scores = []
 
@@ -86,10 +86,11 @@ def generate_signals(data, idx, regime):
 
     scores = sorted(scores, key=lambda x:x[1], reverse=True)
 
-    # 🔥 ALWAYS TRADE FIX
+    # fallback with randomness to force rotation
     if not scores:
-        fallback = list(data.keys())[:MAX_POSITIONS]
-        return [(s, 0.01, 0.02) for s in fallback]
+        syms = list(data.keys())
+        np.random.shuffle(syms)
+        return [(s,0.01,0.02) for s in syms[:MAX_POSITIONS]]
 
     return scores[:MAX_POSITIONS]
 
@@ -122,37 +123,43 @@ def run_paper():
         portfolio["last_signals"] = signals
         portfolio["strategy"] = regime
 
-        # ===== MARK TO MARKET =====
+        # ===== MARK TO MARKET (FIXED SHORT LOGIC) =====
         equity = portfolio["cash"]
+
         for s,pos in portfolio["positions"].items():
             if s in data:
                 price = safe_float(data[s][idx])
-                pnl = (price - pos["entry"]) * pos["shares"]
-                if pos["side"] == "short":
+
+                if pos["side"] == "long":
+                    equity += pos["shares"] * price
+                else:
                     pnl = (pos["entry"] - price) * pos["shares"]
-                equity += pos["shares"] * price
+                    equity += pos["shares"] * pos["entry"] + pnl
 
         portfolio["equity"] = safe_float(equity)
         portfolio["peak"] = max(portfolio["peak"], portfolio["equity"])
 
-        # ===== RISK UNIT =====
         risk_unit = portfolio["equity"] * BASE_RISK * drawdown_factor()
 
-        # ===== CLOSE OLD =====
         current = set(portfolio["positions"].keys())
         target = set(s[0] for s in signals)
 
-        for s in list(current - target):
-            pos = portfolio["positions"][s]
-            price = safe_float(data[s][idx])
+        # ===== FORCE ROTATION =====
+        rebalance = (portfolio["step"] % 5 == 0)
 
-            pnl = (price - pos["entry"]) * pos["shares"]
-            if pos["side"] == "short":
-                pnl = (pos["entry"] - price) * pos["shares"]
+        for s in list(current):
+            if s not in target or rebalance:
+                pos = portfolio["positions"][s]
+                price = safe_float(data[s][idx])
 
-            portfolio["cash"] += pos["shares"] * price
-            portfolio["trades"].append({"symbol": s, "pnl": round(pnl,2)})
-            del portfolio["positions"][s]
+                pnl = (price - pos["entry"]) * pos["shares"]
+                if pos["side"] == "short":
+                    pnl = (pos["entry"] - price) * pos["shares"]
+
+                portfolio["cash"] += pos["shares"] * price
+                portfolio["trades"].append({"symbol": s, "pnl": round(pnl,2)})
+
+                del portfolio["positions"][s]
 
         # ===== OPEN NEW =====
         total_alloc = 0
@@ -173,6 +180,7 @@ def run_paper():
             if portfolio["cash"] >= position_size:
                 portfolio["cash"] -= position_size
                 total_alloc += position_size
+
                 portfolio["positions"][s] = {
                     "shares": shares,
                     "entry": price,
@@ -214,31 +222,79 @@ def metrics():
         "total_pnl": round(sum(pnls),2)
     }
 
-# ================= DASHBOARD =================
+# ================= UI DASHBOARD =================
 @app.route("/dashboard")
 def dashboard():
     return render_template_string("""
-    <html>
-    <body style="background:#111;color:white;font-family:Arial">
-    <h2>Institutional Dashboard</h2>
-    <pre id="data"></pre>
-    <script>
-    async function load(){
-        let s = await fetch('/paper/status').then(r=>r.json());
-        let m = await fetch('/paper/metrics').then(r=>r.json());
-        document.getElementById('data').innerText =
-        "STATUS:\\n"+JSON.stringify(s,null,2)+"\\n\\nMETRICS:\\n"+JSON.stringify(m,null,2);
-    }
-    load();
-    setInterval(load,5000);
-    </script>
-    </body>
-    </html>
-    """)
+<html>
+<head>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body {background:#0f172a;color:white;font-family:Arial}
+.grid {display:grid;grid-template-columns:1fr 1fr;gap:15px}
+.card {background:#1e293b;padding:15px;border-radius:10px}
+</style>
+</head>
+<body>
+
+<h2>📊 Institutional Trading Dashboard</h2>
+
+<div class="grid">
+<div class="card"><canvas id="eq"></canvas></div>
+<div class="card"><canvas id="dd"></canvas></div>
+
+<div class="card"><pre id="signals"></pre></div>
+<div class="card"><pre id="metrics"></pre></div>
+</div>
+
+<script>
+let eqChart, ddChart;
+
+function calcDD(eq){
+ let peak=eq[0];
+ return eq.map(e=>{
+  peak=Math.max(peak,e);
+  return (e-peak)/peak*100;
+ });
+}
+
+async function load(){
+ let p = await fetch('/paper/status').then(r=>r.json());
+ let m = await fetch('/paper/metrics').then(r=>r.json());
+
+ document.getElementById('signals').innerText =
+  JSON.stringify(p.last_signals,null,2);
+
+ document.getElementById('metrics').innerText =
+  JSON.stringify(m,null,2);
+
+ let eq = (p.history.length>1) ? p.history : [10000,10000];
+ let dd = calcDD(eq);
+
+ if(eqChart) eqChart.destroy();
+ eqChart = new Chart(document.getElementById('eq'),{
+  type:'line',
+  data:{labels:eq.map((_,i)=>i),datasets:[{label:'Equity',data:eq}]}
+ });
+
+ if(ddChart) ddChart.destroy();
+ ddChart = new Chart(document.getElementById('dd'),{
+  type:'line',
+  data:{labels:dd.map((_,i)=>i),datasets:[{label:'Drawdown %',data:dd}]}
+ });
+}
+
+load();
+setInterval(load,10000);
+</script>
+
+</body>
+</html>
+""")
 
 @app.route("/")
 def home():
-    return {"status":"CAPITAL ENGINE LIVE"}
+    return {"status":"INSTITUTIONAL SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run():
