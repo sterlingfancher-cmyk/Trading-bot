@@ -37,14 +37,13 @@ def load_data():
 
             if len(prices) > 100:
                 data[s] = prices.astype(float)
-
         except:
             continue
 
     return data
 
 # =========================
-# VOLATILITY
+# VOL
 # =========================
 def get_vol(prices, i):
     returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
@@ -67,7 +66,7 @@ def generate_signals():
         mean = np.mean(window)
         std = np.std(window)
 
-        if std == 0:
+        if std < 1e-6:
             continue
 
         z = (prices[idx] - mean) / std
@@ -104,7 +103,7 @@ def run_paper():
     signals = generate_signals()
     idx = min(len(p) for p in data.values()) - 1
 
-    # close previous positions
+    # close trades
     for s, pos in portfolio["positions"].items():
         price = data[s][idx]
         pnl = (price - pos["entry_price"]) * pos["shares"]
@@ -164,6 +163,7 @@ def get_metrics():
     wins = [p for p in pnls if p > 0]
 
     equity = portfolio["history"]
+
     peak = equity[0] if equity else 10000
     dd = 0
 
@@ -179,7 +179,7 @@ def get_metrics():
     }
 
 # =========================
-# WALK-FORWARD (RESTORED)
+# WALK-FORWARD
 # =========================
 def simulate_segment(data, start, end):
     capital = 10000
@@ -200,7 +200,13 @@ def simulate_segment(data, start, end):
                     continue
 
                 window = prices[i-20:i]
-                z = (prices[i] - np.mean(window)) / np.std(window)
+                mean = np.mean(window)
+                std = np.std(window)
+
+                if std < 1e-6:
+                    continue
+
+                z = (prices[i] - mean) / std
 
                 if z < -0.7:
                     vol = get_vol(prices, i)
@@ -260,11 +266,11 @@ def walk_forward():
     }
 
 # =========================
-# ROUTES (ALL FIXED)
+# ROUTES
 # =========================
 @app.route("/")
 def home():
-    return {"status": "FULL SYSTEM LIVE"}
+    return {"status": "FULL SYSTEM STABLE"}
 
 @app.route("/health")
 def health():
