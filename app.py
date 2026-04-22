@@ -6,21 +6,24 @@ from flask import Flask, jsonify
 app = Flask(__name__)
 
 # =========================
-# DATA LOADER
+# DATA
 # =========================
 def get_prices(symbol, period="1y"):
     try:
         df = yf.download(symbol, period=period, interval="1d", progress=False)
         if df is None or df.empty:
             return None
-        return df["Close"].values.astype(float)
-    except Exception:
+        return df["Close"].dropna().values.astype(float)
+    except Exception as e:
         return None
 
 # =========================
-# SIMPLE STRATEGY (MA CROSS)
+# STRATEGY
 # =========================
 def simulate(prices, short_window=10, long_window=20):
+    if prices is None or len(prices) < long_window:
+        return None
+
     cash = 10000.0
     position = 0.0
     equity_curve = []
@@ -30,12 +33,10 @@ def simulate(prices, short_window=10, long_window=20):
         long_ma = np.mean(prices[i - long_window:i])
         price = prices[i]
 
-        # BUY
         if short_ma > long_ma and position == 0:
             position = cash / price
             cash = 0
 
-        # SELL
         elif short_ma < long_ma and position > 0:
             cash = position * price
             position = 0
@@ -43,12 +44,11 @@ def simulate(prices, short_window=10, long_window=20):
         equity = cash + position * price
         equity_curve.append(equity)
 
-    if len(equity_curve) == 0:
+    if not equity_curve:
         return None
 
     total_return = (equity_curve[-1] - 10000.0) / 10000.0
 
-    # drawdown calculation
     peak = equity_curve[0]
     max_dd = 0
 
@@ -63,7 +63,7 @@ def simulate(prices, short_window=10, long_window=20):
     }
 
 # =========================
-# WALK-FORWARD ENGINE
+# WALK-FORWARD
 # =========================
 def walk_forward(symbol="AAPL"):
     prices = get_prices(symbol)
@@ -85,7 +85,6 @@ def walk_forward(symbol="AAPL"):
         best_params = None
         best_return = -999
 
-        # optimize on training set
         for short in [5, 10, 15]:
             for long in [20, 30, 50]:
                 if short >= long:
@@ -101,7 +100,6 @@ def walk_forward(symbol="AAPL"):
             i += test_window
             continue
 
-        # test on unseen data
         out = simulate(test_data, best_params[0], best_params[1])
 
         if out:
@@ -109,7 +107,7 @@ def walk_forward(symbol="AAPL"):
 
         i += test_window
 
-    if len(results) == 0:
+    if not results:
         return {"error": "No valid results"}
 
     returns = [r["return"] for r in results]
@@ -129,8 +127,11 @@ def walk_forward(symbol="AAPL"):
 # ROUTES
 # =========================
 @app.route("/walkforward")
-def walkforward_route():
-    return jsonify(walk_forward())
+def walkforward():
+    try:
+        return jsonify(walk_forward())
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 @app.route("/health")
 def health():
