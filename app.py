@@ -17,87 +17,147 @@ def load_data():
     data = {}
 
     for s in SYMBOLS:
-        try:
-            df = yf.download(s, period="1y", interval="1d", progress=False)
+        df = yf.download(s, period="1y", interval="1d", progress=False)
 
-            if df is None or df.empty:
-                continue
-
-            prices = np.array(df["Close"]).reshape(-1)
-            prices = prices[np.isfinite(prices)]
-
-            if len(prices) > 100:
-                data[s] = prices.astype(float)
-
-        except Exception:
+        if df is None or df.empty:
             continue
+
+        prices = np.array(df["Close"]).reshape(-1)
+        prices = prices[np.isfinite(prices)]
+
+        if len(prices) > 100:
+            data[s] = prices.astype(float)
 
     return data
 
 # =========================
-# ANALYZER
+# MEAN REVERSION (Z-SCORE)
 # =========================
-def analyze_signals():
+def simulate_segment(data, start, end):
+    capital = 10000
+    equity_curve = []
+    positions = {}
+
+    holding_period = 3
+    rebalance_counter = 0
+    cost = 0.001
+
+    for i in range(start, end):
+
+        rebalance_counter += 1
+
+        if rebalance_counter >= holding_period:
+
+            scores = []
+
+            for s, prices in data.items():
+                if i < 20:
+                    continue
+
+                window = prices[i-20:i]
+                mean = np.mean(window)
+                std = np.std(window)
+
+                if std == 0:
+                    continue
+
+                z = (prices[i] - mean) / std
+                scores.append((s, z))
+
+            # 🔥 MOST OVERSOLD (lowest z-score)
+            scores.sort(key=lambda x: x[1])
+            bottom = scores[:3]
+
+            positions = {}
+            allocation = capital / len(bottom)
+
+            for s, _ in bottom:
+                price = data[s][i]
+                shares = allocation / price
+                positions[s] = shares
+
+            capital *= (1 - cost)
+            rebalance_counter = 0
+
+        total = 0
+        for s, shares in positions.items():
+            total += shares * data[s][i]
+
+        if positions:
+            capital = total
+
+        equity_curve.append(capital)
+
+    if len(equity_curve) < 5:
+        return None
+
+    ret = (equity_curve[-1] - 10000) / 10000
+
+    peak = equity_curve[0]
+    dd = 0
+
+    for e in equity_curve:
+        peak = max(peak, e)
+        dd = min(dd, (e - peak) / peak)
+
+    return {"return": ret, "drawdown": dd}
+
+# =========================
+# WALKFORWARD
+# =========================
+def walk_forward():
     data = load_data()
+
+    if len(data) < 5:
+        return {"error": "not enough data"}
+
+    length = min(len(p) for p in data.values())
+
+    train = 60
+    test = 20
+
     results = []
+    i = 30
 
-    for s, prices in data.items():
+    while i + train + test < length:
+        start = i + train
+        end = start + test
 
-        momentum_scores = []
-        mean_rev_scores = []
-        vol_scores = []
-        future_returns = []
+        res = simulate_segment(data, start, end)
+        if res:
+            results.append(res)
 
-        for i in range(30, len(prices) - 5):
+        i += test
 
-            # SIGNALS
-            momentum = (prices[i] - prices[i-20]) / prices[i-20]
-            mean_rev = (prices[i] - np.mean(prices[i-10:i])) / np.mean(prices[i-10:i])
-            returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
-            vol = np.std(returns)
+    if not results:
+        return {"error": "no results"}
 
-            # FUTURE RETURN (5-day forward)
-            future = (prices[i+5] - prices[i]) / prices[i]
+    returns = [r["return"] for r in results]
+    dds = [r["drawdown"] for r in results]
 
-            momentum_scores.append(momentum)
-            mean_rev_scores.append(mean_rev)
-            vol_scores.append(vol)
-            future_returns.append(future)
-
-        if len(future_returns) > 20:
-            try:
-                corr_momentum = np.corrcoef(momentum_scores, future_returns)[0,1]
-                corr_meanrev = np.corrcoef(mean_rev_scores, future_returns)[0,1]
-                corr_vol = np.corrcoef(vol_scores, future_returns)[0,1]
-
-                results.append({
-                    "symbol": s,
-                    "momentum_corr": round(float(corr_momentum), 3),
-                    "mean_reversion_corr": round(float(corr_meanrev), 3),
-                    "volatility_corr": round(float(corr_vol), 3)
-                })
-            except Exception:
-                continue
-
-    return results
+    return {
+        "segments": len(results),
+        "avg_return_pct": round(np.mean(returns)*100, 2),
+        "worst_drawdown_pct": round(min(dds)*100, 2),
+        "consistency_pct": round(
+            (sum(1 for r in returns if r > 0)/len(returns))*100, 2
+        )
+    }
 
 # =========================
 # ROUTES
 # =========================
 @app.route("/")
 def home():
-    return {"status": "live analyzer"}
+    return {"status": "mean reversion z-score system"}
 
 @app.route("/health")
 def health():
     return {"status": "running"}
 
-@app.route("/analyze")
-def analyze():
-    try:
-        return jsonify(analyze_signals())
-    except Exception as e:
-        return jsonify({"error": str(e)})
+@app.route("/walkforward")
+def wf():
+    return jsonify(walk_forward())
 
 # =========================
 # RUN
