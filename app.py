@@ -23,14 +23,11 @@ SYMBOLS = [
 ]
 
 # =========================
-# PORTFOLIO SETTINGS
+# SETTINGS
 # =========================
 MAX_POSITION_SIZE = 0.4
 TARGET_VOL = 0.15
 
-# =========================
-# RISK ENGINE SETTINGS
-# =========================
 MAX_DRAWDOWN = -0.10
 MAX_DAILY_LOSS = -0.03
 MAX_POSITION_RISK = 0.02
@@ -40,6 +37,7 @@ COOLDOWN_CYCLES = 2
 # STATE
 # =========================
 portfolio = {
+    "cash": 10000,
     "equity": 10000,
     "positions": {},
     "history": [],
@@ -81,7 +79,7 @@ def get_vol(prices, i):
     return np.std(returns) + 1e-6
 
 # =========================
-# REGIME STRENGTH
+# REGIME
 # =========================
 def get_regime_strength():
     try:
@@ -109,33 +107,31 @@ def get_regime_strength():
 def mean_reversion(data, idx):
     scores = []
     for s, prices in data.items():
-        window = prices[idx-20:idx]
-        std = np.std(window)
-        if std < 1e-6:
-            continue
-
-        z = (prices[idx] - np.mean(window)) / std
+        z = (prices[idx] - np.mean(prices[idx-20:idx])) / np.std(prices[idx-20:idx])
         if z < -0.7:
-            vol = get_vol(prices, idx)
-            strength = abs(z)/vol
-            scores.append((s, strength))
-
+            scores.append((s, abs(z)))
     scores.sort(key=lambda x: x[1], reverse=True)
-    return [{"symbol": s, "weight": w} for s, w in scores[:3]]
+    return scores[:3]
 
 def momentum(data, idx):
     scores = []
     for s, prices in data.items():
         ret = (prices[idx] / prices[idx-20]) - 1
         vol = get_vol(prices, idx)
-        score = ret / vol
-        scores.append((s, score))
-
+        scores.append((s, ret/vol))
     scores.sort(key=lambda x: x[1], reverse=True)
-    return [{"symbol": s, "weight": w} for s, w in scores[:3]]
+    return scores[:3]
+
+def short_strategy(data, idx):
+    scores = []
+    for s, prices in data.items():
+        ret = (prices[idx] / prices[idx-20]) - 1
+        scores.append((s, ret))
+    scores.sort(key=lambda x: x[1])  # worst performers
+    return scores[:3]
 
 # =========================
-# BLENDED SIGNAL ENGINE
+# SIGNAL ENGINE
 # =========================
 def generate_signals():
     data = load_data()
@@ -143,58 +139,50 @@ def generate_signals():
         return [], "none"
 
     idx = min(len(p) for p in data.values()) - 1
+    regime, w = get_regime_strength()
 
-    regime, mom_w = get_regime_strength()
-    mr_w = 1 - mom_w
+    if regime == "bear":
+        shorts = short_strategy(data, idx)
+        total = sum(abs(x[1]) for x in shorts)
+        return [
+            {"symbol": s, "weight": abs(v)/total, "side": "short"}
+            for s, v in shorts
+        ], "bear_short"
 
     mom = momentum(data, idx)
     mr = mean_reversion(data, idx)
 
     combined = {}
+    for s, v in mom:
+        combined[s] = combined.get(s, 0) + v*w
+    for s, v in mr:
+        combined[s] = combined.get(s, 0) + v*(1-w)
 
-    for s in mom:
-        combined[s["symbol"]] = combined.get(s["symbol"], 0) + s["weight"] * mom_w
+    top = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:3]
+    total = sum(x[1] for x in top)
 
-    for s in mr:
-        combined[s["symbol"]] = combined.get(s["symbol"], 0) + s["weight"] * mr_w
-
-    if not combined:
-        return [], regime
-
-    sorted_syms = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:3]
-    total = sum(x[1] for x in sorted_syms)
-
-    signals = [{"symbol": s, "weight": w/total} for s, w in sorted_syms]
-    return signals, regime
+    return [
+        {"symbol": s, "weight": v/total, "side": "long"}
+        for s, v in top
+    ], regime
 
 # =========================
-# PORTFOLIO VOL
-# =========================
-def compute_portfolio_vol(history):
-    if len(history) < 10:
-        return 0.1
-    returns = np.diff(history) / history[:-1]
-    return np.std(returns) * np.sqrt(252)
-
-# =========================
-# RISK ENGINE
+# RISK
 # =========================
 def risk_check():
-    equity = portfolio["equity"]
-    history = portfolio["history"]
+    eq = portfolio["equity"]
+    hist = portfolio["history"]
 
-    if len(history) > 5:
-        peak = max(history)
-        dd = (equity - peak) / peak
+    if len(hist) > 5:
+        peak = max(hist)
+        dd = (eq - peak) / peak
         if dd <= MAX_DRAWDOWN:
-            return "KILL_SWITCH"
+            return "KILL"
 
-    last = portfolio["last_equity"]
-    daily = (equity - last) / last
-
+    daily = (eq - portfolio["last_equity"]) / portfolio["last_equity"]
     if daily <= MAX_DAILY_LOSS:
         portfolio["cooldown"] = COOLDOWN_CYCLES
-        return "DAILY_STOP"
+        return "STOP"
 
     if portfolio["cooldown"] > 0:
         portfolio["cooldown"] -= 1
@@ -203,17 +191,14 @@ def risk_check():
     return "OK"
 
 # =========================
-# EXECUTION
+# EXECUTION (FIXED CASH MODEL)
 # =========================
 def run_paper():
     global portfolio
 
-    risk = risk_check()
-    if risk == "KILL_SWITCH":
-        return {"status":"stopped - drawdown"}
-    if risk in ["DAILY_STOP","COOLDOWN"]:
+    if risk_check() != "OK":
         portfolio["history"].append(portfolio["equity"])
-        return {"status":risk}
+        return {"status": "risk_pause"}
 
     data = load_data()
     signals, regime = generate_signals()
@@ -223,24 +208,11 @@ def run_paper():
 
     idx = min(len(p) for p in data.values()) - 1
 
-    # close trades
-    for s, pos in portfolio["positions"].items():
-        if s in data:
-            price = data[s][idx]
-            pnl = (price - pos["entry_price"]) * pos["shares"]
-            portfolio["trades"].append({
-                "symbol": s,
-                "entry": pos["entry_price"],
-                "exit": price,
-                "pnl": round(pnl,2)
-            })
+    # close all → cash
+    portfolio["cash"] = portfolio["equity"]
+    portfolio["positions"] = {}
 
-    capital = portfolio["equity"]
-
-    # volatility scaling
-    vol = compute_portfolio_vol(portfolio["history"])
-    scale = min(1.5, max(0.5, TARGET_VOL / (vol+1e-6)))
-    capital *= scale
+    capital = portfolio["cash"]
 
     new_positions = {}
 
@@ -253,57 +225,34 @@ def run_paper():
 
         shares = alloc / price
 
-        new_positions[s] = {"shares":shares,"entry_price":price}
+        new_positions[s] = {
+            "shares": shares,
+            "entry_price": price,
+            "side": sig["side"]
+        }
 
+    # compute value
+    position_value = 0
+    for s, pos in new_positions.items():
+        price = data[s][idx]
+
+        if pos["side"] == "long":
+            position_value += pos["shares"] * price
+        else:
+            position_value += pos["shares"] * (pos["entry_price"] - price)
+
+    used = sum(pos["shares"] * pos["entry_price"] for pos in new_positions.values())
+
+    portfolio["cash"] = capital - used
     portfolio["positions"] = new_positions
+    portfolio["equity"] = portfolio["cash"] + position_value
 
-    total = sum(pos["shares"] * data[s][idx] for s,pos in new_positions.items())
-
-    portfolio["equity"] = total
-    portfolio["history"].append(total)
+    portfolio["history"].append(portfolio["equity"])
     portfolio["last_run"] = str(datetime.utcnow())
+    portfolio["last_equity"] = portfolio["equity"]
     portfolio["strategy"] = regime
-    portfolio["last_equity"] = total
 
-    return {"equity":round(total,2),"regime":regime}
-
-# =========================
-# AUTO RUN
-# =========================
-def scheduler():
-    while True:
-        now = datetime.utcnow()
-        if now.hour == 21 and now.minute == 0:
-            run_paper()
-            time.sleep(60)
-        time.sleep(30)
-
-def start_scheduler():
-    t = threading.Thread(target=scheduler)
-    t.daemon = True
-    t.start()
-
-# =========================
-# METRICS
-# =========================
-def get_metrics():
-    equity = portfolio["history"]
-    if len(equity) < 10:
-        return {"message":"not enough data"}
-
-    returns = np.diff(equity)/equity[:-1]
-    sharpe = np.mean(returns)/(np.std(returns)+1e-6)*np.sqrt(252)
-
-    peak = equity[0]
-    dd = 0
-    for e in equity:
-        peak = max(peak,e)
-        dd = min(dd,(e-peak)/peak)
-
-    return {
-        "sharpe":round(sharpe,2),
-        "drawdown_pct":round(dd*100,2)
-    }
+    return {"equity": round(portfolio["equity"],2), "strategy": regime}
 
 # =========================
 # DASHBOARD
@@ -323,23 +272,23 @@ body { background:#0f172a; color:white; font-family:Arial; }
 </head>
 <body>
 
-<h1>📊 Institutional Trading Dashboard</h1>
+<h1>📊 Full Trading System</h1>
 
 <div class="grid">
 <div class="card"><h3>Equity</h3><canvas id="eq"></canvas></div>
 <div class="card"><h3>Drawdown</h3><canvas id="dd"></canvas></div>
 
 <div class="card"><h3>Signals</h3><pre id="signals"></pre></div>
-<div class="card"><h3>Risk</h3><pre id="risk"></pre></div>
+<div class="card"><h3>Portfolio</h3><pre id="portfolio"></pre></div>
 
-<div class="card"><h3>Metrics</h3><pre id="metrics"></pre></div>
-<div class="card"><h3>Positions</h3><pre id="positions"></pre></div>
+<div class="card"><h3>Risk</h3><pre id="risk"></pre></div>
+<div class="card"><h3>Strategy</h3><pre id="strategy"></pre></div>
 </div>
 
 <script>
 let ec, dc;
 
-function drawdown(eq){
+function dd(eq){
  let peak=eq[0];
  return eq.map(e=>{
   peak=Math.max(peak,e);
@@ -350,19 +299,18 @@ function drawdown(eq){
 async function load(){
  let p=await fetch('/paper/status').then(r=>r.json());
  let s=await fetch('/signals').then(r=>r.json());
- let m=await fetch('/paper/metrics').then(r=>r.json());
 
  document.getElementById('signals').innerText=JSON.stringify(s,null,2);
- document.getElementById('positions').innerText=JSON.stringify(p.positions,null,2);
- document.getElementById('metrics').innerText=JSON.stringify(m,null,2);
+ document.getElementById('portfolio').innerText=JSON.stringify(p,null,2);
+ document.getElementById('strategy').innerText=p.strategy;
+
  document.getElementById('risk').innerText=JSON.stringify({
-   cooldown:p.cooldown,
-   equity:p.equity,
-   strategy:p.strategy
+  cooldown:p.cooldown,
+  equity:p.equity
  },null,2);
 
  let eq=p.history||[];
- let dd=drawdown(eq);
+ let d=dd(eq);
 
  if(ec) ec.destroy();
  ec=new Chart(document.getElementById('eq'),{
@@ -373,7 +321,7 @@ async function load(){
  if(dc) dc.destroy();
  dc=new Chart(document.getElementById('dd'),{
   type:'line',
-  data:{labels:dd.map((_,i)=>i),datasets:[{label:'Drawdown %',data:dd}]}
+  data:{labels:d.map((_,i)=>i),datasets:[{label:'Drawdown',data:d}]}
  });
 }
 
@@ -390,7 +338,7 @@ setInterval(load,10000);
 # =========================
 @app.route("/")
 def home():
-    return {"status":"INSTITUTIONAL SYSTEM LIVE"}
+    return {"status":"LIVE SYSTEM"}
 
 @app.route("/signals")
 def signals():
@@ -405,15 +353,9 @@ def run():
 def status():
     return jsonify(portfolio)
 
-@app.route("/paper/metrics")
-def metrics():
-    return jsonify(get_metrics())
-
 # =========================
 # START
 # =========================
-start_scheduler()
-
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT",8080))
     app.run(host="0.0.0.0", port=PORT)
