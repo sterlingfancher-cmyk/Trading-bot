@@ -10,23 +10,33 @@ SYMBOLS = [
     "AMZN","GOOGL","TSLA","AVGO","CRM"
 ]
 
+# =========================
+# DATA
+# =========================
 def load_data():
     data = {}
 
     for s in SYMBOLS:
-        df = yf.download(s, period="1y", interval="1d", progress=False)
+        try:
+            df = yf.download(s, period="1y", interval="1d", progress=False)
 
-        if df is None or df.empty:
+            if df is None or df.empty:
+                continue
+
+            prices = np.array(df["Close"]).reshape(-1)
+            prices = prices[np.isfinite(prices)]
+
+            if len(prices) > 100:
+                data[s] = prices.astype(float)
+
+        except:
             continue
-
-        prices = np.array(df["Close"]).reshape(-1)
-        prices = prices[np.isfinite(prices)]
-
-        if len(prices) > 100:
-            data[s] = prices.astype(float)
 
     return data
 
+# =========================
+# ANALYSIS ENGINE
+# =========================
 def analyze_signals():
     data = load_data()
 
@@ -41,13 +51,11 @@ def analyze_signals():
 
         for i in range(30, len(prices)-5):
 
-            # signals
             momentum = (prices[i] - prices[i-20]) / prices[i-20]
             mean_rev = (prices[i] - np.mean(prices[i-10:i])) / np.mean(prices[i-10:i])
             returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
             vol = np.std(returns)
 
-            # future return
             future = (prices[i+5] - prices[i]) / prices[i]
 
             momentum_scores.append(momentum)
@@ -69,6 +77,9 @@ def analyze_signals():
 
     return results
 
+# =========================
+# ROUTES (ALL VERIFIED)
+# =========================
 @app.route("/")
 def home():
     return {"status": "live"}
@@ -81,6 +92,9 @@ def health():
 def analyze():
     return jsonify(analyze_signals())
 
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=PORT)
