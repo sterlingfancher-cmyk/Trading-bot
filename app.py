@@ -10,10 +10,12 @@ SYMBOLS = [
     "AMZN","GOOGL","TSLA","AVGO","CRM"
 ]
 
-def get_data():
+def load_data():
     data = {}
+
     for s in SYMBOLS:
         df = yf.download(s, period="1y", interval="1d", progress=False)
+
         if df is None or df.empty:
             continue
 
@@ -25,120 +27,47 @@ def get_data():
 
     return data
 
-def get_market():
-    df = yf.download("SPY", period="1y", interval="1d", progress=False)
-    prices = np.array(df["Close"]).reshape(-1)
-    prices = prices[np.isfinite(prices)]
-    return prices
-
-def simulate_segment(data, market, start, end):
-    capital = 10000
-    equity_curve = []
-    positions = {}
-
-    holding_period = 5
-    rebalance_counter = 0
-    cost = 0.001
-
-    for i in range(start, end):
-
-        # 🔥 REGIME FILTER
-        market_fast = np.mean(market[i-20:i])
-        market_slow = np.mean(market[i-50:i])
-
-        if market_fast < market_slow:
-            positions = {}
-            equity_curve.append(capital)
-            continue
-
-        rebalance_counter += 1
-
-        if rebalance_counter >= holding_period:
-
-            scores = []
-            for s, prices in data.items():
-                if i < 20:
-                    continue
-
-                momentum = (prices[i] - prices[i-20]) / prices[i-20]
-                scores.append((s, momentum))
-
-            scores.sort(key=lambda x: x[1], reverse=True)
-            top = scores[:3]
-
-            positions = {}
-            allocation = capital / 3
-
-            for s, _ in top:
-                price = data[s][i]
-                shares = allocation / price
-                positions[s] = shares
-
-            capital *= (1 - cost)
-            rebalance_counter = 0
-
-        total = 0
-        for s, shares in positions.items():
-            total += shares * data[s][i]
-
-        if positions:
-            capital = total
-
-        equity_curve.append(capital)
-
-    if len(equity_curve) < 5:
-        return None
-
-    ret = (equity_curve[-1] - 10000) / 10000
-
-    peak = equity_curve[0]
-    dd = 0
-
-    for e in equity_curve:
-        peak = max(peak, e)
-        dd = min(dd, (e - peak) / peak)
-
-    return {"return": ret, "drawdown": dd}
-
-def walk_forward():
-    data = get_data()
-    market = get_market()
-
-    if len(data) < 5:
-        return {"error": "not enough data"}
-
-    length = min(len(p) for p in data.values())
-
-    train = 60
-    test = 20
+def analyze_signals():
+    data = load_data()
 
     results = []
-    i = 50
 
-    while i + train + test < length:
-        start = i + train
-        end = start + test
+    for s, prices in data.items():
 
-        res = simulate_segment(data, market, start, end)
-        if res:
-            results.append(res)
+        momentum_scores = []
+        future_returns = []
+        mean_rev_scores = []
+        vol_scores = []
 
-        i += test
+        for i in range(30, len(prices)-5):
 
-    if not results:
-        return {"error": "no results"}
+            # signals
+            momentum = (prices[i] - prices[i-20]) / prices[i-20]
+            mean_rev = (prices[i] - np.mean(prices[i-10:i])) / np.mean(prices[i-10:i])
+            returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
+            vol = np.std(returns)
 
-    returns = [r["return"] for r in results]
-    dds = [r["drawdown"] for r in results]
+            # future return
+            future = (prices[i+5] - prices[i]) / prices[i]
 
-    return {
-        "segments": len(results),
-        "avg_return_pct": round(np.mean(returns)*100, 2),
-        "worst_drawdown_pct": round(min(dds)*100, 2),
-        "consistency_pct": round(
-            (sum(1 for r in returns if r > 0)/len(returns))*100, 2
-        )
-    }
+            momentum_scores.append(momentum)
+            mean_rev_scores.append(mean_rev)
+            vol_scores.append(vol)
+            future_returns.append(future)
+
+        if len(future_returns) > 10:
+            corr_momentum = np.corrcoef(momentum_scores, future_returns)[0,1]
+            corr_meanrev = np.corrcoef(mean_rev_scores, future_returns)[0,1]
+            corr_vol = np.corrcoef(vol_scores, future_returns)[0,1]
+
+            results.append({
+                "symbol": s,
+                "momentum_corr": round(float(corr_momentum), 3),
+                "mean_reversion_corr": round(float(corr_meanrev), 3),
+                "volatility_corr": round(float(corr_vol), 3)
+            })
+
+    return results
 
 @app.route("/")
 def home():
@@ -148,9 +77,9 @@ def home():
 def health():
     return {"status": "running"}
 
-@app.route("/walkforward")
-def wf():
-    return jsonify(walk_forward())
+@app.route("/analyze")
+def analyze():
+    return jsonify(analyze_signals())
 
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
