@@ -88,8 +88,14 @@ def generate_signals():
 
     signals = []
     for s, strength in strengths:
-        weight = 0.5*(1/n) + 0.5*(strength/total)
-        signals.append({"symbol": s, "weight": round(weight,3)})
+        equal_w = 1 / n
+        strength_w = strength / total
+        weight = 0.5 * equal_w + 0.5 * strength_w
+
+        signals.append({
+            "symbol": s,
+            "weight": round(weight, 3)
+        })
 
     return signals
 
@@ -103,7 +109,7 @@ def run_paper():
     signals = generate_signals()
     idx = min(len(p) for p in data.values()) - 1
 
-    # close trades
+    # close positions
     for s, pos in portfolio["positions"].items():
         price = data[s][idx]
         pnl = (price - pos["entry_price"]) * pos["shares"]
@@ -112,7 +118,7 @@ def run_paper():
             "symbol": s,
             "entry": pos["entry_price"],
             "exit": price,
-            "pnl": round(pnl,2)
+            "pnl": round(pnl, 2)
         })
 
     if not signals:
@@ -146,7 +152,7 @@ def run_paper():
     portfolio["history"].append(total)
 
     return {
-        "equity": round(total,2),
+        "equity": round(total, 2),
         "positions": list(new_positions.keys())
     }
 
@@ -169,30 +175,33 @@ def get_metrics():
 
     for e in equity:
         peak = max(peak, e)
-        dd = min(dd, (e - peak)/peak)
+        dd = min(dd, (e - peak) / peak)
 
     return {
         "total_trades": len(trades),
-        "win_rate": round(len(wins)/len(trades)*100,2),
-        "total_pnl": round(sum(pnls),2),
-        "max_drawdown_pct": round(dd*100,2)
+        "win_rate": round(len(wins)/len(trades)*100, 2),
+        "total_pnl": round(sum(pnls), 2),
+        "max_drawdown_pct": round(dd * 100, 2)
     }
 
 # =========================
-# WALK-FORWARD
+# BACKTEST (FIXED)
 # =========================
 def simulate_segment(data, start, end):
     capital = 10000
-    positions = {}
     equity_curve = []
+    positions = {}
 
-    holding = 3
-    counter = 0
+    holding_period = 3
+    rebalance_counter = 0
+    cost = 0.001
 
     for i in range(start, end):
-        counter += 1
 
-        if counter >= holding:
+        rebalance_counter += 1
+
+        if rebalance_counter >= holding_period:
+
             scores = []
 
             for s, prices in data.items():
@@ -210,59 +219,89 @@ def simulate_segment(data, start, end):
 
                 if z < -0.7:
                     vol = get_vol(prices, i)
-                    strength = abs(z)/vol
-                    scores.append((s,z,strength))
+                    strength = abs(z) / vol
+                    scores.append((s, z, strength))
 
             if len(scores) >= 2:
                 scores.sort(key=lambda x: x[1])
                 bottom = scores[:3]
 
-                strengths = [(s,strength) for s,_,strength in bottom]
+                strengths = [(s, strength) for s, _, strength in bottom]
                 total = sum(x[1] for x in strengths)
                 n = len(strengths)
 
                 positions = {}
-                for s,strength in strengths:
-                    w = 0.5*(1/n)+0.5*(strength/total)
-                    shares = (capital*w)/data[s][i]
+
+                for s, strength in strengths:
+                    equal_w = 1 / n
+                    strength_w = strength / total
+                    weight = 0.5 * equal_w + 0.5 * strength_w
+
+                    allocation = capital * weight
+                    price = data[s][i]
+                    shares = allocation / price
+
                     positions[s] = shares
 
-            counter = 0
+                capital *= (1 - cost)
+                rebalance_counter = 0
 
-        total = sum(shares*data[s][i] for s,shares in positions.items()) if positions else capital
-        capital = total
+        # mark-to-market (CRITICAL)
+        total_value = 0
+        for s, shares in positions.items():
+            price = data[s][i]
+            total_value += shares * price
+
+        if positions:
+            capital = total_value
+
         equity_curve.append(capital)
 
-    ret = (equity_curve[-1]-10000)/10000
+    if len(equity_curve) < 5:
+        return None
+
+    ret = (equity_curve[-1] - 10000) / 10000
+
     peak = equity_curve[0]
     dd = 0
 
     for e in equity_curve:
-        peak = max(peak,e)
-        dd = min(dd,(e-peak)/peak)
+        peak = max(peak, e)
+        dd = min(dd, (e - peak) / peak)
 
-    return {"return":ret,"drawdown":dd}
+    return {"return": ret, "drawdown": dd}
 
 def walk_forward():
     data = load_data()
+
     length = min(len(p) for p in data.values())
 
-    results=[]
-    i=30
+    train = 60
+    test = 20
 
-    while i+80<length:
-        res = simulate_segment(data,i+60,i+80)
-        results.append(res)
-        i+=20
+    results = []
+    i = 30
 
-    returns=[r["return"] for r in results]
-    dds=[r["drawdown"] for r in results]
+    while i + train + test < length:
+        start = i + train
+        end = start + test
+
+        res = simulate_segment(data, start, end)
+        if res:
+            results.append(res)
+
+        i += test
+
+    returns = [r["return"] for r in results]
+    dds = [r["drawdown"] for r in results]
 
     return {
-        "segments":len(results),
-        "avg_return_pct":round(np.mean(returns)*100,2),
-        "worst_drawdown_pct":round(min(dds)*100,2),
-        "consistency_pct":round(sum(1 for r in returns if r>0)/len(returns)*100,2)
+        "segments": len(results),
+        "avg_return_pct": round(np.mean(returns)*100, 2),
+        "worst_drawdown_pct": round(min(dds)*100, 2),
+        "consistency_pct": round(
+            (sum(1 for r in returns if r > 0)/len(returns))*100, 2
+        )
     }
 
 # =========================
@@ -270,7 +309,7 @@ def walk_forward():
 # =========================
 @app.route("/")
 def home():
-    return {"status": "FULL SYSTEM STABLE"}
+    return {"status": "FULL SYSTEM RESTORED"}
 
 @app.route("/health")
 def health():
