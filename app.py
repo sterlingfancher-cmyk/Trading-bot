@@ -8,63 +8,68 @@ app = Flask(__name__)
 # =========================
 # DATA
 # =========================
-def get_prices(symbol, period="1y"):
-    try:
-        df = yf.download(symbol, period=period, interval="1d", progress=False)
+def get_prices(symbol="AAPL"):
+    df = yf.download(symbol, period="1y", interval="1d", progress=False)
 
-        if df is None or df.empty:
-            return None
-
-        close = np.array(df["Close"]).reshape(-1)
-        close = close[np.isfinite(close)]
-
-        return close.astype(float)
-
-    except:
+    if df is None or df.empty:
         return None
 
+    prices = np.array(df["Close"]).reshape(-1)
+    prices = prices[np.isfinite(prices)]
+
+    return prices.astype(float)
+
 # =========================
-# SIMPLE TEST STRATEGY
+# STRATEGY (ALWAYS ACTIVE)
 # =========================
 def simulate(prices):
-    if prices is None or len(prices) < 100:
-        return None
-
     cash = 10000
     position = 0
-    equity = []
+    equity_curve = []
 
-    for i in range(50, len(prices)):
-        ma_fast = np.mean(prices[i-10:i])
-        ma_slow = np.mean(prices[i-30:i])
+    for i in range(30, len(prices)):
         price = prices[i]
 
-        if ma_fast > ma_slow and position == 0:
-            position = cash / price
-            cash = 0
+        ma_fast = np.mean(prices[i-10:i])
+        ma_slow = np.mean(prices[i-30:i])
 
-        elif ma_fast < ma_slow and position > 0:
-            cash = position * price
-            position = 0
+        # ALWAYS IN OR OUT (no dead zone)
+        if ma_fast > ma_slow:
+            if position == 0:
+                position = cash / price
+                cash = 0
+        else:
+            if position > 0:
+                cash = position * price
+                position = 0
 
-        equity.append(cash + position * price)
+        equity = cash + position * price
+        equity_curve.append(equity)
 
-    if not equity:
+    if len(equity_curve) < 5:
         return None
 
-    ret = (equity[-1] - 10000) / 10000
-    return {"return": float(ret)}
+    ret = (equity_curve[-1] - 10000) / 10000
+
+    peak = equity_curve[0]
+    dd = 0
+
+    for e in equity_curve:
+        peak = max(peak, e)
+        dd = min(dd, (e - peak) / peak)
+
+    return {"return": ret, "drawdown": dd}
 
 # =========================
-# WALKFORWARD (SIMPLIFIED)
+# WALKFORWARD
 # =========================
-def walk_forward(symbol="AAPL"):
-    prices = get_prices(symbol)
+def walk_forward():
+    prices = get_prices()
 
-    if prices is None:
-        return {"error": "no data"}
+    if prices is None or len(prices) < 100:
+        return {"error": "not enough data"}
 
-    window = 50
+    window = 60
     step = 20
 
     results = []
@@ -79,14 +84,13 @@ def walk_forward(symbol="AAPL"):
 
         i += step
 
-    if not results:
-        return {"error": "no results"}
-
     returns = [r["return"] for r in results]
+    dds = [r["drawdown"] for r in results]
 
     return {
         "segments": len(results),
         "avg_return_pct": round(np.mean(returns)*100, 2),
+        "worst_drawdown_pct": round(min(dds)*100, 2),
         "consistency_pct": round(
             (sum(1 for r in returns if r > 0)/len(returns))*100, 2
         )
