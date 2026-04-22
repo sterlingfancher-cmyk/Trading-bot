@@ -83,18 +83,26 @@ def simulate_segment(data, start, end):
             scores.sort(key=lambda x: x[1])
             bottom = scores[:3]
 
-            # 🔥 STRENGTH + VOL WEIGHTING (FINAL UPGRADE)
+            # =========================
+            # 🔥 BLENDED WEIGHTING (FINAL FIX)
+            # =========================
             scores_combined = []
             for s, z, vol in bottom:
                 strength = abs(z) / vol
                 scores_combined.append((s, strength))
 
             total_strength = sum(x[1] for x in scores_combined)
+            n = len(scores_combined)
 
             positions = {}
 
             for s, strength in scores_combined:
-                weight = strength / total_strength
+                equal_weight = 1 / n
+                strength_weight = strength / total_strength
+
+                # 50/50 blend
+                weight = 0.5 * equal_weight + 0.5 * strength_weight
+
                 allocation = capital * weight
                 price = data[s][i]
                 shares = allocation / price
@@ -173,7 +181,7 @@ def walk_forward():
 # =========================
 @app.route("/")
 def home():
-    return {"status": "production MR v2 (strength weighted)"}
+    return {"status": "production MR v3 (blended weighting)"}
 
 @app.route("/health")
 def health():
