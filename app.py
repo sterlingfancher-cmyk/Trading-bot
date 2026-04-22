@@ -10,25 +10,38 @@ SYMBOLS = [
     "AMZN","GOOGL","TSLA","AVGO","CRM"
 ]
 
+# =========================
+# LOAD DATA
+# =========================
 def load_data():
     data = {}
     for s in SYMBOLS:
-        df = yf.download(s, period="1y", interval="1d", progress=False)
-        if df is None or df.empty:
+        try:
+            df = yf.download(s, period="1y", interval="1d", progress=False)
+            if df is None or df.empty:
+                continue
+
+            prices = np.array(df["Close"]).reshape(-1)
+            prices = prices[np.isfinite(prices)]
+
+            if len(prices) > 100:
+                data[s] = prices.astype(float)
+
+        except Exception:
             continue
-
-        prices = np.array(df["Close"]).reshape(-1)
-        prices = prices[np.isfinite(prices)]
-
-        if len(prices) > 100:
-            data[s] = prices.astype(float)
 
     return data
 
+# =========================
+# VOLATILITY
+# =========================
 def get_vol(prices, i):
     returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
     return np.std(returns) + 1e-6
 
+# =========================
+# SIMULATION
+# =========================
 def simulate_segment(data, start, end):
     capital = 10000
     equity_curve = []
@@ -70,14 +83,18 @@ def simulate_segment(data, start, end):
             scores.sort(key=lambda x: x[1])
             bottom = scores[:3]
 
-            # 🔥 VOL-ADJUSTED WEIGHTS
-            inv_vols = [1 / x[2] for x in bottom]
-            total = sum(inv_vols)
+            # 🔥 STRENGTH + VOL WEIGHTING (FINAL UPGRADE)
+            scores_combined = []
+            for s, z, vol in bottom:
+                strength = abs(z) / vol
+                scores_combined.append((s, strength))
+
+            total_strength = sum(x[1] for x in scores_combined)
 
             positions = {}
 
-            for idx, (s, _, vol) in enumerate(bottom):
-                weight = inv_vols[idx] / total
+            for s, strength in scores_combined:
+                weight = strength / total_strength
                 allocation = capital * weight
                 price = data[s][i]
                 shares = allocation / price
@@ -109,6 +126,9 @@ def simulate_segment(data, start, end):
 
     return {"return": ret, "drawdown": dd}
 
+# =========================
+# WALK-FORWARD
+# =========================
 def walk_forward():
     data = load_data()
 
@@ -148,9 +168,12 @@ def walk_forward():
         )
     }
 
+# =========================
+# ROUTES
+# =========================
 @app.route("/")
 def home():
-    return {"status": "production MR v1"}
+    return {"status": "production MR v2 (strength weighted)"}
 
 @app.route("/health")
 def health():
@@ -160,6 +183,9 @@ def health():
 def wf():
     return jsonify(walk_forward())
 
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=PORT)
