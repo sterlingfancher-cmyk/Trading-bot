@@ -34,7 +34,7 @@ def get_data():
     return data
 
 # =========================
-# SIMULATION
+# SIMULATION (REAL PNL)
 # =========================
 def simulate():
     data = get_data()
@@ -47,35 +47,44 @@ def simulate():
     capital = 10000
     equity_curve = []
 
-    positions = {}  # {symbol: shares}
+    positions = {}
+    holding_period = 5   # 🔥 HOLD FOR 5 DAYS
+    rebalance_counter = 0
 
     for i in range(30, length):
 
-        # --- RANK STOCKS ---
-        scores = []
-        for s, prices in data.items():
-            ret = (prices[i] - prices[i-20]) / prices[i-20]
-            scores.append((s, ret))
+        rebalance_counter += 1
 
-        scores.sort(key=lambda x: x[1], reverse=True)
-        top = [s for s, _ in scores[:3]]
+        # 🔁 REBALANCE ONLY EVERY N DAYS
+        if rebalance_counter >= holding_period:
 
-        # --- REBALANCE ---
-        positions = {}
-        allocation = capital / 3
+            scores = []
+            for s, prices in data.items():
+                ret = (prices[i] - prices[i-20]) / prices[i-20]
+                scores.append((s, ret))
 
-        for s in top:
-            price = data[s][i]
-            shares = allocation / price
-            positions[s] = shares
+            scores.sort(key=lambda x: x[1], reverse=True)
+            top = [s for s, _ in scores[:3]]
 
-        # --- MARK TO MARKET ---
+            positions = {}
+            allocation = capital / 3
+
+            for s in top:
+                price = data[s][i]
+                shares = allocation / price
+                positions[s] = shares
+
+            rebalance_counter = 0
+
+        # 📈 MARK TO MARKET (THIS IS THE FIX)
         total_value = 0
         for s, shares in positions.items():
             price = data[s][i]
             total_value += shares * price
 
-        capital = total_value
+        if positions:
+            capital = total_value
+
         equity_curve.append(capital)
 
     if len(equity_curve) < 5:
