@@ -24,6 +24,8 @@ api = REST(API_KEY, API_SECRET, BASE_URL)
 CHECK_INTERVAL = 300
 MAX_TRADES_PER_CYCLE = 4
 
+MAX_DRAWDOWN = -0.10
+
 # =========================
 # DATABASE
 # =========================
@@ -79,67 +81,55 @@ def get_prices(symbol):
 def trend_signals(symbols):
     results = []
     for s in symbols:
-        prices = get_prices(s)
-        if prices is None or len(prices) < 30:
+        p = get_prices(s)
+        if p is None or len(p) < 30:
             continue
-        score = prices[-1] - prices[-10]
+        score = p[-1] - p[-10]
         results.append({"symbol": s, "score": score, "strategy": "trend"})
     return results
 
 def mean_signals(symbols):
     results = []
     for s in symbols:
-        prices = get_prices(s)
-        if prices is None or len(prices) < 30:
+        p = get_prices(s)
+        if p is None or len(p) < 30:
             continue
-        mean = np.mean(prices[-20:])
-        deviation = (prices[-1] - mean) / mean
-        results.append({"symbol": s, "score": -deviation, "strategy": "mean"})
+        mean = np.mean(p[-20:])
+        dev = (p[-1] - mean) / mean
+        results.append({"symbol": s, "score": -dev, "strategy": "mean"})
     return results
 
 # =========================
 # PERFORMANCE TRACKING
 # =========================
 def get_strategy_performance():
-    cursor.execute("SELECT strategy, side, price FROM trades")
+    cursor.execute("SELECT strategy, price FROM trades")
     data = cursor.fetchall()
 
     stats = {"trend": [], "mean": []}
 
-    for strategy, side, price in data:
-        if side == "buy":
-            stats[strategy].append(price)
+    for strat, price in data:
+        stats[strat].append(price)
 
-    performance = {}
-
+    perf = {}
     for k, v in stats.items():
         if len(v) > 1:
-            returns = np.diff(v)
-            performance[k] = float(np.mean(returns))
+            perf[k] = float(np.mean(np.diff(v)))
         else:
-            performance[k] = 0.0
+            perf[k] = 0.0
 
-    return performance
+    return perf
 
-# =========================
-# WEIGHTING ENGINE
-# =========================
 def get_weights():
     perf = get_strategy_performance()
-
     total = sum(abs(v) for v in perf.values()) or 1
 
-    weights = {
-        k: max(v / total, 0.1)  # ensure minimum allocation
-        for k, v in perf.items()
-    }
-
-    return weights
+    return {k: max(v / total, 0.1) for k, v in perf.items()}
 
 # =========================
 # SIGNAL MERGE
 # =========================
-def get_combined_signals():
+def get_signals():
     symbols = ["CRWD","CAT","MDB","NET","AMD","PANW","ZS","MSFT","SHOP","ROKU"]
 
     signals = trend_signals(symbols) + mean_signals(symbols)
@@ -170,10 +160,10 @@ def risk_check():
         peak_equity = equity
 
     peak_equity = max(peak_equity, equity)
-    drawdown = (equity - peak_equity) / peak_equity
+    dd = (equity - peak_equity) / peak_equity
 
-    if drawdown < -0.1:
-        alert("🚨 Max drawdown hit. Liquidating.")
+    if dd < MAX_DRAWDOWN:
+        alert("🚨 Drawdown hit. Liquidating.")
         liquidate_all()
         return False
 
@@ -182,8 +172,9 @@ def risk_check():
 def liquidate_all():
     for p in api.list_positions():
         try:
-            api.submit_order(symbol=p.symbol, qty=p.qty, side="sell",
-                             type="market", time_in_force="day")
+            api.submit_order(symbol=p.symbol, qty=p.qty,
+                             side="sell", type="market",
+                             time_in_force="day")
         except:
             pass
 
@@ -211,7 +202,7 @@ def run_bot():
     equity = float(account.equity)
 
     weights = get_weights()
-    signals = get_combined_signals()
+    signals = get_signals()
 
     trades = 0
 
@@ -224,20 +215,15 @@ def run_bot():
 
         try:
             price = api.get_latest_trade(s["symbol"]).price
-
             w = weights.get(s["strategy"], 0.5)
 
             position_value = equity * 0.02 * w
             qty = int(position_value / price)
             qty = max(1, min(qty, 50))
 
-            api.submit_order(
-                symbol=s["symbol"],
-                qty=qty,
-                side="buy",
-                type="market",
-                time_in_force="day"
-            )
+            api.submit_order(symbol=s["symbol"], qty=qty,
+                             side="buy", type="market",
+                             time_in_force="day")
 
             log_trade(s["symbol"], "buy", qty, price, s["strategy"])
             trades += 1
@@ -258,55 +244,93 @@ def scheduler():
 threading.Thread(target=scheduler, daemon=True).start()
 
 # =========================
-# DATA API
+# BACKTEST
 # =========================
-@app.route("/data")
-def data():
-    cursor.execute("SELECT equity FROM equity")
-    equity = [r[0] for r in cursor.fetchall()]
+def run_backtest(symbol="AAPL", short=10, long=20):
+    df = yf.download(symbol, period="6mo", interval="1d", progress=False)
 
-    cursor.execute("SELECT symbol, strategy FROM trades ORDER BY rowid DESC LIMIT 20")
-    trades = cursor.fetchall()
+    prices = df["Close"].values
 
-    return jsonify({
-        "equity": equity,
-        "signals": get_combined_signals()[:10],
-        "weights": get_weights(),
-        "trades": trades
-    })
+    cash = 10000
+    pos = 0
+    equity = []
+
+    for i in range(long, len(prices)):
+        s_ma = np.mean(prices[i-short:i])
+        l_ma = np.mean(prices[i-long:i])
+        price = prices[i]
+
+        if s_ma > l_ma and pos == 0:
+            pos = cash / price
+            cash = 0
+
+        elif s_ma < l_ma and pos > 0:
+            cash = pos * price
+            pos = 0
+
+        equity.append(cash + pos * price)
+
+    ret = (equity[-1] - 10000) / 10000
+
+    return {"return_pct": round(ret*100,2), "equity": equity}
+
+def optimize():
+    best = None
+    best_ret = -999
+
+    for s in [5,10,15]:
+        for l in [20,30,50]:
+            if s >= l:
+                continue
+
+            res = run_backtest("AAPL", s, l)
+            if res["return_pct"] > best_ret:
+                best_ret = res["return_pct"]
+                best = (s,l)
+
+    return {"best": best, "return": best_ret}
 
 # =========================
-# DASHBOARD
+# ROUTES
 # =========================
 @app.route("/dashboard")
 def dashboard():
-    return Response("""
+    cursor.execute("SELECT equity FROM equity")
+    equity = [r[0] for r in cursor.fetchall()]
+
+    return Response(f"""
 <html>
 <head><script src="https://cdn.jsdelivr.net/npm/chart.js"></script></head>
 <body>
-<h1>🚀 Adaptive Multi-Strategy Dashboard</h1>
-<canvas id="equity"></canvas>
+<h1>🚀 Full Trading System</h1>
+
+<canvas id="eq"></canvas>
 
 <script>
-async function load(){
-    const r = await fetch('/data');
-    const d = await r.json();
-
-    new Chart(document.getElementById('equity'), {
-        type:'line',
-        data:{
-            labels:d.equity.map((_,i)=>i),
-            datasets:[{label:'Equity',data:d.equity}]
-        }
-    });
-}
-
-setInterval(load,5000);
-load();
+new Chart(document.getElementById('eq'), {{
+    type:'line',
+    data:{{
+        labels:{list(range(len(equity)))},
+        datasets:[{{label:'Equity',data:{equity}}}]
+    }}
+}});
 </script>
+
 </body>
 </html>
 """, mimetype="text/html")
+
+@app.route("/backtest")
+def bt():
+    return jsonify(run_backtest())
+
+@app.route("/optimize")
+def opt():
+    return jsonify(optimize())
+
+@app.route("/health")
+def health():
+    return {"status":"running"}
 
 # =========================
 # RUN
