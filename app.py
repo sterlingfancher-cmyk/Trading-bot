@@ -40,7 +40,65 @@ def get_vol(prices, i):
     return np.std(returns) + 1e-6
 
 # =========================
-# SIMULATION
+# SIGNAL ENGINE (LIVE)
+# =========================
+def generate_signals():
+    data = load_data()
+
+    if len(data) < 5:
+        return {"error": "not enough data"}
+
+    latest_index = min(len(p) for p in data.values()) - 1
+
+    scores = []
+
+    for s, prices in data.items():
+        if latest_index < 20:
+            continue
+
+        window = prices[latest_index-20:latest_index]
+        mean = np.mean(window)
+        std = np.std(window)
+
+        if std == 0:
+            continue
+
+        z = (prices[latest_index] - mean) / std
+
+        if z < -0.7:
+            vol = get_vol(prices, latest_index)
+            strength = abs(z) / vol
+            scores.append((s, z, vol, strength))
+
+    if len(scores) < 2:
+        return {"signals": []}
+
+    scores.sort(key=lambda x: x[1])
+    bottom = scores[:3]
+
+    # =========================
+    # BLENDED WEIGHTING
+    # =========================
+    strengths = [(s, strength) for s, _, _, strength in bottom]
+    total_strength = sum(x[1] for x in strengths)
+    n = len(strengths)
+
+    signals = []
+
+    for s, strength in strengths:
+        equal_weight = 1 / n
+        strength_weight = strength / total_strength
+        weight = 0.5 * equal_weight + 0.5 * strength_weight
+
+        signals.append({
+            "symbol": s,
+            "weight": round(weight, 3)
+        })
+
+    return {"signals": signals}
+
+# =========================
+# SIMULATION (BACKTEST)
 # =========================
 def simulate_segment(data, start, end):
     capital = 10000
@@ -74,7 +132,8 @@ def simulate_segment(data, start, end):
 
                 if z < -0.7:
                     vol = get_vol(prices, i)
-                    scores.append((s, z, vol))
+                    strength = abs(z) / vol
+                    scores.append((s, z, vol, strength))
 
             if len(scores) < 2:
                 equity_curve.append(capital)
@@ -83,24 +142,15 @@ def simulate_segment(data, start, end):
             scores.sort(key=lambda x: x[1])
             bottom = scores[:3]
 
-            # =========================
-            # 🔥 BLENDED WEIGHTING (FINAL FIX)
-            # =========================
-            scores_combined = []
-            for s, z, vol in bottom:
-                strength = abs(z) / vol
-                scores_combined.append((s, strength))
-
-            total_strength = sum(x[1] for x in scores_combined)
-            n = len(scores_combined)
+            strengths = [(s, strength) for s, _, _, strength in bottom]
+            total_strength = sum(x[1] for x in strengths)
+            n = len(strengths)
 
             positions = {}
 
-            for s, strength in scores_combined:
+            for s, strength in strengths:
                 equal_weight = 1 / n
                 strength_weight = strength / total_strength
-
-                # 50/50 blend
                 weight = 0.5 * equal_weight + 0.5 * strength_weight
 
                 allocation = capital * weight
@@ -181,11 +231,15 @@ def walk_forward():
 # =========================
 @app.route("/")
 def home():
-    return {"status": "production MR v3 (blended weighting)"}
+    return {"status": "live trading system"}
 
 @app.route("/health")
 def health():
     return {"status": "running"}
+
+@app.route("/signals")
+def signals():
+    return jsonify(generate_signals())
 
 @app.route("/walkforward")
 def wf():
