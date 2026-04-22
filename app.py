@@ -18,9 +18,15 @@ SYMBOLS = [
     "SPY","QQQ"
 ]
 
+# ===== RISK / PORTFOLIO =====
 BASE_RISK = 0.02
 MAX_HEAT = 0.25
-MAX_POSITIONS = 4
+MAX_POSITIONS = 3
+REBALANCE_EVERY = 12
+
+# ===== SIGNAL THRESHOLDS =====
+MIN_MOMENTUM = 0.03     # 3% over 20d
+MIN_PRICE = 5
 
 def safe_float(x):
     try:
@@ -49,7 +55,7 @@ def load_data():
             if df is None or df.empty:
                 continue
             prices = np.array(df["Close"], dtype=float)
-            if len(prices) > 60:
+            if len(prices) > 80:
                 data[s] = prices
         except:
             continue
@@ -60,44 +66,66 @@ def get_regime(data):
     spy = data.get("SPY")
     if spy is None:
         return "neutral"
-    return "bull" if np.mean(spy[-20:]) > np.mean(spy[-50:]) else "bear"
+    ma20 = np.mean(spy[-20:])
+    ma50 = np.mean(spy[-50:])
+    return "bull" if ma20 > ma50 else "bear"
 
 # ================= VOL =================
 def get_vol(p, idx):
     r = np.diff(p[idx-20:idx]) / p[idx-20:idx-1]
     return safe_float(np.std(r)) + 1e-6
 
-# ================= SIGNALS =================
+# ================= SIGNAL ENGINE (UPGRADED) =================
 def generate_signals(data, idx, regime):
-    scores = []
+    candidates = []
 
     for s,p in data.items():
         try:
-            ret = (p[idx]/p[idx-20]) - 1
+            price = p[idx]
+            if price < MIN_PRICE:
+                continue
+
+            ma50 = np.mean(p[idx-50:idx])
+            ret20 = (p[idx]/p[idx-20]) - 1
             vol = get_vol(p, idx)
-            score = ret / vol
+
+            # ===== TREND FILTER =====
+            if regime == "bull" and price < ma50:
+                continue
+            if regime == "bear" and price > ma50:
+                continue
+
+            # ===== MOMENTUM FILTER =====
+            if regime == "bull" and ret20 < MIN_MOMENTUM:
+                continue
+            if regime == "bear" and ret20 > -MIN_MOMENTUM:
+                continue
+
+            score = ret20 / vol
 
             if regime == "bear":
                 score = -score
 
-            scores.append((s, safe_float(score), vol))
+            candidates.append((s, safe_float(score), vol))
+
         except:
             continue
 
-    scores = sorted(scores, key=lambda x:x[1], reverse=True)
+    # ===== RANK =====
+    candidates = sorted(candidates, key=lambda x:x[1], reverse=True)
 
-    # fallback with randomness to force rotation
-    if not scores:
+    # ===== FALLBACK (RARE) =====
+    if not candidates:
         syms = list(data.keys())
         np.random.shuffle(syms)
         return [(s,0.01,0.02) for s in syms[:MAX_POSITIONS]]
 
-    return scores[:MAX_POSITIONS]
+    return candidates[:MAX_POSITIONS]
 
 # ================= RISK =================
 def drawdown_factor():
     dd = (portfolio["equity"] - portfolio["peak"]) / portfolio["peak"]
-    return max(0.3, 1 + dd * 3)
+    return max(0.4, 1 + dd * 3)
 
 # ================= EXECUTION =================
 def run_paper():
@@ -112,7 +140,7 @@ def run_paper():
         max_len = min(lengths) - 1
 
         if portfolio["step"] >= max_len:
-            portfolio["step"] = 60
+            portfolio["step"] = 80
 
         idx = portfolio["step"]
         portfolio["step"] += 1
@@ -123,7 +151,7 @@ def run_paper():
         portfolio["last_signals"] = signals
         portfolio["strategy"] = regime
 
-        # ===== MARK TO MARKET (FIXED SHORT LOGIC) =====
+        # ===== MARK TO MARKET =====
         equity = portfolio["cash"]
 
         for s,pos in portfolio["positions"].items():
@@ -144,9 +172,10 @@ def run_paper():
         current = set(portfolio["positions"].keys())
         target = set(s[0] for s in signals)
 
-        # ===== FORCE ROTATION =====
-        rebalance = (portfolio["step"] % 5 == 0)
+        # ===== LOWER CHURN =====
+        rebalance = (portfolio["step"] % REBALANCE_EVERY == 0)
 
+        # ===== CLOSE =====
         for s in list(current):
             if s not in target or rebalance:
                 pos = portfolio["positions"][s]
@@ -157,11 +186,14 @@ def run_paper():
                     pnl = (pos["entry"] - price) * pos["shares"]
 
                 portfolio["cash"] += pos["shares"] * price
-                portfolio["trades"].append({"symbol": s, "pnl": round(pnl,2)})
+                portfolio["trades"].append({
+                    "symbol": s,
+                    "pnl": round(pnl,2)
+                })
 
                 del portfolio["positions"][s]
 
-        # ===== OPEN NEW =====
+        # ===== OPEN =====
         total_alloc = 0
 
         for s,score,vol in signals:
@@ -190,7 +222,11 @@ def run_paper():
         portfolio["history"].append(portfolio["equity"])
         portfolio["last_run"] = str(datetime.utcnow())
 
-        return {"equity": round(portfolio["equity"],2), "regime": regime}
+        return {
+            "equity": round(portfolio["equity"],2),
+            "regime": regime,
+            "positions": list(portfolio["positions"].keys())
+        }
 
     except Exception as e:
         return {"error": str(e)}
@@ -222,7 +258,7 @@ def metrics():
         "total_pnl": round(sum(pnls),2)
     }
 
-# ================= UI DASHBOARD =================
+# ================= DASHBOARD =================
 @app.route("/dashboard")
 def dashboard():
     return render_template_string("""
@@ -242,7 +278,6 @@ body {background:#0f172a;color:white;font-family:Arial}
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
 <div class="card"><canvas id="dd"></canvas></div>
-
 <div class="card"><pre id="signals"></pre></div>
 <div class="card"><pre id="metrics"></pre></div>
 </div>
@@ -294,7 +329,7 @@ setInterval(load,10000);
 
 @app.route("/")
 def home():
-    return {"status":"INSTITUTIONAL SYSTEM LIVE"}
+    return {"status":"INSTITUTIONAL EDGE SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run():
