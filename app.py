@@ -46,7 +46,7 @@ def load_data():
     for s in SYMBOLS:
         try:
             df = yf.download(s, period="6mo", progress=False)
-            if df.empty:
+            if df is None or df.empty:
                 continue
             prices = np.array(df["Close"], dtype=float)
             if len(prices) > 60:
@@ -67,27 +67,36 @@ def get_vol(p, idx):
     r = np.diff(p[idx-20:idx]) / p[idx-20:idx-1]
     return safe_float(np.std(r)) + 1e-6
 
-# ================= SIGNAL =================
+# ================= SIGNAL ENGINE (FIXED) =================
 def generate_signals(data, idx, regime):
     scores = []
+
     for s,p in data.items():
         try:
             ret = (p[idx]/p[idx-20]) - 1
             vol = get_vol(p, idx)
             score = ret / vol
+
             if regime == "bear":
                 score = -score
-            scores.append((s, score, vol))
+
+            scores.append((s, safe_float(score), vol))
         except:
             continue
 
     scores = sorted(scores, key=lambda x:x[1], reverse=True)
+
+    # 🔥 ALWAYS TRADE FIX
+    if not scores:
+        fallback = list(data.keys())[:MAX_POSITIONS]
+        return [(s, 0.01, 0.02) for s in fallback]
+
     return scores[:MAX_POSITIONS]
 
 # ================= RISK =================
 def drawdown_factor():
     dd = (portfolio["equity"] - portfolio["peak"]) / portfolio["peak"]
-    return max(0.3, 1 + dd * 3)  # reduces risk during drawdown
+    return max(0.3, 1 + dd * 3)
 
 # ================= EXECUTION =================
 def run_paper():
@@ -99,7 +108,12 @@ def run_paper():
             return {"error":"no data"}
 
         lengths = [len(p) for p in data.values()]
-        idx = min(lengths) - 1 if portfolio["step"] >= min(lengths)-1 else portfolio["step"]
+        max_len = min(lengths) - 1
+
+        if portfolio["step"] >= max_len:
+            portfolio["step"] = 60
+
+        idx = portfolio["step"]
         portfolio["step"] += 1
 
         regime = get_regime(data)
@@ -108,7 +122,7 @@ def run_paper():
         portfolio["last_signals"] = signals
         portfolio["strategy"] = regime
 
-        # mark to market
+        # ===== MARK TO MARKET =====
         equity = portfolio["cash"]
         for s,pos in portfolio["positions"].items():
             if s in data:
@@ -121,16 +135,17 @@ def run_paper():
         portfolio["equity"] = safe_float(equity)
         portfolio["peak"] = max(portfolio["peak"], portfolio["equity"])
 
-        # risk sizing
+        # ===== RISK UNIT =====
         risk_unit = portfolio["equity"] * BASE_RISK * drawdown_factor()
 
-        # close old
+        # ===== CLOSE OLD =====
         current = set(portfolio["positions"].keys())
         target = set(s[0] for s in signals)
 
         for s in list(current - target):
             pos = portfolio["positions"][s]
             price = safe_float(data[s][idx])
+
             pnl = (price - pos["entry"]) * pos["shares"]
             if pos["side"] == "short":
                 pnl = (pos["entry"] - price) * pos["shares"]
@@ -139,7 +154,7 @@ def run_paper():
             portfolio["trades"].append({"symbol": s, "pnl": round(pnl,2)})
             del portfolio["positions"][s]
 
-        # open new
+        # ===== OPEN NEW =====
         total_alloc = 0
 
         for s,score,vol in signals:
