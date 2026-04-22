@@ -20,38 +20,31 @@ def get_prices(symbol="AAPL"):
     return prices.astype(float)
 
 # =========================
-# IMPROVED STRATEGY
+# BREAKOUT STRATEGY
 # =========================
 def simulate(prices):
     cash = 10000
     position = 0
     equity_curve = []
 
-    for i in range(50, len(prices)):
+    for i in range(30, len(prices)):
         price = prices[i]
 
-        ma_fast = np.mean(prices[i-10:i])
-        ma_slow = np.mean(prices[i-30:i])
+        # 🔥 breakout level
+        recent_high = np.max(prices[i-20:i])
 
-        # 🔥 momentum strength
-        momentum = (price - prices[i-20]) / prices[i-20]
-
-        # 🔥 volatility filter
+        # 🔥 volatility expansion
         returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
         vol = np.std(returns)
 
-        # ENTRY CONDITIONS
-        if (
-            ma_fast > ma_slow and
-            momentum > 0.02 and      # strong move
-            vol < 0.03              # not chaotic
-        ):
+        # ENTRY: breakout + expansion
+        if price > recent_high and vol > 0.01:
             if position == 0:
                 position = cash / price
                 cash = 0
 
-        # EXIT
-        elif ma_fast < ma_slow:
+        # EXIT: momentum loss
+        elif price < np.mean(prices[i-10:i]):
             if position > 0:
                 cash = position * price
                 position = 0
