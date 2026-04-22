@@ -51,8 +51,9 @@ def load_data():
     for s in SYMBOLS:
         try:
             df = yf.download(s, period="6mo", interval="1d", progress=False)
-            if df.empty:
+            if df is None or df.empty:
                 continue
+
             prices = np.array(df["Close"])
             volumes = np.array(df["Volume"])
 
@@ -64,13 +65,16 @@ def load_data():
                 continue
 
             data[s] = prices
-        except:
+        except Exception:
             continue
     return data
 
 def get_vol(prices, i):
-    r = np.diff(prices[i-20:i]) / prices[i-20:i-1]
-    return np.std(r) + 1e-6
+    try:
+        r = np.diff(prices[i-20:i]) / prices[i-20:i-1]
+        return np.std(r) + 1e-6
+    except:
+        return 1e-6
 
 # =========================
 # REGIME
@@ -79,6 +83,10 @@ def get_regime():
     try:
         df = yf.download("SPY", period="3mo", progress=False)
         p = np.array(df["Close"])
+
+        if len(p) < 50:
+            return "neutral", 0.5
+
         ma20 = np.mean(p[-20:])
         ma50 = np.mean(p[-50:])
         strength = (ma20 - ma50) / ma50
@@ -96,24 +104,33 @@ def get_regime():
 def momentum(data, idx):
     scores = []
     for s,p in data.items():
-        ret = (p[idx]/p[idx-20])-1
-        vol = get_vol(p, idx)
-        scores.append((s, ret/vol))
+        try:
+            ret = (p[idx]/p[idx-20])-1
+            vol = get_vol(p, idx)
+            scores.append((s, ret/vol))
+        except:
+            continue
     return sorted(scores, key=lambda x:x[1], reverse=True)[:3]
 
 def mean_reversion(data, idx):
     scores = []
     for s,p in data.items():
-        z = (p[idx]-np.mean(p[idx-20:idx]))/np.std(p[idx-20:idx])
-        if z < -0.7:
-            scores.append((s, abs(z)))
+        try:
+            z = (p[idx]-np.mean(p[idx-20:idx]))/np.std(p[idx-20:idx])
+            if z < -0.7:
+                scores.append((s, abs(z)))
+        except:
+            continue
     return sorted(scores, key=lambda x:x[1], reverse=True)[:3]
 
 def short_strategy(data, idx):
     scores = []
     for s,p in data.items():
-        ret = (p[idx]/p[idx-20])-1
-        scores.append((s, ret))
+        try:
+            ret = (p[idx]/p[idx-20])-1
+            scores.append((s, ret))
+        except:
+            continue
     return sorted(scores, key=lambda x:x[1])[:3]
 
 # =========================
@@ -128,7 +145,7 @@ def generate_signals_with_data(data):
 
     if regime == "bear":
         shorts = short_strategy(data, idx)
-        total = sum(abs(x[1]) for x in shorts)
+        total = sum(abs(x[1]) for x in shorts) or 1
         return [{"symbol":s,"weight":abs(v)/total,"side":"short"} for s,v in shorts], "bear_short"
 
     mom = momentum(data, idx)
@@ -140,4 +157,174 @@ def generate_signals_with_data(data):
     for s,v in mr:
         combined[s] = combined.get(s,0)+v*(1-w)
 
-    top = sorted(combined.items(), key=lambda x:x[1], reverse=True)[:3
+    top = sorted(combined.items(), key=lambda x:x[1], reverse=True)[:3]
+    total = sum(x[1] for x in top) or 1
+
+    return [{"symbol":s,"weight":v/total,"side":"long"} for s,v in top], regime
+
+def generate_signals():
+    return generate_signals_with_data(load_data())
+
+# =========================
+# RISK
+# =========================
+def risk_check():
+    eq = portfolio["equity"]
+    hist = portfolio["history"]
+
+    if len(hist)>5:
+        peak=max(hist)
+        if (eq-peak)/peak <= MAX_DRAWDOWN:
+            return "KILL"
+
+    daily = (eq-portfolio["last_equity"])/portfolio["last_equity"]
+    if daily <= MAX_DAILY_LOSS:
+        portfolio["cooldown"]=COOLDOWN_CYCLES
+        return "STOP"
+
+    if portfolio["cooldown"]>0:
+        portfolio["cooldown"]-=1
+        return "COOLDOWN"
+
+    return "OK"
+
+# =========================
+# EXECUTION
+# =========================
+def run_paper():
+    global portfolio
+
+    if risk_check() != "OK":
+        portfolio["history"].append(portfolio["equity"])
+        return {"status":"risk_pause"}
+
+    data = load_data()
+    signals, regime = generate_signals_with_data(data)
+
+    portfolio["last_signals"] = signals
+
+    if not data:
+        return {"error":"no data"}
+
+    idx = min(len(p) for p in data.values()) - 1
+
+    # log trades
+    for s,pos in portfolio["positions"].items():
+        if s in data:
+            price = data[s][idx]
+            pnl = (price-pos["entry_price"])*pos["shares"] if pos["side"]=="long" else (pos["entry_price"]-price)*pos["shares"]
+            portfolio["trades"].append({
+                "symbol":s,
+                "side":pos["side"],
+                "entry":pos["entry_price"],
+                "exit":price,
+                "pnl":round(pnl,2)
+            })
+
+    # reset
+    portfolio["cash"]=portfolio["equity"]
+    portfolio["positions"]={}
+
+    new_pos={}
+    for sig in signals:
+        s=sig["symbol"]
+        if s not in data:
+            continue
+
+        price=data[s][idx]
+
+        alloc = portfolio["cash"] * min(sig["weight"], MAX_POSITION_SIZE)
+        alloc = min(alloc, portfolio["equity"]*MAX_POSITION_RISK)
+
+        shares=alloc/price
+
+        new_pos[s]={"shares":shares,"entry_price":price,"side":sig["side"]}
+
+    val=0
+    for s,pos in new_pos.items():
+        price=data[s][idx]
+        if pos["side"]=="long":
+            val += pos["shares"]*price
+        else:
+            val += pos["shares"]*(pos["entry_price"]-price)
+
+    used=sum(pos["shares"]*pos["entry_price"] for pos in new_pos.values())
+
+    portfolio["cash"] -= used
+    portfolio["positions"]=new_pos
+    portfolio["equity"]=portfolio["cash"]+val
+
+    portfolio["history"].append(portfolio["equity"])
+    portfolio["last_run"]=str(datetime.utcnow())
+    portfolio["last_equity"]=portfolio["equity"]
+    portfolio["strategy"]=regime
+
+    return {"equity":round(portfolio["equity"],2),"strategy":regime}
+
+# =========================
+# METRICS
+# =========================
+def get_metrics():
+    eq = portfolio["history"]
+    if len(eq)<5:
+        return {"message":"not enough data"}
+
+    r = np.diff(eq)/eq[:-1]
+    sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
+
+    peak=eq[0]; dd=0
+    for e in eq:
+        peak=max(peak,e)
+        dd=min(dd,(e-peak)/peak)
+
+    pnls=[t["pnl"] for t in portfolio["trades"]]
+    wins=[p for p in pnls if p>0]
+
+    return {
+        "sharpe":round(sharpe,2),
+        "drawdown_pct":round(dd*100,2),
+        "trades":len(pnls),
+        "win_rate":round(len(wins)/len(pnls)*100,2) if pnls else 0,
+        "total_pnl":round(sum(pnls),2)
+    }
+
+# =========================
+# DASHBOARD
+# =========================
+@app.route("/dashboard")
+def dashboard():
+    return render_template_string("<h2>Dashboard Running</h2>")
+
+# =========================
+# ROUTES
+# =========================
+@app.route("/")
+def home():
+    return {"status":"LIVE SYSTEM"}
+
+@app.route("/signals")
+def signals():
+    if portfolio["last_signals"]:
+        return jsonify({
+            "regime": portfolio["strategy"],
+            "signals": portfolio["last_signals"]
+        })
+    else:
+        s,r = generate_signals()
+        return jsonify({"regime":r,"signals":s})
+
+@app.route("/paper/run")
+def run():
+    return jsonify(run_paper())
+
+@app.route("/paper/status")
+def status():
+    return jsonify(portfolio)
+
+@app.route("/paper/metrics")
+def metrics():
+    return jsonify(get_metrics())
+
+# =========================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8080)))
