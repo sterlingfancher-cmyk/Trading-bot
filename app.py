@@ -2,7 +2,7 @@ import os
 import numpy as np
 import yfinance as yf
 from datetime import datetime
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
@@ -49,7 +49,7 @@ portfolio = {
 }
 
 # =========================
-# DATA
+# DATA (SAFE)
 # =========================
 def load_data():
     data = {}
@@ -70,7 +70,7 @@ def load_data():
                 continue
 
             data[s] = prices
-        except:
+        except Exception:
             continue
     return data
 
@@ -121,7 +121,10 @@ def mean_reversion(data, idx):
     scores = []
     for s,p in data.items():
         try:
-            z = (p[idx]-np.mean(p[idx-20:idx]))/np.std(p[idx-20:idx])
+            std = np.std(p[idx-20:idx])
+            if std == 0:
+                continue
+            z = (p[idx]-np.mean(p[idx-20:idx]))/std
             if z < -0.7:
                 scores.append((s, abs(z)))
         except:
@@ -142,10 +145,14 @@ def short_strategy(data, idx):
 # SIGNAL ENGINE
 # =========================
 def generate_signals_with_data(data):
-    if len(data) < 5:
-        return [], "none"
+    if not data or len(data) < 5:
+        return [], "no_data"
 
-    idx = min(len(p) for p in data.values()) - 1
+    lengths = [len(p) for p in data.values() if len(p) > 50]
+    if not lengths:
+        return [], "no_data"
+
+    idx = min(lengths) - 1
     regime, w = get_regime()
 
     if regime == "bear":
@@ -162,13 +169,13 @@ def generate_signals_with_data(data):
     for s,v in mr:
         combined[s] = combined.get(s,0)+v*(1-w)
 
+    if not combined:
+        return [], regime
+
     top = sorted(combined.items(), key=lambda x:x[1], reverse=True)[:3]
     total = sum(x[1] for x in top) or 1
 
     return [{"symbol":s,"weight":v/total,"side":"long"} for s,v in top], regime
-
-def generate_signals():
-    return generate_signals_with_data(load_data())
 
 # =========================
 # RISK
@@ -194,76 +201,80 @@ def risk_check():
     return "OK"
 
 # =========================
-# EXECUTION
+# EXECUTION (FULLY SAFE)
 # =========================
 def run_paper():
     global portfolio
 
-    if risk_check() != "OK":
+    try:
+        if risk_check() != "OK":
+            portfolio["history"].append(portfolio["equity"])
+            return {"status":"risk_pause"}
+
+        data = load_data()
+        if not data:
+            return {"error":"no market data"}
+
+        signals, regime = generate_signals_with_data(data)
+        portfolio["last_signals"] = signals
+
+        lengths = [len(p) for p in data.values() if len(p) > 50]
+        if not lengths:
+            return {"error":"insufficient data"}
+
+        idx = min(lengths) - 1
+
+        # log trades
+        for s,pos in portfolio["positions"].items():
+            if s in data:
+                price = data[s][idx]
+                pnl = (price-pos["entry_price"])*pos["shares"] if pos["side"]=="long" else (pos["entry_price"]-price)*pos["shares"]
+                portfolio["trades"].append({
+                    "symbol":s,
+                    "side":pos["side"],
+                    "entry":pos["entry_price"],
+                    "exit":price,
+                    "pnl":round(pnl,2)
+                })
+
+        # reset
+        portfolio["cash"]=portfolio["equity"]
+        portfolio["positions"]={}
+
+        new_pos={}
+        for sig in signals:
+            s=sig["symbol"]
+            if s not in data:
+                continue
+
+            price=data[s][idx]
+
+            alloc = portfolio["cash"] * min(sig["weight"], MAX_POSITION_SIZE)
+            alloc = min(alloc, portfolio["equity"]*MAX_POSITION_RISK)
+
+            shares=alloc/price
+            new_pos[s]={"shares":shares,"entry_price":price,"side":sig["side"]}
+
+        val=0
+        for s,pos in new_pos.items():
+            price=data[s][idx]
+            val += pos["shares"]*price if pos["side"]=="long" else pos["shares"]*(pos["entry_price"]-price)
+
+        used=sum(pos["shares"]*pos["entry_price"] for pos in new_pos.values())
+
+        portfolio["cash"] -= used
+        portfolio["positions"]=new_pos
+        portfolio["equity"]=portfolio["cash"]+val
+
         portfolio["history"].append(portfolio["equity"])
-        return {"status":"risk_pause"}
+        portfolio["last_run"]=str(datetime.utcnow())
+        portfolio["last_equity"]=portfolio["equity"]
+        portfolio["strategy"]=regime
 
-    data = load_data()
-    signals, regime = generate_signals_with_data(data)
-    portfolio["last_signals"] = signals
+        return {"equity":round(portfolio["equity"],2),"strategy":regime}
 
-    if not data:
-        return {"error":"no data"}
-
-    idx = min(len(p) for p in data.values()) - 1
-
-    # log trades
-    for s,pos in portfolio["positions"].items():
-        if s in data:
-            price = data[s][idx]
-            pnl = (price-pos["entry_price"])*pos["shares"] if pos["side"]=="long" else (pos["entry_price"]-price)*pos["shares"]
-            portfolio["trades"].append({
-                "symbol":s,
-                "side":pos["side"],
-                "entry":pos["entry_price"],
-                "exit":price,
-                "pnl":round(pnl,2)
-            })
-
-    # reset positions
-    portfolio["cash"]=portfolio["equity"]
-    portfolio["positions"]={}
-
-    new_pos={}
-    for sig in signals:
-        s=sig["symbol"]
-        if s not in data:
-            continue
-
-        price=data[s][idx]
-        alloc = portfolio["cash"] * min(sig["weight"], MAX_POSITION_SIZE)
-        alloc = min(alloc, portfolio["equity"]*MAX_POSITION_RISK)
-        shares=alloc/price
-
-        new_pos[s]={"shares":shares,"entry_price":price,"side":sig["side"]}
-
-    val=0
-    for s,pos in new_pos.items():
-        price=data[s][idx]
-        if pos["side"]=="long":
-            val += pos["shares"]*price
-        else:
-            val += pos["shares"]*(pos["entry_price"]-price)
-
-    used=sum(pos["shares"]*pos["entry_price"] for pos in new_pos.values())
-
-    portfolio["cash"] -= used
-    portfolio["positions"]=new_pos
-    portfolio["equity"]=portfolio["cash"]+val
-
-    portfolio["history"].append(portfolio["equity"])
-    portfolio["last_run"]=str(datetime.utcnow())
-    portfolio["last_equity"]=portfolio["equity"]
-    portfolio["strategy"]=regime
-
-    print("RUN:", datetime.utcnow(), "Equity:", portfolio["equity"])
-
-    return {"equity":round(portfolio["equity"],2),"strategy":regime}
+    except Exception as e:
+        return {"error": str(e)}
 
 # =========================
 # METRICS
@@ -293,13 +304,6 @@ def get_metrics():
     }
 
 # =========================
-# DASHBOARD
-# =========================
-@app.route("/dashboard")
-def dashboard():
-    return render_template_string("<h2>System Running - Dashboard Active</h2>")
-
-# =========================
 # ROUTES
 # =========================
 @app.route("/")
@@ -313,9 +317,7 @@ def signals():
             "regime": portfolio["strategy"],
             "signals": portfolio["last_signals"]
         })
-    else:
-        s,r = generate_signals()
-        return jsonify({"regime":r,"signals":s})
+    return jsonify({"regime":"init","signals":[]})
 
 @app.route("/paper/run")
 def run():
