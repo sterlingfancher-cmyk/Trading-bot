@@ -45,7 +45,8 @@ portfolio = {
     "strategy": None,
     "cooldown": 0,
     "last_equity": 10000.0,
-    "last_signals": []
+    "last_signals": [],
+    "step": 60  # 🔥 time progression index
 }
 
 # =========================
@@ -144,15 +145,10 @@ def short_strategy(data, idx):
 # =========================
 # SIGNAL ENGINE
 # =========================
-def generate_signals_with_data(data):
+def generate_signals_with_data(data, idx):
     if not data or len(data) < 5:
         return [], "no_data"
 
-    lengths = [len(p) for p in data.values() if len(p) > 50]
-    if not lengths:
-        return [], "no_data"
-
-    idx = min(lengths) - 1
     regime, w = get_regime()
 
     if regime == "bear":
@@ -201,7 +197,7 @@ def risk_check():
     return "OK"
 
 # =========================
-# EXECUTION (FIXED)
+# EXECUTION (TIME FIXED)
 # =========================
 def run_paper():
     global portfolio
@@ -215,14 +211,21 @@ def run_paper():
         if not data:
             return {"error":"no market data"}
 
-        signals, regime = generate_signals_with_data(data)
-        portfolio["last_signals"] = signals
-
-        lengths = [len(p) for p in data.values() if len(p) > 50]
+        lengths = [len(p) for p in data.values() if len(p) > 60]
         if not lengths:
             return {"error":"insufficient data"}
 
-        idx = min(lengths) - 1
+        max_len = min(lengths) - 1
+
+        # 🔥 TIME PROGRESSION
+        if portfolio["step"] >= max_len:
+            portfolio["step"] = 60
+
+        idx = portfolio["step"]
+        portfolio["step"] += 1
+
+        signals, regime = generate_signals_with_data(data, idx)
+        portfolio["last_signals"] = signals
 
         # log trades
         for s,pos in portfolio["positions"].items():
@@ -284,12 +287,10 @@ def home():
 
 @app.route("/signals")
 def signals():
-    if portfolio["last_signals"]:
-        return jsonify({
-            "regime": portfolio["strategy"],
-            "signals": portfolio["last_signals"]
-        })
-    return jsonify({"regime":"init","signals":[]})
+    return jsonify({
+        "regime": portfolio.get("strategy","init"),
+        "signals": portfolio.get("last_signals",[])
+    })
 
 @app.route("/paper/run")
 def run():
