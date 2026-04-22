@@ -10,15 +10,10 @@ SYMBOLS = [
     "AMZN","GOOGL","TSLA","AVGO","CRM"
 ]
 
-# =========================
-# LOAD DATA
-# =========================
 def get_data():
     data = {}
-
     for s in SYMBOLS:
         df = yf.download(s, period="1y", interval="1d", progress=False)
-
         if df is None or df.empty:
             continue
 
@@ -30,75 +25,49 @@ def get_data():
 
     return data
 
-# =========================
-# VOLATILITY
-# =========================
-def get_volatility(prices, i):
-    returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
-    return np.std(returns) if len(returns) > 0 else 0.01
-
-# =========================
-# SIMULATION
-# =========================
 def simulate_segment(data, start, end):
     capital = 10000
-    positions = {}
     equity_curve = []
+    positions = {}
 
     holding_period = 5
     rebalance_counter = 0
-    cost_rate = 0.001
+    cost = 0.001
 
     for i in range(start, end):
+
         rebalance_counter += 1
 
         if rebalance_counter >= holding_period:
 
             scores = []
-
             for s, prices in data.items():
                 if i < 20:
                     continue
 
                 momentum = (prices[i] - prices[i-20]) / prices[i-20]
-
-                # 🔥 filter weak signals
-                if momentum < 0.01:
-                    continue
-
-                vol = get_volatility(prices, i)
-
-                scores.append((s, momentum, vol))
-
-            if len(scores) < 3:
-                continue
+                scores.append((s, momentum))
 
             scores.sort(key=lambda x: x[1], reverse=True)
-            top = scores[:5]
-
-            # 🔥 VOL-ADJUSTED ALLOCATION
-            inv_vols = [1 / (x[2] + 1e-6) for x in top]
-            total = sum(inv_vols)
+            top = scores[:3]
 
             positions = {}
+            allocation = capital / 3
 
-            for idx, (s, _, vol) in enumerate(top):
-                weight = inv_vols[idx] / total
-                allocation = capital * weight
+            for s, _ in top:
                 price = data[s][i]
                 shares = allocation / price
                 positions[s] = shares
 
-            capital *= (1 - cost_rate)
+            capital *= (1 - cost)
             rebalance_counter = 0
 
-        total_value = 0
+        total = 0
         for s, shares in positions.items():
-            price = data[s][i]
-            total_value += shares * price
+            total += shares * data[s][i]
 
         if positions:
-            capital = total_value
+            capital = total
 
         equity_curve.append(capital)
 
@@ -116,9 +85,6 @@ def simulate_segment(data, start, end):
 
     return {"return": ret, "drawdown": dd}
 
-# =========================
-# WALKFORWARD
-# =========================
 def walk_forward():
     data = get_data()
 
@@ -138,7 +104,6 @@ def walk_forward():
         end = start + test
 
         res = simulate_segment(data, start, end)
-
         if res:
             results.append(res)
 
@@ -159,9 +124,6 @@ def walk_forward():
         )
     }
 
-# =========================
-# ROUTES
-# =========================
 @app.route("/")
 def home():
     return {"status": "live"}
@@ -174,9 +136,6 @@ def health():
 def wf():
     return jsonify(walk_forward())
 
-# =========================
-# RUN
-# =========================
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=PORT)
