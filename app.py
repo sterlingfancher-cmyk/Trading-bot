@@ -36,20 +36,20 @@ COOLDOWN_CYCLES = 2
 # STATE
 # =========================
 portfolio = {
-    "cash": 10000,
-    "equity": 10000,
+    "cash": 10000.0,
+    "equity": 10000.0,
     "positions": {},
     "history": [],
     "trades": [],
     "last_run": None,
     "strategy": None,
     "cooldown": 0,
-    "last_equity": 10000,
+    "last_equity": 10000.0,
     "last_signals": []
 }
 
 # =========================
-# DATA (SAFE)
+# DATA
 # =========================
 def load_data():
     data = {}
@@ -59,8 +59,8 @@ def load_data():
             if df is None or df.empty:
                 continue
 
-            prices = np.array(df["Close"])
-            volumes = np.array(df["Volume"])
+            prices = np.array(df["Close"], dtype=float)
+            volumes = np.array(df["Volume"], dtype=float)
 
             if len(prices) < 60:
                 continue
@@ -70,14 +70,14 @@ def load_data():
                 continue
 
             data[s] = prices
-        except Exception:
+        except:
             continue
     return data
 
 def get_vol(prices, i):
     try:
         r = np.diff(prices[i-20:i]) / prices[i-20:i-1]
-        return np.std(r) + 1e-6
+        return float(np.std(r)) + 1e-6
     except:
         return 1e-6
 
@@ -87,13 +87,13 @@ def get_vol(prices, i):
 def get_regime():
     try:
         df = yf.download("SPY", period="3mo", progress=False)
-        p = np.array(df["Close"])
+        p = np.array(df["Close"], dtype=float)
 
         if len(p) < 50:
             return "neutral", 0.5
 
-        ma20 = np.mean(p[-20:])
-        ma50 = np.mean(p[-50:])
+        ma20 = float(np.mean(p[-20:]))
+        ma50 = float(np.mean(p[-50:]))
         strength = (ma20 - ma50) / ma50
 
         if strength > 0.02: return "bull_strong", 0.8
@@ -112,7 +112,7 @@ def momentum(data, idx):
         try:
             ret = (p[idx]/p[idx-20])-1
             vol = get_vol(p, idx)
-            scores.append((s, ret/vol))
+            scores.append((s, float(ret/vol)))
         except:
             continue
     return sorted(scores, key=lambda x:x[1], reverse=True)[:3]
@@ -126,7 +126,7 @@ def mean_reversion(data, idx):
                 continue
             z = (p[idx]-np.mean(p[idx-20:idx]))/std
             if z < -0.7:
-                scores.append((s, abs(z)))
+                scores.append((s, float(abs(z))))
         except:
             continue
     return sorted(scores, key=lambda x:x[1], reverse=True)[:3]
@@ -136,7 +136,7 @@ def short_strategy(data, idx):
     for s,p in data.items():
         try:
             ret = (p[idx]/p[idx-20])-1
-            scores.append((s, ret))
+            scores.append((s, float(ret)))
         except:
             continue
     return sorted(scores, key=lambda x:x[1])[:3]
@@ -175,13 +175,13 @@ def generate_signals_with_data(data):
     top = sorted(combined.items(), key=lambda x:x[1], reverse=True)[:3]
     total = sum(x[1] for x in top) or 1
 
-    return [{"symbol":s,"weight":v/total,"side":"long"} for s,v in top], regime
+    return [{"symbol":s,"weight":float(v/total),"side":"long"} for s,v in top], regime
 
 # =========================
 # RISK
 # =========================
 def risk_check():
-    eq = portfolio["equity"]
+    eq = float(portfolio["equity"])
     hist = portfolio["history"]
 
     if len(hist)>5:
@@ -201,7 +201,7 @@ def risk_check():
     return "OK"
 
 # =========================
-# EXECUTION (FULLY SAFE)
+# EXECUTION (FIXED)
 # =========================
 def run_paper():
     global portfolio
@@ -227,18 +227,17 @@ def run_paper():
         # log trades
         for s,pos in portfolio["positions"].items():
             if s in data:
-                price = data[s][idx]
+                price = float(data[s][idx])
                 pnl = (price-pos["entry_price"])*pos["shares"] if pos["side"]=="long" else (pos["entry_price"]-price)*pos["shares"]
                 portfolio["trades"].append({
                     "symbol":s,
                     "side":pos["side"],
                     "entry":pos["entry_price"],
                     "exit":price,
-                    "pnl":round(pnl,2)
+                    "pnl":round(float(pnl),2)
                 })
 
-        # reset
-        portfolio["cash"]=portfolio["equity"]
+        portfolio["cash"]=float(portfolio["equity"])
         portfolio["positions"]={}
 
         new_pos={}
@@ -247,61 +246,34 @@ def run_paper():
             if s not in data:
                 continue
 
-            price=data[s][idx]
+            price=float(data[s][idx])
 
             alloc = portfolio["cash"] * min(sig["weight"], MAX_POSITION_SIZE)
             alloc = min(alloc, portfolio["equity"]*MAX_POSITION_RISK)
 
-            shares=alloc/price
+            shares=float(alloc/price)
             new_pos[s]={"shares":shares,"entry_price":price,"side":sig["side"]}
 
-        val=0
+        val=0.0
         for s,pos in new_pos.items():
-            price=data[s][idx]
+            price=float(data[s][idx])
             val += pos["shares"]*price if pos["side"]=="long" else pos["shares"]*(pos["entry_price"]-price)
 
         used=sum(pos["shares"]*pos["entry_price"] for pos in new_pos.values())
 
-        portfolio["cash"] -= used
+        portfolio["cash"]=float(portfolio["cash"]-used)
         portfolio["positions"]=new_pos
-        portfolio["equity"]=portfolio["cash"]+val
+        portfolio["equity"]=float(portfolio["cash"]+val)
 
         portfolio["history"].append(portfolio["equity"])
         portfolio["last_run"]=str(datetime.utcnow())
         portfolio["last_equity"]=portfolio["equity"]
         portfolio["strategy"]=regime
 
-        return {"equity":round(portfolio["equity"],2),"strategy":regime}
+        return {"equity": round(portfolio["equity"],2), "strategy": regime}
 
     except Exception as e:
         return {"error": str(e)}
-
-# =========================
-# METRICS
-# =========================
-def get_metrics():
-    eq = portfolio["history"]
-    if len(eq)<5:
-        return {"message":"not enough data"}
-
-    r = np.diff(eq)/eq[:-1]
-    sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
-
-    peak=eq[0]; dd=0
-    for e in eq:
-        peak=max(peak,e)
-        dd=min(dd,(e-peak)/peak)
-
-    pnls=[t["pnl"] for t in portfolio["trades"]]
-    wins=[p for p in pnls if p>0]
-
-    return {
-        "sharpe":round(sharpe,2),
-        "drawdown_pct":round(dd*100,2),
-        "trades":len(pnls),
-        "win_rate":round(len(wins)/len(pnls)*100,2) if pnls else 0,
-        "total_pnl":round(sum(pnls),2)
-    }
 
 # =========================
 # ROUTES
@@ -332,7 +304,28 @@ def status():
 
 @app.route("/paper/metrics")
 def metrics():
-    return jsonify(get_metrics())
+    eq = portfolio["history"]
+    if len(eq)<5:
+        return {"message":"not enough data"}
+
+    r = np.diff(eq)/eq[:-1]
+    sharpe = float(np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252))
+
+    peak=eq[0]; dd=0
+    for e in eq:
+        peak=max(peak,e)
+        dd=min(dd,(e-peak)/peak)
+
+    pnls=[t["pnl"] for t in portfolio["trades"]]
+    wins=[p for p in pnls if p>0]
+
+    return {
+        "sharpe":round(sharpe,2),
+        "drawdown_pct":round(dd*100,2),
+        "trades":len(pnls),
+        "win_rate":round(len(wins)/len(pnls)*100,2) if pnls else 0,
+        "total_pnl":round(sum(pnls),2)
+    }
 
 # =========================
 if __name__ == "__main__":
