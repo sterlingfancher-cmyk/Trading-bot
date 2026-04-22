@@ -5,16 +5,13 @@ from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-# =========================
-# UNIVERSE
-# =========================
 SYMBOLS = [
     "AAPL","MSFT","NVDA","AMD","META",
     "AMZN","GOOGL","TSLA","AVGO","CRM"
 ]
 
 # =========================
-# DATA
+# LOAD DATA
 # =========================
 def get_data():
     data = {}
@@ -37,7 +34,7 @@ def get_data():
     return data
 
 # =========================
-# STRATEGY (RELATIVE STRENGTH)
+# SIMULATION
 # =========================
 def simulate():
     data = get_data()
@@ -47,31 +44,39 @@ def simulate():
 
     length = min(len(p) for p in data.values())
 
-    cash = 10000
+    capital = 10000
     equity_curve = []
+
+    positions = {}  # {symbol: shares}
 
     for i in range(30, length):
 
+        # --- RANK STOCKS ---
         scores = []
-
         for s, prices in data.items():
             ret = (prices[i] - prices[i-20]) / prices[i-20]
             scores.append((s, ret))
 
-        # rank by strength
         scores.sort(key=lambda x: x[1], reverse=True)
+        top = [s for s, _ in scores[:3]]
 
-        top = scores[:3]
+        # --- REBALANCE ---
+        positions = {}
+        allocation = capital / 3
 
-        # equal weight top 3
-        value = 0
-
-        for s, _ in top:
+        for s in top:
             price = data[s][i]
-            value += cash / 3
+            shares = allocation / price
+            positions[s] = shares
 
-        cash = value
-        equity_curve.append(cash)
+        # --- MARK TO MARKET ---
+        total_value = 0
+        for s, shares in positions.items():
+            price = data[s][i]
+            total_value += shares * price
+
+        capital = total_value
+        equity_curve.append(capital)
 
     if len(equity_curve) < 5:
         return None
@@ -97,6 +102,9 @@ def walk_forward():
         res = simulate()
         if res:
             results.append(res)
+
+    if not results:
+        return {"error": "no results"}
 
     returns = [r["return"] for r in results]
     dds = [r["drawdown"] for r in results]
