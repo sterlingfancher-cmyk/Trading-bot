@@ -18,15 +18,10 @@ SYMBOLS = [
     "SPY","QQQ"
 ]
 
-# ===== RISK / PORTFOLIO =====
 BASE_RISK = 0.02
 MAX_HEAT = 0.25
 MAX_POSITIONS = 3
 REBALANCE_EVERY = 12
-
-# ===== SIGNAL THRESHOLDS =====
-MIN_MOMENTUM = 0.03     # 3% over 20d
-MIN_PRICE = 5
 
 def safe_float(x):
     try:
@@ -41,7 +36,7 @@ portfolio = {
     "positions": {},
     "history": [],
     "trades": [],
-    "step": 60,
+    "step": 80,
     "last_signals": [],
     "strategy": None
 }
@@ -61,66 +56,69 @@ def load_data():
             continue
     return data
 
-# ================= REGIME =================
+# ================= REGIME (UPGRADED) =================
 def get_regime(data):
     spy = data.get("SPY")
     if spy is None:
         return "neutral"
+
     ma20 = np.mean(spy[-20:])
     ma50 = np.mean(spy[-50:])
-    return "bull" if ma20 > ma50 else "bear"
+
+    if ma20 > ma50 * 1.01:
+        return "bull"
+    elif ma20 < ma50 * 0.99:
+        return "bear"
+    else:
+        return "neutral"
 
 # ================= VOL =================
 def get_vol(p, idx):
     r = np.diff(p[idx-20:idx]) / p[idx-20:idx-1]
     return safe_float(np.std(r)) + 1e-6
 
-# ================= SIGNAL ENGINE (UPGRADED) =================
+# ================= SIGNAL ENGINE =================
 def generate_signals(data, idx, regime):
-    candidates = []
+    momentum = []
+    mean_rev = []
 
     for s,p in data.items():
         try:
             price = p[idx]
-            if price < MIN_PRICE:
-                continue
-
             ma50 = np.mean(p[idx-50:idx])
             ret20 = (p[idx]/p[idx-20]) - 1
             vol = get_vol(p, idx)
 
-            # ===== TREND FILTER =====
-            if regime == "bull" and price < ma50:
-                continue
-            if regime == "bear" and price > ma50:
-                continue
+            # ===== MOMENTUM =====
+            score_mom = ret20 / vol
 
-            # ===== MOMENTUM FILTER =====
-            if regime == "bull" and ret20 < MIN_MOMENTUM:
-                continue
-            if regime == "bear" and ret20 > -MIN_MOMENTUM:
-                continue
+            if regime == "bull":
+                if price > ma50 and ret20 > 0.03:
+                    momentum.append((s, score_mom, vol))
 
-            score = ret20 / vol
+            elif regime == "bear":
+                if price < ma50 and ret20 < -0.03:
+                    momentum.append((s, -score_mom, vol))
 
-            if regime == "bear":
-                score = -score
+            # ===== MEAN REVERSION =====
+            z = (price - np.mean(p[idx-20:idx])) / (np.std(p[idx-20:idx]) + 1e-6)
 
-            candidates.append((s, safe_float(score), vol))
+            if regime == "neutral":
+                if z < -1:
+                    mean_rev.append((s, abs(z), vol))
 
         except:
             continue
 
-    # ===== RANK =====
-    candidates = sorted(candidates, key=lambda x:x[1], reverse=True)
+    combined = momentum + mean_rev
+    combined = sorted(combined, key=lambda x:x[1], reverse=True)
 
-    # ===== FALLBACK (RARE) =====
-    if not candidates:
+    if not combined:
         syms = list(data.keys())
         np.random.shuffle(syms)
         return [(s,0.01,0.02) for s in syms[:MAX_POSITIONS]]
 
-    return candidates[:MAX_POSITIONS]
+    return combined[:MAX_POSITIONS]
 
 # ================= RISK =================
 def drawdown_factor():
@@ -172,7 +170,6 @@ def run_paper():
         current = set(portfolio["positions"].keys())
         target = set(s[0] for s in signals)
 
-        # ===== LOWER CHURN =====
         rebalance = (portfolio["step"] % REBALANCE_EVERY == 0)
 
         # ===== CLOSE =====
@@ -273,7 +270,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 Institutional Trading Dashboard</h2>
+<h2>📊 Institutional Edge Dashboard</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
