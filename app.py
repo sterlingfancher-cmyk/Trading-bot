@@ -26,11 +26,11 @@ SYMBOLS = [
 # SETTINGS
 # =========================
 MAX_POSITION_SIZE = 0.4
+MAX_POSITION_RISK = 0.02
 TARGET_VOL = 0.15
 
 MAX_DRAWDOWN = -0.10
 MAX_DAILY_LOSS = -0.03
-MAX_POSITION_RISK = 0.02
 COOLDOWN_CYCLES = 2
 
 # =========================
@@ -127,14 +127,13 @@ def short_strategy(data, idx):
     for s, prices in data.items():
         ret = (prices[idx] / prices[idx-20]) - 1
         scores.append((s, ret))
-    scores.sort(key=lambda x: x[1])  # worst performers
+    scores.sort(key=lambda x: x[1])
     return scores[:3]
 
 # =========================
-# SIGNAL ENGINE
+# SIGNAL ENGINE (CONSISTENT)
 # =========================
-def generate_signals():
-    data = load_data()
+def generate_signals_with_data(data):
     if len(data) < 5:
         return [], "none"
 
@@ -166,6 +165,10 @@ def generate_signals():
         for s, v in top
     ], regime
 
+def generate_signals():
+    data = load_data()
+    return generate_signals_with_data(data)
+
 # =========================
 # RISK
 # =========================
@@ -191,7 +194,7 @@ def risk_check():
     return "OK"
 
 # =========================
-# EXECUTION (FIXED CASH MODEL)
+# EXECUTION
 # =========================
 def run_paper():
     global portfolio
@@ -201,7 +204,7 @@ def run_paper():
         return {"status": "risk_pause"}
 
     data = load_data()
-    signals, regime = generate_signals()
+    signals, regime = generate_signals_with_data(data)
 
     if not data:
         return {"error":"no data"}
@@ -231,11 +234,10 @@ def run_paper():
             "side": sig["side"]
         }
 
-    # compute value
+    # valuation
     position_value = 0
     for s, pos in new_positions.items():
         price = data[s][idx]
-
         if pos["side"] == "long":
             position_value += pos["shares"] * price
         else:
@@ -272,7 +274,7 @@ body { background:#0f172a; color:white; font-family:Arial; }
 </head>
 <body>
 
-<h1>📊 Full Trading System</h1>
+<h1>📊 Institutional Trading Dashboard</h1>
 
 <div class="grid">
 <div class="card"><h3>Equity</h3><canvas id="eq"></canvas></div>
