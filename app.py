@@ -4,12 +4,12 @@ import threading
 from datetime import datetime
 import numpy as np
 import yfinance as yf
-from flask import Flask, jsonify
+from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
 
 # =========================
-# BASE UNIVERSE (EXPANDABLE CORE)
+# BASE + SCANNER UNIVERSE
 # =========================
 BASE_SYMBOLS = [
     "AAPL","MSFT","NVDA","AMD","META","GOOGL","AMZN","TSLA","AVGO","CRM",
@@ -35,34 +35,10 @@ portfolio = {
 }
 
 # =========================
-# SMART SCANNER
-# =========================
-def build_universe():
-    """
-    Expands base universe using ETF components + filters.
-    Keeps system stable.
-    """
-    universe = set(BASE_SYMBOLS)
-
-    # Add pseudo “market-wide” coverage via ETF sampling
-    etf_seeds = ["SPY","QQQ","IWM"]
-
-    for etf in etf_seeds:
-        try:
-            df = yf.download(etf, period="5d", interval="1d", progress=False)
-            if df is not None:
-                universe.update(BASE_SYMBOLS)  # keep stable expansion
-        except:
-            continue
-
-    return list(universe)
-
-# =========================
-# LOAD DATA (BATCH SAFE)
+# DATA LOADING + FILTERS
 # =========================
 def load_data(symbols):
     data = {}
-
     for s in symbols:
         try:
             df = yf.download(s, period="6mo", interval="1d", progress=False)
@@ -76,12 +52,11 @@ def load_data(symbols):
             if len(prices) < 60:
                 continue
 
-            # 🔥 LIQUIDITY FILTER
-            avg_vol = np.mean(volumes[-20:])
-            if avg_vol < 1_000_000:
+            # Liquidity filter
+            if np.mean(volumes[-20:]) < 1_000_000:
                 continue
 
-            # 🔥 PRICE FILTER
+            # Price filter
             if prices[-1] < 10:
                 continue
 
@@ -92,31 +67,23 @@ def load_data(symbols):
 
     return data
 
-# =========================
-# VOL
-# =========================
 def get_vol(prices, i):
     returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
     return np.std(returns) + 1e-6
 
 # =========================
-# SIGNAL ENGINE (UNCHANGED EDGE)
+# SIGNAL ENGINE
 # =========================
 def generate_signals():
-    symbols = build_universe()
-    data = load_data(symbols)
+    data = load_data(BASE_SYMBOLS)
 
-    if len(data) < 10:
+    if len(data) < 5:
         return []
 
     idx = min(len(p) for p in data.values()) - 1
-
     scores = []
 
     for s, prices in data.items():
-        if idx < 20:
-            continue
-
         window = prices[idx-20:idx]
         mean = np.mean(window)
         std = np.std(window)
@@ -144,7 +111,7 @@ def generate_signals():
     signals = []
     for s, strength in strengths:
         weight = 0.5*(1/n) + 0.5*(strength/total)
-        signals.append({"symbol": s, "weight": round(weight,3)})
+        signals.append({"symbol": s, "weight": round(weight, 3)})
 
     return signals
 
@@ -154,8 +121,7 @@ def generate_signals():
 def run_paper():
     global portfolio
 
-    symbols = build_universe()
-    data = load_data(symbols)
+    data = load_data(BASE_SYMBOLS)
     signals = generate_signals()
 
     if not data:
@@ -163,7 +129,7 @@ def run_paper():
 
     idx = min(len(p) for p in data.values()) - 1
 
-    # close positions
+    # Close trades
     for s, pos in portfolio["positions"].items():
         if s in data:
             price = data[s][idx]
@@ -173,7 +139,7 @@ def run_paper():
                 "symbol": s,
                 "entry": pos["entry_price"],
                 "exit": price,
-                "pnl": round(pnl,2)
+                "pnl": round(pnl, 2)
             })
 
     if not signals:
@@ -186,9 +152,6 @@ def run_paper():
 
     for sig in signals:
         s = sig["symbol"]
-        if s not in data:
-            continue
-
         price = data[s][idx]
         allocation = capital * sig["weight"]
         shares = allocation / price
@@ -200,16 +163,12 @@ def run_paper():
 
     portfolio["positions"] = new_positions
 
-    total = sum(
-        pos["shares"] * data[s][idx]
-        for s, pos in new_positions.items()
-    )
-
+    total = sum(pos["shares"] * data[s][idx] for s, pos in new_positions.items())
     portfolio["equity"] = total
     portfolio["history"].append(total)
     portfolio["last_run"] = str(datetime.utcnow())
 
-    return {"equity": round(total,2), "positions": list(new_positions.keys())}
+    return {"equity": round(total, 2), "positions": list(new_positions.keys())}
 
 # =========================
 # AUTO SCHEDULER
@@ -252,17 +211,84 @@ def get_metrics():
 
     return {
         "total_trades": len(trades),
-        "win_rate": round(len(wins)/len(trades)*100,2),
-        "total_pnl": round(sum(pnls),2),
-        "max_drawdown_pct": round(dd*100,2)
+        "win_rate": round(len(wins)/len(trades)*100, 2),
+        "total_pnl": round(sum(pnls), 2),
+        "max_drawdown_pct": round(dd*100, 2)
     }
+
+# =========================
+# DASHBOARD UI
+# =========================
+@app.route("/dashboard")
+def dashboard():
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Trading Dashboard</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            body { background:#0f172a; color:white; font-family:Arial; }
+            .card { background:#1e293b; padding:20px; margin:10px; border-radius:10px; }
+        </style>
+    </head>
+    <body>
+    <h1>📊 Trading Dashboard</h1>
+
+    <div class="card">
+        <h2>Portfolio</h2>
+        <pre id="portfolio"></pre>
+    </div>
+
+    <div class="card">
+        <h2>Signals</h2>
+        <pre id="signals"></pre>
+    </div>
+
+    <div class="card">
+        <h2>Metrics</h2>
+        <pre id="metrics"></pre>
+    </div>
+
+    <div class="card">
+        <h2>Equity Curve</h2>
+        <canvas id="chart"></canvas>
+    </div>
+
+    <script>
+    async function load(){
+        let p = await fetch('/paper/status').then(r=>r.json());
+        let s = await fetch('/signals').then(r=>r.json());
+        let m = await fetch('/paper/metrics').then(r=>r.json());
+
+        document.getElementById('portfolio').innerText = JSON.stringify(p,null,2);
+        document.getElementById('signals').innerText = JSON.stringify(s,null,2);
+        document.getElementById('metrics').innerText = JSON.stringify(m,null,2);
+
+        let ctx = document.getElementById('chart').getContext('2d');
+
+        new Chart(ctx,{
+            type:'line',
+            data:{
+                labels:p.history.map((_,i)=>i),
+                datasets:[{label:'Equity',data:p.history}]
+            }
+        });
+    }
+
+    load();
+    setInterval(load,10000);
+    </script>
+    </body>
+    </html>
+    """)
 
 # =========================
 # ROUTES
 # =========================
 @app.route("/")
 def home():
-    return {"status": "TRUE SCANNER SYSTEM LIVE"}
+    return {"status": "SYSTEM + DASHBOARD LIVE"}
 
 @app.route("/health")
 def health():
