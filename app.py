@@ -31,7 +31,14 @@ def get_data():
     return data
 
 # =========================
-# SIMULATION (WITH COSTS)
+# VOLATILITY
+# =========================
+def get_volatility(prices, i):
+    returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
+    return np.std(returns) if len(returns) > 0 else 0.01
+
+# =========================
+# SIMULATION
 # =========================
 def simulate_segment(data, start, end):
     capital = 10000
@@ -40,8 +47,7 @@ def simulate_segment(data, start, end):
 
     holding_period = 5
     rebalance_counter = 0
-
-    cost_rate = 0.001  # 0.1% per rebalance
+    cost_rate = 0.001
 
     for i in range(start, end):
         rebalance_counter += 1
@@ -49,27 +55,41 @@ def simulate_segment(data, start, end):
         if rebalance_counter >= holding_period:
 
             scores = []
+
             for s, prices in data.items():
                 if i < 20:
                     continue
 
-                ret = (prices[i] - prices[i-20]) / prices[i-20]
-                scores.append((s, ret))
+                momentum = (prices[i] - prices[i-20]) / prices[i-20]
+
+                # 🔥 filter weak signals
+                if momentum < 0.01:
+                    continue
+
+                vol = get_volatility(prices, i)
+
+                scores.append((s, momentum, vol))
+
+            if len(scores) < 3:
+                continue
 
             scores.sort(key=lambda x: x[1], reverse=True)
-            top = [s for s, _ in scores[:3]]
+            top = scores[:5]
+
+            # 🔥 VOL-ADJUSTED ALLOCATION
+            inv_vols = [1 / (x[2] + 1e-6) for x in top]
+            total = sum(inv_vols)
 
             positions = {}
-            allocation = capital / 3
 
-            for s in top:
+            for idx, (s, _, vol) in enumerate(top):
+                weight = inv_vols[idx] / total
+                allocation = capital * weight
                 price = data[s][i]
                 shares = allocation / price
                 positions[s] = shares
 
-            # 🔥 APPLY COST
             capital *= (1 - cost_rate)
-
             rebalance_counter = 0
 
         total_value = 0
@@ -97,7 +117,7 @@ def simulate_segment(data, start, end):
     return {"return": ret, "drawdown": dd}
 
 # =========================
-# TRUE WALK-FORWARD
+# WALKFORWARD
 # =========================
 def walk_forward():
     data = get_data()
@@ -114,7 +134,6 @@ def walk_forward():
     i = 30
 
     while i + train + test < length:
-
         start = i + train
         end = start + test
 
