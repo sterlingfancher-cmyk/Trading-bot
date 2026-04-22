@@ -6,14 +6,8 @@ from flask import Flask, jsonify, request, render_template_string
 
 app = Flask(__name__)
 
-# =========================
-# SECURITY
-# =========================
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 
-# =========================
-# SETTINGS
-# =========================
 SYMBOLS = [
     "AAPL","MSFT","NVDA","AMD","META","GOOGL","AMZN","TSLA","AVGO",
     "JPM","BAC","GS","MS",
@@ -24,29 +18,20 @@ SYMBOLS = [
     "SPY","QQQ","IWM"
 ]
 
-MAX_POSITION_RISK = 0.05     # per-position cap
-MAX_POSITIONS = 3            # portfolio breadth
-REBALANCE_TOL = 0.20         # tolerance before resizing (20%)
+TARGET_VOL = 0.02
+MAX_POSITIONS = 4
+MAX_POSITION_RISK = 0.1
 
-# =========================
-# SAFE FLOAT
-# =========================
 def safe_float(x):
     try:
         return float(np.asarray(x).item())
     except:
-        try:
-            return float(x)
-        except:
-            return 0.0
+        return float(x)
 
-# =========================
-# STATE
-# =========================
 portfolio = {
     "cash": 10000.0,
     "equity": 10000.0,
-    "positions": {},   # {symbol: {shares, entry_price}}
+    "positions": {},
     "history": [],
     "trades": [],
     "last_run": None,
@@ -55,9 +40,7 @@ portfolio = {
     "step": 60
 }
 
-# =========================
-# DATA
-# =========================
+# ================= DATA =================
 def load_data():
     data = {}
     for s in SYMBOLS:
@@ -73,193 +56,125 @@ def load_data():
             continue
     return data
 
-# =========================
-# SIGNALS (always produce)
-# =========================
-def generate_signals(data, idx):
+# ================= VOL =================
+def get_vol(p, idx):
+    r = np.diff(p[idx-20:idx]) / p[idx-20:idx-1]
+    return safe_float(np.std(r)) + 1e-6
+
+# ================= REGIME =================
+def get_regime(data):
+    spy = data.get("SPY")
+    if spy is None:
+        return "neutral"
+
+    ma20 = np.mean(spy[-20:])
+    ma50 = np.mean(spy[-50:])
+    return "bull" if ma20 > ma50 else "bear"
+
+# ================= SIGNALS =================
+def generate_signals(data, idx, regime):
     scores = []
-    for s, p in data.items():
+
+    for s,p in data.items():
         try:
-            ret = safe_float(p[idx] / p[idx-20] - 1)
-            scores.append((s, ret))
+            ret = (p[idx] / p[idx-20]) - 1
+            vol = get_vol(p, idx)
+            score = ret / vol
+
+            if regime == "bear":
+                score = -score
+
+            scores.append((s, safe_float(score), vol))
         except:
             continue
 
-    scores = sorted(scores, key=lambda x: x[1], reverse=True)
-    top = scores[:MAX_POSITIONS] if scores else list(data.keys())[:MAX_POSITIONS]
+    scores = sorted(scores, key=lambda x:x[1], reverse=True)
+    top = scores[:MAX_POSITIONS]
 
-    if not top:
-        return [], "no_data"
+    return [{"symbol":s,"vol":vol} for s,_,vol in top]
 
-    w = 1.0 / len(top)
-    return [{"symbol": s, "weight": w} for s, _ in top], "active"
-
-# =========================
-# PORTFOLIO HELPERS
-# =========================
-def mark_to_market(data, idx):
-    total = safe_float(portfolio["cash"])
-    for s, pos in portfolio["positions"].items():
-        if s in data:
-            price = safe_float(data[s][idx])
-            total += safe_float(pos["shares"] * price)
-    portfolio["equity"] = safe_float(total)
-
-def target_value(weight):
-    # per-position cap applied here
-    return safe_float(min(weight, MAX_POSITION_RISK) * portfolio["equity"])
-
-# =========================
-# EXECUTION (STATEFUL)
-# =========================
+# ================= EXECUTION =================
 def run_paper():
     global portfolio
+
     try:
         data = load_data()
         if not data:
-            return {"error": "no data"}
+            return {"error":"no data"}
 
         lengths = [len(p) for p in data.values()]
         max_len = min(lengths) - 1
 
-        # time progression
         if portfolio["step"] >= max_len:
             portfolio["step"] = 60
 
         idx = portfolio["step"]
         portfolio["step"] += 1
 
-        # mark-to-market BEFORE trading
-        mark_to_market(data, idx)
+        regime = get_regime(data)
+        signals = generate_signals(data, idx, regime)
 
-        signals, regime = generate_signals(data, idx)
         portfolio["last_signals"] = signals
         portfolio["strategy"] = regime
 
-        target_syms = set(s["symbol"] for s in signals)
-        current_syms = set(portfolio["positions"].keys())
-
-        # =========================
-        # 1) CLOSE positions not in signals
-        # =========================
-        for s in list(current_syms - target_syms):
-            pos = portfolio["positions"].get(s)
-            if s in data and pos:
+        # mark to market
+        equity = portfolio["cash"]
+        for s,pos in portfolio["positions"].items():
+            if s in data:
                 price = safe_float(data[s][idx])
-                proceeds = safe_float(pos["shares"] * price)
-                pnl = safe_float((price - pos["entry_price"]) * pos["shares"])
-                portfolio["cash"] = safe_float(portfolio["cash"] + proceeds)
-                portfolio["trades"].append({
-                    "symbol": s,
-                    "entry": pos["entry_price"],
-                    "exit": price,
-                    "pnl": round(pnl, 2)
-                })
-                del portfolio["positions"][s]
+                if pos["side"] == "long":
+                    equity += pos["shares"] * price
+                else:
+                    equity += pos["shares"] * (pos["entry"] - price)
 
-        # =========================
-        # 2) REBALANCE existing positions
-        # =========================
+        portfolio["equity"] = safe_float(equity)
+
+        # close removed
+        current = set(portfolio["positions"].keys())
+        target = set(s["symbol"] for s in signals)
+
+        for s in list(current - target):
+            pos = portfolio["positions"][s]
+            price = safe_float(data[s][idx])
+
+            pnl = (price - pos["entry"]) * pos["shares"]
+            if pos["side"] == "short":
+                pnl = (pos["entry"] - price) * pos["shares"]
+
+            portfolio["cash"] += pos["shares"] * price
+            portfolio["trades"].append({"symbol": s, "pnl": round(pnl,2)})
+
+            del portfolio["positions"][s]
+
+        # open new
         for sig in signals:
             s = sig["symbol"]
-            if s not in data:
-                continue
-
             price = safe_float(data[s][idx])
-            tgt_val = target_value(sig["weight"])
+            vol = sig["vol"]
 
-            if s in portfolio["positions"]:
-                pos = portfolio["positions"][s]
-                cur_val = safe_float(pos["shares"] * price)
+            risk_weight = TARGET_VOL / vol
+            alloc = portfolio["equity"] * min(risk_weight, MAX_POSITION_RISK)
 
-                # only rebalance if deviation > tolerance
-                if tgt_val > 0:
-                    dev = abs(cur_val - tgt_val) / tgt_val
-                else:
-                    dev = 0
+            shares = alloc / price
+            side = "long" if regime == "bull" else "short"
 
-                if dev > REBALANCE_TOL:
-                    # adjust shares
-                    desired_shares = safe_float(tgt_val / price if price > 0 else 0)
-                    delta_shares = safe_float(desired_shares - pos["shares"])
-
-                    if abs(delta_shares) > 0:
-                        delta_cash = safe_float(delta_shares * price)
-
-                        # buy more
-                        if delta_shares > 0 and portfolio["cash"] >= delta_cash:
-                            portfolio["cash"] = safe_float(portfolio["cash"] - delta_cash)
-                            pos["shares"] = safe_float(pos["shares"] + delta_shares)
-
-                        # sell down
-                        elif delta_shares < 0:
-                            portfolio["cash"] = safe_float(portfolio["cash"] - delta_cash)  # delta_cash is negative
-                            pos["shares"] = safe_float(pos["shares"] + delta_shares)
-
-            else:
-                # =========================
-                # 3) OPEN new positions
-                # =========================
-                tgt_val = target_value(sig["weight"])
-                if price <= 0:
-                    continue
-
-                shares = safe_float(tgt_val / price)
-                cost = safe_float(shares * price)
-
-                if shares > 0 and portfolio["cash"] >= cost:
-                    portfolio["cash"] = safe_float(portfolio["cash"] - cost)
-                    portfolio["positions"][s] = {
-                        "shares": shares,
-                        "entry_price": price
-                    }
-
-        # mark-to-market AFTER trading
-        mark_to_market(data, idx)
+            if s not in portfolio["positions"] and portfolio["cash"] >= alloc:
+                portfolio["cash"] -= alloc
+                portfolio["positions"][s] = {
+                    "shares": shares,
+                    "entry": price,
+                    "side": side
+                }
 
         portfolio["history"].append(portfolio["equity"])
         portfolio["last_run"] = str(datetime.utcnow())
 
-        return {
-            "equity": round(portfolio["equity"], 2),
-            "strategy": regime,
-            "positions": list(portfolio["positions"].keys())
-        }
+        return {"equity": round(portfolio["equity"],2), "regime": regime}
 
     except Exception as e:
         return {"error": str(e)}
 
-# =========================
-# METRICS
-# =========================
-def get_metrics():
-    eq = portfolio["history"]
-    if len(eq) < 5:
-        return {"message": "not enough data"}
-
-    r = np.diff(eq) / eq[:-1]
-    sharpe = safe_float(np.mean(r) / (np.std(r) + 1e-6) * np.sqrt(252))
-
-    peak = eq[0]
-    dd = 0.0
-    for e in eq:
-        peak = max(peak, e)
-        dd = min(dd, (e - peak) / peak)
-
-    pnls = [t["pnl"] for t in portfolio["trades"]]
-    wins = [p for p in pnls if p > 0]
-
-    return {
-        "sharpe": round(sharpe, 2),
-        "drawdown_pct": round(dd * 100, 2),
-        "trades": len(pnls),
-        "win_rate": round(len(wins) / len(pnls) * 100, 2) if pnls else 0,
-        "total_pnl": round(sum(pnls), 2)
-    }
-
-# =========================
-# DASHBOARD (lightweight)
-# =========================
+# ================= DASHBOARD =================
 @app.route("/dashboard")
 def dashboard():
     return render_template_string("""
@@ -274,7 +189,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 Trading Dashboard</h2>
+<h2>📊 Institutional Dashboard</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -304,7 +219,7 @@ async function load(){
  document.getElementById('metrics').innerText =
   JSON.stringify(m,null,2);
 
- let eq = (p.history && p.history.length>1) ? p.history : [10000,10000];
+ let eq = (p.history.length>1) ? p.history : [10000,10000];
  let dd = calcDD(eq);
 
  if(eqChart) eqChart.destroy();
@@ -328,18 +243,16 @@ setInterval(load,10000);
 </html>
 """)
 
-# =========================
-# ROUTES
-# =========================
+# ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status": "LIVE SYSTEM"}
+    return {"status":"INSTITUTIONAL SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run():
     key = request.args.get("key")
     if key != SECRET_KEY:
-        return {"error": "unauthorized"}
+        return {"error":"unauthorized"}
     return jsonify(run_paper())
 
 @app.route("/paper/status")
@@ -348,8 +261,30 @@ def status():
 
 @app.route("/paper/metrics")
 def metrics():
-    return jsonify(get_metrics())
+    eq = portfolio["history"]
+    if len(eq) < 5:
+        return {"message":"not enough data"}
 
-# =========================
+    r = np.diff(eq)/eq[:-1]
+    sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
+
+    peak = eq[0]
+    dd = 0
+    for e in eq:
+        peak = max(peak,e)
+        dd = min(dd,(e-peak)/peak)
+
+    pnls = [t["pnl"] for t in portfolio["trades"]]
+    wins = [p for p in pnls if p > 0]
+
+    return {
+        "sharpe": round(sharpe,2),
+        "drawdown_pct": round(dd*100,2),
+        "trades": len(pnls),
+        "win_rate": round(len(wins)/len(pnls)*100,2) if pnls else 0,
+        "total_pnl": round(sum(pnls),2)
+    }
+
+# ================= START =================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8080)))
