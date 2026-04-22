@@ -11,13 +11,14 @@ SYMBOLS = [
 ]
 
 # =========================
-# GLOBAL STATE (PAPER TRADING)
+# GLOBAL STATE
 # =========================
 portfolio = {
     "cash": 10000,
-    "positions": {},
     "equity": 10000,
-    "history": []
+    "positions": {},
+    "history": [],
+    "trades": []
 }
 
 # =========================
@@ -54,10 +55,6 @@ def get_vol(prices, i):
 # =========================
 def generate_signals():
     data = load_data()
-
-    if len(data) < 5:
-        return []
-
     idx = min(len(p) for p in data.values()) - 1
 
     scores = []
@@ -92,13 +89,13 @@ def generate_signals():
 
     signals = []
     for s, strength in strengths:
-        w = 0.5*(1/n) + 0.5*(strength/total)
-        signals.append((s, w))
+        weight = 0.5*(1/n) + 0.5*(strength/total)
+        signals.append((s, weight))
 
     return signals
 
 # =========================
-# PAPER TRADING EXECUTION
+# PAPER RUN
 # =========================
 def run_paper():
     global portfolio
@@ -106,16 +103,25 @@ def run_paper():
     data = load_data()
     signals = generate_signals()
 
-    if not signals:
-        return {"message": "no trades"}
-
     idx = min(len(p) for p in data.values()) - 1
 
-    # SELL everything (rebalance)
-    portfolio["positions"] = {}
+    # close old trades
+    for s, pos in portfolio["positions"].items():
+        price = data[s][idx]
+        pnl = (price - pos["entry_price"]) * pos["shares"]
+
+        portfolio["trades"].append({
+            "symbol": s,
+            "entry": pos["entry_price"],
+            "exit": price,
+            "pnl": round(pnl,2)
+        })
+
+    if not signals:
+        portfolio["history"].append(portfolio["equity"])
+        return {"message": "no trades"}
 
     capital = portfolio["equity"]
-
     new_positions = {}
 
     for s, weight in signals:
@@ -137,60 +143,47 @@ def run_paper():
         total += pos["shares"] * price
 
     portfolio["equity"] = total
-
-    portfolio["history"].append({
-        "equity": round(total,2),
-        "positions": list(new_positions.keys())
-    })
+    portfolio["history"].append(total)
 
     return {
-        "executed": True,
         "equity": round(total,2),
-        "positions": new_positions
+        "positions": list(new_positions.keys())
     }
 
 # =========================
-# STATUS
+# METRICS
 # =========================
-def get_status():
-    return portfolio
+def get_metrics():
+    trades = portfolio["trades"]
 
-# =========================
-# BACKTEST
-# =========================
-def walk_forward():
-    data = load_data()
+    if not trades:
+        return {"message": "no trades yet"}
 
-    length = min(len(p) for p in data.values())
+    pnls = [t["pnl"] for t in trades]
+    wins = [p for p in pnls if p > 0]
 
-    train = 60
-    test = 20
+    equity = portfolio["history"]
 
-    results = []
-    i = 30
+    peak = equity[0] if equity else 10000
+    dd = 0
 
-    while i + train + test < length:
-        start = i + train
-        end = start + test
+    for e in equity:
+        peak = max(peak, e)
+        dd = min(dd, (e - peak)/peak)
 
-        capital = 10000
-
-        for j in range(start, end):
-            # simplified reuse
-            pass
-
-        results.append(capital)
-
-        i += test
-
-    return {"note": "use prior validated result"}
+    return {
+        "total_trades": len(trades),
+        "win_rate": round(len(wins)/len(trades)*100,2),
+        "total_pnl": round(sum(pnls),2),
+        "max_drawdown_pct": round(dd*100,2)
+    }
 
 # =========================
 # ROUTES
 # =========================
 @app.route("/")
 def home():
-    return {"status": "paper trading system live"}
+    return {"status": "paper trading + analytics"}
 
 @app.route("/signals")
 def signals():
@@ -201,8 +194,16 @@ def paper_run():
     return jsonify(run_paper())
 
 @app.route("/paper/status")
-def paper_status():
-    return jsonify(get_status())
+def status():
+    return jsonify(portfolio)
+
+@app.route("/paper/history")
+def history():
+    return jsonify(portfolio["history"])
+
+@app.route("/paper/metrics")
+def metrics():
+    return jsonify(get_metrics())
 
 # =========================
 # RUN
