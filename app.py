@@ -1,96 +1,36 @@
 import os
-import numpy as np
-import yfinance as yf
 from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-SYMBOLS = [
-    "AAPL","MSFT","NVDA","AMD","META",
-    "AMZN","GOOGL","TSLA","AVGO","CRM"
-]
-
 # =========================
-# DATA
-# =========================
-def load_data():
-    data = {}
-
-    for s in SYMBOLS:
-        try:
-            df = yf.download(s, period="1y", interval="1d", progress=False)
-
-            if df is None or df.empty:
-                continue
-
-            prices = np.array(df["Close"]).reshape(-1)
-            prices = prices[np.isfinite(prices)]
-
-            if len(prices) > 100:
-                data[s] = prices.astype(float)
-
-        except:
-            continue
-
-    return data
-
-# =========================
-# ANALYSIS ENGINE
-# =========================
-def analyze_signals():
-    data = load_data()
-
-    results = []
-
-    for s, prices in data.items():
-
-        momentum_scores = []
-        future_returns = []
-        mean_rev_scores = []
-        vol_scores = []
-
-        for i in range(30, len(prices)-5):
-
-            momentum = (prices[i] - prices[i-20]) / prices[i-20]
-            mean_rev = (prices[i] - np.mean(prices[i-10:i])) / np.mean(prices[i-10:i])
-            returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
-            vol = np.std(returns)
-
-            future = (prices[i+5] - prices[i]) / prices[i]
-
-            momentum_scores.append(momentum)
-            mean_rev_scores.append(mean_rev)
-            vol_scores.append(vol)
-            future_returns.append(future)
-
-        if len(future_returns) > 10:
-            corr_momentum = np.corrcoef(momentum_scores, future_returns)[0,1]
-            corr_meanrev = np.corrcoef(mean_rev_scores, future_returns)[0,1]
-            corr_vol = np.corrcoef(vol_scores, future_returns)[0,1]
-
-            results.append({
-                "symbol": s,
-                "momentum_corr": round(float(corr_momentum), 3),
-                "mean_reversion_corr": round(float(corr_meanrev), 3),
-                "volatility_corr": round(float(corr_vol), 3)
-            })
-
-    return results
-
-# =========================
-# ROUTES (ALL VERIFIED)
+# ROOT (CONFIRM LIVE FILE)
 # =========================
 @app.route("/")
 def home():
-    return {"status": "live"}
+    return jsonify({
+        "status": "LIVE CHECK",
+        "file": __file__,
+        "message": "If you see this, Railway is running THIS file"
+    })
 
+# =========================
+# HEALTH
+# =========================
 @app.route("/health")
 def health():
-    return {"status": "running"}
+    return jsonify({
+        "status": "running"
+    })
 
+# =========================
+# ANALYZE TEST ROUTE
+# =========================
 @app.route("/analyze")
 def analyze():
-    return jsonify(analyze_signals())
+    return jsonify({
+        "status": "analyze route confirmed"
+    })
 
 # =========================
 # RUN
