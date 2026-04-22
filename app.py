@@ -25,7 +25,13 @@ def get_data():
 
     return data
 
-def simulate_segment(data, start, end):
+def get_market():
+    df = yf.download("SPY", period="1y", interval="1d", progress=False)
+    prices = np.array(df["Close"]).reshape(-1)
+    prices = prices[np.isfinite(prices)]
+    return prices
+
+def simulate_segment(data, market, start, end):
     capital = 10000
     equity_curve = []
     positions = {}
@@ -35,6 +41,15 @@ def simulate_segment(data, start, end):
     cost = 0.001
 
     for i in range(start, end):
+
+        # 🔥 REGIME FILTER
+        market_fast = np.mean(market[i-20:i])
+        market_slow = np.mean(market[i-50:i])
+
+        if market_fast < market_slow:
+            positions = {}
+            equity_curve.append(capital)
+            continue
 
         rebalance_counter += 1
 
@@ -87,6 +102,7 @@ def simulate_segment(data, start, end):
 
 def walk_forward():
     data = get_data()
+    market = get_market()
 
     if len(data) < 5:
         return {"error": "not enough data"}
@@ -97,13 +113,13 @@ def walk_forward():
     test = 20
 
     results = []
-    i = 30
+    i = 50
 
     while i + train + test < length:
         start = i + train
         end = start + test
 
-        res = simulate_segment(data, start, end)
+        res = simulate_segment(data, market, start, end)
         if res:
             results.append(res)
 
