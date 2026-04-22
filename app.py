@@ -44,14 +44,14 @@ def load_data():
     return data
 
 # =========================
-# VOL
+# VOLATILITY
 # =========================
 def get_vol(prices, i):
     returns = np.diff(prices[i-20:i]) / prices[i-20:i-1]
     return np.std(returns) + 1e-6
 
 # =========================
-# SIGNALS
+# SIGNAL ENGINE
 # =========================
 def generate_signals():
     data = load_data()
@@ -90,22 +90,21 @@ def generate_signals():
     signals = []
     for s, strength in strengths:
         weight = 0.5*(1/n) + 0.5*(strength/total)
-        signals.append((s, weight))
+        signals.append({"symbol": s, "weight": round(weight,3)})
 
     return signals
 
 # =========================
-# PAPER RUN
+# PAPER TRADING
 # =========================
 def run_paper():
     global portfolio
 
     data = load_data()
     signals = generate_signals()
-
     idx = min(len(p) for p in data.values()) - 1
 
-    # close old trades
+    # close previous positions
     for s, pos in portfolio["positions"].items():
         price = data[s][idx]
         pnl = (price - pos["entry_price"]) * pos["shares"]
@@ -124,8 +123,11 @@ def run_paper():
     capital = portfolio["equity"]
     new_positions = {}
 
-    for s, weight in signals:
+    for sig in signals:
+        s = sig["symbol"]
+        weight = sig["weight"]
         price = data[s][idx]
+
         allocation = capital * weight
         shares = allocation / price
 
@@ -136,7 +138,6 @@ def run_paper():
 
     portfolio["positions"] = new_positions
 
-    # update equity
     total = 0
     for s, pos in new_positions.items():
         price = data[s][idx]
@@ -163,7 +164,6 @@ def get_metrics():
     wins = [p for p in pnls if p > 0]
 
     equity = portfolio["history"]
-
     peak = equity[0] if equity else 10000
     dd = 0
 
@@ -179,11 +179,96 @@ def get_metrics():
     }
 
 # =========================
-# ROUTES
+# WALK-FORWARD (RESTORED)
+# =========================
+def simulate_segment(data, start, end):
+    capital = 10000
+    positions = {}
+    equity_curve = []
+
+    holding = 3
+    counter = 0
+
+    for i in range(start, end):
+        counter += 1
+
+        if counter >= holding:
+            scores = []
+
+            for s, prices in data.items():
+                if i < 20:
+                    continue
+
+                window = prices[i-20:i]
+                z = (prices[i] - np.mean(window)) / np.std(window)
+
+                if z < -0.7:
+                    vol = get_vol(prices, i)
+                    strength = abs(z)/vol
+                    scores.append((s,z,strength))
+
+            if len(scores) >= 2:
+                scores.sort(key=lambda x: x[1])
+                bottom = scores[:3]
+
+                strengths = [(s,strength) for s,_,strength in bottom]
+                total = sum(x[1] for x in strengths)
+                n = len(strengths)
+
+                positions = {}
+                for s,strength in strengths:
+                    w = 0.5*(1/n)+0.5*(strength/total)
+                    shares = (capital*w)/data[s][i]
+                    positions[s] = shares
+
+            counter = 0
+
+        total = sum(shares*data[s][i] for s,shares in positions.items()) if positions else capital
+        capital = total
+        equity_curve.append(capital)
+
+    ret = (equity_curve[-1]-10000)/10000
+    peak = equity_curve[0]
+    dd = 0
+
+    for e in equity_curve:
+        peak = max(peak,e)
+        dd = min(dd,(e-peak)/peak)
+
+    return {"return":ret,"drawdown":dd}
+
+def walk_forward():
+    data = load_data()
+    length = min(len(p) for p in data.values())
+
+    results=[]
+    i=30
+
+    while i+80<length:
+        res = simulate_segment(data,i+60,i+80)
+        results.append(res)
+        i+=20
+
+    returns=[r["return"] for r in results]
+    dds=[r["drawdown"] for r in results]
+
+    return {
+        "segments":len(results),
+        "avg_return_pct":round(np.mean(returns)*100,2),
+        "worst_drawdown_pct":round(min(dds)*100,2),
+        "consistency_pct":round(sum(1 for r in returns if r>0)/len(returns)*100,2)
+    }
+
+# =========================
+# ROUTES (ALL FIXED)
 # =========================
 @app.route("/")
 def home():
-    return {"status": "paper trading + analytics"}
+    return {"status": "FULL SYSTEM LIVE"}
+
+@app.route("/health")
+def health():
+    return {"status": "running"}
 
 @app.route("/signals")
 def signals():
@@ -204,6 +289,10 @@ def history():
 @app.route("/paper/metrics")
 def metrics():
     return jsonify(get_metrics())
+
+@app.route("/walkforward")
+def wf():
+    return jsonify(walk_forward())
 
 # =========================
 # RUN
