@@ -26,7 +26,6 @@ BASE_RISK = 0.01
 MAX_HEAT = 0.20
 STOP_LOSS = 0.05
 MAX_POSITIONS = 3
-MIN_SCORE = 0.5
 
 portfolio = {
     "cash":10000,
@@ -38,20 +37,59 @@ portfolio = {
     "step":80,
     "universe":[],
     "last_run":None,
-    "regime":None
+    "regime":None,
+    "ai_recommendations":[]
 }
 
 def sf(x): return float(np.asarray(x).item())
 
-# ================= CAPITAL SCALING =================
-def capital_scaler():
-    growth = portfolio["equity"] / 10000
+# ================= AI SUPERVISOR =================
+def ai_supervisor():
+    eq = portfolio["history"]
+    trades = portfolio["trades"]
 
-    if growth > 1.2:
-        return 1.2
-    elif growth < 0.95:
-        return 0.7
-    return 1.0
+    if len(eq) < 10:
+        return ["Collecting data..."]
+
+    rec = []
+
+    # returns
+    r = np.diff(eq)/eq[:-1]
+    sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
+
+    # drawdown
+    peak = eq[0]
+    dd = 0
+    for e in eq:
+        peak = max(peak,e)
+        dd = min(dd,(e-peak)/peak)
+
+    # win rate
+    pnls = [t["pnl"] for t in trades]
+    wins = [p for p in pnls if p > 0]
+    win_rate = len(wins)/len(pnls) if pnls else 0
+
+    # ===== DIAGNOSTICS =====
+    if sharpe < 0.5:
+        rec.append("⚠️ Low Sharpe → tighten signal filter or reduce trades")
+
+    if dd < -0.08:
+        rec.append("⚠️ Drawdown high → reduce BASE_RISK or MAX_HEAT")
+
+    if win_rate < 0.45 and len(pnls) > 10:
+        rec.append("⚠️ Low win rate → signals too loose")
+
+    if len(pnls) > 50 and sharpe < 1:
+        rec.append("⚠️ Overtrading detected → increase MIN_SCORE")
+
+    if sharpe > 2 and dd > -0.03:
+        rec.append("✅ Strong system → consider increasing capital allocation")
+
+    if not rec:
+        rec.append("✅ System stable")
+
+    portfolio["ai_recommendations"] = rec
+    return rec
 
 # ================= UNIVERSE =================
 def build_universe():
@@ -107,7 +145,7 @@ def regime(data):
         return "bear"
     return "neutral"
 
-# ================= SIGNAL ENGINE =================
+# ================= SIGNAL =================
 def signals(data, idx, reg):
     raw=[]
 
@@ -122,15 +160,12 @@ def signals(data, idx, reg):
 
             if reg=="bull" and price>ma50 and ret>0.02:
                 raw.append((s,score,vol))
-
             elif reg=="bear" and price<ma50 and ret<-0.02:
                 raw.append((s,-score,vol))
-
-            elif reg=="neutral":
+            else:
                 mean=np.mean(p[idx-20:idx])
                 std=np.std(p[idx-20:idx])+1e-6
                 z=(price-mean)/std
-
                 if abs(z)>1:
                     raw.append((s,abs(z),vol))
 
@@ -138,9 +173,6 @@ def signals(data, idx, reg):
             continue
 
     raw=sorted(raw,key=lambda x:x[1],reverse=True)
-
-    # QUALITY FILTER
-    raw=[r for r in raw if r[1] > MIN_SCORE]
 
     if not raw:
         syms=list(data.keys())
@@ -167,8 +199,6 @@ def run_engine():
 
     sig=signals(data,idx,reg)
 
-    scale=capital_scaler()
-
     equity=portfolio["cash"]
 
     for s,pos in portfolio["positions"].items():
@@ -194,7 +224,6 @@ def run_engine():
     # STOP LOSS
     for s,pos in list(portfolio["positions"].items()):
         price=sf(data[s][idx])
-
         loss=(price-pos["entry"])/pos["entry"]
         if pos["side"]=="short":
             loss=(pos["entry"]-price)/pos["entry"]
@@ -227,7 +256,7 @@ def run_engine():
             continue
 
         price=sf(data[s][idx])
-        size=portfolio["equity"]*BASE_RISK*scale/(vol*5)
+        size=portfolio["equity"]*BASE_RISK/(vol*5)
 
         if total_exposure+size>max_allowed:
             continue
@@ -245,6 +274,9 @@ def run_engine():
 
     portfolio["history"].append(portfolio["equity"])
     portfolio["last_run"]=str(datetime.utcnow())
+
+    # RUN AI SUPERVISOR
+    ai_supervisor()
 
     return {
         "equity":round(portfolio["equity"],2),
@@ -267,14 +299,14 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 Final Institutional Dashboard</h2>
+<h2>🤖 AI Supervised Trading Dashboard</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
 <div class="card"><canvas id="dd"></canvas></div>
 <div class="card"><pre id="positions"></pre></div>
 <div class="card"><pre id="metrics"></pre></div>
-<div class="card"><pre id="regime"></pre></div>
+<div class="card"><pre id="ai"></pre></div>
 </div>
 
 <script>
@@ -298,8 +330,8 @@ async function load(){
  document.getElementById('metrics').innerText =
   JSON.stringify(m,null,2);
 
- document.getElementById('regime').innerText =
-  "Regime: " + p.regime;
+ document.getElementById('ai').innerText =
+  JSON.stringify(p.ai_recommendations,null,2);
 
  let eq = (p.history.length>1) ? p.history : [10000,10000];
  let dd = calcDD(eq);
@@ -325,10 +357,9 @@ setInterval(load,10000);
 </html>
 """)
 
-# ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"FINAL SYSTEM READY"}
+    return {"status":"AI SUPERVISED SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run_api():
