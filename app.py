@@ -7,25 +7,19 @@ from flask import Flask, jsonify, request, render_template_string
 app = Flask(__name__)
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 
-CORE = [
+UNIVERSE = [
     "NVDA","AMD","AVGO","MU","LRCX","TER","TSM",
-    "GEV","HWM","CAT","BWXT",
-    "RKLB","KTOS","PLTR","COHR","NBIS","IREN",
-    "AMZN","MSFT","GOOGL"
-]
-
-CRYPTO = ["IBIT","ETHA","GDLC"]
-
-EXPANSION = [
-    "SMCI","CRWD","PANW","ZS","NET",
-    "TSLA","META","SHOP","SNOW",
-    "XOM","CVX","LLY"
+    "ARM","PANW","CRWD","SNOW","PLTR",
+    "RKLB","KTOS","COHR","NBIS",
+    "META","TSLA","SHOP","NET",
+    "IBIT","ETHA","GDLC"
 ]
 
 BASE_RISK = 0.01
-MAX_HEAT = 0.20
+MAX_HEAT = 0.25
 STOP_LOSS = 0.05
-MAX_POSITIONS = 3
+MAX_POSITIONS = 4
+MIN_SCORE = 1.2
 
 portfolio = {
     "cash":10000,
@@ -35,86 +29,12 @@ portfolio = {
     "history":[],
     "trades":[],
     "step":80,
-    "universe":[],
     "last_run":None,
     "regime":None,
     "ai_recommendations":[]
 }
 
 def sf(x): return float(np.asarray(x).item())
-
-# ================= AI SUPERVISOR =================
-def ai_supervisor():
-    eq = portfolio["history"]
-    trades = portfolio["trades"]
-
-    if len(eq) < 10:
-        return ["Collecting data..."]
-
-    rec = []
-
-    # returns
-    r = np.diff(eq)/eq[:-1]
-    sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
-
-    # drawdown
-    peak = eq[0]
-    dd = 0
-    for e in eq:
-        peak = max(peak,e)
-        dd = min(dd,(e-peak)/peak)
-
-    # win rate
-    pnls = [t["pnl"] for t in trades]
-    wins = [p for p in pnls if p > 0]
-    win_rate = len(wins)/len(pnls) if pnls else 0
-
-    # ===== DIAGNOSTICS =====
-    if sharpe < 0.5:
-        rec.append("⚠️ Low Sharpe → tighten signal filter or reduce trades")
-
-    if dd < -0.08:
-        rec.append("⚠️ Drawdown high → reduce BASE_RISK or MAX_HEAT")
-
-    if win_rate < 0.45 and len(pnls) > 10:
-        rec.append("⚠️ Low win rate → signals too loose")
-
-    if len(pnls) > 50 and sharpe < 1:
-        rec.append("⚠️ Overtrading detected → increase MIN_SCORE")
-
-    if sharpe > 2 and dd > -0.03:
-        rec.append("✅ Strong system → consider increasing capital allocation")
-
-    if not rec:
-        rec.append("✅ System stable")
-
-    portfolio["ai_recommendations"] = rec
-    return rec
-
-# ================= UNIVERSE =================
-def build_universe():
-    pool = CORE + CRYPTO + EXPANSION
-    scores=[]
-
-    for s in pool:
-        try:
-            df=yf.download(s,period="3mo",progress=False)
-            if df.empty: continue
-
-            p=np.array(df["Close"],float)
-            ret=(p[-1]/p[-20])-1
-            vol=np.std(np.diff(p[-20:])/p[-20:-1])
-            score=ret/(vol+1e-6)
-
-            scores.append((s,score))
-        except:
-            continue
-
-    scores=sorted(scores,key=lambda x:x[1],reverse=True)
-    selected=[s for s,_ in scores[:20]]
-
-    portfolio["universe"]=selected
-    return selected
 
 # ================= DATA =================
 def load(symbols):
@@ -139,101 +59,146 @@ def regime(data):
     ma20=np.mean(spy[-20:])
     ma50=np.mean(spy[-50:])
 
-    if ma20>ma50*1.01:
-        return "bull"
-    elif ma20<ma50*0.99:
-        return "bear"
+    if ma20>ma50: return "bull"
+    elif ma20<ma50: return "bear"
     return "neutral"
 
-# ================= SIGNAL =================
+# ================= SIGNAL EDGE V2 =================
 def signals(data, idx, reg):
-    raw=[]
+    spy = data.get("SPY")
+    if spy is None:
+        return []
+
+    spy_ret = (spy[idx]/spy[idx-20])-1
+
+    scored=[]
 
     for s,p in data.items():
+        if s in ["SPY","QQQ"]:
+            continue
+
         try:
-            price=p[idx]
-            ma50=np.mean(p[idx-50:idx])
-            ret=(p[idx]/p[idx-20])-1
-            vol=np.std(np.diff(p[idx-20:idx])/p[idx-20:idx-1])+1e-6
+            price = p[idx]
 
-            score=ret/vol
+            # momentum
+            ret20 = (p[idx]/p[idx-20])-1
+            ret10 = (p[idx]/p[idx-10])-1
 
-            if reg=="bull" and price>ma50 and ret>0.02:
-                raw.append((s,score,vol))
-            elif reg=="bear" and price<ma50 and ret<-0.02:
-                raw.append((s,-score,vol))
+            # acceleration
+            accel = ret10 - ret20/2
+
+            # relative strength
+            rs = ret20 - spy_ret
+
+            # breakout
+            high20 = max(p[idx-20:idx])
+            breakout = price > high20 * 0.99
+
+            # volatility compression
+            vol = np.std(np.diff(p[idx-20:idx])/p[idx-20:idx-1])
+            vol_long = np.std(np.diff(p[idx-60:idx])/p[idx-60:idx-1])
+            compression = vol < vol_long
+
+            score = rs*2 + accel
+
+            if reg == "bull":
+                if rs > 0 and accel > 0 and breakout:
+                    if compression:
+                        score *= 1.5
+                    scored.append((s,score,vol))
+
+            elif reg == "bear":
+                if rs < 0 and accel < 0:
+                    scored.append((s,abs(score),vol))
+
             else:
-                mean=np.mean(p[idx-20:idx])
-                std=np.std(p[idx-20:idx])+1e-6
-                z=(price-mean)/std
-                if abs(z)>1:
-                    raw.append((s,abs(z),vol))
+                if abs(rs) > 0.02:
+                    scored.append((s,abs(score),vol))
 
         except:
             continue
 
-    raw=sorted(raw,key=lambda x:x[1],reverse=True)
+    scored = sorted(scored,key=lambda x:x[1],reverse=True)
 
-    if not raw:
-        syms=list(data.keys())
-        np.random.shuffle(syms)
-        return [(s,0.5,0.02) for s in syms[:MAX_POSITIONS]]
+    # HIGH CONVICTION ONLY
+    scored = [s for s in scored if s[1] > MIN_SCORE]
 
-    return raw[:MAX_POSITIONS]
+    return scored[:MAX_POSITIONS]
 
-# ================= EXECUTION =================
+# ================= AI SUPERVISOR =================
+def ai_supervisor():
+    eq = portfolio["history"]
+    trades = portfolio["trades"]
+
+    if len(eq) < 10:
+        portfolio["ai_recommendations"] = ["Collecting data..."]
+        return
+
+    r = np.diff(eq)/eq[:-1]
+    sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
+
+    peak = eq[0]
+    dd = 0
+    for e in eq:
+        peak=max(peak,e)
+        dd=min(dd,(e-peak)/peak)
+
+    rec=[]
+
+    if sharpe < 0.5:
+        rec.append("⚠️ Weak edge → increase MIN_SCORE or tighten breakout rules")
+
+    if dd < -0.1:
+        rec.append("⚠️ Drawdown high → reduce BASE_RISK")
+
+    if sharpe > 2:
+        rec.append("✅ Strong performance → consider scaling capital")
+
+    if not rec:
+        rec.append("✅ System stable")
+
+    portfolio["ai_recommendations"]=rec
+
+# ================= ENGINE =================
 def run_engine():
     global portfolio
 
-    universe=build_universe()+["SPY","QQQ"]
-    data=load(universe)
+    universe = UNIVERSE + ["SPY","QQQ"]
+    data = load(universe)
 
     if not data:
         return {"error":"no data"}
 
-    idx=portfolio["step"]
-    portfolio["step"]+=1
+    idx = portfolio["step"]
+    portfolio["step"] += 1
 
-    reg=regime(data)
+    reg = regime(data)
     portfolio["regime"]=reg
 
-    sig=signals(data,idx,reg)
+    sig = signals(data,idx,reg)
 
-    equity=portfolio["cash"]
+    equity = portfolio["cash"]
 
     for s,pos in portfolio["positions"].items():
         if s in data:
             price=sf(data[s][idx])
             if pos["side"]=="long":
-                equity+=pos["shares"]*price
+                equity += pos["shares"]*price
             else:
-                pnl=(pos["entry"]-price)*pos["shares"]
-                equity+=pos["shares"]*pos["entry"]+pnl
+                equity += pos["shares"]*(pos["entry"]-price)
 
     portfolio["equity"]=equity
     portfolio["peak"]=max(portfolio["peak"],equity)
-
-    total_exposure=sum(
-        pos["shares"]*data[s][idx]
-        for s,pos in portfolio["positions"].items()
-        if s in data
-    )
-
-    max_allowed=portfolio["equity"]*MAX_HEAT
 
     # STOP LOSS
     for s,pos in list(portfolio["positions"].items()):
         price=sf(data[s][idx])
         loss=(price-pos["entry"])/pos["entry"]
-        if pos["side"]=="short":
-            loss=(pos["entry"]-price)/pos["entry"]
-
-        if loss<-STOP_LOSS:
-            portfolio["cash"]+=pos["shares"]*price
-            portfolio["trades"].append({"symbol":s,"pnl":round(loss*100,2)})
+        if loss < -STOP_LOSS:
+            portfolio["cash"] += pos["shares"]*price
             del portfolio["positions"][s]
 
-    # ROTATION
+    # ROTATE
     current=set(portfolio["positions"].keys())
     target=set(s[0] for s in sig)
 
@@ -241,13 +206,7 @@ def run_engine():
         if s not in target:
             pos=portfolio["positions"][s]
             price=sf(data[s][idx])
-
-            pnl=(price-pos["entry"])*pos["shares"]
-            if pos["side"]=="short":
-                pnl=(pos["entry"]-price)*pos["shares"]
-
-            portfolio["cash"]+=pos["shares"]*price
-            portfolio["trades"].append({"symbol":s,"pnl":round(pnl,2)})
+            portfolio["cash"] += pos["shares"]*price
             del portfolio["positions"][s]
 
     # ENTRY
@@ -256,26 +215,20 @@ def run_engine():
             continue
 
         price=sf(data[s][idx])
-        size=portfolio["equity"]*BASE_RISK/(vol*5)
+        size = portfolio["equity"]*BASE_RISK/(vol*5)
 
-        if total_exposure+size>max_allowed:
-            continue
-
-        shares=size/price
-        side="long" if reg!="bear" else "short"
-
-        if portfolio["cash"]>=size:
-            portfolio["cash"]-=size
+        if portfolio["cash"] >= size:
+            shares=size/price
+            portfolio["cash"] -= size
             portfolio["positions"][s]={
                 "shares":shares,
                 "entry":price,
-                "side":side
+                "side":"long"
             }
 
     portfolio["history"].append(portfolio["equity"])
     portfolio["last_run"]=str(datetime.utcnow())
 
-    # RUN AI SUPERVISOR
     ai_supervisor()
 
     return {
@@ -299,7 +252,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>🤖 AI Supervised Trading Dashboard</h2>
+<h2>🚀 Signal Edge v2 Dashboard</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -359,7 +312,7 @@ setInterval(load,10000);
 
 @app.route("/")
 def home():
-    return {"status":"AI SUPERVISED SYSTEM LIVE"}
+    return {"status":"SIGNAL EDGE V2 LIVE"}
 
 @app.route("/paper/run")
 def run_api():
