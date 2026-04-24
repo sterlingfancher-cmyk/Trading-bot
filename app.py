@@ -19,7 +19,6 @@ UNIVERSE = [
 BASE_RISK = 0.01
 STOP_LOSS = 0.05
 MAX_POSITIONS = 4
-MIN_SCORE = 0.4
 
 portfolio = {
     "cash": 10000,
@@ -66,7 +65,7 @@ def regime(data):
         return "bear"
     return "neutral"
 
-# ================= SIGNAL ENGINE =================
+# ================= SIGNAL ENGINE (FIXED) =================
 def signals(data, idx, reg):
     spy = data.get("SPY")
     if spy is None:
@@ -89,35 +88,31 @@ def signals(data, idx, reg):
             rs = ret20 - spy_ret
 
             high20 = max(p[idx-20:idx])
-            breakout = price > high20 * 0.97
+            breakout = price > high20 * 0.98
 
-            vol = np.std(np.diff(p[idx-20:idx]) / p[idx-20:idx-1])
-            vol_long = np.std(np.diff(p[idx-60:idx]) / p[idx-60:idx-1])
-            compression = vol < vol_long
+            vol = np.std(np.diff(p[idx-20:idx]) / p[idx-20:idx-1]) + 1e-6
 
-            score = rs*2 + accel
+            score = 0
 
-            if reg == "bull":
-                if rs > -0.01 and accel > -0.01:
-                    if breakout:
-                        score += 0.5
-                    if compression:
-                        score += 0.3
-                    scored.append((s, score, vol))
+            # Tier 1 (best setups)
+            if breakout and rs > 0 and accel > 0:
+                score = 3 + rs*2 + accel
 
-            elif reg == "bear":
-                if rs < 0 or accel < 0:
-                    scored.append((s, abs(score), vol))
+            # Tier 2 (momentum leaders)
+            elif rs > 0.02 or accel > 0.02:
+                score = 2 + rs + accel
 
-            else:
-                if abs(rs) > 0.01:
-                    scored.append((s, abs(score), vol))
+            # Tier 3 (fallback leaders)
+            elif ret20 > 0.01:
+                score = 1 + ret20
+
+            if score > 0:
+                scored.append((s, score, vol))
 
         except:
             continue
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
-    scored = [s for s in scored if s[1] > MIN_SCORE]
 
     return scored[:MAX_POSITIONS]
 
@@ -129,14 +124,14 @@ def ai_supervisor():
         portfolio["ai_recommendations"] = ["Collecting data..."]
         return
 
-    r = np.diff(eq) / eq[:-1]
-    sharpe = np.mean(r) / (np.std(r) + 1e-6) * np.sqrt(252)
+    r = np.diff(eq)/eq[:-1]
+    sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
 
     peak = eq[0]
     dd = 0
     for e in eq:
-        peak = max(peak, e)
-        dd = min(dd, (e - peak) / peak)
+        peak = max(peak,e)
+        dd = min(dd,(e-peak)/peak)
 
     rec = []
 
@@ -145,7 +140,7 @@ def ai_supervisor():
     if dd < -0.1:
         rec.append("⚠️ High drawdown → reduce risk")
     if sharpe > 2:
-        rec.append("✅ Strong performance → scale capital")
+        rec.append("✅ Strong → scale capital")
 
     if not rec:
         rec.append("✅ System stable")
@@ -304,7 +299,7 @@ setInterval(load,10000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"LIVE SYSTEM READY"}
+    return {"status":"SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run_api():
