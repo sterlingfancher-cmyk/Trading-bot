@@ -7,29 +7,21 @@ from flask import Flask, jsonify, request, render_template_string
 app = Flask(__name__)
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 
-# ================= CONFIG =================
 UNIVERSE = [
-    "NVDA","AMD","AVGO","MU","LRCX","TER","TSM",
-    "ARM","PANW","CRWD","SNOW","PLTR",
-    "RKLB","KTOS","COHR","NBIS",
-    "META","TSLA","SHOP","NET",
-    "IBIT","ETHA","GDLC"
+    "NVDA","AMD","META","TSLA","AVGO",
+    "ARM","PANW","CRWD","PLTR","SNOW"
 ]
 
 BASE_RISK = 0.01
-STOP_LOSS = 0.05
 MAX_POSITIONS = 4
 
 portfolio = {
     "cash": 10000,
     "equity": 10000,
-    "peak": 10000,
     "positions": {},
     "history": [],
-    "trades": [],
     "last_run": None,
-    "regime": None,
-    "ai_recommendations": []
+    "symbols_loaded": []
 }
 
 def sf(x):
@@ -38,160 +30,92 @@ def sf(x):
 # ================= DATA =================
 def load(symbols):
     data = {}
+
     for s in symbols:
         try:
-            df = yf.download(s, period="6mo", progress=False)
-            if df.empty:
+            df = yf.download(s, period="3mo", progress=False)
+
+            if df is None or df.empty:
                 continue
-            p = np.array(df["Close"], dtype=float)
-            if len(p) > 80:
-                data[s] = p
-        except:
-            continue
+
+            prices = df["Close"].values
+
+            if len(prices) < 50:
+                continue
+
+            data[s] = prices
+
+        except Exception as e:
+            print("DATA FAIL:", s)
+
     return data
 
-# ================= REGIME =================
-def regime(data):
-    spy = data.get("SPY")
-    if spy is None:
-        return "neutral"
-
-    ma20 = np.mean(spy[-20:])
-    ma50 = np.mean(spy[-50:])
-
-    if ma20 > ma50:
-        return "bull"
-    elif ma20 < ma50:
-        return "bear"
-    return "neutral"
-
-# ================= ALWAYS-ACTIVE SIGNAL ENGINE =================
-def signals(data, idx, reg):
-    spy = data.get("SPY")
-    if spy is None:
-        return []
-
-    spy_ret = (spy[idx]/spy[idx-20]) - 1
+# ================= SIGNALS =================
+def signals(data):
     scored = []
 
     for s, p in data.items():
-        if s in ["SPY","QQQ"]:
-            continue
-
         try:
-            ret20 = (p[idx]/p[idx-20]) - 1
-            ret10 = (p[idx]/p[idx-10]) - 1
+            ret20 = (p[-1] / p[-20]) - 1
+            ret5 = (p[-1] / p[-5]) - 1
 
-            accel = ret10 - ret20/2
-            rs = ret20 - spy_ret
+            score = ret20 + ret5
 
-            vol = np.std(np.diff(p[idx-20:idx]) / p[idx-20:idx-1]) + 1e-6
-
-            # ALWAYS produce a score
-            score = (
-                rs * 2 +
-                accel +
-                ret10 * 0.5
-            )
+            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
 
             scored.append((s, score, vol))
 
         except:
             continue
 
-    # SORT EVERYTHING
+    if not scored:
+        return []
+
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
-    # ALWAYS RETURN TOP PICKS
     return scored[:MAX_POSITIONS]
-
-# ================= AI SUPERVISOR =================
-def ai_supervisor():
-    eq = portfolio["history"]
-
-    if len(eq) < 10:
-        portfolio["ai_recommendations"] = ["Collecting data..."]
-        return
-
-    r = np.diff(eq)/eq[:-1]
-    sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
-
-    peak = eq[0]
-    dd = 0
-    for e in eq:
-        peak = max(peak,e)
-        dd = min(dd,(e-peak)/peak)
-
-    rec = []
-
-    if sharpe < 0.5:
-        rec.append("⚠️ Weak edge → refine signals")
-    if dd < -0.1:
-        rec.append("⚠️ High drawdown → reduce risk")
-    if sharpe > 2:
-        rec.append("✅ Strong performance → scale capital")
-
-    if not rec:
-        rec.append("✅ System stable")
-
-    portfolio["ai_recommendations"] = rec
 
 # ================= ENGINE =================
 def run_engine():
     global portfolio
 
-    universe = UNIVERSE + ["SPY","QQQ"]
-    data = load(universe)
+    symbols = UNIVERSE + ["SPY"]
+    data = load(symbols)
 
-    if not data:
-        return {"error": "no data"}
+    portfolio["symbols_loaded"] = list(data.keys())
 
-    idx = len(next(iter(data.values()))) - 1
+    if len(data) < 3:
+        return {
+            "error": "DATA FAILURE",
+            "symbols_loaded": portfolio["symbols_loaded"]
+        }
 
-    if idx < 60:
-        return {"error": "not enough history"}
+    sig = signals(data)
 
-    reg = regime(data)
-    portfolio["regime"] = reg
-
-    sig = signals(data, idx, reg)
+    if not sig:
+        return {
+            "error": "NO SIGNALS",
+            "symbols_loaded": portfolio["symbols_loaded"]
+        }
 
     equity = portfolio["cash"]
 
-    # VALUE POSITIONS
+    # VALUE
     for s, pos in portfolio["positions"].items():
         if s in data:
-            price = sf(data[s][idx])
-            equity += pos["shares"] * price
+            equity += pos["shares"] * sf(data[s][-1])
 
     portfolio["equity"] = equity
-    portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # STOP LOSS
-    for s, pos in list(portfolio["positions"].items()):
-        price = sf(data[s][idx])
-        loss = (price - pos["entry"]) / pos["entry"]
-
-        if loss < -STOP_LOSS:
-            portfolio["cash"] += pos["shares"] * price
-            del portfolio["positions"][s]
-
-    # ROTATION
-    current = set(portfolio["positions"].keys())
-    target = set(s[0] for s in sig)
-
-    for s in list(current):
-        if s not in target:
-            price = sf(data[s][idx])
-            portfolio["cash"] += portfolio["positions"][s]["shares"] * price
-            del portfolio["positions"][s]
+    # CLEAR (simple rotation)
+    for s in list(portfolio["positions"].keys()):
+        price = sf(data[s][-1])
+        portfolio["cash"] += portfolio["positions"][s]["shares"] * price
+        del portfolio["positions"][s]
 
     # ENTRY
     for s, score, vol in sig:
-        if s in portfolio["positions"]:
-            continue
-
-        price = sf(data[s][idx])
+        price = sf(data[s][-1])
         size = portfolio["equity"] * BASE_RISK / max(vol, 0.01)
 
         if portfolio["cash"] >= size:
@@ -200,20 +124,17 @@ def run_engine():
 
             portfolio["positions"][s] = {
                 "shares": shares,
-                "entry": price,
-                "side": "long"
+                "entry": price
             }
 
     portfolio["history"].append(portfolio["equity"])
     portfolio["last_run"] = str(datetime.utcnow())
 
-    ai_supervisor()
-
     return {
         "equity": round(portfolio["equity"], 2),
         "positions": list(portfolio["positions"].keys()),
-        "regime": reg,
-        "signals_found": len(sig)
+        "signals_found": len(sig),
+        "symbols_loaded": portfolio["symbols_loaded"]
     }
 
 # ================= DASHBOARD =================
@@ -231,49 +152,29 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>🚀 AI Trading Dashboard</h2>
+<h2>📊 Trading Dashboard</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
-<div class="card"><canvas id="dd"></canvas></div>
 <div class="card"><pre id="positions"></pre></div>
-<div class="card"><pre id="metrics"></pre></div>
-<div class="card"><pre id="ai"></pre></div>
+<div class="card"><pre id="symbols"></pre></div>
 </div>
 
 <script>
-function calcDD(eq){
- let peak=eq[0];
- return eq.map(e=>{
-  peak=Math.max(peak,e);
-  return (e-peak)/peak*100;
- });
-}
-
 async function load(){
  let p = await fetch('/paper/status').then(r=>r.json());
- let m = await fetch('/paper/metrics').then(r=>r.json());
 
  document.getElementById('positions').innerText =
   JSON.stringify(p.positions,null,2);
 
- document.getElementById('metrics').innerText =
-  JSON.stringify(m,null,2);
-
- document.getElementById('ai').innerText =
-  JSON.stringify(p.ai_recommendations,null,2);
+ document.getElementById('symbols').innerText =
+  "Loaded Symbols:\\n" + JSON.stringify(p.symbols_loaded,null,2);
 
  let eq = (p.history.length>1) ? p.history : [10000,10000];
- let dd = calcDD(eq);
 
  new Chart(document.getElementById('eq'),{
   type:'line',
   data:{labels:eq.map((_,i)=>i),datasets:[{label:'Equity',data:eq}]}
- });
-
- new Chart(document.getElementById('dd'),{
-  type:'line',
-  data:{labels:dd.map((_,i)=>i),datasets:[{label:'Drawdown %',data:dd}]}
  });
 }
 
@@ -299,27 +200,6 @@ def run_api():
 @app.route("/paper/status")
 def status():
     return jsonify(portfolio)
-
-@app.route("/paper/metrics")
-def metrics():
-    eq = portfolio["history"]
-    if len(eq) < 10:
-        return {"message":"not enough data"}
-
-    r = np.diff(eq)/eq[:-1]
-    sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
-
-    peak = eq[0]
-    dd = 0
-    for e in eq:
-        peak = max(peak,e)
-        dd = min(dd,(e-peak)/peak)
-
-    return {
-        "sharpe": round(sharpe,2),
-        "drawdown_pct": round(dd*100,2),
-        "trades": len(portfolio["trades"])
-    }
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8080)))
