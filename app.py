@@ -28,7 +28,6 @@ portfolio = {
     "positions": {},
     "history": [],
     "trades": [],
-    "step": 80,
     "last_run": None,
     "regime": None,
     "ai_recommendations": []
@@ -163,8 +162,11 @@ def run_engine():
     if not data:
         return {"error": "no data"}
 
-    idx = portfolio["step"]
-    portfolio["step"] += 1
+    # ✅ LIVE INDEX FIX
+    idx = len(next(iter(data.values()))) - 1
+
+    if idx < 60:
+        return {"error": "not enough history"}
 
     reg = regime(data)
     portfolio["regime"] = reg
@@ -173,7 +175,6 @@ def run_engine():
 
     equity = portfolio["cash"]
 
-    # value positions
     for s, pos in portfolio["positions"].items():
         if s in data:
             price = sf(data[s][idx])
@@ -182,7 +183,7 @@ def run_engine():
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # stop loss
+    # STOP LOSS
     for s, pos in list(portfolio["positions"].items()):
         price = sf(data[s][idx])
         loss = (price - pos["entry"]) / pos["entry"]
@@ -191,7 +192,7 @@ def run_engine():
             portfolio["cash"] += pos["shares"] * price
             del portfolio["positions"][s]
 
-    # rotate
+    # ROTATION
     current = set(portfolio["positions"].keys())
     target = set(s[0] for s in sig)
 
@@ -201,7 +202,7 @@ def run_engine():
             portfolio["cash"] += portfolio["positions"][s]["shares"] * price
             del portfolio["positions"][s]
 
-    # entries
+    # ENTRY
     for s, score, vol in sig:
         if s in portfolio["positions"]:
             continue
@@ -227,7 +228,8 @@ def run_engine():
     return {
         "equity": round(portfolio["equity"], 2),
         "positions": list(portfolio["positions"].keys()),
-        "regime": reg
+        "regime": reg,
+        "signals_found": len(sig)
     }
 
 # ================= DASHBOARD =================
@@ -245,7 +247,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>🚀 Institutional AI Trading Dashboard</h2>
+<h2>🚀 AI Trading Dashboard</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -302,7 +304,7 @@ setInterval(load,10000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"LIVE SYSTEM"}
+    return {"status":"LIVE SYSTEM READY"}
 
 @app.route("/paper/run")
 def run_api():
