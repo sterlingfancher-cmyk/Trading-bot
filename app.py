@@ -65,7 +65,7 @@ def regime(data):
         return "bear"
     return "neutral"
 
-# ================= SIGNAL ENGINE (FIXED) =================
+# ================= ALWAYS-ACTIVE SIGNAL ENGINE =================
 def signals(data, idx, reg):
     spy = data.get("SPY")
     if spy is None:
@@ -79,41 +79,30 @@ def signals(data, idx, reg):
             continue
 
         try:
-            price = p[idx]
-
             ret20 = (p[idx]/p[idx-20]) - 1
             ret10 = (p[idx]/p[idx-10]) - 1
 
             accel = ret10 - ret20/2
             rs = ret20 - spy_ret
 
-            high20 = max(p[idx-20:idx])
-            breakout = price > high20 * 0.98
-
             vol = np.std(np.diff(p[idx-20:idx]) / p[idx-20:idx-1]) + 1e-6
 
-            score = 0
+            # ALWAYS produce a score
+            score = (
+                rs * 2 +
+                accel +
+                ret10 * 0.5
+            )
 
-            # Tier 1 (best setups)
-            if breakout and rs > 0 and accel > 0:
-                score = 3 + rs*2 + accel
-
-            # Tier 2 (momentum leaders)
-            elif rs > 0.02 or accel > 0.02:
-                score = 2 + rs + accel
-
-            # Tier 3 (fallback leaders)
-            elif ret20 > 0.01:
-                score = 1 + ret20
-
-            if score > 0:
-                scored.append((s, score, vol))
+            scored.append((s, score, vol))
 
         except:
             continue
 
+    # SORT EVERYTHING
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
+    # ALWAYS RETURN TOP PICKS
     return scored[:MAX_POSITIONS]
 
 # ================= AI SUPERVISOR =================
@@ -136,11 +125,11 @@ def ai_supervisor():
     rec = []
 
     if sharpe < 0.5:
-        rec.append("⚠️ Weak edge → tighten signals")
+        rec.append("⚠️ Weak edge → refine signals")
     if dd < -0.1:
         rec.append("⚠️ High drawdown → reduce risk")
     if sharpe > 2:
-        rec.append("✅ Strong → scale capital")
+        rec.append("✅ Strong performance → scale capital")
 
     if not rec:
         rec.append("✅ System stable")
@@ -157,7 +146,6 @@ def run_engine():
     if not data:
         return {"error": "no data"}
 
-    # ✅ LIVE INDEX FIX
     idx = len(next(iter(data.values()))) - 1
 
     if idx < 60:
@@ -170,6 +158,7 @@ def run_engine():
 
     equity = portfolio["cash"]
 
+    # VALUE POSITIONS
     for s, pos in portfolio["positions"].items():
         if s in data:
             price = sf(data[s][idx])
