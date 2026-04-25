@@ -1,4 +1,4 @@
-import os, json, traceback
+import os, json
 import numpy as np
 import yfinance as yf
 from flask import Flask, jsonify, request, render_template_string
@@ -40,7 +40,6 @@ def load_state():
         "positions": {},
         "history": [],
         "trades": [],
-        "errors": [],
         "regime": "neutral"
     }
     return _memory
@@ -59,8 +58,7 @@ portfolio = load_state()
 # ================= DATA =================
 def clean(arr):
     arr = np.asarray(arr).astype(float).flatten()
-    arr = arr[~np.isnan(arr)]
-    return arr
+    return arr[~np.isnan(arr)]
 
 def load_data(symbols):
     out = {}
@@ -70,9 +68,8 @@ def load_data(symbols):
             if df is None or df.empty:
                 continue
             c = clean(df["Close"].values)
-            if len(c) < 10:
-                continue
-            out[s] = c
+            if len(c) > 5:
+                out[s] = c
         except:
             continue
     return out
@@ -81,127 +78,91 @@ def load_data(symbols):
 def simulate(px):
     return float(px * (1 + np.random.normal(0, 0.002)))
 
-# ================= REGIME =================
-def detect_regime(data):
-    spy = data.get("SPY")
-    if spy is None or len(spy) < 20:
-        return "neutral"
-
-    ma = np.mean(spy[-20:])
-    px = spy[-1]
-
-    if px > ma * 1.002:
-        return "bull"
-    elif px < ma * 0.998:
-        return "bear"
-    return "neutral"
-
-# ================= SIGNAL ENGINE =================
+# ================= SIGNAL =================
 def generate_signals(data):
     ranked = []
-
     for s, p in data.items():
         try:
             if len(p) < 5:
                 continue
-
             px = p[-1]
-            r5 = (px / p[-5]) - 1 if len(p) >= 5 else 0
+            r5 = (px / p[-5]) - 1
             r10 = (px / p[-10]) - 1 if len(p) >= 10 else r5
-
-            score = r5 * 0.7 + r10 * 0.3
-
+            score = r5*0.7 + r10*0.3
             ranked.append((s, float(score)))
-
         except:
             continue
-
-    # ALWAYS return something
-    ranked = sorted(ranked, key=lambda x: x[1], reverse=True)
-
-    return ranked[:5]  # always top 5
+    return sorted(ranked, key=lambda x: x[1], reverse=True)[:5]
 
 # ================= ENGINE =================
 def run_engine():
-    try:
-        data = load_data(UNIVERSE + ["SPY"])
-        if not data:
-            return {"error": "no data"}
+    data = load_data(UNIVERSE + ["SPY"])
+    if not data:
+        return {"error": "no data"}
 
-        portfolio["regime"] = detect_regime(data)
+    equity = portfolio["cash"]
 
-        equity = portfolio["cash"]
+    # mark-to-market
+    for s, pos in portfolio["positions"].items():
+        new_px = data[s][-1] if s in data else pos["last_price"]
 
-        # ===== MARK TO MARKET =====
-        for s, pos in portfolio["positions"].items():
-            new_px = data[s][-1] if s in data else pos["last_price"]
+        if abs(new_px - pos["last_price"]) < 1e-8:
+            px = simulate(pos["last_price"])
+        else:
+            px = new_px
 
-            if abs(new_px - pos["last_price"]) < 1e-8:
-                px = simulate(pos["last_price"])
-            else:
-                px = new_px
+        pos["last_price"] = px
+        pos["peak"] = max(pos["peak"], px)
+        equity += pos["shares"] * px
 
-            pos["last_price"] = px
-            pos["peak"] = max(pos["peak"], px)
+    portfolio["equity"] = equity
+    portfolio["peak"] = max(portfolio["peak"], equity)
 
-            equity += pos["shares"] * px
+    # exits
+    for s in list(portfolio["positions"].keys()):
+        pos = portfolio["positions"][s]
+        px = pos["last_price"]
+        entry = pos["entry"]
 
-        portfolio["equity"] = equity
-        portfolio["peak"] = max(portfolio["peak"], equity)
+        pnl = (px - entry) / entry
 
-        # ===== EXITS =====
-        for s in list(portfolio["positions"].keys()):
-            pos = portfolio["positions"][s]
-            px = pos["last_price"]
-            entry = pos["entry"]
+        if pnl < -0.04 or px < pos["peak"] * 0.95 or pnl > 0.12:
+            portfolio["cash"] += px * pos["shares"]
+            del portfolio["positions"][s]
 
-            pnl = (px - entry) / entry
+    # entries
+    sig = generate_signals(data)
 
-            if pnl < -0.04 or px < pos["peak"] * 0.95 or pnl > 0.12:
-                portfolio["cash"] += px * pos["shares"]
-                del portfolio["positions"][s]
+    for s, score in sig:
+        if s in portfolio["positions"]:
+            continue
+        if len(portfolio["positions"]) >= 3:
+            break
 
-        # ===== ENTRIES =====
-        sig = generate_signals(data)
+        px = data[s][-1]
+        alloc = portfolio["equity"] * 0.25
 
-        max_positions = 3
+        if portfolio["cash"] < alloc:
+            continue
 
-        for s, score in sig:
+        shares = alloc / px
 
-            if s in portfolio["positions"]:
-                continue
-
-            if len(portfolio["positions"]) >= max_positions:
-                break
-
-            px = data[s][-1]
-
-            alloc = portfolio["equity"] * 0.25
-
-            if portfolio["cash"] < alloc:
-                continue
-
-            shares = alloc / px
-
-            portfolio["cash"] -= alloc
-            portfolio["positions"][s] = {
-                "entry": px,
-                "shares": shares,
-                "last_price": px,
-                "peak": px
-            }
-
-        portfolio["history"].append(portfolio["equity"])
-        save_state(portfolio)
-
-        return {
-            "equity": round(portfolio["equity"],2),
-            "positions": list(portfolio["positions"].keys()),
-            "signals_found": len(sig)
+        portfolio["cash"] -= alloc
+        portfolio["positions"][s] = {
+            "entry": px,
+            "shares": shares,
+            "last_price": px,
+            "peak": px
         }
 
-    except Exception as e:
-        return {"error":"engine fail","detail":str(e)}
+    portfolio["history"].append(portfolio["equity"])
+    save_state(portfolio)
+
+    return {
+        "equity": round(portfolio["equity"],2),
+        "positions": list(portfolio["positions"].keys()),
+        "signals_found": len(sig)
+    }
 
 # ================= ROUTES =================
 @app.route("/")
@@ -218,35 +179,46 @@ def run():
 def status():
     return jsonify(portfolio)
 
+# ================= DASHBOARD =================
 @app.route("/dashboard")
-def dash():
+def dashboard():
     return render_template_string("""
     <html>
-    <head><script src="https://cdn.jsdelivr.net/npm/chart.js"></script></head>
+    <head>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Guaranteed Signal System</h2>
-    <canvas id="c"></canvas>
-    <pre id="d"></pre>
+    <h2>📊 Trading Dashboard</h2>
+
+    <canvas id="chart"></canvas>
+    <pre id="data"></pre>
+
     <script>
     let chart;
+
     async function load(){
-        const r = await fetch('/paper/status');
-        const j = await r.json();
-        document.getElementById('d').innerText = JSON.stringify(j,null,2);
-        let h = j.history.length>1?j.history:[10000,10000];
+        const res = await fetch('/paper/status');
+        const d = await res.json();
+
+        document.getElementById('data').innerText = JSON.stringify(d,null,2);
+
+        let hist = d.history.length > 1 ? d.history : [10000,10000];
 
         if(!chart){
-            chart = new Chart(document.getElementById('c'),{
+            chart = new Chart(document.getElementById('chart'),{
                 type:'line',
-                data:{labels:h.map((_,i)=>i),
-                datasets:[{label:'Equity',data:h}]}
+                data:{
+                    labels: hist.map((_,i)=>i),
+                    datasets:[{label:'Equity', data:hist}]
+                }
             });
         } else {
-            chart.data.labels = h.map((_,i)=>i);
-            chart.data.datasets[0].data = h;
+            chart.data.labels = hist.map((_,i)=>i);
+            chart.data.datasets[0].data = hist;
             chart.update();
         }
     }
+
     load();
     setInterval(load,3000);
     </script>
@@ -254,6 +226,7 @@ def dash():
     </html>
     """)
 
+# ================= START =================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT",8080))
     app.run(host="0.0.0.0",port=port)
