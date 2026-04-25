@@ -7,7 +7,7 @@ from flask import Flask, jsonify, request, render_template_string
 app = Flask(__name__)
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 
-# ================= UNIVERSE =================
+# ================= CONFIG =================
 UNIVERSE = [
     "NVDA","AMD","AVGO","TSM","MU","LRCX","ARM",
     "META","AMZN","GOOGL","MSFT","SNOW","PLTR","CRWD","PANW","NET",
@@ -17,9 +17,8 @@ UNIVERSE = [
     "IBIT","ETHA","GDLC"
 ]
 
-# ================= SECTORS =================
 SECTOR_MAP = {
-    "NVDA":"semis","AMD":"semis","TSM":"semis","AVGO":"semis","ARM":"semis","MU":"semis","LRCX":"semis",
+    "NVDA":"semis","AMD":"semis","TSM":"semis","AVGO":"semis","ARM":"semis",
     "META":"tech","GOOGL":"tech","MSFT":"tech","AMZN":"tech",
     "SNOW":"cloud","CRWD":"cloud","PANW":"cloud","NET":"cloud","PLTR":"cloud",
     "TSLA":"auto","SHOP":"ecom","ROKU":"media",
@@ -28,10 +27,11 @@ SECTOR_MAP = {
     "RKLB":"defense","KTOS":"defense","LHX":"defense","NOC":"defense"
 }
 
-BASE_RISK = 0.02
 MAX_POSITIONS = 4
 STOP_LOSS = 0.05
 SIGNAL_THRESHOLD = 0.01
+PYRAMID_THRESHOLD = 0.02
+PYRAMID_LIMIT = 2
 
 portfolio = {
     "cash": 10000.0,
@@ -65,9 +65,10 @@ def load(symbols):
             continue
     return data
 
-# ================= SIGNALS =================
+# ================= SIGNAL ENGINE =================
 def signals(data):
     scored = []
+
     for s, d in data.items():
         try:
             p = np.array(d["close"], dtype=float)
@@ -92,10 +93,9 @@ def signals(data):
             except:
                 continue
 
-    scored = sorted(scored, key=lambda x: x[1], reverse=True)
-    return scored[:MAX_POSITIONS * 2]
+    return sorted(scored, key=lambda x: x[1], reverse=True)
 
-# ================= AI SUPERVISOR =================
+# ================= AI =================
 def ai_supervisor():
     eq = portfolio["history"]
 
@@ -107,22 +107,13 @@ def ai_supervisor():
     sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
 
     peak = eq[0]
-    dd = 0
-    for e in eq:
-        peak = max(peak,e)
-        dd = min(dd,(e-peak)/peak)
+    dd = min([(e-peak)/peak for e in eq])
 
     notes = []
-
-    if sharpe < 0.5:
-        notes.append("⚠️ Weak edge")
-    if dd < -0.1:
-        notes.append("⚠️ High drawdown")
-    if sharpe > 2:
-        notes.append("✅ Strong system")
-
-    if not notes:
-        notes.append("Stable")
+    if sharpe < 0.5: notes.append("⚠️ Weak edge")
+    if dd < -0.1: notes.append("⚠️ Drawdown risk")
+    if sharpe > 2: notes.append("✅ Strong system")
+    if not notes: notes.append("Stable")
 
     portfolio["ai_notes"] = notes
 
@@ -138,37 +129,32 @@ def run_engine():
 
     sig = signals(data)
 
-    # ===== STEP 1: MARK-TO-MARKET =====
-    total_value = portfolio["cash"]
+    # ===== EQUITY =====
+    equity = portfolio["cash"]
     for s, pos in portfolio["positions"].items():
-        if s in data:
-            price = sf(data[s]["close"][-1])
-            total_value += pos["shares"] * price
+        price = sf(data[s]["close"][-1])
+        equity += pos["shares"] * price
 
-    portfolio["equity"] = total_value
-    portfolio["peak"] = max(portfolio["peak"], total_value)
+    portfolio["equity"] = equity
+    portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # ===== STEP 2: STOP LOSS =====
+    # ===== STOP LOSS =====
     for s, pos in list(portfolio["positions"].items()):
-        if s not in data:
-            continue
-
         low = sf(data[s]["low"][-1])
         entry = pos["entry"]
 
-        if (low - entry) / entry < -STOP_LOSS:
+        if (low - entry)/entry < -STOP_LOSS:
             exit_price = sf(data[s]["close"][-1])
             portfolio["cash"] += pos["shares"] * exit_price
-            portfolio["trades"].append((low-entry)/entry)
+            portfolio["trades"].append((s, (low-entry)/entry))
             del portfolio["positions"][s]
 
-    # ===== STEP 3: BUILD TARGET =====
+    # ===== TARGET BUILD =====
     used_sectors = set()
     targets = []
 
     for s, score, vol in sig:
         sector = SECTOR_MAP.get(s, "other")
-
         if sector in used_sectors:
             continue
 
@@ -178,22 +164,14 @@ def run_engine():
         if len(targets) >= MAX_POSITIONS:
             break
 
-    # ===== STEP 4: REMOVE NON-TARGETS =====
+    # ===== REMOVE NON-TARGETS =====
     for s in list(portfolio["positions"].keys()):
         if s not in [t[0] for t in targets]:
             price = sf(data[s]["close"][-1])
             portfolio["cash"] += portfolio["positions"][s]["shares"] * price
             del portfolio["positions"][s]
 
-    # ===== STEP 5: RE-CALC EQUITY =====
-    total_value = portfolio["cash"]
-    for s, pos in portfolio["positions"].items():
-        price = sf(data[s]["close"][-1])
-        total_value += pos["shares"] * price
-
-    portfolio["equity"] = total_value
-
-    # ===== STEP 6: ENTRY =====
+    # ===== ENTRY =====
     capital_per_trade = portfolio["equity"] / MAX_POSITIONS
 
     for s, score, vol in targets:
@@ -201,16 +179,33 @@ def run_engine():
             continue
 
         price = sf(data[s]["close"][-1])
-        size = capital_per_trade * (1 / (1 + vol * 10))
+        size = capital_per_trade * (1/(1+vol*5))
 
-        if portfolio["cash"] >= size:
+        if portfolio["cash"] >= size * 0.95:
             shares = size / price
             portfolio["cash"] -= size
 
             portfolio["positions"][s] = {
                 "shares": shares,
-                "entry": price
+                "entry": price,
+                "adds": 0
             }
+
+    # ===== PYRAMIDING =====
+    for s, pos in portfolio["positions"].items():
+        price = sf(data[s]["close"][-1])
+
+        gain = (price - pos["entry"]) / pos["entry"]
+
+        if gain > PYRAMID_THRESHOLD and pos.get("adds",0) < PYRAMID_LIMIT:
+            size = (portfolio["equity"] / MAX_POSITIONS) * 0.5
+
+            if portfolio["cash"] >= size:
+                shares = size / price
+                portfolio["cash"] -= size
+
+                pos["shares"] += shares
+                pos["adds"] += 1
 
     portfolio["history"].append(portfolio["equity"])
     portfolio["last_run"] = str(datetime.utcnow())
@@ -218,7 +213,7 @@ def run_engine():
     ai_supervisor()
 
     return {
-        "equity": round(portfolio["equity"], 2),
+        "equity": round(portfolio["equity"],2),
         "positions": list(portfolio["positions"].keys()),
         "signals_found": len(sig)
     }
@@ -238,7 +233,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 AI Trading Dashboard (Stable v3)</h2>
+<h2>📊 AI Trading Dashboard (Pyramiding)</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -279,11 +274,6 @@ setInterval(load,10000);
 </html>
 """)
 
-# ================= ROUTES =================
-@app.route("/")
-def home():
-    return {"status":"STABLE SYSTEM LIVE"}
-
 @app.route("/paper/run")
 def run_api():
     if request.args.get("key") != SECRET_KEY:
@@ -293,6 +283,10 @@ def run_api():
 @app.route("/paper/status")
 def status():
     return jsonify(portfolio)
+
+@app.route("/")
+def home():
+    return {"status":"PYRAMID SYSTEM LIVE"}
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8080)))
