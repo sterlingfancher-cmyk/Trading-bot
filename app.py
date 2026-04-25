@@ -18,7 +18,7 @@ UNIVERSE = [
 ]
 
 SECTOR_MAP = {
-    "NVDA":"semis","AMD":"semis","TSM":"semis","AVGO":"semis","ARM":"semis",
+    "NVDA":"semis","AMD":"semis","TSM":"semis","AVGO":"semis","ARM":"semis","MU":"semis","LRCX":"semis",
     "META":"tech","GOOGL":"tech","MSFT":"tech","AMZN":"tech",
     "SNOW":"cloud","CRWD":"cloud","PANW":"cloud","NET":"cloud","PLTR":"cloud",
     "TSLA":"auto","SHOP":"ecom","ROKU":"media",
@@ -30,7 +30,7 @@ SECTOR_MAP = {
 MAX_POSITIONS = 4
 STOP_LOSS = 0.05
 SIGNAL_THRESHOLD = 0.01
-PYRAMID_THRESHOLD = 0.02
+PYRAMID_THRESHOLD = 0.005   # 🔥 lowered for intraday
 PYRAMID_LIMIT = 2
 
 portfolio = {
@@ -48,12 +48,18 @@ portfolio = {
 def sf(x):
     return float(np.asarray(x).item())
 
-# ================= DATA =================
+# ================= DATA (INTRADAY FIX) =================
 def load(symbols):
     data = {}
     for s in symbols:
         try:
-            df = yf.download(s, period="3mo", progress=False)
+            df = yf.download(
+                s,
+                period="5d",
+                interval="5m",
+                progress=False
+            )
+
             if df is None or df.empty or len(df) < 50:
                 continue
 
@@ -95,7 +101,7 @@ def signals(data):
 
     return sorted(scored, key=lambda x: x[1], reverse=True)
 
-# ================= AI =================
+# ================= AI SUPERVISOR =================
 def ai_supervisor():
     eq = portfolio["history"]
 
@@ -107,7 +113,10 @@ def ai_supervisor():
     sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
 
     peak = eq[0]
-    dd = min([(e-peak)/peak for e in eq])
+    dd = 0
+    for e in eq:
+        peak = max(peak,e)
+        dd = min(dd,(e-peak)/peak)
 
     notes = []
     if sharpe < 0.5: notes.append("⚠️ Weak edge")
@@ -129,24 +138,34 @@ def run_engine():
 
     sig = signals(data)
 
-    # ===== EQUITY =====
+    # ===== EQUITY (MARK-TO-MARKET) =====
     equity = portfolio["cash"]
     for s, pos in portfolio["positions"].items():
-        price = sf(data[s]["close"][-1])
-        equity += pos["shares"] * price
+        if s in data:
+            price = sf(data[s]["close"][-1])
+            equity += pos["shares"] * price
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # ===== STOP LOSS =====
+    # ===== STOP LOSS (FIXED DUPLICATE BUG) =====
     for s, pos in list(portfolio["positions"].items()):
+        if s not in data:
+            continue
+
+        if pos.get("stopped"):
+            continue
+
         low = sf(data[s]["low"][-1])
         entry = pos["entry"]
 
         if (low - entry)/entry < -STOP_LOSS:
             exit_price = sf(data[s]["close"][-1])
+
             portfolio["cash"] += pos["shares"] * exit_price
             portfolio["trades"].append((s, (low-entry)/entry))
+
+            pos["stopped"] = True
             del portfolio["positions"][s]
 
     # ===== TARGET BUILD =====
@@ -155,6 +174,7 @@ def run_engine():
 
     for s, score, vol in sig:
         sector = SECTOR_MAP.get(s, "other")
+
         if sector in used_sectors:
             continue
 
@@ -191,13 +211,12 @@ def run_engine():
                 "adds": 0
             }
 
-    # ===== PYRAMIDING =====
+    # ===== PYRAMIDING (NOW ACTIVE) =====
     for s, pos in portfolio["positions"].items():
         price = sf(data[s]["close"][-1])
-
         gain = (price - pos["entry"]) / pos["entry"]
 
-        if gain > PYRAMID_THRESHOLD and pos.get("adds",0) < PYRAMID_LIMIT:
+        if gain > PYRAMID_THRESHOLD and pos["adds"] < PYRAMID_LIMIT:
             size = (portfolio["equity"] / MAX_POSITIONS) * 0.5
 
             if portfolio["cash"] >= size:
@@ -233,7 +252,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 AI Trading Dashboard (Pyramiding)</h2>
+<h2>📊 AI Trading Dashboard (Intraday + Pyramiding)</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -274,6 +293,11 @@ setInterval(load,10000);
 </html>
 """)
 
+# ================= ROUTES =================
+@app.route("/")
+def home():
+    return {"status":"INTRADAY SYSTEM LIVE"}
+
 @app.route("/paper/run")
 def run_api():
     if request.args.get("key") != SECRET_KEY:
@@ -283,10 +307,6 @@ def run_api():
 @app.route("/paper/status")
 def status():
     return jsonify(portfolio)
-
-@app.route("/")
-def home():
-    return {"status":"PYRAMID SYSTEM LIVE"}
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8080)))
