@@ -18,7 +18,7 @@ UNIVERSE = [
 ]
 
 SECTOR_MAP = {
-    "NVDA":"semis","AMD":"semis","TSM":"semis","AVGO":"semis","ARM":"semis","MU":"semis","LRCX":"semis",
+    "NVDA":"semis","AMD":"semis","TSM":"semis","AVGO":"semis","ARM":"semis",
     "META":"tech","GOOGL":"tech","MSFT":"tech","AMZN":"tech",
     "SNOW":"cloud","CRWD":"cloud","PANW":"cloud","NET":"cloud","PLTR":"cloud",
     "TSLA":"auto","SHOP":"ecom","ROKU":"media",
@@ -28,11 +28,10 @@ SECTOR_MAP = {
 }
 
 MAX_POSITIONS = 4
-STOP_LOSS = 0.02           # hard stop (entry-based)
-PYRAMID_STEP = 0.001       # 0.10% step from last action
-SCALP_STEP = 0.005         # 0.50% from last action
-TRAIL_STOP = 0.01          # 1% off peak
-PYRAMID_LIMIT = 3
+STOP_LOSS = 0.02
+PYRAMID_STEP = 0.001
+SCALP_STEP = 0.005
+TRAIL_STOP = 0.01
 
 portfolio = {
     "cash": 10000.0,
@@ -42,8 +41,7 @@ portfolio = {
     "history": [],
     "trades": [],
     "last_run": None,
-    "symbols_loaded": [],
-    "ai_notes": [],
+    "last_timestamp": None,
     "regime": "neutral"
 }
 
@@ -53,19 +51,27 @@ def sf(x):
 # ================= DATA =================
 def load(symbols):
     data = {}
+    timestamps = []
+
     for s in symbols:
         try:
-            df = yf.download(s, period="5d", interval="5m", progress=False)
-            if df is None or df.empty or len(df) < 50:
+            df = yf.download(s, period="1d", interval="1m", progress=False)
+
+            if df is None or df.empty or len(df) < 30:
                 continue
 
             data[s] = {
                 "close": df["Close"].values,
                 "low": df["Low"].values
             }
+
+            timestamps.append(df.index[-1])
+
         except:
             continue
-    return data
+
+    latest_time = max(timestamps) if timestamps else None
+    return data, latest_time
 
 # ================= REGIME =================
 def detect_regime(data):
@@ -89,32 +95,21 @@ def detect_regime(data):
 # ================= SIGNALS =================
 def signals(data):
     scored = []
+
     for s, d in data.items():
         try:
             p = np.array(d["close"], dtype=float)
 
-            ret3 = (p[-1] / p[-3]) - 1 if len(p) >= 3 else 0
-            ret10 = (p[-1] / p[-10]) - 1 if len(p) >= 10 else 0
+            ret3 = (p[-1] / p[-3]) - 1
+            ret10 = (p[-1] / p[-10]) - 1
+            breakout = (p[-1] - np.max(p[-20:])) / np.max(p[-20:])
 
-            high20 = np.max(p[-20:]) if len(p) >= 20 else p[-1]
-            breakout = (p[-1] - high20) / (high20 + 1e-6)
-
-            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) if len(p) >= 20 else 0.02
-            vol = vol if np.isfinite(vol) else 0.02
+            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
 
             score = float(ret3 + ret10 + breakout)
             scored.append((s, score, vol))
         except:
             continue
-
-    if not scored:
-        for s, d in data.items():
-            try:
-                p = d["close"]
-                score = (p[-1] - p[-2]) / p[-2]
-                scored.append((s, score, 0.02))
-            except:
-                continue
 
     return sorted(scored, key=lambda x: x[1], reverse=True)
 
@@ -122,56 +117,46 @@ def signals(data):
 def run_engine():
     global portfolio
 
-    data = load(UNIVERSE + ["SPY"])
-    portfolio["symbols_loaded"] = list(data.keys())
+    data, timestamp = load(UNIVERSE + ["SPY"])
+
+    # 🚨 EXECUTION GUARD
+    if timestamp == portfolio["last_timestamp"]:
+        return {
+            "message": "No new market data",
+            "equity": portfolio["equity"]
+        }
+
+    portfolio["last_timestamp"] = timestamp
 
     if len(data) < 5:
         return {"error": "DATA FAILURE"}
 
-    # ===== REGIME =====
-    regime = detect_regime(data)
-    portfolio["regime"] = regime
-
+    portfolio["regime"] = detect_regime(data)
     sig = signals(data)
 
-    # ===== MARK-TO-MARKET =====
+    # ===== EQUITY =====
     equity = portfolio["cash"]
     for s, pos in portfolio["positions"].items():
-        if s in data:
-            price = sf(data[s]["close"][-1])
-            equity += pos["shares"] * price
+        price = sf(data[s]["close"][-1])
+        equity += pos["shares"] * price
+
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # ===== HARD STOP (entry-based) =====
-    for s, pos in list(portfolio["positions"].items()):
-        if s not in data:
-            continue
-        low = sf(data[s]["low"][-1])
-        if (low - pos["entry"]) / pos["entry"] < -STOP_LOSS:
-            price = sf(data[s]["close"][-1])
-            portfolio["cash"] += pos["shares"] * price
-            portfolio["trades"].append((s, "hard_stop"))
-            del portfolio["positions"][s]
-
-    # ===== TRAILING STOP (peak-based) =====
+    # ===== TRAILING STOP =====
     for s, pos in list(portfolio["positions"].items()):
         price = sf(data[s]["close"][-1])
-        peak = pos.get("peak", pos["entry"])
-        peak = max(peak, price)
-        pos["peak"] = peak
+        pos["peak"] = max(pos.get("peak", pos["entry"]), price)
 
-        dd = (price - peak) / peak
-        if dd < -TRAIL_STOP:
+        if (price - pos["peak"]) / pos["peak"] < -TRAIL_STOP:
             portfolio["cash"] += pos["shares"] * price
             portfolio["trades"].append((s, "trail_stop"))
             del portfolio["positions"][s]
 
-    # ===== MICRO TAKE-PROFIT (scalp from last action) =====
+    # ===== SCALP =====
     for s, pos in list(portfolio["positions"].items()):
         price = sf(data[s]["close"][-1])
-        last_price = pos.get("last_price", pos["entry"])
-        move = (price - last_price) / last_price
+        move = (price - pos["last_price"]) / pos["last_price"]
 
         if move > SCALP_STEP:
             sell = pos["shares"] * 0.3
@@ -180,78 +165,61 @@ def run_engine():
             pos["last_price"] = price
             portfolio["trades"].append((s, "scalp"))
 
-    # ===== TARGET BUILD (sector diversified + regime aware) =====
-    used_sectors = set()
-    targets = []
+    # ===== ENTRY =====
+    used = set()
+    capital = portfolio["equity"] / MAX_POSITIONS
+
     for s, score, vol in sig:
-        # avoid long entries in bear regime
-        if regime == "bear" and score > 0:
-            continue
-
         sector = SECTOR_MAP.get(s, "other")
-        if sector in used_sectors:
+
+        if s in portfolio["positions"] or sector in used:
             continue
 
-        targets.append((s, score, vol))
-        used_sectors.add(sector)
-
-        if len(targets) >= MAX_POSITIONS:
+        if len(portfolio["positions"]) >= MAX_POSITIONS:
             break
 
-    # ===== REMOVE NON-TARGETS =====
-    for s in list(portfolio["positions"].keys()):
-        if s not in [t[0] for t in targets]:
-            price = sf(data[s]["close"][-1])
-            portfolio["cash"] += portfolio["positions"][s]["shares"] * price
-            del portfolio["positions"][s]
-
-    # ===== ENTRY =====
-    capital_per_trade = portfolio["equity"] / MAX_POSITIONS
-
-    for s, score, vol in targets:
-        if s in portfolio["positions"]:
-            continue
-
         price = sf(data[s]["close"][-1])
-        size = capital_per_trade * (1 / (1 + vol * 5))
+        size = capital / (1 + vol * 5)
 
-        if portfolio["cash"] >= size * 0.95:
+        if portfolio["cash"] >= size:
             shares = size / price
             portfolio["cash"] -= size
 
             portfolio["positions"][s] = {
                 "shares": shares,
                 "entry": price,
-                "last_price": price,   # 🔥 dynamic tracking
+                "last_price": price,
                 "peak": price,
                 "adds": 0
             }
 
-    # ===== PYRAMIDING (incremental from last action) =====
+            used.add(sector)
+
+    # ===== PYRAMID =====
     for s, pos in portfolio["positions"].items():
         price = sf(data[s]["close"][-1])
-        last_price = pos.get("last_price", pos["entry"])
-        move = (price - last_price) / last_price
+        move = (price - pos["last_price"]) / pos["last_price"]
 
-        if move > PYRAMID_STEP and pos["adds"] < PYRAMID_LIMIT:
+        if move > PYRAMID_STEP:
             size = (portfolio["equity"] / MAX_POSITIONS) * 0.3
+
             if portfolio["cash"] >= size:
                 shares = size / price
                 portfolio["cash"] -= size
 
                 pos["shares"] += shares
-                pos["adds"] += 1
                 pos["last_price"] = price
+                pos["adds"] += 1
                 portfolio["trades"].append((s, "pyramid"))
 
     portfolio["history"].append(portfolio["equity"])
     portfolio["last_run"] = str(datetime.utcnow())
 
     return {
-        "equity": round(portfolio["equity"], 2),
+        "equity": round(portfolio["equity"],2),
         "positions": list(portfolio["positions"].keys()),
-        "signals_found": len(sig),
-        "regime": regime
+        "trades": portfolio["trades"][-5:],
+        "regime": portfolio["regime"]
     }
 
 # ================= DASHBOARD =================
@@ -263,35 +231,24 @@ def dashboard():
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 body {background:#0f172a;color:white;font-family:Arial}
-.grid {display:grid;grid-template-columns:1fr 1fr;gap:15px}
-.card {background:#1e293b;padding:15px;border-radius:10px}
+.card {background:#1e293b;padding:15px;border-radius:10px;margin:10px}
 </style>
 </head>
 <body>
 
-<h2>📊 AI Trading Dashboard (Dynamic Intraday)</h2>
+<h2>📊 Live Trading Dashboard (1m Engine)</h2>
 
-<div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
-<div class="card"><pre id="positions"></pre></div>
-<div class="card"><pre id="regime"></pre></div>
-<div class="card"><pre id="trades"></pre></div>
-</div>
+<div class="card"><pre id="info"></pre></div>
 
 <script>
 async function load(){
  let p = await fetch('/paper/status').then(r=>r.json());
 
- document.getElementById('positions').innerText =
-  JSON.stringify(p.positions,null,2);
+ document.getElementById('info').innerText =
+  JSON.stringify(p,null,2);
 
- document.getElementById('regime').innerText =
-  "Regime: " + p.regime;
-
- document.getElementById('trades').innerText =
-  JSON.stringify(p.trades,null,2);
-
- let eq = (p.history.length>1) ? p.history : [10000,10000];
+ let eq = p.history.length > 1 ? p.history : [10000,10000];
 
  new Chart(document.getElementById('eq'),{
   type:'line',
@@ -303,7 +260,7 @@ async function load(){
 }
 
 load();
-setInterval(load,10000);
+setInterval(load,5000);
 </script>
 
 </body>
@@ -311,10 +268,6 @@ setInterval(load,10000);
 """)
 
 # ================= ROUTES =================
-@app.route("/")
-def home():
-    return {"status":"DYNAMIC SYSTEM LIVE"}
-
 @app.route("/paper/run")
 def run_api():
     if request.args.get("key") != SECRET_KEY:
@@ -324,6 +277,10 @@ def run_api():
 @app.route("/paper/status")
 def status():
     return jsonify(portfolio)
+
+@app.route("/")
+def home():
+    return {"status":"1M ENGINE LIVE"}
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8080)))
