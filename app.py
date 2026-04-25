@@ -17,21 +17,13 @@ UNIVERSE = [
     "IBIT","ETHA","GDLC"
 ]
 
-SECTOR_MAP = {
-    "NVDA":"semis","AMD":"semis","TSM":"semis","AVGO":"semis","ARM":"semis",
-    "META":"tech","GOOGL":"tech","MSFT":"tech","AMZN":"tech",
-    "SNOW":"cloud","CRWD":"cloud","PANW":"cloud","NET":"cloud","PLTR":"cloud",
-    "TSLA":"auto","SHOP":"ecom","ROKU":"media",
-    "COIN":"crypto","IBIT":"crypto","ETHA":"crypto","GDLC":"crypto",
-    "XOM":"energy","CVX":"energy",
-    "RKLB":"defense","KTOS":"defense","LHX":"defense","NOC":"defense"
-}
-
 MAX_POSITIONS = 4
-STOP_LOSS = 0.02
-PYRAMID_STEP = 0.001
-SCALP_STEP = 0.005
+BASE_RISK = 0.02
 TRAIL_STOP = 0.01
+SCALP_STEP = 0.005
+PYRAMID_STEP = 0.001
+
+SIMULATION_MODE = False
 
 portfolio = {
     "cash": 10000.0,
@@ -40,7 +32,6 @@ portfolio = {
     "positions": {},
     "history": [],
     "trades": [],
-    "last_run": None,
     "last_timestamp": None,
     "regime": "neutral"
 }
@@ -70,8 +61,26 @@ def load(symbols):
         except:
             continue
 
-    latest_time = max(timestamps) if timestamps else None
-    return data, latest_time
+    return data, max(timestamps) if timestamps else None
+
+# ================= SIGNAL =================
+def signals(data):
+    scored = []
+
+    for s, d in data.items():
+        try:
+            p = np.array(d["close"])
+
+            ret = (p[-1] / p[-5]) - 1
+            breakout = (p[-1] - np.max(p[-20:])) / np.max(p[-20:])
+            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
+
+            score = float(ret + breakout)
+            scored.append((s, score, vol))
+        except:
+            continue
+
+    return sorted(scored, key=lambda x: x[1], reverse=True)
 
 # ================= REGIME =================
 def detect_regime(data):
@@ -79,78 +88,65 @@ def detect_regime(data):
     if not spy:
         return "neutral"
 
-    p = np.array(spy["close"], dtype=float)
+    p = np.array(spy["close"])
+
     if len(p) < 50:
         return "neutral"
 
-    ma20 = np.mean(p[-20:])
-    ma50 = np.mean(p[-50:])
-
-    if p[-1] > ma20 > ma50:
+    if p[-1] > np.mean(p[-20:]):
         return "bull"
-    elif p[-1] < ma20 < ma50:
+    elif p[-1] < np.mean(p[-20:]):
         return "bear"
+
     return "neutral"
-
-# ================= SIGNALS =================
-def signals(data):
-    scored = []
-
-    for s, d in data.items():
-        try:
-            p = np.array(d["close"], dtype=float)
-
-            ret3 = (p[-1] / p[-3]) - 1
-            ret10 = (p[-1] / p[-10]) - 1
-            breakout = (p[-1] - np.max(p[-20:])) / np.max(p[-20:])
-
-            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
-
-            score = float(ret3 + ret10 + breakout)
-            scored.append((s, score, vol))
-        except:
-            continue
-
-    return sorted(scored, key=lambda x: x[1], reverse=True)
 
 # ================= ENGINE =================
 def run_engine():
     global portfolio
 
+    if datetime.utcnow().weekday() >= 5:
+        return {"status": "Market Closed"}
+
     data, timestamp = load(UNIVERSE + ["SPY"])
 
-    # 🚨 EXECUTION GUARD
     if timestamp == portfolio["last_timestamp"]:
-        return {
-            "message": "No new market data",
-            "equity": portfolio["equity"]
-        }
+        return {"message": "No new data", "equity": portfolio["equity"]}
 
     portfolio["last_timestamp"] = timestamp
 
     if len(data) < 5:
-        return {"error": "DATA FAILURE"}
+        return {"error": "DATA FAIL"}
 
-    portfolio["regime"] = detect_regime(data)
+    regime = detect_regime(data)
+    portfolio["regime"] = regime
+
     sig = signals(data)
 
     # ===== EQUITY =====
     equity = portfolio["cash"]
     for s, pos in portfolio["positions"].items():
         price = sf(data[s]["close"][-1])
+        if SIMULATION_MODE:
+            price *= (1 + np.random.uniform(-0.001, 0.001))
         equity += pos["shares"] * price
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
+    # ===== DRAWDOWN STOP =====
+    dd = (equity - portfolio["peak"]) / portfolio["peak"]
+    if dd < -0.05:
+        return {"status": "PAUSED - DRAWDOWN"}
+
     # ===== TRAILING STOP =====
     for s, pos in list(portfolio["positions"].items()):
         price = sf(data[s]["close"][-1])
+
         pos["peak"] = max(pos.get("peak", pos["entry"]), price)
 
         if (price - pos["peak"]) / pos["peak"] < -TRAIL_STOP:
             portfolio["cash"] += pos["shares"] * price
-            portfolio["trades"].append((s, "trail_stop"))
+            portfolio["trades"].append((s, "exit"))
             del portfolio["positions"][s]
 
     # ===== SCALP =====
@@ -166,20 +162,19 @@ def run_engine():
             portfolio["trades"].append((s, "scalp"))
 
     # ===== ENTRY =====
-    used = set()
-    capital = portfolio["equity"] / MAX_POSITIONS
-
     for s, score, vol in sig:
-        sector = SECTOR_MAP.get(s, "other")
-
-        if s in portfolio["positions"] or sector in used:
+        if s in portfolio["positions"]:
             continue
 
         if len(portfolio["positions"]) >= MAX_POSITIONS:
             break
 
+        if regime == "bear" and score > 0:
+            continue
+
         price = sf(data[s]["close"][-1])
-        size = capital / (1 + vol * 5)
+        risk = portfolio["equity"] * BASE_RISK
+        size = risk / (vol * price + 1e-6)
 
         if portfolio["cash"] >= size:
             shares = size / price
@@ -193,15 +188,13 @@ def run_engine():
                 "adds": 0
             }
 
-            used.add(sector)
-
     # ===== PYRAMID =====
     for s, pos in portfolio["positions"].items():
         price = sf(data[s]["close"][-1])
         move = (price - pos["last_price"]) / pos["last_price"]
 
         if move > PYRAMID_STEP:
-            size = (portfolio["equity"] / MAX_POSITIONS) * 0.3
+            size = portfolio["equity"] * 0.01
 
             if portfolio["cash"] >= size:
                 shares = size / price
@@ -209,17 +202,15 @@ def run_engine():
 
                 pos["shares"] += shares
                 pos["last_price"] = price
-                pos["adds"] += 1
                 portfolio["trades"].append((s, "pyramid"))
 
     portfolio["history"].append(portfolio["equity"])
-    portfolio["last_run"] = str(datetime.utcnow())
 
     return {
         "equity": round(portfolio["equity"],2),
         "positions": list(portfolio["positions"].keys()),
         "trades": portfolio["trades"][-5:],
-        "regime": portfolio["regime"]
+        "regime": regime
     }
 
 # ================= DASHBOARD =================
@@ -231,24 +222,35 @@ def dashboard():
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 body {background:#0f172a;color:white;font-family:Arial}
-.card {background:#1e293b;padding:15px;border-radius:10px;margin:10px}
+.grid {display:grid;grid-template-columns:1fr 1fr;gap:15px}
+.card {background:#1e293b;padding:15px;border-radius:10px}
 </style>
 </head>
 <body>
 
-<h2>📊 Live Trading Dashboard (1m Engine)</h2>
+<h2>📊 Institutional Trading Dashboard</h2>
 
+<div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
-<div class="card"><pre id="info"></pre></div>
+<div class="card"><pre id="positions"></pre></div>
+<div class="card"><pre id="regime"></pre></div>
+<div class="card"><pre id="trades"></pre></div>
+</div>
 
 <script>
 async function load(){
  let p = await fetch('/paper/status').then(r=>r.json());
 
- document.getElementById('info').innerText =
-  JSON.stringify(p,null,2);
+ document.getElementById('positions').innerText =
+  JSON.stringify(p.positions,null,2);
 
- let eq = p.history.length > 1 ? p.history : [10000,10000];
+ document.getElementById('regime').innerText =
+  "Regime: " + p.regime;
+
+ document.getElementById('trades').innerText =
+  JSON.stringify(p.trades,null,2);
+
+ let eq = p.history.length>1 ? p.history : [10000,10000];
 
  new Chart(document.getElementById('eq'),{
   type:'line',
@@ -280,7 +282,4 @@ def status():
 
 @app.route("/")
 def home():
-    return {"status":"1M ENGINE LIVE"}
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",8080)))
+    return {"status":"FINAL SYSTEM WITH DASHBOARD LIVE"}
