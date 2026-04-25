@@ -29,8 +29,7 @@ SECTOR_MAP = {
 
 MAX_POSITIONS = 4
 STOP_LOSS = 0.05
-SIGNAL_THRESHOLD = 0.01
-PYRAMID_THRESHOLD = 0.005   # 🔥 lowered for intraday
+PYRAMID_THRESHOLD = 0.0025   # 0.25%
 PYRAMID_LIMIT = 2
 
 portfolio = {
@@ -48,18 +47,12 @@ portfolio = {
 def sf(x):
     return float(np.asarray(x).item())
 
-# ================= DATA (INTRADAY FIX) =================
+# ================= DATA =================
 def load(symbols):
     data = {}
     for s in symbols:
         try:
-            df = yf.download(
-                s,
-                period="5d",
-                interval="5m",
-                progress=False
-            )
-
+            df = yf.download(s, period="5d", interval="5m", progress=False)
             if df is None or df.empty or len(df) < 50:
                 continue
 
@@ -71,7 +64,7 @@ def load(symbols):
             continue
     return data
 
-# ================= SIGNAL ENGINE =================
+# ================= SIGNAL ENGINE (UPGRADED) =================
 def signals(data):
     scored = []
 
@@ -79,29 +72,24 @@ def signals(data):
         try:
             p = np.array(d["close"], dtype=float)
 
-            ret20 = (p[-1] / p[-20]) - 1
-            ret5 = (p[-1] / p[-5]) - 1
+            ret3 = (p[-1] / p[-3]) - 1
+            ret10 = (p[-1] / p[-10]) - 1
+
+            high20 = np.max(p[-20:])
+            breakout = (p[-1] - high20) / high20
+
             vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
 
-            score = float(ret20 + ret5)
+            score = (ret3 * 2) + ret10 + breakout
 
-            if score > SIGNAL_THRESHOLD:
+            if score > 0:
                 scored.append((s, score, vol))
         except:
             continue
 
-    if not scored:
-        for s, d in data.items():
-            try:
-                p = d["close"]
-                score = (p[-1] - p[-2]) / p[-2]
-                scored.append((s, score, 0.02))
-            except:
-                continue
-
     return sorted(scored, key=lambda x: x[1], reverse=True)
 
-# ================= AI SUPERVISOR =================
+# ================= AI =================
 def ai_supervisor():
     eq = portfolio["history"]
 
@@ -138,7 +126,7 @@ def run_engine():
 
     sig = signals(data)
 
-    # ===== EQUITY (MARK-TO-MARKET) =====
+    # ===== EQUITY =====
     equity = portfolio["cash"]
     for s, pos in portfolio["positions"].items():
         if s in data:
@@ -148,7 +136,7 @@ def run_engine():
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # ===== STOP LOSS (FIXED DUPLICATE BUG) =====
+    # ===== STOP LOSS =====
     for s, pos in list(portfolio["positions"].items()):
         if s not in data:
             continue
@@ -168,6 +156,18 @@ def run_engine():
             pos["stopped"] = True
             del portfolio["positions"][s]
 
+    # ===== TAKE PROFIT (NEW) =====
+    for s, pos in list(portfolio["positions"].items()):
+        price = sf(data[s]["close"][-1])
+        gain = (price - pos["entry"]) / pos["entry"]
+
+        if gain > 0.03:
+            sell = pos["shares"] * 0.5
+            portfolio["cash"] += sell * price
+            pos["shares"] -= sell
+
+            portfolio["trades"].append((s, gain))
+
     # ===== TARGET BUILD =====
     used_sectors = set()
     targets = []
@@ -184,7 +184,7 @@ def run_engine():
         if len(targets) >= MAX_POSITIONS:
             break
 
-    # ===== REMOVE NON-TARGETS =====
+    # ===== REMOVE NON TARGETS =====
     for s in list(portfolio["positions"].keys()):
         if s not in [t[0] for t in targets]:
             price = sf(data[s]["close"][-1])
@@ -211,7 +211,7 @@ def run_engine():
                 "adds": 0
             }
 
-    # ===== PYRAMIDING (NOW ACTIVE) =====
+    # ===== PYRAMIDING =====
     for s, pos in portfolio["positions"].items():
         price = sf(data[s]["close"][-1])
         gain = (price - pos["entry"]) / pos["entry"]
@@ -252,7 +252,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 AI Trading Dashboard (Intraday + Pyramiding)</h2>
+<h2>📊 AI Trading Dashboard (Alpha Engine)</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -296,7 +296,7 @@ setInterval(load,10000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"INTRADAY SYSTEM LIVE"}
+    return {"status":"ALPHA SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run_api():
