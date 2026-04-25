@@ -7,10 +7,14 @@ from flask import Flask, jsonify, request, render_template_string
 app = Flask(__name__)
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 
-# ================= CONFIG =================
+# ================= UNIVERSE =================
 UNIVERSE = [
-    "NVDA","AMD","META","TSLA","AVGO",
-    "ARM","PANW","CRWD","PLTR","SNOW"
+    "NVDA","AMD","AVGO","TSM","MU","LRCX","ARM",
+    "META","AMZN","GOOGL","MSFT","SNOW","PLTR","CRWD","PANW","NET",
+    "TSLA","SHOP","COIN","ROKU",
+    "RKLB","KTOS","LHX","NOC",
+    "XOM","CVX",
+    "IBIT","ETHA","GDLC"
 ]
 
 BASE_RISK = 0.02
@@ -32,7 +36,7 @@ portfolio = {
 def sf(x):
     return float(np.asarray(x).item())
 
-# ================= DATA =================
+# ================= DATA (WITH HIGH/LOW) =================
 def load(symbols):
     data = {}
 
@@ -43,52 +47,44 @@ def load(symbols):
             if df is None or df.empty:
                 continue
 
-            prices = df["Close"].values
-
-            if len(prices) < 50:
+            if len(df) < 50:
                 continue
 
-            data[s] = prices
+            data[s] = {
+                "close": df["Close"].values,
+                "low": df["Low"].values,
+                "high": df["High"].values
+            }
 
         except Exception as e:
-            print(f"DATA FAIL: {s} -> {e}")
+            print(f"DATA FAIL: {s}")
 
     return data
 
-# ================= SIGNAL ENGINE (GUARANTEED) =================
+# ================= SIGNAL ENGINE =================
 def signals(data):
     scored = []
 
-    for s, p in data.items():
+    for s, d in data.items():
         try:
-            p = np.array(p, dtype=float)
-
-            if len(p) < 30:
-                continue
+            p = np.array(d["close"], dtype=float)
 
             ret20 = (p[-1] / p[-20]) - 1
             ret5 = (p[-1] / p[-5]) - 1
 
-            if not np.isfinite(ret20) or not np.isfinite(ret5):
-                continue
-
-            vol = np.std(np.diff(p[-20:]) / p[-20:-1])
-
-            if not np.isfinite(vol) or vol == 0:
-                vol = 0.02
+            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
 
             score = float(ret20 + ret5)
 
             scored.append((s, score, vol))
 
-        except Exception as e:
-            print(f"SIGNAL FAIL: {s} -> {e}")
+        except:
+            continue
 
-    # 🚨 FALLBACK (never allow empty)
     if not scored:
-        print("⚠️ FALLBACK SIGNAL ACTIVATED")
-        for s, p in data.items():
+        for s, d in data.items():
             try:
+                p = d["close"]
                 score = (p[-1] - p[-2]) / p[-2]
                 scored.append((s, score, 0.02))
             except:
@@ -138,7 +134,7 @@ def run_engine():
 
     portfolio["symbols_loaded"] = list(data.keys())
 
-    if len(data) < 3:
+    if len(data) < 5:
         return {
             "error": "DATA FAILURE",
             "symbols_loaded": portfolio["symbols_loaded"]
@@ -151,32 +147,45 @@ def run_engine():
     # VALUE POSITIONS
     for s, pos in portfolio["positions"].items():
         if s in data:
-            price = sf(data[s][-1])
+            price = sf(data[s]["close"][-1])
             equity += pos["shares"] * price
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # STOP LOSS + CLOSE
+    # ================= INTRADAY-AWARE STOP LOSS =================
     for s, pos in list(portfolio["positions"].items()):
-        price = sf(data[s][-1])
-        pnl = (price - pos["entry"]) / pos["entry"]
+        if s not in data:
+            continue
 
-        if pnl < -STOP_LOSS:
-            portfolio["cash"] += pos["shares"] * price
-            portfolio["trades"].append(pnl)
+        low_price = sf(data[s]["low"][-1])
+        entry = pos["entry"]
+
+        drawdown = (low_price - entry) / entry
+
+        if drawdown < -STOP_LOSS:
+            exit_price = sf(data[s]["close"][-1])
+            portfolio["cash"] += pos["shares"] * exit_price
+            portfolio["trades"].append(drawdown)
             del portfolio["positions"][s]
 
-    # FULL ROTATION
+    # ================= ROTATION =================
     for s in list(portfolio["positions"].keys()):
-        price = sf(data[s][-1])
-        portfolio["cash"] += portfolio["positions"][s]["shares"] * price
-        del portfolio["positions"][s]
+        if s not in [x[0] for x in sig]:
+            price = sf(data[s]["close"][-1])
+            portfolio["cash"] += portfolio["positions"][s]["shares"] * price
+            del portfolio["positions"][s]
 
-    # ENTRY
+    # ================= ENTRY =================
+    capital_per_trade = portfolio["equity"] / MAX_POSITIONS
+
     for s, score, vol in sig:
-        price = sf(data[s][-1])
-        size = portfolio["equity"] * BASE_RISK / max(vol, 0.02)
+        if s in portfolio["positions"]:
+            continue
+
+        price = sf(data[s]["close"][-1])
+
+        size = capital_per_trade * (1 / (1 + vol * 10))
 
         if portfolio["cash"] >= size:
             shares = size / price
@@ -214,7 +223,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 AI Trading Dashboard</h2>
+<h2>📊 AI Trading Dashboard (Risk Engine v2)</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -240,8 +249,10 @@ async function load(){
 
  new Chart(document.getElementById('eq'),{
   type:'line',
-  data:{labels:eq.map((_,i)=>i),
-  datasets:[{label:'Equity',data:eq}]}
+  data:{
+    labels:eq.map((_,i)=>i),
+    datasets:[{label:'Equity',data:eq}]
+  }
  });
 }
 
@@ -256,7 +267,7 @@ setInterval(load,10000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"SYSTEM LIVE"}
+    return {"status":"SYSTEM LIVE (RISK ENGINE V2)"}
 
 @app.route("/paper/run")
 def run_api():
