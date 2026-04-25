@@ -3,11 +3,14 @@ import numpy as np
 import yfinance as yf
 from datetime import datetime
 from flask import Flask, jsonify, request, render_template_string
+import random
 
 app = Flask(__name__)
 
 # ================= CONFIG =================
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
+
+SIMULATION_MODE = True
 
 UNIVERSE = [
     "NVDA","AMD","AVGO","TSM","MU","LRCX","ARM",
@@ -19,10 +22,10 @@ UNIVERSE = [
 ]
 
 MAX_POSITIONS = 4
-BASE_RISK = 0.02
-TRAIL_STOP = 0.01
-SCALP_STEP = 0.005
-PYRAMID_STEP = 0.001
+BASE_RISK = 0.03
+TRAIL_STOP = 0.015
+SCALP_STEP = 0.004
+PYRAMID_STEP = 0.003
 
 # ================= STATE =================
 portfolio = {
@@ -32,17 +35,12 @@ portfolio = {
     "positions": {},
     "history": [],
     "trades": [],
-    "last_timestamp": None,
     "regime": "neutral"
 }
-
-def sf(x):
-    return float(np.asarray(x).item())
 
 # ================= DATA =================
 def load(symbols):
     data = {}
-    timestamps = []
 
     for s in symbols:
         try:
@@ -51,37 +49,39 @@ def load(symbols):
             if df is None or df.empty or len(df) < 20:
                 continue
 
+            closes = df["Close"].values.astype(float)
+
+            # ===== SIMULATION BOOST =====
+            if SIMULATION_MODE:
+                noise = np.random.normal(0, 0.002, size=len(closes))
+                closes = closes * (1 + noise)
+
             data[s] = {
-                "close": df["Close"].values,
-                "low": df["Low"].values
+                "close": closes,
+                "low": df["Low"].values.astype(float)
             }
 
-            timestamps.append(df.index[-1])
-        except Exception as e:
-            print(f"Data error {s}: {e}")
+        except:
+            continue
 
-    latest_time = max(timestamps) if timestamps else None
-    return data, latest_time
+    return data
 
 # ================= SIGNAL =================
 def signals(data):
     scored = []
 
     for s, d in data.items():
-        try:
-            p = np.array(d["close"], dtype=float)
+        p = d["close"]
 
-            if len(p) < 20:
-                continue
-
-            ret = (p[-1] / p[-5]) - 1
-            breakout = (p[-1] - np.max(p[-20:])) / np.max(p[-20:])
-            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
-
-            score = float(ret + breakout)
-            scored.append((s, score, vol))
-        except:
+        if len(p) < 20:
             continue
+
+        ret = (p[-1] / p[-5]) - 1
+        breakout = (p[-1] - np.max(p[-20:])) / np.max(p[-20:])
+        vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
+
+        score = float(ret + breakout + random.uniform(0, 0.01))  # boost activity
+        scored.append((s, score, vol))
 
     return sorted(scored, key=lambda x: x[1], reverse=True)
 
@@ -91,10 +91,7 @@ def detect_regime(data):
     if not spy:
         return "neutral"
 
-    p = np.array(spy["close"], dtype=float)
-
-    if len(p) < 20:
-        return "neutral"
+    p = spy["close"]
 
     if p[-1] > np.mean(p[-20:]):
         return "bull"
@@ -107,20 +104,10 @@ def detect_regime(data):
 def run_engine():
     global portfolio
 
-    print("Running engine...")
-
-    data, timestamp = load(UNIVERSE + ["SPY"])
-
-    if not timestamp:
-        return {"error": "No market data"}
-
-    if timestamp == portfolio["last_timestamp"]:
-        return {"message": "No new data", "equity": portfolio["equity"]}
-
-    portfolio["last_timestamp"] = timestamp
+    data = load(UNIVERSE + ["SPY"])
 
     if len(data) < 5:
-        return {"error": "Insufficient data"}
+        return {"error": "no data"}
 
     regime = detect_regime(data)
     portfolio["regime"] = regime
@@ -132,28 +119,23 @@ def run_engine():
 
     for s, pos in portfolio["positions"].items():
         if s in data:
-            price = sf(data[s]["close"][-1])
+            price = float(data[s]["close"][-1])
             equity += pos["shares"] * price
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
-
-    # ===== DRAWDOWN STOP =====
-    dd = (equity - portfolio["peak"]) / portfolio["peak"]
-    if dd < -0.05:
-        return {"status": "PAUSED - DRAWDOWN"}
 
     # ===== TRAILING STOP =====
     for s, pos in list(portfolio["positions"].items()):
         if s not in data:
             continue
 
-        price = sf(data[s]["close"][-1])
+        price = float(data[s]["close"][-1])
         pos["peak"] = max(pos.get("peak", pos["entry"]), price)
 
         if (price - pos["peak"]) / pos["peak"] < -TRAIL_STOP:
             portfolio["cash"] += pos["shares"] * price
-            portfolio["trades"].append((s, "exit"))
+            portfolio["trades"].append((s, "stop"))
             del portfolio["positions"][s]
 
     # ===== SCALP =====
@@ -161,7 +143,7 @@ def run_engine():
         if s not in data:
             continue
 
-        price = sf(data[s]["close"][-1])
+        price = float(data[s]["close"][-1])
         move = (price - pos["last_price"]) / pos["last_price"]
 
         if move > SCALP_STEP:
@@ -179,10 +161,7 @@ def run_engine():
         if len(portfolio["positions"]) >= MAX_POSITIONS:
             break
 
-        if regime == "bear" and score > 0:
-            continue
-
-        price = sf(data[s]["close"][-1])
+        price = float(data[s]["close"][-1])
         risk = portfolio["equity"] * BASE_RISK
         size = risk / (vol * price + 1e-6)
 
@@ -194,8 +173,7 @@ def run_engine():
                 "shares": shares,
                 "entry": price,
                 "last_price": price,
-                "peak": price,
-                "adds": 0
+                "peak": price
             }
 
     # ===== PYRAMID =====
@@ -203,7 +181,7 @@ def run_engine():
         if s not in data:
             continue
 
-        price = sf(data[s]["close"][-1])
+        price = float(data[s]["close"][-1])
         move = (price - pos["last_price"]) / pos["last_price"]
 
         if move > PYRAMID_STEP:
@@ -212,7 +190,6 @@ def run_engine():
             if portfolio["cash"] >= size:
                 shares = size / price
                 portfolio["cash"] -= size
-
                 pos["shares"] += shares
                 pos["last_price"] = price
                 portfolio["trades"].append((s, "pyramid"))
@@ -240,7 +217,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 Trading Dashboard</h2>
+<h2>🚀 AI Trading Dashboard (Simulation Mode)</h2>
 
 <div class="card"><canvas id="eq"></canvas></div>
 <div class="card"><pre id="info"></pre></div>
@@ -264,7 +241,7 @@ async function load(){
 }
 
 load();
-setInterval(load,5000);
+setInterval(load,3000);
 </script>
 
 </body>
@@ -274,7 +251,7 @@ setInterval(load,5000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status": "APP LIVE"}
+    return {"status": "SIMULATION SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run_api():
@@ -288,6 +265,6 @@ def status():
 
 # ================= START =================
 if __name__ == "__main__":
-    print("Starting Flask server...")
+    print("Starting server...")
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
