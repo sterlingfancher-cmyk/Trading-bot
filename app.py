@@ -29,7 +29,7 @@ SECTOR_MAP = {
 
 MAX_POSITIONS = 4
 STOP_LOSS = 0.05
-PYRAMID_THRESHOLD = 0.0025   # 0.25%
+PYRAMID_THRESHOLD = 0.0025
 PYRAMID_LIMIT = 2
 
 portfolio = {
@@ -64,7 +64,7 @@ def load(symbols):
             continue
     return data
 
-# ================= SIGNAL ENGINE (UPGRADED) =================
+# ================= SIGNAL ENGINE (ALWAYS ACTIVE) =================
 def signals(data):
     scored = []
 
@@ -82,12 +82,15 @@ def signals(data):
 
             score = (ret3 * 2) + ret10 + breakout
 
-            if score > 0:
-                scored.append((s, score, vol))
+            scored.append((s, score, vol))
+
         except:
             continue
 
-    return sorted(scored, key=lambda x: x[1], reverse=True)
+    # ALWAYS return best options (even if weak)
+    scored = sorted(scored, key=lambda x: x[1], reverse=True)
+
+    return scored[:MAX_POSITIONS * 2]
 
 # ================= AI =================
 def ai_supervisor():
@@ -101,10 +104,7 @@ def ai_supervisor():
     sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
 
     peak = eq[0]
-    dd = 0
-    for e in eq:
-        peak = max(peak,e)
-        dd = min(dd,(e-peak)/peak)
+    dd = min([(e-peak)/peak for e in eq])
 
     notes = []
     if sharpe < 0.5: notes.append("⚠️ Weak edge")
@@ -149,14 +149,12 @@ def run_engine():
 
         if (low - entry)/entry < -STOP_LOSS:
             exit_price = sf(data[s]["close"][-1])
-
             portfolio["cash"] += pos["shares"] * exit_price
             portfolio["trades"].append((s, (low-entry)/entry))
-
             pos["stopped"] = True
             del portfolio["positions"][s]
 
-    # ===== TAKE PROFIT (NEW) =====
+    # ===== TAKE PROFIT =====
     for s, pos in list(portfolio["positions"].items()):
         price = sf(data[s]["close"][-1])
         gain = (price - pos["entry"]) / pos["entry"]
@@ -165,10 +163,9 @@ def run_engine():
             sell = pos["shares"] * 0.5
             portfolio["cash"] += sell * price
             pos["shares"] -= sell
-
             portfolio["trades"].append((s, gain))
 
-    # ===== TARGET BUILD =====
+    # ===== TARGET BUILD (SECTOR BALANCED) =====
     used_sectors = set()
     targets = []
 
@@ -184,7 +181,7 @@ def run_engine():
         if len(targets) >= MAX_POSITIONS:
             break
 
-    # ===== REMOVE NON TARGETS =====
+    # ===== REMOVE NON-TARGETS =====
     for s in list(portfolio["positions"].keys()):
         if s not in [t[0] for t in targets]:
             price = sf(data[s]["close"][-1])
@@ -252,7 +249,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 AI Trading Dashboard (Alpha Engine)</h2>
+<h2>📊 AI Trading Dashboard (Always Active)</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -296,7 +293,7 @@ setInterval(load,10000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"ALPHA SYSTEM LIVE"}
+    return {"status":"ALWAYS-ACTIVE SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run_api():
