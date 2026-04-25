@@ -77,7 +77,7 @@ def load_data(symbols):
             continue
     return out
 
-# ================= SIMULATION =================
+# ================= SIM =================
 def simulate(px):
     return float(px * (1 + np.random.normal(0, 0.0015)))
 
@@ -96,9 +96,10 @@ def detect_regime(data):
         return "bear"
     return "neutral"
 
-# ================= SIGNAL ENGINE =================
+# ================= SIGNALS =================
 def generate_signals(data, regime):
-    ranked = []
+    primary = []
+    fallback = []
 
     for s, p in data.items():
         try:
@@ -109,38 +110,41 @@ def generate_signals(data, regime):
             ma20 = np.mean(p[-20:])
             r5 = (px / p[-5]) - 1
             r20 = (px / p[-20]) - 1
-            high20 = np.max(p[-20:])
-            breakout = (px - high20) / high20
             vol = np.std(np.diff(p[-20:]) / p[-20:-1])
 
-            # ===== REGIME ADAPTIVE FILTER =====
-            if regime == "bull":
-                if px < ma20 or r5 <= 0 or r20 <= 0:
-                    continue
-
-            elif regime == "neutral":
-                if r5 <= 0:
-                    continue
-                if breakout < -0.03:
-                    continue
-
-            elif regime == "bear":
-                if r5 <= 0 or r20 <= 0:
-                    continue
-                if px < ma20:
-                    continue
-
-            # volatility filter
             if vol < 0.0015:
                 continue
 
-            score = r5 * 0.6 + r20 * 0.4
-            ranked.append((s, float(score), float(vol)))
+            score = r5*0.6 + r20*0.4
+
+            # ===== PRIMARY STRICT =====
+            if regime == "bull":
+                if px > ma20 and r5 > 0 and r20 > 0:
+                    primary.append((s, score, vol))
+
+            elif regime == "neutral":
+                if r5 > 0 and px > ma20:
+                    primary.append((s, score, vol))
+
+            elif regime == "bear":
+                if r5 > 0 and r20 > 0 and px > ma20:
+                    primary.append((s, score, vol))
+
+            # ===== FALLBACK (LOOSER) =====
+            if r5 > 0:
+                fallback.append((s, r5, vol))
 
         except:
             continue
 
-    return sorted(ranked, key=lambda x: x[1], reverse=True)
+    primary = sorted(primary, key=lambda x: x[1], reverse=True)
+    fallback = sorted(fallback, key=lambda x: x[1], reverse=True)
+
+    # 🔥 KEY: fallback activation
+    if len(primary) == 0:
+        return fallback[:3]
+
+    return primary
 
 # ================= ENGINE =================
 def run_engine():
@@ -155,10 +159,8 @@ def run_engine():
 
         # ===== MARK TO MARKET =====
         for s, pos in portfolio["positions"].items():
-
             new_px = data[s][-1] if s in data else pos["last_price"]
 
-            # stale detection → simulate
             if abs(new_px - pos["last_price"]) < 1e-8:
                 px = simulate(pos["last_price"])
             else:
@@ -172,14 +174,12 @@ def run_engine():
         portfolio["equity"] = equity
         portfolio["peak"] = max(portfolio["peak"], equity)
 
-        # ===== KILL SWITCH =====
+        # ===== RISK =====
         dd = (equity - portfolio["peak"]) / portfolio["peak"]
         if dd < -0.10:
             portfolio["positions"] = {}
             portfolio["cash"] = equity
-            portfolio["trades"].append({"type": "kill"})
-            save_state(portfolio)
-            return {"risk": "portfolio stopped"}
+            return {"risk": "stopped"}
 
         # ===== EXITS =====
         for s in list(portfolio["positions"].keys()):
@@ -189,22 +189,15 @@ def run_engine():
 
             pnl = (px - entry) / entry
 
-            if pnl < -0.04 or px < pos["peak"] * 0.95 or pnl > 0.15:
+            if pnl < -0.04 or px < pos["peak"]*0.95 or pnl > 0.15:
                 portfolio["cash"] += px * pos["shares"]
                 del portfolio["positions"][s]
 
-        # ===== SIGNALS =====
+        # ===== ENTRIES =====
         sig = generate_signals(data, portfolio["regime"])
 
-        # ===== POSITION LIMITS =====
-        if portfolio["regime"] == "bull":
-            max_positions = 4
-        elif portfolio["regime"] == "neutral":
-            max_positions = 2
-        else:
-            max_positions = 1
+        max_positions = 3 if portfolio["regime"] != "bear" else 1
 
-        # ===== ENTRIES =====
         for s, score, vol in sig[:max_positions]:
 
             if s in portfolio["positions"]:
@@ -214,9 +207,7 @@ def run_engine():
                 break
 
             px = data[s][-1]
-
-            size = min(0.25, 0.06 / (vol + 1e-6))
-            alloc = portfolio["equity"] * size
+            alloc = portfolio["equity"] * 0.2
 
             if portfolio["cash"] < alloc:
                 continue
@@ -231,35 +222,28 @@ def run_engine():
                 "peak": px
             }
 
-            portfolio["trades"].append({
-                "sym": s,
-                "type": "entry",
-                "px": px
-            })
-
         portfolio["history"].append(portfolio["equity"])
         save_state(portfolio)
 
         return {
-            "equity": round(portfolio["equity"], 2),
+            "equity": round(portfolio["equity"],2),
             "positions": list(portfolio["positions"].keys()),
             "signals_found": len(sig),
             "regime": portfolio["regime"]
         }
 
     except Exception as e:
-        portfolio["errors"].append(traceback.format_exc())
-        return {"error": "engine failure", "detail": str(e)}
+        return {"error":"engine fail","detail":str(e)}
 
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status": "SYSTEM LIVE"}
+    return {"status":"LIVE"}
 
 @app.route("/paper/run")
 def run():
     if request.args.get("key") != SECRET_KEY:
-        return {"error": "unauthorized"}
+        return {"error":"unauthorized"}
     return jsonify(run_engine())
 
 @app.route("/paper/status")
@@ -267,44 +251,34 @@ def status():
     return jsonify(portfolio)
 
 @app.route("/dashboard")
-def dashboard():
+def dash():
     return render_template_string("""
     <html>
-    <head>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    </head>
+    <head><script src="https://cdn.jsdelivr.net/npm/chart.js"></script></head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Adaptive Trading System</h2>
-
-    <canvas id="chart"></canvas>
-    <pre id="data"></pre>
-
+    <h2>📊 Adaptive + Fallback System</h2>
+    <canvas id="c"></canvas>
+    <pre id="d"></pre>
     <script>
     let chart;
-
     async function load(){
-        const res = await fetch('/paper/status');
-        const d = await res.json();
-
-        document.getElementById('data').innerText = JSON.stringify(d,null,2);
-
-        let hist = d.history.length > 1 ? d.history : [10000,10000];
+        const r = await fetch('/paper/status');
+        const j = await r.json();
+        document.getElementById('d').innerText = JSON.stringify(j,null,2);
+        let h = j.history.length>1?j.history:[10000,10000];
 
         if(!chart){
-            chart = new Chart(document.getElementById('chart'),{
+            chart = new Chart(document.getElementById('c'),{
                 type:'line',
-                data:{
-                    labels: hist.map((_,i)=>i),
-                    datasets:[{label:'Equity', data:hist}]
-                }
+                data:{labels:h.map((_,i)=>i),
+                datasets:[{label:'Equity',data:h}]}
             });
         } else {
-            chart.data.labels = hist.map((_,i)=>i);
-            chart.data.datasets[0].data = hist;
+            chart.data.labels = h.map((_,i)=>i);
+            chart.data.datasets[0].data = h;
             chart.update();
         }
     }
-
     load();
     setInterval(load,3000);
     </script>
@@ -312,7 +286,6 @@ def dashboard():
     </html>
     """)
 
-# ================= START =================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT",8080))
+    app.run(host="0.0.0.0",port=port)
