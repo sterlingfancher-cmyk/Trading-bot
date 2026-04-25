@@ -17,7 +17,7 @@ UNIVERSE = [
     "IBIT","ETHA","GDLC"
 ]
 
-# ================= SECTOR MAP =================
+# ================= SECTORS =================
 SECTOR_MAP = {
     "NVDA":"semis","AMD":"semis","TSM":"semis","AVGO":"semis","ARM":"semis","MU":"semis","LRCX":"semis",
     "META":"tech","GOOGL":"tech","MSFT":"tech","AMZN":"tech",
@@ -31,12 +31,12 @@ SECTOR_MAP = {
 BASE_RISK = 0.02
 MAX_POSITIONS = 4
 STOP_LOSS = 0.05
-SIGNAL_THRESHOLD = 0.01  # 🔥 reduces weak trades
+SIGNAL_THRESHOLD = 0.01
 
 portfolio = {
-    "cash": 10000,
-    "equity": 10000,
-    "peak": 10000,
+    "cash": 10000.0,
+    "equity": 10000.0,
+    "peak": 10000.0,
     "positions": {},
     "history": [],
     "trades": [],
@@ -51,11 +51,9 @@ def sf(x):
 # ================= DATA =================
 def load(symbols):
     data = {}
-
     for s in symbols:
         try:
             df = yf.download(s, period="3mo", progress=False)
-
             if df is None or df.empty or len(df) < 50:
                 continue
 
@@ -63,16 +61,13 @@ def load(symbols):
                 "close": df["Close"].values,
                 "low": df["Low"].values
             }
-
         except:
             continue
-
     return data
 
-# ================= SIGNAL ENGINE =================
+# ================= SIGNALS =================
 def signals(data):
     scored = []
-
     for s, d in data.items():
         try:
             p = np.array(d["close"], dtype=float)
@@ -83,9 +78,8 @@ def signals(data):
 
             score = float(ret20 + ret5)
 
-            if score > SIGNAL_THRESHOLD:  # 🔥 filter weak signals
+            if score > SIGNAL_THRESHOLD:
                 scored.append((s, score, vol))
-
         except:
             continue
 
@@ -99,8 +93,7 @@ def signals(data):
                 continue
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
-
-    return scored[:MAX_POSITIONS * 2]  # allow filtering later
+    return scored[:MAX_POSITIONS * 2]
 
 # ================= AI SUPERVISOR =================
 def ai_supervisor():
@@ -145,17 +138,17 @@ def run_engine():
 
     sig = signals(data)
 
-    # ================= EQUITY =================
-    equity = portfolio["cash"]
+    # ===== STEP 1: MARK-TO-MARKET =====
+    total_value = portfolio["cash"]
     for s, pos in portfolio["positions"].items():
         if s in data:
             price = sf(data[s]["close"][-1])
-            equity += pos["shares"] * price
+            total_value += pos["shares"] * price
 
-    portfolio["equity"] = equity
-    portfolio["peak"] = max(portfolio["peak"], equity)
+    portfolio["equity"] = total_value
+    portfolio["peak"] = max(portfolio["peak"], total_value)
 
-    # ================= STOP LOSS (INTRADAY) =================
+    # ===== STEP 2: STOP LOSS =====
     for s, pos in list(portfolio["positions"].items()):
         if s not in data:
             continue
@@ -163,13 +156,13 @@ def run_engine():
         low = sf(data[s]["low"][-1])
         entry = pos["entry"]
 
-        if (low - entry)/entry < -STOP_LOSS:
-            price = sf(data[s]["close"][-1])
-            portfolio["cash"] += pos["shares"] * price
+        if (low - entry) / entry < -STOP_LOSS:
+            exit_price = sf(data[s]["close"][-1])
+            portfolio["cash"] += pos["shares"] * exit_price
             portfolio["trades"].append((low-entry)/entry)
             del portfolio["positions"][s]
 
-    # ================= BUILD NEW TARGET =================
+    # ===== STEP 3: BUILD TARGET =====
     used_sectors = set()
     targets = []
 
@@ -185,31 +178,39 @@ def run_engine():
         if len(targets) >= MAX_POSITIONS:
             break
 
-    # ================= REBALANCE =================
-    capital_per_trade = portfolio["equity"] / MAX_POSITIONS
-
-    for s, score, vol in targets:
-        price = sf(data[s]["close"][-1])
-        target_size = capital_per_trade * (1 / (1 + vol * 10))
-
-        if s in portfolio["positions"]:
-            continue  # hold winners 🔥
-
-        if portfolio["cash"] >= target_size:
-            shares = target_size / price
-            portfolio["cash"] -= target_size
-
-            portfolio["positions"][s] = {
-                "shares": shares,
-                "entry": price
-            }
-
-    # ================= TRIM NON-TARGETS =================
+    # ===== STEP 4: REMOVE NON-TARGETS =====
     for s in list(portfolio["positions"].keys()):
         if s not in [t[0] for t in targets]:
             price = sf(data[s]["close"][-1])
             portfolio["cash"] += portfolio["positions"][s]["shares"] * price
             del portfolio["positions"][s]
+
+    # ===== STEP 5: RE-CALC EQUITY =====
+    total_value = portfolio["cash"]
+    for s, pos in portfolio["positions"].items():
+        price = sf(data[s]["close"][-1])
+        total_value += pos["shares"] * price
+
+    portfolio["equity"] = total_value
+
+    # ===== STEP 6: ENTRY =====
+    capital_per_trade = portfolio["equity"] / MAX_POSITIONS
+
+    for s, score, vol in targets:
+        if s in portfolio["positions"]:
+            continue
+
+        price = sf(data[s]["close"][-1])
+        size = capital_per_trade * (1 / (1 + vol * 10))
+
+        if portfolio["cash"] >= size:
+            shares = size / price
+            portfolio["cash"] -= size
+
+            portfolio["positions"][s] = {
+                "shares": shares,
+                "entry": price
+            }
 
     portfolio["history"].append(portfolio["equity"])
     portfolio["last_run"] = str(datetime.utcnow())
@@ -237,7 +238,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 AI Trading Dashboard (Optimized)</h2>
+<h2>📊 AI Trading Dashboard (Stable v3)</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -281,7 +282,7 @@ setInterval(load,10000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"OPTIMIZED SYSTEM LIVE"}
+    return {"status":"STABLE SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run_api():
