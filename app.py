@@ -28,8 +28,8 @@ SECTOR_MAP = {
 }
 
 MAX_POSITIONS = 4
-STOP_LOSS = 0.05
-PYRAMID_THRESHOLD = 0.0025
+STOP_LOSS = 0.02          # 🔥 tighter
+PYRAMID_THRESHOLD = 0.0015  # 🔥 intraday tuned
 PYRAMID_LIMIT = 2
 
 portfolio = {
@@ -41,7 +41,8 @@ portfolio = {
     "trades": [],
     "last_run": None,
     "symbols_loaded": [],
-    "ai_notes": []
+    "ai_notes": [],
+    "regime": "neutral"
 }
 
 def sf(x):
@@ -53,7 +54,6 @@ def load(symbols):
     for s in symbols:
         try:
             df = yf.download(s, period="5d", interval="5m", progress=False)
-
             if df is None or df.empty or len(df) < 50:
                 continue
 
@@ -65,7 +65,25 @@ def load(symbols):
             continue
     return data
 
-# ================= SIGNAL ENGINE (NEVER FAILS) =================
+# ================= REGIME ENGINE =================
+def detect_regime(data):
+    spy = data.get("SPY")
+    if not spy:
+        return "neutral"
+
+    p = np.array(spy["close"], dtype=float)
+
+    ma20 = np.mean(p[-20:])
+    ma50 = np.mean(p[-50:]) if len(p) >= 50 else ma20
+
+    if p[-1] > ma20 > ma50:
+        return "bull"
+    elif p[-1] < ma20 < ma50:
+        return "bear"
+    else:
+        return "neutral"
+
+# ================= SIGNAL ENGINE =================
 def signals(data):
     scored = []
 
@@ -86,13 +104,10 @@ def signals(data):
 
             scored.append((s, score, vol))
 
-        except Exception as e:
-            print(f"SIGNAL FAIL: {s} -> {e}")
+        except:
+            continue
 
-    # 🚨 HARD FALLBACK
     if not scored:
-        print("⚠️ SIGNAL FALLBACK ACTIVATED")
-
         for s, d in data.items():
             try:
                 p = d["close"]
@@ -101,31 +116,7 @@ def signals(data):
             except:
                 continue
 
-    scored = sorted(scored, key=lambda x: x[1], reverse=True)
-
-    return scored[:MAX_POSITIONS * 2]
-
-# ================= AI =================
-def ai_supervisor():
-    eq = portfolio["history"]
-
-    if len(eq) < 10:
-        portfolio["ai_notes"] = ["Collecting data..."]
-        return
-
-    r = np.diff(eq)/eq[:-1]
-    sharpe = np.mean(r)/(np.std(r)+1e-6)*np.sqrt(252)
-
-    peak = eq[0]
-    dd = min([(e-peak)/peak for e in eq])
-
-    notes = []
-    if sharpe < 0.5: notes.append("⚠️ Weak edge")
-    if dd < -0.1: notes.append("⚠️ Drawdown risk")
-    if sharpe > 2: notes.append("✅ Strong system")
-    if not notes: notes.append("Stable")
-
-    portfolio["ai_notes"] = notes
+    return sorted(scored, key=lambda x: x[1], reverse=True)
 
 # ================= ENGINE =================
 def run_engine():
@@ -137,58 +128,51 @@ def run_engine():
     if len(data) < 5:
         return {"error": "DATA FAILURE"}
 
-    sig = signals(data)
+    # ===== REGIME =====
+    regime = detect_regime(data)
+    portfolio["regime"] = regime
 
-    if not sig:
-        return {"error": "SIGNAL FAILURE"}
+    sig = signals(data)
 
     # ===== EQUITY =====
     equity = portfolio["cash"]
     for s, pos in portfolio["positions"].items():
-        if s in data:
-            price = sf(data[s]["close"][-1])
-            equity += pos["shares"] * price
+        price = sf(data[s]["close"][-1])
+        equity += pos["shares"] * price
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
     # ===== STOP LOSS =====
     for s, pos in list(portfolio["positions"].items()):
-        if s not in data:
-            continue
-
-        if pos.get("stopped"):
-            continue
-
         low = sf(data[s]["low"][-1])
         entry = pos["entry"]
 
         if (low - entry)/entry < -STOP_LOSS:
-            exit_price = sf(data[s]["close"][-1])
-
-            portfolio["cash"] += pos["shares"] * exit_price
-            portfolio["trades"].append((s, (low-entry)/entry))
-
-            pos["stopped"] = True
+            price = sf(data[s]["close"][-1])
+            portfolio["cash"] += pos["shares"] * price
+            portfolio["trades"].append((s, "stop"))
             del portfolio["positions"][s]
 
-    # ===== TAKE PROFIT =====
+    # ===== MICRO TAKE PROFIT =====
     for s, pos in list(portfolio["positions"].items()):
         price = sf(data[s]["close"][-1])
         gain = (price - pos["entry"]) / pos["entry"]
 
-        if gain > 0.03:
-            sell = pos["shares"] * 0.5
+        if gain > 0.01:
+            sell = pos["shares"] * 0.3
             portfolio["cash"] += sell * price
             pos["shares"] -= sell
-
-            portfolio["trades"].append((s, gain))
+            portfolio["trades"].append((s, "take_profit"))
 
     # ===== TARGET BUILD =====
     used_sectors = set()
     targets = []
 
     for s, score, vol in sig:
+        if regime == "bear" and score > 0:
+            continue  # avoid longs in bear
+
         sector = SECTOR_MAP.get(s, "other")
 
         if sector in used_sectors:
@@ -199,13 +183,6 @@ def run_engine():
 
         if len(targets) >= MAX_POSITIONS:
             break
-
-    # ===== REMOVE NON TARGETS =====
-    for s in list(portfolio["positions"].keys()):
-        if s not in [t[0] for t in targets]:
-            price = sf(data[s]["close"][-1])
-            portfolio["cash"] += portfolio["positions"][s]["shares"] * price
-            del portfolio["positions"][s]
 
     # ===== ENTRY =====
     capital_per_trade = portfolio["equity"] / MAX_POSITIONS
@@ -245,12 +222,11 @@ def run_engine():
     portfolio["history"].append(portfolio["equity"])
     portfolio["last_run"] = str(datetime.utcnow())
 
-    ai_supervisor()
-
     return {
-        "equity": round(portfolio["equity"], 2),
+        "equity": round(portfolio["equity"],2),
         "positions": list(portfolio["positions"].keys()),
-        "signals_found": len(sig)
+        "signals_found": len(sig),
+        "regime": regime
     }
 
 # ================= DASHBOARD =================
@@ -268,12 +244,12 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 AI Trading Dashboard (Final Stable)</h2>
+<h2>📊 AI Trading Dashboard (Regime Aware)</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
 <div class="card"><pre id="positions"></pre></div>
-<div class="card"><pre id="ai"></pre></div>
+<div class="card"><pre id="regime"></pre></div>
 <div class="card"><pre id="trades"></pre></div>
 </div>
 
@@ -284,8 +260,8 @@ async function load(){
  document.getElementById('positions').innerText =
   JSON.stringify(p.positions,null,2);
 
- document.getElementById('ai').innerText =
-  JSON.stringify(p.ai_notes,null,2);
+ document.getElementById('regime').innerText =
+  "Regime: " + p.regime;
 
  document.getElementById('trades').innerText =
   JSON.stringify(p.trades,null,2);
@@ -312,7 +288,7 @@ setInterval(load,10000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"FINAL SYSTEM LIVE"}
+    return {"status":"REGIME SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run_api():
