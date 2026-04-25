@@ -28,9 +28,11 @@ SECTOR_MAP = {
 }
 
 MAX_POSITIONS = 4
-STOP_LOSS = 0.02          # 🔥 tighter
-PYRAMID_THRESHOLD = 0.0015  # 🔥 intraday tuned
-PYRAMID_LIMIT = 2
+STOP_LOSS = 0.02           # hard stop (entry-based)
+PYRAMID_STEP = 0.001       # 0.10% step from last action
+SCALP_STEP = 0.005         # 0.50% from last action
+TRAIL_STOP = 0.01          # 1% off peak
+PYRAMID_LIMIT = 3
 
 portfolio = {
     "cash": 10000.0,
@@ -65,28 +67,28 @@ def load(symbols):
             continue
     return data
 
-# ================= REGIME ENGINE =================
+# ================= REGIME =================
 def detect_regime(data):
     spy = data.get("SPY")
     if not spy:
         return "neutral"
 
     p = np.array(spy["close"], dtype=float)
+    if len(p) < 50:
+        return "neutral"
 
     ma20 = np.mean(p[-20:])
-    ma50 = np.mean(p[-50:]) if len(p) >= 50 else ma20
+    ma50 = np.mean(p[-50:])
 
     if p[-1] > ma20 > ma50:
         return "bull"
     elif p[-1] < ma20 < ma50:
         return "bear"
-    else:
-        return "neutral"
+    return "neutral"
 
-# ================= SIGNAL ENGINE =================
+# ================= SIGNALS =================
 def signals(data):
     scored = []
-
     for s, d in data.items():
         try:
             p = np.array(d["close"], dtype=float)
@@ -101,9 +103,7 @@ def signals(data):
             vol = vol if np.isfinite(vol) else 0.02
 
             score = float(ret3 + ret10 + breakout)
-
             scored.append((s, score, vol))
-
         except:
             continue
 
@@ -134,47 +134,61 @@ def run_engine():
 
     sig = signals(data)
 
-    # ===== EQUITY =====
+    # ===== MARK-TO-MARKET =====
     equity = portfolio["cash"]
     for s, pos in portfolio["positions"].items():
-        price = sf(data[s]["close"][-1])
-        equity += pos["shares"] * price
-
+        if s in data:
+            price = sf(data[s]["close"][-1])
+            equity += pos["shares"] * price
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # ===== STOP LOSS =====
+    # ===== HARD STOP (entry-based) =====
     for s, pos in list(portfolio["positions"].items()):
+        if s not in data:
+            continue
         low = sf(data[s]["low"][-1])
-        entry = pos["entry"]
-
-        if (low - entry)/entry < -STOP_LOSS:
+        if (low - pos["entry"]) / pos["entry"] < -STOP_LOSS:
             price = sf(data[s]["close"][-1])
             portfolio["cash"] += pos["shares"] * price
-            portfolio["trades"].append((s, "stop"))
+            portfolio["trades"].append((s, "hard_stop"))
             del portfolio["positions"][s]
 
-    # ===== MICRO TAKE PROFIT =====
+    # ===== TRAILING STOP (peak-based) =====
     for s, pos in list(portfolio["positions"].items()):
         price = sf(data[s]["close"][-1])
-        gain = (price - pos["entry"]) / pos["entry"]
+        peak = pos.get("peak", pos["entry"])
+        peak = max(peak, price)
+        pos["peak"] = peak
 
-        if gain > 0.01:
+        dd = (price - peak) / peak
+        if dd < -TRAIL_STOP:
+            portfolio["cash"] += pos["shares"] * price
+            portfolio["trades"].append((s, "trail_stop"))
+            del portfolio["positions"][s]
+
+    # ===== MICRO TAKE-PROFIT (scalp from last action) =====
+    for s, pos in list(portfolio["positions"].items()):
+        price = sf(data[s]["close"][-1])
+        last_price = pos.get("last_price", pos["entry"])
+        move = (price - last_price) / last_price
+
+        if move > SCALP_STEP:
             sell = pos["shares"] * 0.3
             portfolio["cash"] += sell * price
             pos["shares"] -= sell
-            portfolio["trades"].append((s, "take_profit"))
+            pos["last_price"] = price
+            portfolio["trades"].append((s, "scalp"))
 
-    # ===== TARGET BUILD =====
+    # ===== TARGET BUILD (sector diversified + regime aware) =====
     used_sectors = set()
     targets = []
-
     for s, score, vol in sig:
+        # avoid long entries in bear regime
         if regime == "bear" and score > 0:
-            continue  # avoid longs in bear
+            continue
 
         sector = SECTOR_MAP.get(s, "other")
-
         if sector in used_sectors:
             continue
 
@@ -184,6 +198,13 @@ def run_engine():
         if len(targets) >= MAX_POSITIONS:
             break
 
+    # ===== REMOVE NON-TARGETS =====
+    for s in list(portfolio["positions"].keys()):
+        if s not in [t[0] for t in targets]:
+            price = sf(data[s]["close"][-1])
+            portfolio["cash"] += portfolio["positions"][s]["shares"] * price
+            del portfolio["positions"][s]
+
     # ===== ENTRY =====
     capital_per_trade = portfolio["equity"] / MAX_POSITIONS
 
@@ -192,7 +213,7 @@ def run_engine():
             continue
 
         price = sf(data[s]["close"][-1])
-        size = capital_per_trade * (1/(1+vol*5))
+        size = capital_per_trade * (1 / (1 + vol * 5))
 
         if portfolio["cash"] >= size * 0.95:
             shares = size / price
@@ -201,29 +222,33 @@ def run_engine():
             portfolio["positions"][s] = {
                 "shares": shares,
                 "entry": price,
+                "last_price": price,   # 🔥 dynamic tracking
+                "peak": price,
                 "adds": 0
             }
 
-    # ===== PYRAMIDING =====
+    # ===== PYRAMIDING (incremental from last action) =====
     for s, pos in portfolio["positions"].items():
         price = sf(data[s]["close"][-1])
-        gain = (price - pos["entry"]) / pos["entry"]
+        last_price = pos.get("last_price", pos["entry"])
+        move = (price - last_price) / last_price
 
-        if gain > PYRAMID_THRESHOLD and pos["adds"] < PYRAMID_LIMIT:
-            size = (portfolio["equity"] / MAX_POSITIONS) * 0.5
-
+        if move > PYRAMID_STEP and pos["adds"] < PYRAMID_LIMIT:
+            size = (portfolio["equity"] / MAX_POSITIONS) * 0.3
             if portfolio["cash"] >= size:
                 shares = size / price
                 portfolio["cash"] -= size
 
                 pos["shares"] += shares
                 pos["adds"] += 1
+                pos["last_price"] = price
+                portfolio["trades"].append((s, "pyramid"))
 
     portfolio["history"].append(portfolio["equity"])
     portfolio["last_run"] = str(datetime.utcnow())
 
     return {
-        "equity": round(portfolio["equity"],2),
+        "equity": round(portfolio["equity"], 2),
         "positions": list(portfolio["positions"].keys()),
         "signals_found": len(sig),
         "regime": regime
@@ -244,7 +269,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 AI Trading Dashboard (Regime Aware)</h2>
+<h2>📊 AI Trading Dashboard (Dynamic Intraday)</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -288,7 +313,7 @@ setInterval(load,10000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"REGIME SYSTEM LIVE"}
+    return {"status":"DYNAMIC SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run_api():
