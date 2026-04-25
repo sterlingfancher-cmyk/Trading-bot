@@ -1,4 +1,4 @@
-import os, json, traceback
+import os, json, traceback, random
 import numpy as np
 import yfinance as yf
 from flask import Flask, jsonify, request, render_template_string
@@ -40,7 +40,7 @@ def save_state(state):
 
 portfolio = load_state()
 
-# ================= DATA CLEAN =================
+# ================= CLEAN =================
 def clean(arr):
     arr = np.asarray(arr)
     if arr.ndim > 1:
@@ -58,22 +58,25 @@ def load_data(symbols):
             if df is None or df.empty:
                 continue
             c = clean(df["Close"].values)
-            if len(c) < 25:
+            if len(c) < 20:
                 continue
             out[s] = c
-        except Exception as e:
-            portfolio["errors"].append(f"{s}:{str(e)}")
+        except:
+            continue
     return out
+
+# ================= SIMULATION =================
+def simulate_price(last_price):
+    shock = np.random.normal(0, 0.002)  # controlled noise
+    return last_price * (1 + shock)
 
 # ================= REGIME =================
 def regime(data):
     spy = data.get("SPY")
-    if spy is None or len(spy) < 20:
+    if spy is None:
         return "neutral"
-
     ma = np.mean(spy[-20:])
     px = spy[-1]
-
     if px > ma * 1.002: return "bull"
     if px < ma * 0.998: return "bear"
     return "neutral"
@@ -89,14 +92,14 @@ def signals(data):
             r5 = (p[-1] / p[-5]) - 1
             r20 = (p[-1] / p[-20]) - 1
             breakout = (p[-1] - np.max(p[-20:])) / np.max(p[-20:])
-            vol = np.std(np.diff(p[-20:]) / p[-20:-1])
+            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
 
             score = r5*0.4 + r20*0.4 + breakout*0.2
 
             ranked.append((s, float(score), float(vol)))
 
-        except Exception as e:
-            portfolio["errors"].append(f"SIGNAL {s}:{str(e)}")
+        except:
+            continue
 
     return sorted(ranked, key=lambda x: x[1], reverse=True)
 
@@ -104,53 +107,77 @@ def signals(data):
 def run_engine():
     try:
         data = load_data(UNIVERSE + ["SPY"])
+
         if not data:
-            return {"error":"no data"}
+            return {"error": "no data"}
 
         portfolio["regime"] = regime(data)
 
-        # ==== update equity ====
+        # ===== MARK TO MARKET =====
         eq = portfolio["cash"]
+
         for s, pos in portfolio["positions"].items():
             if s in data:
                 px = data[s][-1]
-                eq += pos["shares"] * px
+            else:
+                px = simulate_price(pos["last_price"])
+
+            pos["last_price"] = px
+            pos["peak"] = max(pos.get("peak", px), px)
+
+            eq += pos["shares"] * px
 
         portfolio["equity"] = eq
         portfolio["peak"] = max(portfolio["peak"], eq)
 
-        # ==== exits (risk control) ====
-        for s in list(portfolio["positions"].keys()):
-            if s not in data:
-                continue
+        # ===== RISK ENGINE =====
+        dd = (portfolio["equity"] - portfolio["peak"]) / portfolio["peak"]
 
-            px = data[s][-1]
-            entry = portfolio["positions"][s]["entry"]
+        if dd < -0.10:
+            portfolio["positions"] = {}
+            portfolio["cash"] = portfolio["equity"]
+            portfolio["trades"].append({"type":"kill_switch"})
+            return {"risk":"portfolio liquidated"}
+
+        # ===== POSITION MANAGEMENT =====
+        for s in list(portfolio["positions"].keys()):
+            pos = portfolio["positions"][s]
+            px = pos["last_price"]
+            entry = pos["entry"]
 
             pnl = (px - entry) / entry
 
-            # stop loss
+            # hard stop
             if pnl < -0.05:
-                portfolio["cash"] += px * portfolio["positions"][s]["shares"]
+                portfolio["cash"] += px * pos["shares"]
+                del portfolio["positions"][s]
+
+            # trailing stop
+            elif px < pos["peak"] * 0.95:
+                portfolio["cash"] += px * pos["shares"]
                 del portfolio["positions"][s]
 
             # take profit
-            elif pnl > 0.10:
-                portfolio["cash"] += px * portfolio["positions"][s]["shares"]
+            elif pnl > 0.12:
+                portfolio["cash"] += px * pos["shares"]
                 del portfolio["positions"][s]
 
         sig = signals(data)
 
-        # ==== entries ====
+        # ===== ENTRY ENGINE =====
+        max_positions = 5 if portfolio["regime"] == "bull" else 3
+
         for s, score, vol in sig:
             if s in portfolio["positions"]:
                 continue
 
-            if len(portfolio["positions"]) >= 5:
+            if len(portfolio["positions"]) >= max_positions:
                 break
 
             px = data[s][-1]
-            alloc = portfolio["equity"] * 0.2
+
+            risk_adj = min(0.2, 0.05 / (vol + 1e-6))
+            alloc = portfolio["equity"] * risk_adj
 
             if portfolio["cash"] < alloc:
                 continue
@@ -160,8 +187,16 @@ def run_engine():
             portfolio["cash"] -= alloc
             portfolio["positions"][s] = {
                 "entry": px,
-                "shares": shares
+                "shares": shares,
+                "last_price": px,
+                "peak": px
             }
+
+            portfolio["trades"].append({
+                "sym": s,
+                "type": "entry",
+                "px": px
+            })
 
         portfolio["history"].append(portfolio["equity"])
         save_state(portfolio)
@@ -199,7 +234,7 @@ def dash():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Institutional Dashboard</h2>
+    <h2>🚀 AI Trading Dashboard (Sim + Risk Engine)</h2>
     <canvas id="c"></canvas>
     <pre id="d"></pre>
     <script>
