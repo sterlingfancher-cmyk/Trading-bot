@@ -5,9 +5,10 @@ from datetime import datetime
 from flask import Flask, jsonify, request, render_template_string
 
 app = Flask(__name__)
-SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 
 # ================= CONFIG =================
+SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
+
 UNIVERSE = [
     "NVDA","AMD","AVGO","TSM","MU","LRCX","ARM",
     "META","AMZN","GOOGL","MSFT","SNOW","PLTR","CRWD","PANW","NET",
@@ -23,8 +24,7 @@ TRAIL_STOP = 0.01
 SCALP_STEP = 0.005
 PYRAMID_STEP = 0.001
 
-SIMULATION_MODE = False
-
+# ================= STATE =================
 portfolio = {
     "cash": 10000.0,
     "equity": 10000.0,
@@ -48,7 +48,7 @@ def load(symbols):
         try:
             df = yf.download(s, period="1d", interval="1m", progress=False)
 
-            if df is None or df.empty or len(df) < 30:
+            if df is None or df.empty or len(df) < 20:
                 continue
 
             data[s] = {
@@ -57,11 +57,11 @@ def load(symbols):
             }
 
             timestamps.append(df.index[-1])
+        except Exception as e:
+            print(f"Data error {s}: {e}")
 
-        except:
-            continue
-
-    return data, max(timestamps) if timestamps else None
+    latest_time = max(timestamps) if timestamps else None
+    return data, latest_time
 
 # ================= SIGNAL =================
 def signals(data):
@@ -69,7 +69,10 @@ def signals(data):
 
     for s, d in data.items():
         try:
-            p = np.array(d["close"])
+            p = np.array(d["close"], dtype=float)
+
+            if len(p) < 20:
+                continue
 
             ret = (p[-1] / p[-5]) - 1
             breakout = (p[-1] - np.max(p[-20:])) / np.max(p[-20:])
@@ -88,9 +91,9 @@ def detect_regime(data):
     if not spy:
         return "neutral"
 
-    p = np.array(spy["close"])
+    p = np.array(spy["close"], dtype=float)
 
-    if len(p) < 50:
+    if len(p) < 20:
         return "neutral"
 
     if p[-1] > np.mean(p[-20:]):
@@ -104,10 +107,12 @@ def detect_regime(data):
 def run_engine():
     global portfolio
 
-    if datetime.utcnow().weekday() >= 5:
-        return {"status": "Market Closed"}
+    print("Running engine...")
 
     data, timestamp = load(UNIVERSE + ["SPY"])
+
+    if not timestamp:
+        return {"error": "No market data"}
 
     if timestamp == portfolio["last_timestamp"]:
         return {"message": "No new data", "equity": portfolio["equity"]}
@@ -115,7 +120,7 @@ def run_engine():
     portfolio["last_timestamp"] = timestamp
 
     if len(data) < 5:
-        return {"error": "DATA FAIL"}
+        return {"error": "Insufficient data"}
 
     regime = detect_regime(data)
     portfolio["regime"] = regime
@@ -124,11 +129,11 @@ def run_engine():
 
     # ===== EQUITY =====
     equity = portfolio["cash"]
+
     for s, pos in portfolio["positions"].items():
-        price = sf(data[s]["close"][-1])
-        if SIMULATION_MODE:
-            price *= (1 + np.random.uniform(-0.001, 0.001))
-        equity += pos["shares"] * price
+        if s in data:
+            price = sf(data[s]["close"][-1])
+            equity += pos["shares"] * price
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
@@ -140,8 +145,10 @@ def run_engine():
 
     # ===== TRAILING STOP =====
     for s, pos in list(portfolio["positions"].items()):
-        price = sf(data[s]["close"][-1])
+        if s not in data:
+            continue
 
+        price = sf(data[s]["close"][-1])
         pos["peak"] = max(pos.get("peak", pos["entry"]), price)
 
         if (price - pos["peak"]) / pos["peak"] < -TRAIL_STOP:
@@ -151,6 +158,9 @@ def run_engine():
 
     # ===== SCALP =====
     for s, pos in list(portfolio["positions"].items()):
+        if s not in data:
+            continue
+
         price = sf(data[s]["close"][-1])
         move = (price - pos["last_price"]) / pos["last_price"]
 
@@ -190,6 +200,9 @@ def run_engine():
 
     # ===== PYRAMID =====
     for s, pos in portfolio["positions"].items():
+        if s not in data:
+            continue
+
         price = sf(data[s]["close"][-1])
         move = (price - pos["last_price"]) / pos["last_price"]
 
@@ -207,7 +220,7 @@ def run_engine():
     portfolio["history"].append(portfolio["equity"])
 
     return {
-        "equity": round(portfolio["equity"],2),
+        "equity": round(portfolio["equity"], 2),
         "positions": list(portfolio["positions"].keys()),
         "trades": portfolio["trades"][-5:],
         "regime": regime
@@ -222,35 +235,24 @@ def dashboard():
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 body {background:#0f172a;color:white;font-family:Arial}
-.grid {display:grid;grid-template-columns:1fr 1fr;gap:15px}
-.card {background:#1e293b;padding:15px;border-radius:10px}
+.card {background:#1e293b;padding:15px;border-radius:10px;margin:10px}
 </style>
 </head>
 <body>
 
-<h2>📊 Institutional Trading Dashboard</h2>
+<h2>📊 Trading Dashboard</h2>
 
-<div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
-<div class="card"><pre id="positions"></pre></div>
-<div class="card"><pre id="regime"></pre></div>
-<div class="card"><pre id="trades"></pre></div>
-</div>
+<div class="card"><pre id="info"></pre></div>
 
 <script>
 async function load(){
  let p = await fetch('/paper/status').then(r=>r.json());
 
- document.getElementById('positions').innerText =
-  JSON.stringify(p.positions,null,2);
+ document.getElementById('info').innerText =
+  JSON.stringify(p,null,2);
 
- document.getElementById('regime').innerText =
-  "Regime: " + p.regime;
-
- document.getElementById('trades').innerText =
-  JSON.stringify(p.trades,null,2);
-
- let eq = p.history.length>1 ? p.history : [10000,10000];
+ let eq = p.history.length > 1 ? p.history : [10000,10000];
 
  new Chart(document.getElementById('eq'),{
   type:'line',
@@ -270,16 +272,22 @@ setInterval(load,5000);
 """)
 
 # ================= ROUTES =================
+@app.route("/")
+def home():
+    return {"status": "APP LIVE"}
+
 @app.route("/paper/run")
 def run_api():
     if request.args.get("key") != SECRET_KEY:
-        return {"error":"unauthorized"}
+        return {"error": "unauthorized"}
     return jsonify(run_engine())
 
 @app.route("/paper/status")
 def status():
     return jsonify(portfolio)
 
-@app.route("/")
-def home():
-    return {"status":"FINAL SYSTEM WITH DASHBOARD LIVE"}
+# ================= START =================
+if __name__ == "__main__":
+    print("Starting Flask server...")
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
