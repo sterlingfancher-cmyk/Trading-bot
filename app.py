@@ -17,6 +17,22 @@ UNIVERSE = [
     "IBIT","ETHA","GDLC"
 ]
 
+# ================= SECTOR MAP =================
+SECTORS = {
+    "tech": ["NVDA","AMD","AVGO","TSM","MU","LRCX","ARM","META","MSFT","GOOGL","AMZN"],
+    "cyber": ["CRWD","PANW","NET"],
+    "consumer": ["TSLA","SHOP","ROKU"],
+    "energy": ["XOM","CVX"],
+    "defense": ["LHX","NOC","KTOS"],
+    "crypto": ["COIN","IBIT","ETHA","GDLC"]
+}
+
+def get_sector(sym):
+    for k,v in SECTORS.items():
+        if sym in v:
+            return k
+    return "other"
+
 # ================= STATE =================
 _memory = None
 
@@ -39,8 +55,7 @@ def load_state():
         "peak": 10000.0,
         "positions": {},
         "history": [],
-        "trades": [],
-        "regime": "neutral"
+        "trades": []
     }
     return _memory
 
@@ -92,7 +107,7 @@ def generate_signals(data):
             ranked.append((s, float(score)))
         except:
             continue
-    return sorted(ranked, key=lambda x: x[1], reverse=True)[:5]
+    return sorted(ranked, key=lambda x: x[1], reverse=True)[:6]
 
 # ================= ENGINE =================
 def run_engine():
@@ -102,7 +117,7 @@ def run_engine():
 
     equity = portfolio["cash"]
 
-    # mark-to-market
+    # ===== MARK TO MARKET =====
     for s, pos in portfolio["positions"].items():
         new_px = data[s][-1] if s in data else pos["last_price"]
 
@@ -118,24 +133,33 @@ def run_engine():
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # exits
+    # ===== EXITS =====
     for s in list(portfolio["positions"].keys()):
         pos = portfolio["positions"][s]
         px = pos["last_price"]
         entry = pos["entry"]
-
         pnl = (px - entry) / entry
 
         if pnl < -0.04 or px < pos["peak"] * 0.95 or pnl > 0.12:
             portfolio["cash"] += px * pos["shares"]
             del portfolio["positions"][s]
 
-    # entries
+    # ===== ENTRIES WITH DIVERSIFICATION =====
     sig = generate_signals(data)
 
+    used_sectors = set(get_sector(s) for s in portfolio["positions"])
+
     for s, score in sig:
+
         if s in portfolio["positions"]:
             continue
+
+        sector = get_sector(s)
+
+        # 🔥 prevent stacking
+        if sector in used_sectors:
+            continue
+
         if len(portfolio["positions"]) >= 3:
             break
 
@@ -154,6 +178,9 @@ def run_engine():
             "last_price": px,
             "peak": px
         }
+
+        portfolio["trades"].append({"sym": s, "type": "entry", "px": px})
+        used_sectors.add(sector)
 
     portfolio["history"].append(portfolio["equity"])
     save_state(portfolio)
@@ -188,7 +215,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Trading Dashboard</h2>
+    <h2>📊 Diversified Trading System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
