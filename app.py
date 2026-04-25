@@ -17,7 +17,7 @@ UNIVERSE = [
     "IBIT","ETHA","GDLC"
 ]
 
-# ================= SECTOR MAP =================
+# ================= SECTORS =================
 SECTORS = {
     "tech": ["NVDA","AMD","AVGO","TSM","MU","LRCX","ARM","META","MSFT","GOOGL","AMZN"],
     "cyber": ["CRWD","PANW","NET"],
@@ -128,25 +128,39 @@ def run_engine():
 
         pos["last_price"] = px
         pos["peak"] = max(pos["peak"], px)
+
         equity += pos["shares"] * px
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
+
+    # ===== SCALE INTO WINNERS =====
+    for s, pos in portfolio["positions"].items():
+        pnl = (pos["last_price"] - pos["entry"]) / pos["entry"]
+
+        if pnl > 0.03 and pos.get("adds", 0) < 1:
+            alloc = portfolio["equity"] * 0.10
+
+            if portfolio["cash"] >= alloc:
+                shares = alloc / pos["last_price"]
+                portfolio["cash"] -= alloc
+                pos["shares"] += shares
+                pos["adds"] = pos.get("adds", 0) + 1
 
     # ===== EXITS =====
     for s in list(portfolio["positions"].keys()):
         pos = portfolio["positions"][s]
         px = pos["last_price"]
         entry = pos["entry"]
+
         pnl = (px - entry) / entry
 
-        if pnl < -0.04 or px < pos["peak"] * 0.95 or pnl > 0.12:
+        if pnl < -0.03 or px < pos["peak"] * 0.96 or pnl > 0.15:
             portfolio["cash"] += px * pos["shares"]
             del portfolio["positions"][s]
 
     # ===== ENTRIES WITH DIVERSIFICATION =====
     sig = generate_signals(data)
-
     used_sectors = set(get_sector(s) for s in portfolio["positions"])
 
     for s, score in sig:
@@ -156,7 +170,6 @@ def run_engine():
 
         sector = get_sector(s)
 
-        # 🔥 prevent stacking
         if sector in used_sectors:
             continue
 
@@ -164,7 +177,16 @@ def run_engine():
             break
 
         px = data[s][-1]
-        alloc = portfolio["equity"] * 0.25
+
+        # dynamic sizing
+        if score > 0.02:
+            alloc_pct = 0.30
+        elif score > 0.01:
+            alloc_pct = 0.20
+        else:
+            alloc_pct = 0.12
+
+        alloc = portfolio["equity"] * alloc_pct
 
         if portfolio["cash"] < alloc:
             continue
@@ -176,7 +198,8 @@ def run_engine():
             "entry": px,
             "shares": shares,
             "last_price": px,
-            "peak": px
+            "peak": px,
+            "adds": 0
         }
 
         portfolio["trades"].append({"sym": s, "type": "entry", "px": px})
@@ -215,7 +238,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Diversified Trading System</h2>
+    <h2>🚀 Capital Concentration System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
