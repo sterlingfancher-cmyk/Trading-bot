@@ -70,7 +70,7 @@ def load_data(symbols):
             if df is None or df.empty:
                 continue
             c = clean(df["Close"].values)
-            if len(c) < 30:
+            if len(c) < 10:
                 continue
             out[s] = c
         except:
@@ -79,7 +79,7 @@ def load_data(symbols):
 
 # ================= SIM =================
 def simulate(px):
-    return float(px * (1 + np.random.normal(0, 0.0015)))
+    return float(px * (1 + np.random.normal(0, 0.002)))
 
 # ================= REGIME =================
 def detect_regime(data):
@@ -96,55 +96,30 @@ def detect_regime(data):
         return "bear"
     return "neutral"
 
-# ================= SIGNALS =================
-def generate_signals(data, regime):
-    primary = []
-    fallback = []
+# ================= SIGNAL ENGINE =================
+def generate_signals(data):
+    ranked = []
 
     for s, p in data.items():
         try:
-            if len(p) < 25:
+            if len(p) < 5:
                 continue
 
             px = p[-1]
-            ma20 = np.mean(p[-20:])
-            r5 = (px / p[-5]) - 1
-            r20 = (px / p[-20]) - 1
-            vol = np.std(np.diff(p[-20:]) / p[-20:-1])
+            r5 = (px / p[-5]) - 1 if len(p) >= 5 else 0
+            r10 = (px / p[-10]) - 1 if len(p) >= 10 else r5
 
-            if vol < 0.0015:
-                continue
+            score = r5 * 0.7 + r10 * 0.3
 
-            score = r5*0.6 + r20*0.4
-
-            # ===== PRIMARY STRICT =====
-            if regime == "bull":
-                if px > ma20 and r5 > 0 and r20 > 0:
-                    primary.append((s, score, vol))
-
-            elif regime == "neutral":
-                if r5 > 0 and px > ma20:
-                    primary.append((s, score, vol))
-
-            elif regime == "bear":
-                if r5 > 0 and r20 > 0 and px > ma20:
-                    primary.append((s, score, vol))
-
-            # ===== FALLBACK (LOOSER) =====
-            if r5 > 0:
-                fallback.append((s, r5, vol))
+            ranked.append((s, float(score)))
 
         except:
             continue
 
-    primary = sorted(primary, key=lambda x: x[1], reverse=True)
-    fallback = sorted(fallback, key=lambda x: x[1], reverse=True)
+    # ALWAYS return something
+    ranked = sorted(ranked, key=lambda x: x[1], reverse=True)
 
-    # 🔥 KEY: fallback activation
-    if len(primary) == 0:
-        return fallback[:3]
-
-    return primary
+    return ranked[:5]  # always top 5
 
 # ================= ENGINE =================
 def run_engine():
@@ -174,13 +149,6 @@ def run_engine():
         portfolio["equity"] = equity
         portfolio["peak"] = max(portfolio["peak"], equity)
 
-        # ===== RISK =====
-        dd = (equity - portfolio["peak"]) / portfolio["peak"]
-        if dd < -0.10:
-            portfolio["positions"] = {}
-            portfolio["cash"] = equity
-            return {"risk": "stopped"}
-
         # ===== EXITS =====
         for s in list(portfolio["positions"].keys()):
             pos = portfolio["positions"][s]
@@ -189,16 +157,16 @@ def run_engine():
 
             pnl = (px - entry) / entry
 
-            if pnl < -0.04 or px < pos["peak"]*0.95 or pnl > 0.15:
+            if pnl < -0.04 or px < pos["peak"] * 0.95 or pnl > 0.12:
                 portfolio["cash"] += px * pos["shares"]
                 del portfolio["positions"][s]
 
         # ===== ENTRIES =====
-        sig = generate_signals(data, portfolio["regime"])
+        sig = generate_signals(data)
 
-        max_positions = 3 if portfolio["regime"] != "bear" else 1
+        max_positions = 3
 
-        for s, score, vol in sig[:max_positions]:
+        for s, score in sig:
 
             if s in portfolio["positions"]:
                 continue
@@ -207,7 +175,8 @@ def run_engine():
                 break
 
             px = data[s][-1]
-            alloc = portfolio["equity"] * 0.2
+
+            alloc = portfolio["equity"] * 0.25
 
             if portfolio["cash"] < alloc:
                 continue
@@ -228,8 +197,7 @@ def run_engine():
         return {
             "equity": round(portfolio["equity"],2),
             "positions": list(portfolio["positions"].keys()),
-            "signals_found": len(sig),
-            "regime": portfolio["regime"]
+            "signals_found": len(sig)
         }
 
     except Exception as e:
@@ -256,7 +224,7 @@ def dash():
     <html>
     <head><script src="https://cdn.jsdelivr.net/npm/chart.js"></script></head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Adaptive + Fallback System</h2>
+    <h2>📊 Guaranteed Signal System</h2>
     <canvas id="c"></canvas>
     <pre id="d"></pre>
     <script>
