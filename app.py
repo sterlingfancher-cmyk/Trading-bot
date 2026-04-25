@@ -1,15 +1,15 @@
 import os
 import numpy as np
 import yfinance as yf
-from datetime import datetime
 from flask import Flask, jsonify, request, render_template_string
+from datetime import datetime
 import random
 
 app = Flask(__name__)
+app.config["PROPAGATE_EXCEPTIONS"] = True
 
 # ================= CONFIG =================
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
-
 SIMULATION_MODE = True
 
 UNIVERSE = [
@@ -35,55 +35,63 @@ portfolio = {
     "positions": {},
     "history": [],
     "trades": [],
-    "regime": "neutral"
+    "regime": "neutral",
+    "last_update": None
 }
 
-# ================= DATA =================
-def load(symbols):
+# ================= SAFE DATA LOADER =================
+def load_data(symbols):
     data = {}
 
     for s in symbols:
         try:
             df = yf.download(s, period="1d", interval="1m", progress=False)
 
-            if df is None or df.empty or len(df) < 20:
+            if df is None or df.empty or len(df) < 25:
                 continue
 
-            closes = df["Close"].values.astype(float)
+            closes = df["Close"].dropna().values.astype(float)
+            lows = df["Low"].dropna().values.astype(float)
 
-            # ===== SIMULATION BOOST =====
+            if len(closes) < 20:
+                continue
+
+            # Simulation noise
             if SIMULATION_MODE:
                 noise = np.random.normal(0, 0.002, size=len(closes))
                 closes = closes * (1 + noise)
 
-            data[s] = {
-                "close": closes,
-                "low": df["Low"].values.astype(float)
-            }
+            data[s] = {"close": closes, "low": lows}
 
-        except:
+        except Exception as e:
+            print(f"[DATA ERROR] {s}: {e}")
             continue
 
     return data
 
-# ================= SIGNAL =================
-def signals(data):
-    scored = []
+# ================= SIGNAL ENGINE =================
+def generate_signals(data):
+    ranked = []
 
     for s, d in data.items():
-        p = d["close"]
+        try:
+            p = np.array(d["close"])
 
-        if len(p) < 20:
+            if len(p) < 20:
+                continue
+
+            ret = (p[-1] / p[-5]) - 1
+            breakout = (p[-1] - np.max(p[-20:])) / np.max(p[-20:])
+            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
+
+            score = float(ret + breakout + random.uniform(0, 0.01))
+            ranked.append((s, score, vol))
+
+        except Exception as e:
+            print(f"[SIGNAL ERROR] {s}: {e}")
             continue
 
-        ret = (p[-1] / p[-5]) - 1
-        breakout = (p[-1] - np.max(p[-20:])) / np.max(p[-20:])
-        vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
-
-        score = float(ret + breakout + random.uniform(0, 0.01))  # boost activity
-        scored.append((s, score, vol))
-
-    return sorted(scored, key=lambda x: x[1], reverse=True)
+    return sorted(ranked, key=lambda x: x[1], reverse=True)
 
 # ================= REGIME =================
 def detect_regime(data):
@@ -92,6 +100,9 @@ def detect_regime(data):
         return "neutral"
 
     p = spy["close"]
+
+    if len(p) < 20:
+        return "neutral"
 
     if p[-1] > np.mean(p[-20:]):
         return "bull"
@@ -104,15 +115,15 @@ def detect_regime(data):
 def run_engine():
     global portfolio
 
-    data = load(UNIVERSE + ["SPY"])
+    data = load_data(UNIVERSE + ["SPY"])
 
-    if len(data) < 5:
-        return {"error": "no data"}
+    if not data or len(data) < 5:
+        return {"error": "No usable market data"}
 
     regime = detect_regime(data)
     portfolio["regime"] = regime
 
-    sig = signals(data)
+    signals = generate_signals(data)
 
     # ===== EQUITY =====
     equity = portfolio["cash"]
@@ -154,7 +165,7 @@ def run_engine():
             portfolio["trades"].append((s, "scalp"))
 
     # ===== ENTRY =====
-    for s, score, vol in sig:
+    for s, score, vol in signals:
         if s in portfolio["positions"]:
             continue
 
@@ -195,6 +206,7 @@ def run_engine():
                 portfolio["trades"].append((s, "pyramid"))
 
     portfolio["history"].append(portfolio["equity"])
+    portfolio["last_update"] = str(datetime.now())
 
     return {
         "equity": round(portfolio["equity"], 2),
@@ -217,21 +229,22 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>🚀 AI Trading Dashboard (Simulation Mode)</h2>
+<h2>🚀 AI Trading Dashboard</h2>
 
-<div class="card"><canvas id="eq"></canvas></div>
-<div class="card"><pre id="info"></pre></div>
+<div class="card"><canvas id="chart"></canvas></div>
+<div class="card"><pre id="data"></pre></div>
 
 <script>
-async function load(){
- let p = await fetch('/paper/status').then(r=>r.json());
+async function refresh(){
+ let res = await fetch('/paper/status');
+ let d = await res.json();
 
- document.getElementById('info').innerText =
-  JSON.stringify(p,null,2);
+ document.getElementById('data').innerText =
+  JSON.stringify(d,null,2);
 
- let eq = p.history.length > 1 ? p.history : [10000,10000];
+ let eq = d.history.length > 1 ? d.history : [10000,10000];
 
- new Chart(document.getElementById('eq'),{
+ new Chart(document.getElementById('chart'),{
   type:'line',
   data:{
     labels:eq.map((_,i)=>i),
@@ -240,8 +253,8 @@ async function load(){
  });
 }
 
-load();
-setInterval(load,3000);
+refresh();
+setInterval(refresh,3000);
 </script>
 
 </body>
@@ -251,10 +264,10 @@ setInterval(load,3000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status": "SIMULATION SYSTEM LIVE"}
+    return {"status": "SYSTEM LIVE"}
 
 @app.route("/paper/run")
-def run_api():
+def run():
     if request.args.get("key") != SECRET_KEY:
         return {"error": "unauthorized"}
     return jsonify(run_engine())
@@ -265,6 +278,5 @@ def status():
 
 # ================= START =================
 if __name__ == "__main__":
-    print("Starting server...")
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
