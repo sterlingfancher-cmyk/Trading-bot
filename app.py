@@ -128,18 +128,17 @@ def run_engine():
 
         pos["last_price"] = px
         pos["peak"] = max(pos["peak"], px)
-
         equity += pos["shares"] * px
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # ===== SCALE INTO WINNERS =====
+    # ===== SCALE INTO WINNERS (AGGRESSIVE) =====
     for s, pos in portfolio["positions"].items():
         pnl = (pos["last_price"] - pos["entry"]) / pos["entry"]
 
-        if pnl > 0.03 and pos.get("adds", 0) < 1:
-            alloc = portfolio["equity"] * 0.10
+        if pnl > 0.015 and pos.get("adds", 0) < 2:
+            alloc = portfolio["equity"] * 0.15
 
             if portfolio["cash"] >= alloc:
                 shares = alloc / pos["last_price"]
@@ -178,13 +177,13 @@ def run_engine():
 
         px = data[s][-1]
 
-        # dynamic sizing
+        # 🔥 HIGH DEPLOYMENT SIZING
         if score > 0.02:
-            alloc_pct = 0.30
+            alloc_pct = 0.45
         elif score > 0.01:
-            alloc_pct = 0.20
+            alloc_pct = 0.35
         else:
-            alloc_pct = 0.12
+            alloc_pct = 0.25
 
         alloc = portfolio["equity"] * alloc_pct
 
@@ -238,7 +237,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>🚀 Capital Concentration System</h2>
+    <h2>🚀 High-Deployment Trading System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
