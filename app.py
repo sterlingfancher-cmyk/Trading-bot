@@ -53,6 +53,7 @@ def load(symbols):
     for s in symbols:
         try:
             df = yf.download(s, period="5d", interval="5m", progress=False)
+
             if df is None or df.empty or len(df) < 50:
                 continue
 
@@ -64,7 +65,7 @@ def load(symbols):
             continue
     return data
 
-# ================= SIGNAL ENGINE (ALWAYS ACTIVE) =================
+# ================= SIGNAL ENGINE (NEVER FAILS) =================
 def signals(data):
     scored = []
 
@@ -72,22 +73,34 @@ def signals(data):
         try:
             p = np.array(d["close"], dtype=float)
 
-            ret3 = (p[-1] / p[-3]) - 1
-            ret10 = (p[-1] / p[-10]) - 1
+            ret3 = (p[-1] / p[-3]) - 1 if len(p) >= 3 else 0
+            ret10 = (p[-1] / p[-10]) - 1 if len(p) >= 10 else 0
 
-            high20 = np.max(p[-20:])
-            breakout = (p[-1] - high20) / high20
+            high20 = np.max(p[-20:]) if len(p) >= 20 else p[-1]
+            breakout = (p[-1] - high20) / (high20 + 1e-6)
 
-            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) + 1e-6
+            vol = np.std(np.diff(p[-20:]) / p[-20:-1]) if len(p) >= 20 else 0.02
+            vol = vol if np.isfinite(vol) else 0.02
 
-            score = (ret3 * 2) + ret10 + breakout
+            score = float(ret3 + ret10 + breakout)
 
             scored.append((s, score, vol))
 
-        except:
-            continue
+        except Exception as e:
+            print(f"SIGNAL FAIL: {s} -> {e}")
 
-    # ALWAYS return best options (even if weak)
+    # 🚨 HARD FALLBACK
+    if not scored:
+        print("⚠️ SIGNAL FALLBACK ACTIVATED")
+
+        for s, d in data.items():
+            try:
+                p = d["close"]
+                score = (p[-1] - p[-2]) / p[-2]
+                scored.append((s, score, 0.02))
+            except:
+                continue
+
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
     return scored[:MAX_POSITIONS * 2]
@@ -126,6 +139,9 @@ def run_engine():
 
     sig = signals(data)
 
+    if not sig:
+        return {"error": "SIGNAL FAILURE"}
+
     # ===== EQUITY =====
     equity = portfolio["cash"]
     for s, pos in portfolio["positions"].items():
@@ -149,8 +165,10 @@ def run_engine():
 
         if (low - entry)/entry < -STOP_LOSS:
             exit_price = sf(data[s]["close"][-1])
+
             portfolio["cash"] += pos["shares"] * exit_price
             portfolio["trades"].append((s, (low-entry)/entry))
+
             pos["stopped"] = True
             del portfolio["positions"][s]
 
@@ -163,9 +181,10 @@ def run_engine():
             sell = pos["shares"] * 0.5
             portfolio["cash"] += sell * price
             pos["shares"] -= sell
+
             portfolio["trades"].append((s, gain))
 
-    # ===== TARGET BUILD (SECTOR BALANCED) =====
+    # ===== TARGET BUILD =====
     used_sectors = set()
     targets = []
 
@@ -181,7 +200,7 @@ def run_engine():
         if len(targets) >= MAX_POSITIONS:
             break
 
-    # ===== REMOVE NON-TARGETS =====
+    # ===== REMOVE NON TARGETS =====
     for s in list(portfolio["positions"].keys()):
         if s not in [t[0] for t in targets]:
             price = sf(data[s]["close"][-1])
@@ -229,7 +248,7 @@ def run_engine():
     ai_supervisor()
 
     return {
-        "equity": round(portfolio["equity"],2),
+        "equity": round(portfolio["equity"], 2),
         "positions": list(portfolio["positions"].keys()),
         "signals_found": len(sig)
     }
@@ -249,7 +268,7 @@ body {background:#0f172a;color:white;font-family:Arial}
 </head>
 <body>
 
-<h2>📊 AI Trading Dashboard (Always Active)</h2>
+<h2>📊 AI Trading Dashboard (Final Stable)</h2>
 
 <div class="grid">
 <div class="card"><canvas id="eq"></canvas></div>
@@ -293,7 +312,7 @@ setInterval(load,10000);
 # ================= ROUTES =================
 @app.route("/")
 def home():
-    return {"status":"ALWAYS-ACTIVE SYSTEM LIVE"}
+    return {"status":"FINAL SYSTEM LIVE"}
 
 @app.route("/paper/run")
 def run_api():
