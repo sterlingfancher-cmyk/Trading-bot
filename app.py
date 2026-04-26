@@ -108,24 +108,23 @@ def generate_signals(data5, data15):
 
             px = p5[-1]
 
-            # 5m trend
+            # Trend filters
             if px < np.mean(p5[-20:]):
                 continue
-
-            # 15m trend
             if p15[-1] < np.mean(p15[-20:]):
                 continue
 
-            # 🔥 SOFT BREAKOUT (FIXED)
+            # Soft breakout
             range_high = max(p5[-10:])
             if px < range_high * 0.998:
                 continue
 
-            # momentum
+            # Momentum
             r3 = (px / p5[-3]) - 1
             r12 = (px / p5[-12]) - 1
 
-            if r3 <= 0:
+            # 🔥 MOMENTUM ACCELERATION (FINAL EDGE)
+            if r3 <= r12:
                 continue
 
             score = r3*0.6 + r12*0.4
@@ -261,7 +260,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>🚀 Soft Breakout Trading System</h2>
+    <h2>🚀 Acceleration Trading System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
