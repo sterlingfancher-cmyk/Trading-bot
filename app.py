@@ -83,7 +83,7 @@ def load_data(symbols):
             df5 = yf.download(s, period="2d", interval="5m", progress=False)
             df15 = yf.download(s, period="5d", interval="15m", progress=False)
 
-            if df5 is None or df15 is None or df5.empty or df15.empty:
+            if df5.empty or df15.empty:
                 continue
 
             c5 = clean(df5["Close"].values)
@@ -92,7 +92,6 @@ def load_data(symbols):
             if len(c5) > 20 and len(c15) > 20:
                 data5[s] = c5
                 data15[s] = c15
-
         except:
             continue
 
@@ -109,10 +108,17 @@ def generate_signals(data5, data15):
 
             px = p5[-1]
 
+            # 5m trend
             if px < np.mean(p5[-20:]):
                 continue
 
+            # 15m trend
             if p15[-1] < np.mean(p15[-20:]):
+                continue
+
+            # 🔥 BREAKOUT FILTER (NEW CORE EDGE)
+            range_high = max(p5[-10:])
+            if px <= range_high:
                 continue
 
             r3 = (px / p5[-3]) - 1
@@ -123,7 +129,6 @@ def generate_signals(data5, data15):
 
             score = r3*0.6 + r12*0.4
 
-            # 🔥 LOWERED THRESHOLD
             if score < 0.0025:
                 continue
 
@@ -176,7 +181,7 @@ def run_engine():
 
         pnl = (px - pos["entry"]) / pos["entry"]
 
-        if pnl < -0.02 or px < pos["peak"] * 0.96 or pnl > 0.18:
+        if pnl < -0.02 or px < pos["peak"] * 0.96 or pnl > 0.20:
             portfolio["cash"] += px * pos["shares"]
             del portfolio["positions"][s]
 
@@ -185,22 +190,17 @@ def run_engine():
     used_sectors = set(get_sector(s) for s in portfolio["positions"])
 
     for s, score in signals:
-
         if s in portfolio["positions"]:
             continue
 
-        sector = get_sector(s)
-
-        if sector in used_sectors:
+        if get_sector(s) in used_sectors:
             continue
 
-        # 🔥 INCREASED POSITION COUNT
         if len(portfolio["positions"]) >= 4:
             break
 
         px = data5[s][-1]
 
-        # 🔥 HIGHER DEPLOYMENT
         if score > 0.02:
             alloc_pct = 0.55
         elif score > 0.01:
@@ -225,7 +225,7 @@ def run_engine():
         }
 
         portfolio["trades"].append({"sym": s, "type": "entry", "px": px})
-        used_sectors.add(sector)
+        used_sectors.add(get_sector(s))
 
     portfolio["history"].append(portfolio["equity"])
     save_state(portfolio)
@@ -260,7 +260,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📈 Balanced Multi-Timeframe System</h2>
+    <h2>🚀 Breakout Trading System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
@@ -301,4 +301,4 @@ def dashboard():
 # ================= START =================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT",8080))
-    app.run(host="0.0.0.0",port=port)
+    app.run(host="0.0.0.0", port=port)
