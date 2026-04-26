@@ -17,7 +17,6 @@ UNIVERSE = [
     "IBIT","ETHA","GDLC"
 ]
 
-# ================= SECTORS =================
 SECTORS = {
     "tech": ["NVDA","AMD","AVGO","TSM","MU","LRCX","ARM","META","MSFT","GOOGL","AMZN"],
     "cyber": ["CRWD","PANW","NET"],
@@ -105,16 +104,17 @@ def generate_signals(data):
             px = p[-1]
             ma20 = np.mean(p[-20:])
 
-            # trend filter
             if px < ma20:
                 continue
 
             r3 = (px / p[-3]) - 1
             r12 = (px / p[-12]) - 1
 
+            if r3 <= 0:
+                continue
+
             score = r3*0.6 + r12*0.4
 
-            # strength filter
             if score < 0.003:
                 continue
 
@@ -133,7 +133,7 @@ def run_engine():
 
     equity = portfolio["cash"]
 
-    # ===== MARK TO MARKET =====
+    # MARK TO MARKET
     for s, pos in portfolio["positions"].items():
         new_px = data[s][-1] if s in data else pos["last_price"]
 
@@ -149,11 +149,11 @@ def run_engine():
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # ===== SCALE INTO WINNERS =====
+    # 🔥 SCALE INTO WINNERS (FIXED)
     for s, pos in portfolio["positions"].items():
         pnl = (pos["last_price"] - pos["entry"]) / pos["entry"]
 
-        if pnl > 0.015 and pos.get("adds", 0) < 2:
+        if pnl > 0.007 and pos.get("adds", 0) < 3:
             alloc = portfolio["equity"] * 0.15
 
             if portfolio["cash"] >= alloc:
@@ -162,7 +162,7 @@ def run_engine():
                 pos["shares"] += shares
                 pos["adds"] = pos.get("adds", 0) + 1
 
-    # ===== EXITS =====
+    # 🔥 EXIT LOGIC (TUNED)
     for s in list(portfolio["positions"].keys()):
         pos = portfolio["positions"][s]
         px = pos["last_price"]
@@ -170,16 +170,15 @@ def run_engine():
 
         pnl = (px - entry) / entry
 
-        if pnl < -0.03 or px < pos["peak"] * 0.96 or pnl > 0.15:
+        if pnl < -0.02 or px < pos["peak"] * 0.96 or pnl > 0.18:
             portfolio["cash"] += px * pos["shares"]
             del portfolio["positions"][s]
 
-    # ===== ENTRIES =====
+    # ENTRIES
     sig = generate_signals(data)
     used_sectors = set(get_sector(s) for s in portfolio["positions"])
 
     for s, score in sig:
-
         if s in portfolio["positions"]:
             continue
 
@@ -252,7 +251,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Final Trend System</h2>
+    <h2>🚀 Compounding Trading System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
