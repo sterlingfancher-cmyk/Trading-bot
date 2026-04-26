@@ -75,47 +75,57 @@ def clean(arr):
     return arr[~np.isnan(arr)]
 
 def load_data(symbols):
-    out = {}
+    data5 = {}
+    data15 = {}
+
     for s in symbols:
         try:
-            df = yf.download(s, period="2d", interval="5m", progress=False)
-            if df is None or df.empty:
+            df5 = yf.download(s, period="2d", interval="5m", progress=False)
+            df15 = yf.download(s, period="5d", interval="15m", progress=False)
+
+            if df5 is None or df15 is None or df5.empty or df15.empty:
                 continue
-            c = clean(df["Close"].values)
-            if len(c) > 20:
-                out[s] = c
+
+            c5 = clean(df5["Close"].values)
+            c15 = clean(df15["Close"].values)
+
+            if len(c5) > 20 and len(c15) > 20:
+                data5[s] = c5
+                data15[s] = c15
+
         except:
             continue
-    return out
 
-# ================= SIM =================
-def simulate(px):
-    return float(px * (1 + np.random.normal(0, 0.002)))
+    return data5, data15
 
 # ================= SIGNAL =================
-def generate_signals(data):
+def generate_signals(data5, data15):
     ranked = []
 
-    for s, p in data.items():
+    for s in data5:
         try:
-            if len(p) < 20:
+            p5 = data5[s]
+            p15 = data15[s]
+
+            px = p5[-1]
+
+            # 5m trend
+            if px < np.mean(p5[-20:]):
                 continue
 
-            px = p[-1]
-            ma20 = np.mean(p[-20:])
-
-            if px < ma20:
+            # 15m confirmation
+            if p15[-1] < np.mean(p15[-20:]):
                 continue
 
-            r3 = (px / p[-3]) - 1
-            r12 = (px / p[-12]) - 1
+            r3 = (px / p5[-3]) - 1
+            r12 = (px / p5[-12]) - 1
 
             if r3 <= 0:
                 continue
 
             score = r3*0.6 + r12*0.4
 
-            if score < 0.003:
+            if score < 0.004:
                 continue
 
             ranked.append((s, float(score)))
@@ -123,25 +133,23 @@ def generate_signals(data):
         except:
             continue
 
-    return sorted(ranked, key=lambda x: x[1], reverse=True)[:5]
+    return sorted(ranked, key=lambda x: x[1], reverse=True)[:4]
 
 # ================= ENGINE =================
 def run_engine():
-    data = load_data(UNIVERSE + ["SPY"])
-    if not data:
+    data5, data15 = load_data(UNIVERSE + ["SPY"])
+
+    if not data5:
         return {"error": "no data"}
 
     equity = portfolio["cash"]
 
     # MARK TO MARKET
     for s, pos in portfolio["positions"].items():
-        new_px = data[s][-1] if s in data else pos["last_price"]
+        if s not in data5:
+            continue
 
-        if abs(new_px - pos["last_price"]) < 1e-8:
-            px = simulate(pos["last_price"])
-        else:
-            px = new_px
-
+        px = data5[s][-1]
         pos["last_price"] = px
         pos["peak"] = max(pos["peak"], px)
         equity += pos["shares"] * px
@@ -149,7 +157,7 @@ def run_engine():
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # 🔥 SCALE INTO WINNERS (FIXED)
+    # SCALE INTO WINNERS
     for s, pos in portfolio["positions"].items():
         pnl = (pos["last_price"] - pos["entry"]) / pos["entry"]
 
@@ -162,23 +170,22 @@ def run_engine():
                 pos["shares"] += shares
                 pos["adds"] = pos.get("adds", 0) + 1
 
-    # 🔥 EXIT LOGIC (TUNED)
+    # EXITS
     for s in list(portfolio["positions"].keys()):
         pos = portfolio["positions"][s]
         px = pos["last_price"]
-        entry = pos["entry"]
 
-        pnl = (px - entry) / entry
+        pnl = (px - pos["entry"]) / pos["entry"]
 
         if pnl < -0.02 or px < pos["peak"] * 0.96 or pnl > 0.18:
             portfolio["cash"] += px * pos["shares"]
             del portfolio["positions"][s]
 
     # ENTRIES
-    sig = generate_signals(data)
+    signals = generate_signals(data5, data15)
     used_sectors = set(get_sector(s) for s in portfolio["positions"])
 
-    for s, score in sig:
+    for s, score in signals:
         if s in portfolio["positions"]:
             continue
 
@@ -190,7 +197,7 @@ def run_engine():
         if len(portfolio["positions"]) >= 3:
             break
 
-        px = data[s][-1]
+        px = data5[s][-1]
 
         if score > 0.02:
             alloc_pct = 0.45
@@ -224,7 +231,7 @@ def run_engine():
     return {
         "equity": round(portfolio["equity"],2),
         "positions": list(portfolio["positions"].keys()),
-        "signals_found": len(sig)
+        "signals_found": len(signals)
     }
 
 # ================= ROUTES =================
@@ -251,7 +258,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>🚀 Compounding Trading System</h2>
+    <h2>📈 Multi-Timeframe Trading System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
