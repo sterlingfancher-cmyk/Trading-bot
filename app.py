@@ -83,7 +83,7 @@ def load_data(symbols):
             if df is None or df.empty:
                 continue
             c = clean(df["Close"].values)
-            if len(c) > 15:
+            if len(c) > 20:
                 out[s] = c
         except:
             continue
@@ -96,22 +96,34 @@ def simulate(px):
 # ================= SIGNAL =================
 def generate_signals(data):
     ranked = []
+
     for s, p in data.items():
         try:
-            if len(p) < 12:
+            if len(p) < 20:
                 continue
 
             px = p[-1]
+            ma20 = np.mean(p[-20:])
+
+            # trend filter
+            if px < ma20:
+                continue
+
             r3 = (px / p[-3]) - 1
             r12 = (px / p[-12]) - 1
 
             score = r3*0.6 + r12*0.4
+
+            # strength filter
+            if score < 0.003:
+                continue
+
             ranked.append((s, float(score)))
 
         except:
             continue
 
-    return sorted(ranked, key=lambda x: x[1], reverse=True)[:6]
+    return sorted(ranked, key=lambda x: x[1], reverse=True)[:5]
 
 # ================= ENGINE =================
 def run_engine():
@@ -162,7 +174,7 @@ def run_engine():
             portfolio["cash"] += px * pos["shares"]
             del portfolio["positions"][s]
 
-    # ===== ENTRIES WITH DIVERSIFICATION =====
+    # ===== ENTRIES =====
     sig = generate_signals(data)
     used_sectors = set(get_sector(s) for s in portfolio["positions"])
 
@@ -240,7 +252,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Final Edge Trading System</h2>
+    <h2>📊 Final Trend System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
