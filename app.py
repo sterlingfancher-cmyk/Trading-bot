@@ -123,7 +123,7 @@ def generate_signals(data5, data15):
             r3 = (px / p5[-3]) - 1
             r12 = (px / p5[-12]) - 1
 
-            # 🔥 MOMENTUM ACCELERATION (FINAL EDGE)
+            # 🔥 Acceleration
             if r3 <= r12:
                 continue
 
@@ -141,40 +141,41 @@ def generate_signals(data5, data15):
 
 # ================= ENGINE =================
 def run_engine():
-    data5, data15 = load_data(UNIVERSE + ["SPY"])
+    data5, data15 = load_data(UNIVERSE)
 
     if not data5:
         return {"error": "no data"}
 
+    # ===== MARK TO MARKET =====
     equity = portfolio["cash"]
 
-    # MARK TO MARKET
     for s, pos in portfolio["positions"].items():
         if s not in data5:
             continue
 
-        px = data5[s][-1]
+        px = float(data5[s][-1])
         pos["last_price"] = px
         pos["peak"] = max(pos["peak"], px)
+
         equity += pos["shares"] * px
 
-    portfolio["equity"] = equity
-    portfolio["peak"] = max(portfolio["peak"], equity)
+    portfolio["equity"] = float(equity)
+    portfolio["peak"] = max(portfolio["peak"], portfolio["equity"])
 
-    # SCALE INTO WINNERS
+    # ===== SCALE INTO WINNERS =====
     for s, pos in portfolio["positions"].items():
         pnl = (pos["last_price"] - pos["entry"]) / pos["entry"]
 
         if pnl > 0.007 and pos.get("adds", 0) < 3:
-            alloc = portfolio["equity"] * 0.15
+            alloc = portfolio["cash"] * 0.5  # scale only from cash
 
-            if portfolio["cash"] >= alloc:
+            if alloc > 0:
                 shares = alloc / pos["last_price"]
                 portfolio["cash"] -= alloc
                 pos["shares"] += shares
                 pos["adds"] = pos.get("adds", 0) + 1
 
-    # EXITS
+    # ===== EXITS =====
     for s in list(portfolio["positions"].keys()):
         pos = portfolio["positions"][s]
         px = pos["last_price"]
@@ -185,11 +186,12 @@ def run_engine():
             portfolio["cash"] += px * pos["shares"]
             del portfolio["positions"][s]
 
-    # ENTRIES
+    # ===== ENTRIES =====
     signals = generate_signals(data5, data15)
     used_sectors = set(get_sector(s) for s in portfolio["positions"])
 
     for s, score in signals:
+
         if s in portfolio["positions"]:
             continue
 
@@ -199,8 +201,9 @@ def run_engine():
         if len(portfolio["positions"]) >= 4:
             break
 
-        px = data5[s][-1]
+        px = float(data5[s][-1])
 
+        # 🔥 FIXED: USE CASH ONLY
         if score > 0.02:
             alloc_pct = 0.55
         elif score > 0.01:
@@ -208,9 +211,10 @@ def run_engine():
         else:
             alloc_pct = 0.35
 
-        alloc = portfolio["equity"] * alloc_pct
+        alloc = portfolio["cash"] * alloc_pct
+        alloc = min(alloc, portfolio["cash"])
 
-        if portfolio["cash"] < alloc:
+        if alloc <= 0:
             continue
 
         shares = alloc / px
@@ -232,6 +236,7 @@ def run_engine():
 
     return {
         "equity": round(portfolio["equity"],2),
+        "cash": round(portfolio["cash"],2),
         "positions": list(portfolio["positions"].keys()),
         "signals_found": len(signals)
     }
@@ -260,7 +265,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>🚀 Acceleration Trading System</h2>
+    <h2>📊 Fixed Trading System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
