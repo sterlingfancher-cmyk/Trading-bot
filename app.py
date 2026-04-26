@@ -109,11 +109,9 @@ def generate_signals(data5, data15):
 
             px = p5[-1]
 
-            # 5m trend
             if px < np.mean(p5[-20:]):
                 continue
 
-            # 15m confirmation
             if p15[-1] < np.mean(p15[-20:]):
                 continue
 
@@ -125,7 +123,8 @@ def generate_signals(data5, data15):
 
             score = r3*0.6 + r12*0.4
 
-            if score < 0.004:
+            # 🔥 LOWERED THRESHOLD
+            if score < 0.0025:
                 continue
 
             ranked.append((s, float(score)))
@@ -133,7 +132,7 @@ def generate_signals(data5, data15):
         except:
             continue
 
-    return sorted(ranked, key=lambda x: x[1], reverse=True)[:4]
+    return sorted(ranked, key=lambda x: x[1], reverse=True)[:5]
 
 # ================= ENGINE =================
 def run_engine():
@@ -186,6 +185,7 @@ def run_engine():
     used_sectors = set(get_sector(s) for s in portfolio["positions"])
 
     for s, score in signals:
+
         if s in portfolio["positions"]:
             continue
 
@@ -194,17 +194,19 @@ def run_engine():
         if sector in used_sectors:
             continue
 
-        if len(portfolio["positions"]) >= 3:
+        # 🔥 INCREASED POSITION COUNT
+        if len(portfolio["positions"]) >= 4:
             break
 
         px = data5[s][-1]
 
+        # 🔥 HIGHER DEPLOYMENT
         if score > 0.02:
-            alloc_pct = 0.45
+            alloc_pct = 0.55
         elif score > 0.01:
-            alloc_pct = 0.35
+            alloc_pct = 0.45
         else:
-            alloc_pct = 0.25
+            alloc_pct = 0.35
 
         alloc = portfolio["equity"] * alloc_pct
 
@@ -258,7 +260,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📈 Multi-Timeframe Trading System</h2>
+    <h2>📈 Balanced Multi-Timeframe System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
