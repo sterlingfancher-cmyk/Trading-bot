@@ -116,11 +116,12 @@ def generate_signals(data5, data15):
             if p15[-1] < np.mean(p15[-20:]):
                 continue
 
-            # 🔥 BREAKOUT FILTER (NEW CORE EDGE)
+            # 🔥 SOFT BREAKOUT (FIXED)
             range_high = max(p5[-10:])
-            if px <= range_high:
+            if px < range_high * 0.998:
                 continue
 
+            # momentum
             r3 = (px / p5[-3]) - 1
             r12 = (px / p5[-12]) - 1
 
@@ -260,7 +261,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>🚀 Breakout Trading System</h2>
+    <h2>🚀 Soft Breakout Trading System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
