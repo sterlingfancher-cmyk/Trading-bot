@@ -79,11 +79,11 @@ def load_data(symbols):
     out = {}
     for s in symbols:
         try:
-            df = yf.download(s, period="1d", interval="1m", progress=False)
+            df = yf.download(s, period="2d", interval="5m", progress=False)
             if df is None or df.empty:
                 continue
             c = clean(df["Close"].values)
-            if len(c) > 5:
+            if len(c) > 15:
                 out[s] = c
         except:
             continue
@@ -98,15 +98,19 @@ def generate_signals(data):
     ranked = []
     for s, p in data.items():
         try:
-            if len(p) < 5:
+            if len(p) < 12:
                 continue
+
             px = p[-1]
-            r5 = (px / p[-5]) - 1
-            r10 = (px / p[-10]) - 1 if len(p) >= 10 else r5
-            score = r5*0.7 + r10*0.3
+            r3 = (px / p[-3]) - 1
+            r12 = (px / p[-12]) - 1
+
+            score = r3*0.6 + r12*0.4
             ranked.append((s, float(score)))
+
         except:
             continue
+
     return sorted(ranked, key=lambda x: x[1], reverse=True)[:6]
 
 # ================= ENGINE =================
@@ -133,7 +137,7 @@ def run_engine():
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # ===== SCALE INTO WINNERS (AGGRESSIVE) =====
+    # ===== SCALE INTO WINNERS =====
     for s, pos in portfolio["positions"].items():
         pnl = (pos["last_price"] - pos["entry"]) / pos["entry"]
 
@@ -177,7 +181,6 @@ def run_engine():
 
         px = data[s][-1]
 
-        # 🔥 HIGH DEPLOYMENT SIZING
         if score > 0.02:
             alloc_pct = 0.45
         elif score > 0.01:
@@ -237,7 +240,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>🚀 High-Deployment Trading System</h2>
+    <h2>📊 Final Edge Trading System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
