@@ -33,22 +33,15 @@ def get_sector(sym):
     return "other"
 
 # ================= STATE =================
-_memory = None
-
 def load_state():
-    global _memory
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r") as f:
-                _memory = json.load(f)
-                return _memory
+                return json.load(f)
         except:
             pass
 
-    if _memory:
-        return _memory
-
-    _memory = {
+    return {
         "cash": 10000.0,
         "equity": 10000.0,
         "peak": 10000.0,
@@ -56,16 +49,10 @@ def load_state():
         "history": [],
         "trades": []
     }
-    return _memory
 
 def save_state(state):
-    global _memory
-    _memory = state
-    try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f)
-    except:
-        pass
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
 
 portfolio = load_state()
 
@@ -75,8 +62,7 @@ def clean(arr):
     return arr[~np.isnan(arr)]
 
 def load_data(symbols):
-    data5 = {}
-    data15 = {}
+    data5, data15 = {}, {}
 
     for s in symbols:
         try:
@@ -105,28 +91,25 @@ def generate_signals(data5, data15):
         try:
             p5 = data5[s]
             p15 = data15[s]
-
             px = p5[-1]
 
-            # Trend filters
+            # Trend
             if px < np.mean(p5[-20:]):
                 continue
             if p15[-1] < np.mean(p15[-20:]):
                 continue
 
-            # Soft breakout
+            # 🔥 RELAXED BREAKOUT
             range_high = max(p5[-10:])
-            if px < range_high * 0.998:
+            if px < range_high * 0.995:
                 continue
 
-            # Momentum
+            # 🔥 SIMPLIFIED MOMENTUM
             r3 = (px / p5[-3]) - 1
-            r12 = (px / p5[-12]) - 1
-
-            # 🔥 Acceleration
-            if r3 <= r12:
+            if r3 <= 0:
                 continue
 
+            r12 = (px / p5[-12]) - 1
             score = r3*0.6 + r12*0.4
 
             if score < 0.0025:
@@ -146,9 +129,9 @@ def run_engine():
     if not data5:
         return {"error": "no data"}
 
-    # ===== MARK TO MARKET =====
     equity = portfolio["cash"]
 
+    # MARK TO MARKET
     for s, pos in portfolio["positions"].items():
         if s not in data5:
             continue
@@ -156,26 +139,24 @@ def run_engine():
         px = float(data5[s][-1])
         pos["last_price"] = px
         pos["peak"] = max(pos["peak"], px)
-
         equity += pos["shares"] * px
 
     portfolio["equity"] = float(equity)
     portfolio["peak"] = max(portfolio["peak"], portfolio["equity"])
 
-    # ===== SCALE INTO WINNERS =====
+    # SCALE INTO WINNERS
     for s, pos in portfolio["positions"].items():
         pnl = (pos["last_price"] - pos["entry"]) / pos["entry"]
 
         if pnl > 0.007 and pos.get("adds", 0) < 3:
-            alloc = portfolio["cash"] * 0.5  # scale only from cash
-
+            alloc = portfolio["cash"] * 0.5
             if alloc > 0:
                 shares = alloc / pos["last_price"]
                 portfolio["cash"] -= alloc
                 pos["shares"] += shares
                 pos["adds"] = pos.get("adds", 0) + 1
 
-    # ===== EXITS =====
+    # EXITS
     for s in list(portfolio["positions"].keys()):
         pos = portfolio["positions"][s]
         px = pos["last_price"]
@@ -186,24 +167,20 @@ def run_engine():
             portfolio["cash"] += px * pos["shares"]
             del portfolio["positions"][s]
 
-    # ===== ENTRIES =====
+    # ENTRIES
     signals = generate_signals(data5, data15)
     used_sectors = set(get_sector(s) for s in portfolio["positions"])
 
     for s, score in signals:
-
         if s in portfolio["positions"]:
             continue
-
         if get_sector(s) in used_sectors:
             continue
-
         if len(portfolio["positions"]) >= 4:
             break
 
         px = float(data5[s][-1])
 
-        # 🔥 FIXED: USE CASH ONLY
         if score > 0.02:
             alloc_pct = 0.55
         elif score > 0.01:
@@ -265,7 +242,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Fixed Trading System</h2>
+    <h2>📊 Balanced Trading System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
