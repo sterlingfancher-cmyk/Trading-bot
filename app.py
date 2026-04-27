@@ -99,12 +99,12 @@ def generate_signals(data5, data15):
             if p15[-1] < np.mean(p15[-20:]):
                 continue
 
-            # 🔥 RELAXED BREAKOUT
+            # Soft breakout
             range_high = max(p5[-10:])
             if px < range_high * 0.995:
                 continue
 
-            # 🔥 SIMPLIFIED MOMENTUM
+            # Momentum
             r3 = (px / p5[-3]) - 1
             if r3 <= 0:
                 continue
@@ -144,11 +144,11 @@ def run_engine():
     portfolio["equity"] = float(equity)
     portfolio["peak"] = max(portfolio["peak"], portfolio["equity"])
 
-    # SCALE INTO WINNERS
+    # 🔥 SCALE INTO WINNERS (UPDATED)
     for s, pos in portfolio["positions"].items():
         pnl = (pos["last_price"] - pos["entry"]) / pos["entry"]
 
-        if pnl > 0.007 and pos.get("adds", 0) < 3:
+        if pnl > 0.0035 and pos.get("adds", 0) < 3:
             alloc = portfolio["cash"] * 0.5
             if alloc > 0:
                 shares = alloc / pos["last_price"]
@@ -242,7 +242,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Balanced Trading System</h2>
+    <h2>📊 Compounding System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
