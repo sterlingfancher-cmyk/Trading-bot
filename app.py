@@ -9,6 +9,10 @@ SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 STATE_FILE = "state.json"
 MARKET_CACHE_TTL = 300
 
+MAX_DAILY_LOSS_PCT = 0.03
+MAX_INTRADAY_DRAWDOWN_PCT = 0.025
+COOLDOWN_SECONDS = 1800
+
 # ===== UNIVERSE =====
 UNIVERSE = [
     "NVDA", "AMD", "AVGO", "TSM", "MU", "ARM",
@@ -25,6 +29,23 @@ MACRO_SYMBOLS = ["SPY", "QQQ", "^VIX", "^TNX"] + SECTOR_ETFS
 _market_cache = {"ts": 0, "data": None}
 
 # ===== STATE =====
+def today_key():
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def default_risk_controls():
+    return {
+        "date": today_key(),
+        "day_start_equity": 10000.0,
+        "day_peak_equity": 10000.0,
+        "daily_drawdown_pct": 0.0,
+        "intraday_drawdown_pct": 0.0,
+        "halted": False,
+        "halt_reason": "",
+        "cooldowns": {}
+    }
+
+
 def default_state():
     return {
         "cash": 10000.0,
@@ -33,7 +54,8 @@ def default_state():
         "positions": {},
         "history": [],
         "trades": [],
-        "last_market": {}
+        "last_market": {},
+        "risk_controls": default_risk_controls()
     }
 
 
@@ -56,6 +78,7 @@ def load_state():
     state.setdefault("history", [])
     state.setdefault("trades", [])
     state.setdefault("last_market", {})
+    state.setdefault("risk_controls", default_risk_controls())
 
     return state
 
@@ -143,6 +166,7 @@ def position_value(pos, px):
 
 def record_trade(action, symbol, side, px, shares, extra=None):
     trade = {
+        "time": int(time.time()),
         "action": action,
         "symbol": symbol,
         "side": side,
@@ -155,6 +179,84 @@ def record_trade(action, symbol, side, px, shares, extra=None):
 
     portfolio["trades"].append(trade)
     portfolio["trades"] = portfolio["trades"][-150:]
+
+
+def get_risk_controls():
+    rc = portfolio.setdefault("risk_controls", default_risk_controls())
+    today = today_key()
+
+    if rc.get("date") != today:
+        current_equity = float(portfolio.get("equity", 10000.0))
+        rc.clear()
+        rc.update({
+            "date": today,
+            "day_start_equity": current_equity,
+            "day_peak_equity": current_equity,
+            "daily_drawdown_pct": 0.0,
+            "intraday_drawdown_pct": 0.0,
+            "halted": False,
+            "halt_reason": "",
+            "cooldowns": {}
+        })
+
+    rc.setdefault("cooldowns", {})
+    return rc
+
+
+def prune_cooldowns():
+    rc = get_risk_controls()
+    now = time.time()
+    rc["cooldowns"] = {
+        symbol: until for symbol, until in rc.get("cooldowns", {}).items()
+        if float(until) > now
+    }
+    return rc["cooldowns"]
+
+
+def is_in_cooldown(symbol):
+    cooldowns = prune_cooldowns()
+    return float(cooldowns.get(symbol, 0)) > time.time()
+
+
+def set_cooldown(symbol):
+    rc = get_risk_controls()
+    rc.setdefault("cooldowns", {})[symbol] = time.time() + COOLDOWN_SECONDS
+
+
+def update_daily_risk_controls(equity):
+    rc = get_risk_controls()
+    equity = float(equity)
+    start = max(float(rc.get("day_start_equity", equity)), 0.01)
+    peak = max(float(rc.get("day_peak_equity", equity)), equity, 0.01)
+
+    rc["day_peak_equity"] = peak
+    rc["daily_drawdown_pct"] = round(((start - equity) / start) * 100, 3)
+    rc["intraday_drawdown_pct"] = round(((peak - equity) / peak) * 100, 3)
+
+    daily_loss_triggered = equity <= start * (1 - MAX_DAILY_LOSS_PCT)
+    intraday_dd_triggered = equity <= peak * (1 - MAX_INTRADAY_DRAWDOWN_PCT)
+
+    if daily_loss_triggered:
+        rc["halted"] = True
+        rc["halt_reason"] = f"daily loss limit hit ({MAX_DAILY_LOSS_PCT * 100:.1f}%)"
+    elif intraday_dd_triggered:
+        rc["halted"] = True
+        rc["halt_reason"] = f"intraday drawdown limit hit ({MAX_INTRADAY_DRAWDOWN_PCT * 100:.1f}%)"
+
+    return rc
+
+
+def reset_state(starting_cash=10000.0):
+    global portfolio
+    portfolio = default_state()
+    portfolio["cash"] = float(starting_cash)
+    portfolio["equity"] = float(starting_cash)
+    portfolio["peak"] = float(starting_cash)
+    portfolio["risk_controls"] = default_risk_controls()
+    portfolio["risk_controls"]["day_start_equity"] = float(starting_cash)
+    portfolio["risk_controls"]["day_peak_equity"] = float(starting_cash)
+    save_state(portfolio)
+    return portfolio
 
 # ===== MARKET / ECONOMIC RISK ENGINE =====
 def market_status(force=False):
@@ -276,71 +378,41 @@ def risk_parameters(market):
 
     if mode == "risk_on":
         return {
-            "max_positions": 5,
-            "long_alloc_pct": 0.42,
-            "short_alloc_pct": 0.12,
-            "long_scale_pct": 0.30,
-            "short_scale_pct": 0.12,
-            "allow_longs": True,
-            "allow_shorts": False,
-            "stop_loss": -0.02,
-            "trail_long": 0.97,
-            "trail_short": 1.03
+            "max_positions": 5, "long_alloc_pct": 0.42, "short_alloc_pct": 0.12,
+            "long_scale_pct": 0.30, "short_scale_pct": 0.12,
+            "allow_longs": True, "allow_shorts": False,
+            "stop_loss": -0.02, "trail_long": 0.97, "trail_short": 1.03
         }
 
     if mode == "constructive":
         return {
-            "max_positions": 4,
-            "long_alloc_pct": 0.35,
-            "short_alloc_pct": 0.15,
-            "long_scale_pct": 0.25,
-            "short_scale_pct": 0.12,
-            "allow_longs": True,
-            "allow_shorts": False,
-            "stop_loss": -0.02,
-            "trail_long": 0.97,
-            "trail_short": 1.03
+            "max_positions": 4, "long_alloc_pct": 0.35, "short_alloc_pct": 0.15,
+            "long_scale_pct": 0.25, "short_scale_pct": 0.12,
+            "allow_longs": True, "allow_shorts": False,
+            "stop_loss": -0.02, "trail_long": 0.97, "trail_short": 1.03
         }
 
     if mode == "neutral":
         return {
-            "max_positions": 4,
-            "long_alloc_pct": 0.25,
-            "short_alloc_pct": 0.15,
-            "long_scale_pct": 0.15,
-            "short_scale_pct": 0.10,
-            "allow_longs": True,
-            "allow_shorts": True,
-            "stop_loss": -0.018,
-            "trail_long": 0.975,
-            "trail_short": 1.025
+            "max_positions": 4, "long_alloc_pct": 0.25, "short_alloc_pct": 0.15,
+            "long_scale_pct": 0.15, "short_scale_pct": 0.10,
+            "allow_longs": True, "allow_shorts": True,
+            "stop_loss": -0.018, "trail_long": 0.975, "trail_short": 1.025
         }
 
     if mode == "risk_off":
         return {
-            "max_positions": 3,
-            "long_alloc_pct": 0.15,
-            "short_alloc_pct": 0.22,
-            "long_scale_pct": 0.00,
-            "short_scale_pct": 0.12,
-            "allow_longs": False,
-            "allow_shorts": True,
-            "stop_loss": -0.015,
-            "trail_long": 0.98,
-            "trail_short": 1.025
+            "max_positions": 3, "long_alloc_pct": 0.15, "short_alloc_pct": 0.22,
+            "long_scale_pct": 0.00, "short_scale_pct": 0.12,
+            "allow_longs": False, "allow_shorts": True,
+            "stop_loss": -0.015, "trail_long": 0.98, "trail_short": 1.025
         }
 
     return {
-        "max_positions": 2,
-        "long_alloc_pct": 0.00,
-        "short_alloc_pct": 0.18,
-        "long_scale_pct": 0.00,
-        "short_scale_pct": 0.00,
-        "allow_longs": False,
-        "allow_shorts": True,
-        "stop_loss": -0.012,
-        "trail_long": 0.985,
-        "trail_short": 1.02
+        "max_positions": 2, "long_alloc_pct": 0.00, "short_alloc_pct": 0.18,
+        "long_scale_pct": 0.00, "short_scale_pct": 0.00,
+        "allow_longs": False, "allow_shorts": True,
+        "stop_loss": -0.012, "trail_long": 0.985, "trail_short": 1.02
     }
 
 # ===== SCANNER =====
@@ -469,40 +541,46 @@ def run_engine():
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(float(portfolio.get("peak", equity)), equity)
+    risk_controls = update_daily_risk_controls(equity)
+    prune_cooldowns()
 
-    # SCALE WINNERS, but disable or reduce scaling when the market engine says to de-risk.
-    for s, pos in list(portfolio["positions"].items()):
-        px = float(pos.get("last_price", pos["entry"]))
-        side = pos.get("side", "long")
-        pnl = position_pnl_pct(pos, px)
-
-        if side == "short":
-            trend_ok = px <= float(pos.get("trough", px)) * 1.015
-            alloc_pct = params["short_scale_pct"]
-        else:
-            trend_ok = px >= float(pos.get("peak", px)) * 0.985
-            alloc_pct = params["long_scale_pct"]
-
-        if alloc_pct > 0 and pnl > 0.0035 and trend_ok and pos.get("adds", 0) < 3:
-            alloc = float(portfolio["cash"]) * alloc_pct
-
-            if alloc <= 0:
-                continue
-
-            new_shares = alloc / px
-            old_shares = float(pos["shares"])
-            total_shares = old_shares + new_shares
-            old_entry = float(pos["entry"])
-
-            pos["entry"] = ((old_entry * old_shares) + (px * new_shares)) / total_shares
-            pos["shares"] = total_shares
-            pos["adds"] = pos.get("adds", 0) + 1
-            portfolio["cash"] -= alloc
+    # SCALE WINNERS
+    if not risk_controls.get("halted", False):
+        for s, pos in list(portfolio["positions"].items()):
+            px = float(pos.get("last_price", pos["entry"]))
+            side = pos.get("side", "long")
+            pnl = position_pnl_pct(pos, px)
 
             if side == "short":
-                pos["margin"] = float(pos.get("margin", 0)) + alloc
+                trend_ok = px <= float(pos.get("trough", px)) * 1.015
+                alloc_pct = params["short_scale_pct"]
+            else:
+                trend_ok = px >= float(pos.get("peak", px)) * 0.985
+                alloc_pct = params["long_scale_pct"]
 
-            record_trade("scale", s, side, px, new_shares, {"alloc": round(float(alloc), 2), "market_mode": market["market_mode"]})
+            if alloc_pct > 0 and pnl > 0.0035 and trend_ok and pos.get("adds", 0) < 3:
+                alloc = float(portfolio["cash"]) * alloc_pct
+
+                if alloc <= 0:
+                    continue
+
+                new_shares = alloc / px
+                old_shares = float(pos["shares"])
+                total_shares = old_shares + new_shares
+                old_entry = float(pos["entry"])
+
+                pos["entry"] = ((old_entry * old_shares) + (px * new_shares)) / total_shares
+                pos["shares"] = total_shares
+                pos["adds"] = pos.get("adds", 0) + 1
+                portfolio["cash"] -= alloc
+
+                if side == "short":
+                    pos["margin"] = float(pos.get("margin", 0)) + alloc
+
+                record_trade("scale", s, side, px, new_shares, {
+                    "alloc": round(float(alloc), 2),
+                    "market_mode": market["market_mode"]
+                })
 
     # EXITS
     for s in list(portfolio["positions"].keys()):
@@ -522,16 +600,30 @@ def run_engine():
 
         if should_exit:
             portfolio["cash"] += position_value(pos, px)
-            record_trade("exit", s, side, px, shares, {"pnl_pct": round(float(pnl * 100), 2), "market_mode": market["market_mode"]})
+            record_trade("exit", s, side, px, shares, {
+                "pnl_pct": round(float(pnl * 100), 2),
+                "market_mode": market["market_mode"],
+                "cooldown_seconds": COOLDOWN_SECONDS
+            })
+            set_cooldown(s)
             del portfolio["positions"][s]
+
+    # Refresh equity and risk after exits before allowing new entries.
+    interim_equity = float(portfolio["cash"])
+    for s, pos in portfolio["positions"].items():
+        interim_equity += position_value(pos, float(pos.get("last_price", pos["entry"])))
+    portfolio["equity"] = interim_equity
+    risk_controls = update_daily_risk_controls(interim_equity)
 
     # SIGNALS
     longs, shorts = generate_signals(data5, data15, regime)
 
+    new_entries_allowed = not risk_controls.get("halted", False)
+
     # LONG ENTRIES
-    if params["allow_longs"]:
+    if new_entries_allowed and params["allow_longs"]:
         for s, score in longs:
-            if s in portfolio["positions"]:
+            if s in portfolio["positions"] or is_in_cooldown(s):
                 continue
             if len(portfolio["positions"]) >= params["max_positions"]:
                 break
@@ -554,12 +646,16 @@ def run_engine():
                 "side": "long"
             }
 
-            record_trade("entry", s, "long", px, shares, {"score": round(float(score), 6), "alloc": round(float(alloc), 2), "market_mode": market["market_mode"]})
+            record_trade("entry", s, "long", px, shares, {
+                "score": round(float(score), 6),
+                "alloc": round(float(alloc), 2),
+                "market_mode": market["market_mode"]
+            })
 
     # SHORT ENTRIES
-    if params["allow_shorts"]:
+    if new_entries_allowed and params["allow_shorts"]:
         for s, score in shorts:
-            if s in portfolio["positions"]:
+            if s in portfolio["positions"] or is_in_cooldown(s):
                 continue
             if len(portfolio["positions"]) >= params["max_positions"]:
                 break
@@ -583,7 +679,11 @@ def run_engine():
                 "side": "short"
             }
 
-            record_trade("entry", s, "short", px, shares, {"score": round(float(score), 6), "alloc": round(float(alloc), 2), "market_mode": market["market_mode"]})
+            record_trade("entry", s, "short", px, shares, {
+                "score": round(float(score), 6),
+                "alloc": round(float(alloc), 2),
+                "market_mode": market["market_mode"]
+            })
 
     # FINAL EQUITY SNAPSHOT
     final_equity = float(portfolio["cash"])
@@ -597,6 +697,7 @@ def run_engine():
     portfolio["history"].append(portfolio["equity"])
     portfolio["history"] = portfolio["history"][-500:]
     portfolio["last_market"] = market
+    risk_controls = update_daily_risk_controls(final_equity)
 
     save_state(portfolio)
 
@@ -611,6 +712,8 @@ def run_engine():
         "signals_found": len(longs) + len(shorts),
         "long_signals": [s for s, _ in longs],
         "short_signals": [s for s, _ in shorts],
+        "new_entries_allowed": new_entries_allowed,
+        "risk_controls": risk_controls,
         "risk_parameters": params,
         "sector_leaders": market["sector_leaders"]
     }
@@ -630,7 +733,29 @@ def run():
 
 @app.route("/paper/status")
 def status():
+    prune_cooldowns()
     return jsonify(portfolio)
+
+
+@app.route("/paper/reset")
+def reset_route():
+    if request.args.get("key") != SECRET_KEY:
+        return {"error": "unauthorized"}
+
+    starting_cash = request.args.get("cash", 10000)
+    try:
+        starting_cash = float(starting_cash)
+    except Exception:
+        starting_cash = 10000.0
+
+    return jsonify(reset_state(starting_cash))
+
+
+@app.route("/risk/status")
+def risk_status_route():
+    prune_cooldowns()
+    update_daily_risk_controls(float(portfolio.get("equity", 10000.0)))
+    return jsonify(portfolio.get("risk_controls", default_risk_controls()))
 
 
 @app.route("/market/status")
@@ -656,6 +781,7 @@ def dashboard():
     <body style="background:#0f172a;color:white;font-family:Arial;padding:20px;">
     <h2>📊 Scanner + Long/Short Paper System</h2>
     <h3 id="market"></h3>
+    <h3 id="risk"></h3>
 
     <canvas id="chart" style="max-height:420px;"></canvas>
     <pre id="data" style="background:#020617;padding:15px;border-radius:8px;overflow:auto;"></pre>
@@ -670,8 +796,12 @@ def dashboard():
         document.getElementById('data').innerText = JSON.stringify(d,null,2);
 
         const m = d.last_market || {};
+        const r = d.risk_controls || {};
         document.getElementById('market').innerText =
             `Market: ${m.market_mode || 'unknown'} | Risk: ${m.risk_score ?? 'n/a'} | Regime: ${m.regime || 'n/a'} | Leaders: ${(m.sector_leaders || []).join(', ')}`;
+
+        document.getElementById('risk').innerText =
+            `Trading Halted: ${r.halted ? 'YES' : 'NO'} | Daily DD: ${r.daily_drawdown_pct ?? 0}% | Intraday DD: ${r.intraday_drawdown_pct ?? 0}% | Cooldowns: ${Object.keys(r.cooldowns || {}).length}`;
 
         let hist = d.history && d.history.length > 1 ? d.history : [10000,10000];
 
