@@ -1,6 +1,7 @@
-import os, json, time
+import os, json, time, datetime, threading, traceback
 import numpy as np
 import yfinance as yf
+import pytz
 from flask import Flask, jsonify, request, render_template_string
 
 app = Flask(__name__)
@@ -12,6 +13,16 @@ MARKET_CACHE_TTL = 300
 MAX_DAILY_LOSS_PCT = 0.03
 MAX_INTRADAY_DRAWDOWN_PCT = 0.025
 COOLDOWN_SECONDS = 1800
+
+# Auto-run controls. Railway will serve the app continuously, but the trading
+# engine only runs when something calls it. This worker calls it automatically
+# during regular U.S. equity market hours.
+AUTO_RUN_ENABLED = os.environ.get("AUTO_RUN_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
+AUTO_RUN_INTERVAL_SECONDS = int(os.environ.get("AUTO_RUN_INTERVAL_SECONDS", "300"))
+AUTO_RUN_MARKET_ONLY = os.environ.get("AUTO_RUN_MARKET_ONLY", "true").lower() not in ["0", "false", "no", "off"]
+MARKET_TZ = pytz.timezone("America/Chicago")
+RUN_LOCK = threading.Lock()
+AUTO_THREAD_STARTED = False
 
 # ===== UNIVERSE =====
 UNIVERSE = [
@@ -46,6 +57,22 @@ def default_risk_controls():
     }
 
 
+def default_auto_runner():
+    return {
+        "enabled": AUTO_RUN_ENABLED,
+        "market_only": AUTO_RUN_MARKET_ONLY,
+        "interval_seconds": AUTO_RUN_INTERVAL_SECONDS,
+        "market_open_now": False,
+        "last_run_ts": None,
+        "last_run_local": None,
+        "last_run_source": None,
+        "last_result": None,
+        "last_error": None,
+        "last_skip_reason": None,
+        "thread_started": False
+    }
+
+
 def default_state():
     return {
         "cash": 10000.0,
@@ -55,7 +82,8 @@ def default_state():
         "history": [],
         "trades": [],
         "last_market": {},
-        "risk_controls": default_risk_controls()
+        "risk_controls": default_risk_controls(),
+        "auto_runner": default_auto_runner()
     }
 
 
@@ -79,6 +107,7 @@ def load_state():
     state.setdefault("trades", [])
     state.setdefault("last_market", {})
     state.setdefault("risk_controls", default_risk_controls())
+    state.setdefault("auto_runner", default_auto_runner())
 
     return state
 
@@ -255,6 +284,7 @@ def reset_state(starting_cash=10000.0):
     portfolio["risk_controls"] = default_risk_controls()
     portfolio["risk_controls"]["day_start_equity"] = float(starting_cash)
     portfolio["risk_controls"]["day_peak_equity"] = float(starting_cash)
+    portfolio["auto_runner"] = default_auto_runner()
     save_state(portfolio)
     return portfolio
 
@@ -718,22 +748,130 @@ def run_engine():
         "sector_leaders": market["sector_leaders"]
     }
 
+# ===== AUTO-RUNNER =====
+def local_now():
+    return datetime.datetime.now(MARKET_TZ)
+
+
+def market_open_now():
+    now = local_now()
+
+    if now.weekday() >= 5:
+        return False
+
+    regular_open = now.replace(hour=8, minute=30, second=0, microsecond=0)
+    regular_close = now.replace(hour=15, minute=0, second=0, microsecond=0)
+
+    return regular_open <= now <= regular_close
+
+
+def update_auto_runner_status(extra=None):
+    ar = portfolio.setdefault("auto_runner", default_auto_runner())
+    ar["enabled"] = AUTO_RUN_ENABLED
+    ar["market_only"] = AUTO_RUN_MARKET_ONLY
+    ar["interval_seconds"] = AUTO_RUN_INTERVAL_SECONDS
+    ar["market_open_now"] = market_open_now()
+    ar["thread_started"] = AUTO_THREAD_STARTED
+
+    if extra:
+        ar.update(extra)
+
+    try:
+        save_state(portfolio)
+    except Exception:
+        pass
+
+    return ar
+
+
+def run_engine_locked(source="manual"):
+    if not RUN_LOCK.acquire(blocking=False):
+        update_auto_runner_status({
+            "last_skip_reason": "engine already running",
+            "last_run_source": source
+        })
+        return {"error": "engine already running", "source": source}
+
+    try:
+        result = run_engine()
+        now = local_now()
+        update_auto_runner_status({
+            "last_run_ts": int(time.time()),
+            "last_run_local": now.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            "last_run_source": source,
+            "last_result": result,
+            "last_error": None,
+            "last_skip_reason": None
+        })
+        return result
+    except Exception as e:
+        err = f"{type(e).__name__}: {str(e)}"
+        update_auto_runner_status({
+            "last_error": err,
+            "last_error_trace": traceback.format_exc()[-2000:],
+            "last_run_source": source
+        })
+        return {"error": err, "source": source}
+    finally:
+        RUN_LOCK.release()
+
+
+def auto_runner_loop():
+    update_auto_runner_status({"last_skip_reason": "auto runner started"})
+
+    while True:
+        try:
+            is_open = market_open_now()
+
+            if not AUTO_RUN_ENABLED:
+                update_auto_runner_status({"last_skip_reason": "AUTO_RUN_ENABLED is false"})
+            elif AUTO_RUN_MARKET_ONLY and not is_open:
+                update_auto_runner_status({"last_skip_reason": "market closed"})
+            else:
+                run_engine_locked(source="auto")
+        except Exception as e:
+            update_auto_runner_status({
+                "last_error": f"auto loop error: {type(e).__name__}: {str(e)}",
+                "last_error_trace": traceback.format_exc()[-2000:]
+            })
+
+        time.sleep(max(60, AUTO_RUN_INTERVAL_SECONDS))
+
+
+def start_auto_runner_once():
+    global AUTO_THREAD_STARTED
+
+    if AUTO_THREAD_STARTED:
+        return
+
+    AUTO_THREAD_STARTED = True
+    t = threading.Thread(target=auto_runner_loop, daemon=True)
+    t.start()
+    update_auto_runner_status({"thread_started": True})
+
 # ===== ROUTES =====
 @app.route("/")
 def home():
-    return {"status": "LIVE"}
+    return {
+        "status": "LIVE",
+        "auto_run_enabled": AUTO_RUN_ENABLED,
+        "auto_run_interval_seconds": AUTO_RUN_INTERVAL_SECONDS,
+        "auto_run_market_only": AUTO_RUN_MARKET_ONLY,
+        "market_open_now": market_open_now()
+    }
 
 
 @app.route("/paper/run")
 def run():
     if request.args.get("key") != SECRET_KEY:
         return {"error": "unauthorized"}
-    return jsonify(run_engine())
+    return jsonify(run_engine_locked(source="manual"))
 
 
 @app.route("/paper/status")
 def status():
     prune_cooldowns()
+    update_auto_runner_status()
     return jsonify(portfolio)
 
 
@@ -749,6 +887,11 @@ def reset_route():
         starting_cash = 10000.0
 
     return jsonify(reset_state(starting_cash))
+
+
+@app.route("/auto/status")
+def auto_status_route():
+    return jsonify(update_auto_runner_status())
 
 
 @app.route("/risk/status")
@@ -782,6 +925,7 @@ def dashboard():
     <h2>📊 Scanner + Long/Short Paper System</h2>
     <h3 id="market"></h3>
     <h3 id="risk"></h3>
+    <h3 id="auto"></h3>
 
     <canvas id="chart" style="max-height:420px;"></canvas>
     <pre id="data" style="background:#020617;padding:15px;border-radius:8px;overflow:auto;"></pre>
@@ -797,11 +941,16 @@ def dashboard():
 
         const m = d.last_market || {};
         const r = d.risk_controls || {};
+        const a = d.auto_runner || {};
+
         document.getElementById('market').innerText =
             `Market: ${m.market_mode || 'unknown'} | Risk: ${m.risk_score ?? 'n/a'} | Regime: ${m.regime || 'n/a'} | Leaders: ${(m.sector_leaders || []).join(', ')}`;
 
         document.getElementById('risk').innerText =
             `Trading Halted: ${r.halted ? 'YES' : 'NO'} | Daily DD: ${r.daily_drawdown_pct ?? 0}% | Intraday DD: ${r.intraday_drawdown_pct ?? 0}% | Cooldowns: ${Object.keys(r.cooldowns || {}).length}`;
+
+        document.getElementById('auto').innerText =
+            `Auto Runner: ${a.enabled ? 'ON' : 'OFF'} | Thread: ${a.thread_started ? 'RUNNING' : 'NOT RUNNING'} | Market Open: ${a.market_open_now ? 'YES' : 'NO'} | Last Run: ${a.last_run_local || 'none'} | Skip: ${a.last_skip_reason || 'none'} | Error: ${a.last_error || 'none'}`;
 
         let hist = d.history && d.history.length > 1 ? d.history : [10000,10000];
 
@@ -834,6 +983,9 @@ def dashboard():
     </body>
     </html>
     """)
+
+# Start the automatic runner when the web app boots.
+start_auto_runner_once()
 
 # ===== START =====
 if __name__ == "__main__":
