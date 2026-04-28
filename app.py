@@ -400,13 +400,9 @@ def market_status(force=False):
         mode = "risk_off"
         trade_permission = "short_bias"
         regime = "bear"
-    elif defensive_rotation and broad_market_soft:
-        mode = "defensive_rotation"
-        trade_permission = "defensive_pause"
-        regime = "defensive"
     elif defensive_rotation:
         mode = "defensive_rotation"
-        trade_permission = "reduced"
+        trade_permission = "defensive_pause"
         regime = "defensive"
 
     result = {
@@ -1003,7 +999,11 @@ new Chart(document.getElementById('equityChart'), {
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok", "market_open_now": market_open_now(), "auto_runner_started": AUTO_THREAD_STARTED})
+    return jsonify({
+        "status": "ok",
+        "market_open_now": market_open_now(),
+        "auto_runner_started": AUTO_THREAD_STARTED
+    })
 
 
 @app.route("/paper/status")
