@@ -93,13 +93,13 @@ def generate_signals(data5, data15):
             p15 = data15[s]
             px = p5[-1]
 
-            # Trend
+            # Trend filters
             if px < np.mean(p5[-20:]):
                 continue
             if p15[-1] < np.mean(p15[-20:]):
                 continue
 
-            # Soft breakout
+            # Relaxed breakout
             range_high = max(p5[-10:])
             if px < range_high * 0.995:
                 continue
@@ -129,9 +129,9 @@ def run_engine():
     if not data5:
         return {"error": "no data"}
 
+    # ===== MARK TO MARKET =====
     equity = portfolio["cash"]
 
-    # MARK TO MARKET
     for s, pos in portfolio["positions"].items():
         if s not in data5:
             continue
@@ -139,35 +139,40 @@ def run_engine():
         px = float(data5[s][-1])
         pos["last_price"] = px
         pos["peak"] = max(pos["peak"], px)
+
         equity += pos["shares"] * px
 
     portfolio["equity"] = float(equity)
     portfolio["peak"] = max(portfolio["peak"], portfolio["equity"])
 
-    # 🔥 SCALE INTO WINNERS (UPDATED)
+    # ===== SCALE INTO WINNERS (REFINED) =====
     for s, pos in portfolio["positions"].items():
         pnl = (pos["last_price"] - pos["entry"]) / pos["entry"]
 
-        if pnl > 0.0035 and pos.get("adds", 0) < 3:
-            alloc = portfolio["cash"] * 0.5
+        # 🔥 only add if holding strength (not extended)
+        pullback_ok = pos["last_price"] >= pos["peak"] * 0.985
+
+        if pnl > 0.0035 and pullback_ok and pos.get("adds", 0) < 3:
+            alloc = portfolio["cash"] * 0.3  # 🔥 reduced aggression
+
             if alloc > 0:
                 shares = alloc / pos["last_price"]
                 portfolio["cash"] -= alloc
                 pos["shares"] += shares
                 pos["adds"] = pos.get("adds", 0) + 1
 
-    # EXITS
+    # ===== EXITS (TIGHTER TRAIL) =====
     for s in list(portfolio["positions"].keys()):
         pos = portfolio["positions"][s]
         px = pos["last_price"]
 
         pnl = (px - pos["entry"]) / pos["entry"]
 
-        if pnl < -0.02 or px < pos["peak"] * 0.96 or pnl > 0.20:
+        if pnl < -0.02 or px < pos["peak"] * 0.97 or pnl > 0.20:
             portfolio["cash"] += px * pos["shares"]
             del portfolio["positions"][s]
 
-    # ENTRIES
+    # ===== ENTRIES =====
     signals = generate_signals(data5, data15)
     used_sectors = set(get_sector(s) for s in portfolio["positions"])
 
@@ -242,7 +247,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Compounding System</h2>
+    <h2>📊 Refined Compounding System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
