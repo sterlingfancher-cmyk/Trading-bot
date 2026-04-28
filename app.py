@@ -120,6 +120,11 @@ def save_state(state):
 portfolio = load_state()
 
 # ===== HELPERS =====
+def key_ok():
+    supplied = request.args.get("key") or request.headers.get("X-Run-Key")
+    return SECRET_KEY == "changeme" or supplied == SECRET_KEY
+
+
 def clean(arr):
     arr = np.asarray(arr).astype(float).flatten()
     return arr[~np.isnan(arr)]
@@ -133,7 +138,7 @@ def price_series(df, column="Close"):
 
 def latest_price(symbol):
     try:
-        df = yf.download(symbol, period="1d", interval="5m", progress=False)
+        df = yf.download(symbol, period="1d", interval="5m", progress=False, auto_adjust=True)
         prices = price_series(df)
         if len(prices) == 0:
             return None
@@ -298,7 +303,7 @@ def market_status(force=False):
 
     for symbol in MACRO_SYMBOLS:
         try:
-            df = yf.download(symbol, period="30d", interval="1d", progress=False)
+            df = yf.download(symbol, period="30d", interval="1d", progress=False, auto_adjust=True)
             prices = price_series(df)
             if len(prices) >= 10:
                 series[symbol] = prices
@@ -380,6 +385,30 @@ def market_status(force=False):
         trade_permission = "protective"
         regime = "bear"
 
+    # Defensive rotation override: do not treat defensive leadership as full risk-on.
+    defensive_rotation = defensive_leadership and not growth_leadership
+    broad_market_soft = spy_5d <= 0 or qqq_5d <= 0
+    bear_confirmed = (
+        spy_trend == "down"
+        and qqq_trend == "down"
+        and spy_5d < 0
+        and qqq_5d < 0
+        and vix_5d > 0
+    )
+
+    if bear_confirmed:
+        mode = "risk_off"
+        trade_permission = "short_bias"
+        regime = "bear"
+    elif defensive_rotation and broad_market_soft:
+        mode = "defensive_rotation"
+        trade_permission = "defensive_pause"
+        regime = "defensive"
+    elif defensive_rotation:
+        mode = "defensive_rotation"
+        trade_permission = "reduced"
+        regime = "defensive"
+
     result = {
         "market_mode": mode,
         "risk_score": risk_score,
@@ -393,7 +422,10 @@ def market_status(force=False):
         "rates_5d_pct": round(tnx_5d * 100, 2),
         "sector_leaders": sector_leaders,
         "defensive_leadership": defensive_leadership,
-        "growth_leadership": growth_leadership
+        "growth_leadership": growth_leadership,
+        "defensive_rotation": defensive_rotation,
+        "broad_market_soft": broad_market_soft,
+        "bear_confirmed": bear_confirmed
     }
 
     _market_cache["ts"] = now
@@ -422,19 +454,28 @@ def risk_parameters(market):
             "stop_loss": -0.02, "trail_long": 0.97, "trail_short": 1.03
         }
 
+    if mode == "defensive_rotation":
+        return {
+            "max_positions": 3, "long_alloc_pct": 0.00, "short_alloc_pct": 0.00,
+            "long_scale_pct": 0.00, "short_scale_pct": 0.00,
+            "allow_longs": False, "allow_shorts": False,
+            "stop_loss": -0.015, "trail_long": 0.98, "trail_short": 1.025
+        }
+
     if mode == "neutral":
         return {
-            "max_positions": 4, "long_alloc_pct": 0.25, "short_alloc_pct": 0.15,
-            "long_scale_pct": 0.15, "short_scale_pct": 0.10,
-            "allow_longs": True, "allow_shorts": True,
+            "max_positions": 4, "long_alloc_pct": 0.15, "short_alloc_pct": 0.00,
+            "long_scale_pct": 0.00, "short_scale_pct": 0.00,
+            "allow_longs": False, "allow_shorts": False,
             "stop_loss": -0.018, "trail_long": 0.975, "trail_short": 1.025
         }
 
     if mode == "risk_off":
+        bear_confirmed = bool(market.get("bear_confirmed", False))
         return {
-            "max_positions": 3, "long_alloc_pct": 0.15, "short_alloc_pct": 0.22,
-            "long_scale_pct": 0.00, "short_scale_pct": 0.12,
-            "allow_longs": False, "allow_shorts": True,
+            "max_positions": 3, "long_alloc_pct": 0.00, "short_alloc_pct": 0.22 if bear_confirmed else 0.00,
+            "long_scale_pct": 0.00, "short_scale_pct": 0.12 if bear_confirmed else 0.00,
+            "allow_longs": False, "allow_shorts": bear_confirmed,
             "stop_loss": -0.015, "trail_long": 0.98, "trail_short": 1.025
         }
 
@@ -451,7 +492,7 @@ def pre_scan(symbols, regime):
 
     for s in symbols:
         try:
-            df = yf.download(s, period="5d", interval="15m", progress=False)
+            df = yf.download(s, period="5d", interval="15m", progress=False, auto_adjust=True)
             prices = price_series(df)
 
             if len(prices) < 20:
@@ -464,6 +505,11 @@ def pre_scan(symbols, regime):
                     scored.append((s, abs(r20)))
                 elif r20 > 0.006:
                     scored.append((s, r20 * 0.5))
+            elif regime == "defensive":
+                # Defensive rotation: keep scan light. Existing positions can be managed,
+                # but new entries are blocked by risk_parameters.
+                if r20 > 0.008:
+                    scored.append((s, r20 * 0.25))
             else:
                 if r20 > 0.005:
                     scored.append((s, r20))
@@ -479,8 +525,8 @@ def load_data(symbols):
 
     for s in symbols:
         try:
-            df5 = yf.download(s, period="2d", interval="5m", progress=False)
-            df15 = yf.download(s, period="5d", interval="15m", progress=False)
+            df5 = yf.download(s, period="2d", interval="5m", progress=False, auto_adjust=True)
+            df15 = yf.download(s, period="5d", interval="15m", progress=False, auto_adjust=True)
 
             c5 = price_series(df5)
             c15 = price_series(df15)
@@ -517,9 +563,10 @@ def generate_signals(data5, data15, regime):
             r12 = pct_change(p5, 12)
             score = r3 * 0.6 + r12 * 0.4
 
-            if px > np.mean(p5[-20:]) and p15[-1] > np.mean(p15[-20:]):
-                if px >= max(p5[-10:]) * 0.992 and r3 > 0 and score > 0.0025:
-                    longs.append((s, float(score)))
+            if regime in ["bull"]:
+                if px > np.mean(p5[-20:]) and p15[-1] > np.mean(p15[-20:]):
+                    if px >= max(p5[-10:]) * 0.992 and r3 > 0 and score > 0.0025:
+                        longs.append((s, float(score)))
 
             if regime == "bear":
                 if px < np.mean(p5[-20:]) and p15[-1] < np.mean(p15[-20:]):
@@ -539,6 +586,11 @@ def run_engine():
     market = market_status(force=True)
     params = risk_parameters(market)
     regime = market.get("regime", "neutral")
+
+    # Never scale long exposure when the market is defensive, neutral, or choppy.
+    if market.get("regime") in ["defensive", "neutral", "chop"] or market.get("defensive_rotation"):
+        params["long_scale_pct"] = 0.00
+
     scan_list = pre_scan(UNIVERSE, regime)
 
     if len(scan_list) < 5:
@@ -625,7 +677,7 @@ def run_engine():
             should_exit = pnl < params["stop_loss"] or trailing_stop or pnl > 0.20
         else:
             trailing_stop = px < float(pos.get("peak", px)) * params["trail_long"]
-            risk_exit = market["market_mode"] == "crash_warning" and pnl < 0.005
+            risk_exit = market["market_mode"] in ["crash_warning", "risk_off"] and pnl < 0.005
             should_exit = pnl < params["stop_loss"] or trailing_stop or pnl > 0.20 or risk_exit
 
         if should_exit:
@@ -745,7 +797,10 @@ def run_engine():
         "new_entries_allowed": new_entries_allowed,
         "risk_controls": risk_controls,
         "risk_parameters": params,
-        "sector_leaders": market["sector_leaders"]
+        "sector_leaders": market["sector_leaders"],
+        "defensive_rotation": market.get("defensive_rotation", False),
+        "broad_market_soft": market.get("broad_market_soft", False),
+        "bear_confirmed": market.get("bear_confirmed", False)
     }
 
 # ===== AUTO-RUNNER =====
@@ -851,143 +906,135 @@ def start_auto_runner_once():
 
 # ===== ROUTES =====
 @app.route("/")
-def home():
-    return {
-        "status": "LIVE",
-        "auto_run_enabled": AUTO_RUN_ENABLED,
-        "auto_run_interval_seconds": AUTO_RUN_INTERVAL_SECONDS,
-        "auto_run_market_only": AUTO_RUN_MARKET_ONLY,
-        "market_open_now": market_open_now()
+@app.route("/paper")
+@app.route("/paper/dashboard")
+def dashboard():
+    market = portfolio.get("last_market") or market_status()
+    ar = update_auto_runner_status()
+    history = portfolio.get("history", [])[-200:]
+
+    html = """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scanner + Long/Short Paper System</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { margin: 0; padding: 28px; font-family: Arial, sans-serif; background: #0f172a; color: #f8fafc; }
+    h1 { font-size: 24px; margin: 0 0 24px; }
+    .line { font-size: 26px; font-weight: 800; line-height: 1.45; margin: 8px 0; }
+    .small { color: #cbd5e1; font-size: 15px; margin-top: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 20px; }
+    .card { background: #111c33; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; }
+    .label { color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .value { font-size: 20px; font-weight: 800; margin-top: 6px; }
+    canvas { margin-top: 24px; background: #111827; border-radius: 10px; padding: 10px; }
+    a { color: #38bdf8; }
+  </style>
+</head>
+<body>
+  <h1>📊 Scanner + Long/Short Paper System</h1>
+  <div class="line">Market: {{ market.market_mode }} | Risk: {{ market.risk_score }} | Regime: {{ market.regime }} | Leaders: {{ leaders }}</div>
+  <div class="line">Trading Halted: {{ halted }} | Daily DD: {{ daily_dd }}% | Intraday DD: {{ intraday_dd }}% | Cooldowns: {{ cooldowns }}</div>
+  <div class="line">Auto Runner: {{ auto_on }} | Thread: {{ thread }} | Market Open: {{ market_open }} | Last Run: {{ last_run }} | Skip: {{ skip }} | Error: {{ error }}</div>
+  <div class="line">Defensive Rotation: {{ defensive_rotation }} | Broad Soft: {{ broad_market_soft }} | Bear Confirmed: {{ bear_confirmed }}</div>
+
+  <canvas id="equityChart" height="120"></canvas>
+
+  <div class="grid">
+    <div class="card"><div class="label">Equity</div><div class="value">${{ equity }}</div></div>
+    <div class="card"><div class="label">Cash</div><div class="value">${{ cash }}</div></div>
+    <div class="card"><div class="label">Positions</div><div class="value">{{ positions }}</div></div>
+    <div class="card"><div class="label">Trade Permission</div><div class="value">{{ market.trade_permission }}</div></div>
+  </div>
+
+  <p class="small">
+    JSON: <a href="/paper/status">/paper/status</a> · Run once: <a href="/paper/run">/paper/run</a>
+  </p>
+
+<script>
+const historyData = {{ history_json | safe }};
+const labels = historyData.map((_, i) => i);
+new Chart(document.getElementById('equityChart'), {
+  type: 'line',
+  data: {
+    labels,
+    datasets: [{ label: 'Equity', data: historyData, borderWidth: 3, pointRadius: 2, tension: 0.15 }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { labels: { color: '#e5e7eb' } } },
+    scales: {
+      x: { ticks: { color: '#cbd5e1' }, grid: { color: 'rgba(148,163,184,0.08)' } },
+      y: { ticks: { color: '#cbd5e1' }, grid: { color: 'rgba(148,163,184,0.08)' } }
     }
+  }
+});
+</script>
+</body>
+</html>
+"""
+    rc = portfolio.get("risk_controls", default_risk_controls())
+    return render_template_string(
+        html,
+        market=market,
+        leaders=", ".join(market.get("sector_leaders", [])),
+        halted="YES" if rc.get("halted") else "NO",
+        daily_dd=rc.get("daily_drawdown_pct", 0),
+        intraday_dd=rc.get("intraday_drawdown_pct", 0),
+        cooldowns=len(rc.get("cooldowns", {})),
+        auto_on="ON" if ar.get("enabled") else "OFF",
+        thread="RUNNING" if ar.get("thread_started") else "STOPPED",
+        market_open="YES" if ar.get("market_open_now") else "NO",
+        last_run=ar.get("last_run_local") or "never",
+        skip=ar.get("last_skip_reason") or "none",
+        error=ar.get("last_error") or "none",
+        defensive_rotation=market.get("defensive_rotation", False),
+        broad_market_soft=market.get("broad_market_soft", False),
+        bear_confirmed=market.get("bear_confirmed", False),
+        equity=round(float(portfolio.get("equity", 0)), 2),
+        cash=round(float(portfolio.get("cash", 0)), 2),
+        positions=", ".join(portfolio.get("positions", {}).keys()) or "none",
+        history_json=json.dumps(history if history else [portfolio.get("equity", 10000.0)])
+    )
 
 
-@app.route("/paper/run")
-def run():
-    if request.args.get("key") != SECRET_KEY:
-        return {"error": "unauthorized"}
-    return jsonify(run_engine_locked(source="manual"))
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "market_open_now": market_open_now(), "auto_runner_started": AUTO_THREAD_STARTED})
 
 
 @app.route("/paper/status")
 def status():
-    prune_cooldowns()
     update_auto_runner_status()
     return jsonify(portfolio)
 
 
+@app.route("/paper/market")
+def market():
+    return jsonify(market_status(force=request.args.get("force") == "1"))
+
+
+@app.route("/paper/run")
+def run():
+    if not key_ok():
+        return jsonify({"error": "unauthorized"}), 401
+    return jsonify(run_engine_locked(source="manual"))
+
+
 @app.route("/paper/reset")
-def reset_route():
-    if request.args.get("key") != SECRET_KEY:
-        return {"error": "unauthorized"}
-
-    starting_cash = request.args.get("cash", 10000)
-    try:
-        starting_cash = float(starting_cash)
-    except Exception:
-        starting_cash = 10000.0
-
-    return jsonify(reset_state(starting_cash))
+def reset():
+    if not key_ok():
+        return jsonify({"error": "unauthorized"}), 401
+    cash = float(request.args.get("cash", 10000.0))
+    return jsonify(reset_state(cash))
 
 
-@app.route("/auto/status")
-def auto_status_route():
-    return jsonify(update_auto_runner_status())
-
-
-@app.route("/risk/status")
-def risk_status_route():
-    prune_cooldowns()
-    update_daily_risk_controls(float(portfolio.get("equity", 10000.0)))
-    return jsonify(portfolio.get("risk_controls", default_risk_controls()))
-
-
-@app.route("/market/status")
-def market_route():
-    force = request.args.get("force") == "1"
-    return jsonify(market_status(force=force))
-
-
-@app.route("/risk/params")
-def risk_route():
-    m = market_status(force=request.args.get("force") == "1")
-    return jsonify({"market": m, "params": risk_parameters(m)})
-
-# ===== DASHBOARD =====
-@app.route("/dashboard")
-def dashboard():
-    return render_template_string("""
-    <html>
-    <head>
-    <title>Trading Bot Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    </head>
-    <body style="background:#0f172a;color:white;font-family:Arial;padding:20px;">
-    <h2>📊 Scanner + Long/Short Paper System</h2>
-    <h3 id="market"></h3>
-    <h3 id="risk"></h3>
-    <h3 id="auto"></h3>
-
-    <canvas id="chart" style="max-height:420px;"></canvas>
-    <pre id="data" style="background:#020617;padding:15px;border-radius:8px;overflow:auto;"></pre>
-
-    <script>
-    let chart;
-
-    async function load(){
-        const statusRes = await fetch('/paper/status');
-        const d = await statusRes.json();
-
-        document.getElementById('data').innerText = JSON.stringify(d,null,2);
-
-        const m = d.last_market || {};
-        const r = d.risk_controls || {};
-        const a = d.auto_runner || {};
-
-        document.getElementById('market').innerText =
-            `Market: ${m.market_mode || 'unknown'} | Risk: ${m.risk_score ?? 'n/a'} | Regime: ${m.regime || 'n/a'} | Leaders: ${(m.sector_leaders || []).join(', ')}`;
-
-        document.getElementById('risk').innerText =
-            `Trading Halted: ${r.halted ? 'YES' : 'NO'} | Daily DD: ${r.daily_drawdown_pct ?? 0}% | Intraday DD: ${r.intraday_drawdown_pct ?? 0}% | Cooldowns: ${Object.keys(r.cooldowns || {}).length}`;
-
-        document.getElementById('auto').innerText =
-            `Auto Runner: ${a.enabled ? 'ON' : 'OFF'} | Thread: ${a.thread_started ? 'RUNNING' : 'NOT RUNNING'} | Market Open: ${a.market_open_now ? 'YES' : 'NO'} | Last Run: ${a.last_run_local || 'none'} | Skip: ${a.last_skip_reason || 'none'} | Error: ${a.last_error || 'none'}`;
-
-        let hist = d.history && d.history.length > 1 ? d.history : [10000,10000];
-
-        if(!chart){
-            chart = new Chart(document.getElementById('chart'),{
-                type:'line',
-                data:{
-                    labels: hist.map((_,i)=>i),
-                    datasets:[{label:'Equity', data:hist}]
-                },
-                options:{
-                    responsive:true,
-                    plugins:{legend:{labels:{color:'white'}}},
-                    scales:{
-                        x:{ticks:{color:'white'}},
-                        y:{ticks:{color:'white'}}
-                    }
-                }
-            });
-        } else {
-            chart.data.labels = hist.map((_,i)=>i);
-            chart.data.datasets[0].data = hist;
-            chart.update();
-        }
-    }
-
-    load();
-    setInterval(load,3000);
-    </script>
-    </body>
-    </html>
-    """)
-
-# Start the automatic runner when the web app boots.
+# Start the auto-runner when the app boots on Railway/gunicorn.
 start_auto_runner_once()
 
-# ===== START =====
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
