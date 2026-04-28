@@ -8,7 +8,7 @@ app = Flask(__name__)
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 STATE_FILE = "state.json"
 
-# ===== EXPANDED UNIVERSE =====
+# ===== UNIVERSE =====
 UNIVERSE = [
     "NVDA","AMD","AVGO","TSM","MU","ARM",
     "MSFT","AMZN","GOOGL","META","PLTR","SNOW","NET","CRWD","PANW",
@@ -26,7 +26,6 @@ def load_state():
                 return json.load(f)
         except:
             pass
-
     return {
         "cash": 10000.0,
         "equity": 10000.0,
@@ -47,7 +46,7 @@ def clean(arr):
     arr = np.asarray(arr).astype(float).flatten()
     return arr[~np.isnan(arr)]
 
-# ===== SCANNER =====
+# ===== SCANNER (RELAXED + EXPANDED) =====
 def pre_scan(symbols):
     scored = []
 
@@ -63,13 +62,15 @@ def pre_scan(symbols):
 
             r = (prices[-1] / prices[-20]) - 1
 
-            if r > 0.01:
+            # 🔥 relaxed threshold
+            if r > 0.005:
                 scored.append((s, r))
 
         except:
             continue
 
-    return [s for s,_ in sorted(scored, key=lambda x: x[1], reverse=True)[:20]]
+    # 🔥 larger pool
+    return [s for s,_ in sorted(scored, key=lambda x: x[1], reverse=True)[:30]]
 
 # ===== DATA =====
 def load_data(symbols):
@@ -119,15 +120,14 @@ def generate_signals(data5, data15, regime):
 
             r3 = (px / p5[-3]) - 1
             r12 = (px / p5[-12]) - 1
-
             score = r3*0.6 + r12*0.4
 
-            # ===== LONG =====
+            # LONG
             if px > np.mean(p5[-20:]) and p15[-1] > np.mean(p15[-20:]):
-                if px >= max(p5[-10:]) * 0.995 and r3 > 0 and score > 0.0025:
+                if px >= max(p5[-10:]) * 0.992 and r3 > 0 and score > 0.0025:
                     longs.append((s, score))
 
-            # ===== SHORT =====
+            # SHORT (bear only)
             if regime == "bear":
                 if px < np.mean(p5[-20:]) and p15[-1] < np.mean(p15[-20:]):
                     if px <= min(p5[-10:]) * 1.005 and r3 < 0:
@@ -146,6 +146,11 @@ def run_engine():
     regime = get_regime()
 
     scan_list = pre_scan(UNIVERSE)
+
+    # 🔥 fallback if scanner too strict
+    if len(scan_list) < 5:
+        scan_list = UNIVERSE
+
     data5, data15 = load_data(scan_list)
 
     if not data5:
@@ -161,32 +166,28 @@ def run_engine():
         px = float(data5[s][-1])
         pos["last_price"] = px
         pos["peak"] = max(pos["peak"], px)
-
         equity += pos["shares"] * px
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(portfolio["peak"], equity)
 
-    # SCALE (SMART)
+    # SCALE
     for s, pos in portfolio["positions"].items():
         pnl = (pos["last_price"] - pos["entry"]) / pos["entry"]
-
         pullback_ok = pos["last_price"] >= pos["peak"] * 0.985
 
         if pnl > 0.0035 and pullback_ok and pos.get("adds", 0) < 3:
             alloc = portfolio["cash"] * 0.3
-
             if alloc > 0:
                 shares = alloc / pos["last_price"]
                 portfolio["cash"] -= alloc
                 pos["shares"] += shares
-                pos["adds"] = pos.get("adds", 0) + 1
+                pos["adds"] += 1
 
     # EXITS
     for s in list(portfolio["positions"].keys()):
         pos = portfolio["positions"][s]
         px = pos["last_price"]
-
         pnl = (px - pos["entry"]) / pos["entry"]
 
         if pnl < -0.02 or px < pos["peak"] * 0.97 or pnl > 0.20:
@@ -196,23 +197,22 @@ def run_engine():
     # SIGNALS
     longs, shorts = generate_signals(data5, data15, regime)
 
-    # ENTRIES
+    # LONG ENTRIES
     for s, score in longs:
         if s in portfolio["positions"]:
             continue
-
         if len(portfolio["positions"]) >= 4:
             break
 
         px = data5[s][-1]
-
         alloc = portfolio["cash"] * 0.4
+
         if alloc <= 0:
             continue
 
         shares = alloc / px
-
         portfolio["cash"] -= alloc
+
         portfolio["positions"][s] = {
             "entry": px,
             "shares": shares,
@@ -222,23 +222,22 @@ def run_engine():
             "side": "long"
         }
 
-    # SHORTS (HALF SIZE)
+    # SHORT ENTRIES
     for s, score in shorts:
         if s in portfolio["positions"]:
             continue
-
         if len(portfolio["positions"]) >= 5:
             break
 
         px = data5[s][-1]
-
         alloc = portfolio["cash"] * 0.2
+
         if alloc <= 0:
             continue
 
         shares = alloc / px
-
         portfolio["cash"] -= alloc
+
         portfolio["positions"][s] = {
             "entry": px,
             "shares": shares,
@@ -283,7 +282,7 @@ def dashboard():
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
     <body style="background:#0f172a;color:white;">
-    <h2>📊 Hedge System (Long/Short + Scanner)</h2>
+    <h2>📊 Scanner + Long/Short System</h2>
 
     <canvas id="chart"></canvas>
     <pre id="data"></pre>
