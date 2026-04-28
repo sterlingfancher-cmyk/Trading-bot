@@ -1,0 +1,29 @@
+name: Scheduled Paper Trading Run
+
+on:
+  schedule:
+    # Runs about every 5 minutes. GitHub may delay cron jobs slightly.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: paper-trading-runner
+  cancel-in-progress: true
+
+jobs:
+  run-paper-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger Railway paper engine
+        env:
+          RUN_KEY: ${{ secrets.RUN_KEY }}
+          BOT_BASE_URL: https://trading-bot-clean.up.railway.app
+        run: |
+          if [ -z "$RUN_KEY" ]; then
+            echo "Missing RUN_KEY secret. Add it in GitHub repo Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          RESPONSE=$(curl -sS --fail --max-time 120 "$BOT_BASE_URL/paper/run?key=$RUN_KEY")
+          echo "$RESPONSE"
