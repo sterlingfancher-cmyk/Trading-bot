@@ -436,10 +436,10 @@ def risk_parameters(market):
 
     if mode == "risk_on":
         return {
-            "max_positions": 5, "long_alloc_pct": 0.42, "short_alloc_pct": 0.12,
-            "long_scale_pct": 0.30, "short_scale_pct": 0.12,
+            "max_positions": 4, "long_alloc_pct": 0.20, "short_alloc_pct": 0.10,
+            "long_scale_pct": 0.10, "short_scale_pct": 0.08,
             "allow_longs": True, "allow_shorts": False,
-            "stop_loss": -0.02, "trail_long": 0.97, "trail_short": 1.03
+            "stop_loss": -0.015, "trail_long": 0.985, "trail_short": 1.02
         }
 
     if mode == "constructive":
@@ -577,11 +577,61 @@ def generate_signals(data5, data15, regime):
 
     return longs, shorts
 
+# ===== HALT LIQUIDATION =====
+def liquidate_all_positions(reason, market, data5=None):
+    closed = []
+
+    for s, pos in list(portfolio["positions"].items()):
+        px = None
+
+        try:
+            if data5 and s in data5 and len(data5[s]) > 0:
+                px = float(data5[s][-1])
+        except Exception:
+            px = None
+
+        if px is None:
+            px = latest_price(s)
+
+        if px is None:
+            px = float(pos.get("last_price", pos["entry"]))
+
+        side = pos.get("side", "long")
+        shares = float(pos["shares"])
+        pnl = position_pnl_pct(pos, px)
+
+        portfolio["cash"] += position_value(pos, px)
+        record_trade("halt_exit", s, side, px, shares, {
+            "pnl_pct": round(float(pnl * 100), 2),
+            "market_mode": market.get("market_mode", "unknown"),
+            "halt_reason": reason,
+            "cooldown_seconds": COOLDOWN_SECONDS
+        })
+        set_cooldown(s)
+        closed.append(s)
+        del portfolio["positions"][s]
+
+    return closed
+
+
+def refresh_equity_from_positions():
+    equity = float(portfolio["cash"])
+
+    for _, pos in portfolio["positions"].items():
+        px = float(pos.get("last_price", pos["entry"]))
+        equity += position_value(pos, px)
+
+    portfolio["equity"] = equity
+    portfolio["peak"] = max(float(portfolio.get("peak", equity)), equity)
+    return equity
+
+
 # ===== ENGINE =====
 def run_engine():
     market = market_status(force=True)
     params = risk_parameters(market)
     regime = market.get("regime", "neutral")
+    halted_exits = []
 
     # Never scale long exposure when the market is defensive, neutral, or choppy.
     if market.get("regime") in ["defensive", "neutral", "chop"] or market.get("defensive_rotation"):
@@ -621,6 +671,12 @@ def run_engine():
     portfolio["peak"] = max(float(portfolio.get("peak", equity)), equity)
     risk_controls = update_daily_risk_controls(equity)
     prune_cooldowns()
+
+    # HARD HALT: if drawdown limits are hit, immediately flatten all positions.
+    if risk_controls.get("halted", False) and portfolio.get("positions"):
+        halted_exits.extend(liquidate_all_positions(risk_controls.get("halt_reason", "risk halt"), market, data5))
+        equity = refresh_equity_from_positions()
+        risk_controls = update_daily_risk_controls(equity)
 
     # SCALE WINNERS
     if not risk_controls.get("halted", False):
@@ -692,6 +748,12 @@ def run_engine():
         interim_equity += position_value(pos, float(pos.get("last_price", pos["entry"])))
     portfolio["equity"] = interim_equity
     risk_controls = update_daily_risk_controls(interim_equity)
+
+    # HARD HALT: if exits/mark-to-market push drawdown through the limit, flatten leftovers.
+    if risk_controls.get("halted", False) and portfolio.get("positions"):
+        halted_exits.extend(liquidate_all_positions(risk_controls.get("halt_reason", "risk halt"), market, data5))
+        interim_equity = refresh_equity_from_positions()
+        risk_controls = update_daily_risk_controls(interim_equity)
 
     # SIGNALS
     longs, shorts = generate_signals(data5, data15, regime)
@@ -787,6 +849,7 @@ def run_engine():
         "risk_score": market["risk_score"],
         "trade_permission": market["trade_permission"],
         "positions": list(portfolio["positions"].keys()),
+        "halted_exits": halted_exits,
         "signals_found": len(longs) + len(shorts),
         "long_signals": [s for s, _ in longs],
         "short_signals": [s for s, _ in shorts],
