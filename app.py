@@ -351,8 +351,17 @@ def market_status(force=False):
 
     sector_scores = sorted(sector_scores, key=lambda x: x[1], reverse=True)
     sector_leaders = [s for s, _ in sector_scores[:3]]
-    defensive_leadership = any(s in sector_leaders for s in ["XLU", "XLV", "XLP"])
-    growth_leadership = any(s in sector_leaders for s in ["XLK", "XLY"])
+
+    # Less sensitive defensive-rotation logic:
+    # One defensive ETF in the top 3 should not freeze the bot when SPY/QQQ are strong.
+    defensive_sectors = ["XLU", "XLV", "XLP"]
+    risk_on_sectors = ["XLK", "XLY", "XLF", "XLE"]
+
+    defensive_count = sum(1 for s in sector_leaders if s in defensive_sectors)
+    risk_on_sector_count = sum(1 for s in sector_leaders if s in risk_on_sectors)
+
+    defensive_leadership = defensive_count >= 2
+    growth_leadership = risk_on_sector_count >= 1
 
     if growth_leadership:
         risk_score += 5
@@ -382,8 +391,16 @@ def market_status(force=False):
         trade_permission = "protective"
         regime = "bear"
 
-    defensive_rotation = defensive_leadership and not growth_leadership
+    # Defensive rotation override:
+    # Only pause when defensive sectors dominate AND the broad market is soft.
     broad_market_soft = spy_5d <= 0 or qqq_5d <= 0
+
+    defensive_rotation = (
+        defensive_count >= 2
+        and not growth_leadership
+        and broad_market_soft
+    )
+
     bear_confirmed = (
         spy_trend == "down"
         and qqq_trend == "down"
@@ -415,6 +432,8 @@ def market_status(force=False):
         "sector_leaders": sector_leaders,
         "defensive_leadership": defensive_leadership,
         "growth_leadership": growth_leadership,
+        "defensive_count": defensive_count,
+        "risk_on_sector_count": risk_on_sector_count,
         "defensive_rotation": defensive_rotation,
         "broad_market_soft": broad_market_soft,
         "bear_confirmed": bear_confirmed
@@ -848,6 +867,10 @@ def run_engine():
         "risk_controls": risk_controls,
         "risk_parameters": params,
         "sector_leaders": market["sector_leaders"],
+        "defensive_leadership": market.get("defensive_leadership", False),
+        "growth_leadership": market.get("growth_leadership", False),
+        "defensive_count": market.get("defensive_count", 0),
+        "risk_on_sector_count": market.get("risk_on_sector_count", 0),
         "defensive_rotation": market.get("defensive_rotation", False),
         "broad_market_soft": market.get("broad_market_soft", False),
         "bear_confirmed": market.get("bear_confirmed", False)
@@ -985,11 +1008,11 @@ def dashboard():
   </style>
 </head>
 <body>
-  <h1>📊 Scanner + Long/Short Paper System</h1>
+  <h1>ð Scanner + Long/Short Paper System</h1>
   <div class="line">Market: {{ market.market_mode }} | Risk: {{ market.risk_score }} | Regime: {{ market.regime }} | Leaders: {{ leaders }}</div>
   <div class="line">Trading Halted: {{ halted }} | Daily DD: {{ daily_dd }}% | Intraday DD: {{ intraday_dd }}% | Cooldowns: {{ cooldowns }}</div>
   <div class="line">Auto Runner: {{ auto_on }} | Thread: {{ thread }} | Market Open: {{ market_open }} | Last Run: {{ last_run }} | Skip: {{ skip }} | Error: {{ error }}</div>
-  <div class="line">Defensive Rotation: {{ defensive_rotation }} | Broad Soft: {{ broad_market_soft }} | Bear Confirmed: {{ bear_confirmed }}</div>
+  <div class="line">Defensive Rotation: {{ defensive_rotation }} | Defensive Count: {{ defensive_count }} | Risk-On Sector Count: {{ risk_on_sector_count }} | Broad Soft: {{ broad_market_soft }} | Bear Confirmed: {{ bear_confirmed }}</div>
 
   <canvas id="equityChart" height="120"></canvas>
 
@@ -1001,7 +1024,7 @@ def dashboard():
   </div>
 
   <p class="small">
-    JSON: <a href="/paper/status">/paper/status</a> · Run once: <a href="/paper/run">/paper/run</a>
+    JSON: <a href="/paper/status">/paper/status</a> Â· Run once: <a href="/paper/run">/paper/run</a>
   </p>
 
 <script>
@@ -1042,6 +1065,8 @@ new Chart(document.getElementById('equityChart'), {
         skip=ar.get("last_skip_reason") or "none",
         error=ar.get("last_error") or "none",
         defensive_rotation=market.get("defensive_rotation", False),
+        defensive_count=market.get("defensive_count", 0),
+        risk_on_sector_count=market.get("risk_on_sector_count", 0),
         broad_market_soft=market.get("broad_market_soft", False),
         bear_confirmed=market.get("bear_confirmed", False),
         equity=round(float(portfolio.get("equity", 0)), 2),
