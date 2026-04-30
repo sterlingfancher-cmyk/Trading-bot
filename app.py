@@ -7,17 +7,33 @@ from flask import Flask, jsonify, request, render_template_string
 app = Flask(__name__)
 
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
-STATE_FILE = "state.json"
-MARKET_CACHE_TTL = 300
+STATE_FILE = os.environ.get("STATE_FILE", "state.json")
+MARKET_CACHE_TTL = int(os.environ.get("MARKET_CACHE_TTL", "300"))
 
-MAX_DAILY_LOSS_PCT = 0.03
-MAX_INTRADAY_DRAWDOWN_PCT = 0.025
-COOLDOWN_SECONDS = 1800
+MAX_DAILY_LOSS_PCT = float(os.environ.get("MAX_DAILY_LOSS_PCT", "0.03"))
+MAX_INTRADAY_DRAWDOWN_PCT = float(os.environ.get("MAX_INTRADAY_DRAWDOWN_PCT", "0.025"))
+COOLDOWN_SECONDS = int(os.environ.get("COOLDOWN_SECONDS", "1800"))
+
+# ===== ENTRY FILTER / ROTATION CONFIG =====
+# These are intentionally conservative. They are designed to keep the bot from
+# buying symbols that are already stretched near the intraday high.
+EXTENSION_MAX_ABOVE_DAY_OPEN = float(os.environ.get("EXTENSION_MAX_ABOVE_DAY_OPEN", "0.055"))
+EXTENSION_MAX_BELOW_DAY_OPEN = float(os.environ.get("EXTENSION_MAX_BELOW_DAY_OPEN", "0.055"))
+EXTENSION_NEAR_HIGH_FACTOR = float(os.environ.get("EXTENSION_NEAR_HIGH_FACTOR", "0.996"))
+EXTENSION_NEAR_LOW_FACTOR = float(os.environ.get("EXTENSION_NEAR_LOW_FACTOR", "1.004"))
+EXTENSION_BIG_MOVE_CONFIRM = float(os.environ.get("EXTENSION_BIG_MOVE_CONFIRM", "0.035"))
+EXTENSION_MAX_FROM_MA20 = float(os.environ.get("EXTENSION_MAX_FROM_MA20", "0.035"))
+
+ROTATION_SCORE_MULTIPLIER = float(os.environ.get("ROTATION_SCORE_MULTIPLIER", "1.25"))
+ROTATION_MIN_SCORE_EDGE = float(os.environ.get("ROTATION_MIN_SCORE_EDGE", "0.0020"))
+ROTATION_MIN_HOLD_SECONDS = int(os.environ.get("ROTATION_MIN_HOLD_SECONDS", "900"))
+ROTATION_KEEP_WINNER_PCT = float(os.environ.get("ROTATION_KEEP_WINNER_PCT", "0.012"))
+MIN_TRADE_ALLOC = float(os.environ.get("MIN_TRADE_ALLOC", "50"))
 
 AUTO_RUN_ENABLED = os.environ.get("AUTO_RUN_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
 AUTO_RUN_INTERVAL_SECONDS = int(os.environ.get("AUTO_RUN_INTERVAL_SECONDS", "300"))
 AUTO_RUN_MARKET_ONLY = os.environ.get("AUTO_RUN_MARKET_ONLY", "true").lower() not in ["0", "false", "no", "off"]
-MARKET_TZ = pytz.timezone("America/Chicago")
+MARKET_TZ = pytz.timezone(os.environ.get("MARKET_TZ", "America/Chicago"))
 RUN_LOCK = threading.Lock()
 AUTO_THREAD_STARTED = False
 
@@ -34,11 +50,21 @@ UNIVERSE = [
 SECTOR_ETFS = ["XLK", "XLY", "XLF", "XLE", "XLV", "XLU", "XLI", "XLP"]
 MACRO_SYMBOLS = ["SPY", "QQQ", "^VIX", "^TNX"] + SECTOR_ETFS
 
+SYMBOL_SECTOR = {
+    "NVDA": "XLK", "AMD": "XLK", "AVGO": "XLK", "TSM": "XLK", "MU": "XLK", "ARM": "XLK",
+    "MSFT": "XLK", "SNOW": "XLK", "NET": "XLK", "CRWD": "XLK", "PANW": "XLK",
+    "WDC": "XLK", "STX": "XLK", "GLW": "XLK", "TER": "XLK", "CIEN": "XLK",
+    "AMZN": "XLY", "SHOP": "XLY", "ROKU": "XLY", "GOOGL": "XLY", "META": "XLY",
+    "COIN": "XLF",
+    "XOM": "XLE", "CVX": "XLE",
+    "SPY": "SPY", "QQQ": "QQQ"
+}
+
 _market_cache = {"ts": 0, "data": None}
 
 # ===== STATE =====
 def today_key():
-    return time.strftime("%Y-%m-%d", time.gmtime())
+    return datetime.datetime.now(MARKET_TZ).strftime("%Y-%m-%d")
 
 
 def default_risk_controls():
@@ -54,18 +80,56 @@ def default_risk_controls():
     }
 
 
+def default_realized_pnl():
+    return {
+        "date": today_key(),
+        "today": 0.0,
+        "total": 0.0,
+        "wins_today": 0,
+        "losses_today": 0,
+        "wins_total": 0,
+        "losses_total": 0
+    }
+
+
+def default_performance():
+    return {
+        "realized_pnl_today": 0.0,
+        "realized_pnl_total": 0.0,
+        "unrealized_pnl": 0.0,
+        "open_positions": {}
+    }
+
+
 def default_auto_runner():
     return {
         "enabled": AUTO_RUN_ENABLED,
         "market_only": AUTO_RUN_MARKET_ONLY,
         "interval_seconds": AUTO_RUN_INTERVAL_SECONDS,
         "market_open_now": False,
+        "market_clock": {},
+
+        # Compatibility fields already used by previous dashboard/status JSON.
         "last_run_ts": None,
         "last_run_local": None,
         "last_run_source": None,
         "last_result": None,
-        "last_error": None,
+
+        # Cleaner separated fields.
+        "last_attempt_ts": None,
+        "last_attempt_local": None,
+        "last_attempt_source": None,
+
+        "last_successful_run_ts": None,
+        "last_successful_run_local": None,
+        "last_successful_run_source": None,
+
+        "last_skip_ts": None,
+        "last_skip_local": None,
         "last_skip_reason": None,
+
+        "last_error": None,
+        "last_error_trace": None,
         "thread_started": False
     }
 
@@ -80,7 +144,9 @@ def default_state():
         "trades": [],
         "last_market": {},
         "risk_controls": default_risk_controls(),
-        "auto_runner": default_auto_runner()
+        "auto_runner": default_auto_runner(),
+        "realized_pnl": default_realized_pnl(),
+        "performance": default_performance()
     }
 
 
@@ -105,6 +171,24 @@ def load_state():
     state.setdefault("last_market", {})
     state.setdefault("risk_controls", default_risk_controls())
     state.setdefault("auto_runner", default_auto_runner())
+    state.setdefault("realized_pnl", default_realized_pnl())
+    state.setdefault("performance", default_performance())
+
+    # Backfill newer position metadata so existing paper positions survive deploy.
+    for symbol, pos in state.get("positions", {}).items():
+        if not isinstance(pos, dict):
+            continue
+        pos.setdefault("side", "long")
+        pos.setdefault("entry_time", int(time.time()))
+        pos.setdefault("score", 0.0)
+        pos.setdefault("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN"))
+        pos.setdefault("adds", 0)
+        pos.setdefault("last_price", pos.get("entry", 0))
+        if pos.get("side", "long") == "short":
+            pos.setdefault("trough", pos.get("last_price", pos.get("entry", 0)))
+            pos.setdefault("margin", float(pos.get("entry", 0)) * float(pos.get("shares", 0)))
+        else:
+            pos.setdefault("peak", pos.get("last_price", pos.get("entry", 0)))
 
     return state
 
@@ -127,16 +211,32 @@ def clean(arr):
     return arr[~np.isnan(arr)]
 
 
-def price_series(df, column="Close"):
-    if df is None or df.empty or column not in df:
+def _series_from_df(df, column):
+    if df is None or df.empty:
+        return np.array([])
+
+    try:
+        # yfinance sometimes returns MultiIndex columns, especially with grouped downloads.
+        if hasattr(df.columns, "nlevels") and df.columns.nlevels > 1:
+            matches = [c for c in df.columns if c[0] == column or c[-1] == column]
+            if matches:
+                return clean(df[matches[0]].values)
+    except Exception:
+        pass
+
+    if column not in df:
         return np.array([])
     return clean(df[column].values)
+
+
+def price_series(df, column="Close"):
+    return _series_from_df(df, column)
 
 
 def latest_price(symbol):
     try:
         df = yf.download(symbol, period="1d", interval="5m", progress=False, auto_adjust=True)
-        prices = price_series(df)
+        prices = price_series(df, "Close")
         if len(prices) == 0:
             return None
         return float(prices[-1])
@@ -145,7 +245,7 @@ def latest_price(symbol):
 
 
 def pct_change(prices, bars):
-    if len(prices) <= bars or prices[-bars] == 0:
+    if len(prices) <= bars or float(prices[-bars]) == 0:
         return 0.0
     return float((prices[-1] / prices[-bars]) - 1)
 
@@ -175,24 +275,37 @@ def trend_state(prices):
 
 def position_pnl_pct(pos, px):
     entry = float(pos["entry"])
+    if entry <= 0:
+        return 0.0
     side = pos.get("side", "long")
 
     if side == "short":
-        return (entry - px) / entry
+        return (entry - float(px)) / entry
 
-    return (px - entry) / entry
+    return (float(px) - entry) / entry
+
+
+def position_pnl_dollars(pos, px):
+    shares = float(pos.get("shares", 0))
+    entry = float(pos.get("entry", 0))
+    side = pos.get("side", "long")
+
+    if side == "short":
+        return (entry - float(px)) * shares
+
+    return (float(px) - entry) * shares
 
 
 def position_value(pos, px):
-    shares = float(pos["shares"])
+    shares = float(pos.get("shares", 0))
     side = pos.get("side", "long")
 
     if side == "short":
-        margin = float(pos.get("margin", float(pos["entry"]) * shares))
-        pnl_dollars = (float(pos["entry"]) - px) * shares
+        margin = float(pos.get("margin", float(pos.get("entry", 0)) * shares))
+        pnl_dollars = (float(pos.get("entry", 0)) - float(px)) * shares
         return margin + pnl_dollars
 
-    return shares * px
+    return shares * float(px)
 
 
 def record_trade(action, symbol, side, px, shares, extra=None):
@@ -208,8 +321,80 @@ def record_trade(action, symbol, side, px, shares, extra=None):
     if extra:
         trade.update(extra)
 
-    portfolio["trades"].append(trade)
-    portfolio["trades"] = portfolio["trades"][-150:]
+    portfolio.setdefault("trades", []).append(trade)
+    portfolio["trades"] = portfolio["trades"][-300:]
+
+
+def get_realized_pnl():
+    rp = portfolio.setdefault("realized_pnl", default_realized_pnl())
+
+    if rp.get("date") != today_key():
+        rp["date"] = today_key()
+        rp["today"] = 0.0
+        rp["wins_today"] = 0
+        rp["losses_today"] = 0
+
+    rp.setdefault("total", 0.0)
+    rp.setdefault("today", 0.0)
+    rp.setdefault("wins_today", 0)
+    rp.setdefault("losses_today", 0)
+    rp.setdefault("wins_total", 0)
+    rp.setdefault("losses_total", 0)
+    return rp
+
+
+def add_realized_pnl(pnl_dollars):
+    pnl_dollars = float(pnl_dollars)
+    rp = get_realized_pnl()
+
+    rp["today"] = round(float(rp.get("today", 0.0)) + pnl_dollars, 2)
+    rp["total"] = round(float(rp.get("total", 0.0)) + pnl_dollars, 2)
+
+    if pnl_dollars >= 0:
+        rp["wins_today"] = int(rp.get("wins_today", 0)) + 1
+        rp["wins_total"] = int(rp.get("wins_total", 0)) + 1
+    else:
+        rp["losses_today"] = int(rp.get("losses_today", 0)) + 1
+        rp["losses_total"] = int(rp.get("losses_total", 0)) + 1
+
+    return rp
+
+
+def performance_snapshot():
+    rp = get_realized_pnl()
+    open_pnl = {}
+    unrealized_total = 0.0
+
+    for s, pos in portfolio.get("positions", {}).items():
+        px = float(pos.get("last_price", pos.get("entry", 0)))
+        pnl_dollars = position_pnl_dollars(pos, px)
+        pnl_pct = position_pnl_pct(pos, px) * 100
+        unrealized_total += pnl_dollars
+
+        open_pnl[s] = {
+            "side": pos.get("side", "long"),
+            "entry": round(float(pos.get("entry", 0)), 4),
+            "last_price": round(px, 4),
+            "shares": round(float(pos.get("shares", 0)), 6),
+            "pnl_dollars": round(float(pnl_dollars), 2),
+            "pnl_pct": round(float(pnl_pct), 2),
+            "score": round(float(pos.get("score", 0.0)), 6),
+            "sector": pos.get("sector", SYMBOL_SECTOR.get(s, "UNKNOWN")),
+            "entry_time": pos.get("entry_time")
+        }
+
+    perf = {
+        "realized_pnl_today": round(float(rp.get("today", 0.0)), 2),
+        "realized_pnl_total": round(float(rp.get("total", 0.0)), 2),
+        "wins_today": int(rp.get("wins_today", 0)),
+        "losses_today": int(rp.get("losses_today", 0)),
+        "wins_total": int(rp.get("wins_total", 0)),
+        "losses_total": int(rp.get("losses_total", 0)),
+        "unrealized_pnl": round(float(unrealized_total), 2),
+        "open_positions": open_pnl
+    }
+    portfolio["performance"] = perf
+    return perf
 
 
 def get_risk_controls():
@@ -287,6 +472,8 @@ def reset_state(starting_cash=10000.0):
     portfolio["risk_controls"]["day_start_equity"] = float(starting_cash)
     portfolio["risk_controls"]["day_peak_equity"] = float(starting_cash)
     portfolio["auto_runner"] = default_auto_runner()
+    portfolio["realized_pnl"] = default_realized_pnl()
+    portfolio["performance"] = default_performance()
     save_state(portfolio)
     return portfolio
 
@@ -297,11 +484,10 @@ def market_status(force=False):
         return _market_cache["data"]
 
     series = {}
-
     for symbol in MACRO_SYMBOLS:
         try:
             df = yf.download(symbol, period="30d", interval="1d", progress=False, auto_adjust=True)
-            prices = price_series(df)
+            prices = price_series(df, "Close")
             if len(prices) >= 10:
                 series[symbol] = prices
         except Exception:
@@ -352,8 +538,6 @@ def market_status(force=False):
     sector_scores = sorted(sector_scores, key=lambda x: x[1], reverse=True)
     sector_leaders = [s for s, _ in sector_scores[:3]]
 
-    # Less sensitive defensive-rotation logic:
-    # One defensive ETF in the top 3 should not freeze the bot when SPY/QQQ are strong.
     defensive_sectors = ["XLU", "XLV", "XLP"]
     risk_on_sectors = ["XLK", "XLY", "XLF", "XLE"]
 
@@ -391,16 +575,8 @@ def market_status(force=False):
         trade_permission = "protective"
         regime = "bear"
 
-    # Defensive rotation override:
-    # Only pause when defensive sectors dominate AND the broad market is soft.
     broad_market_soft = spy_5d <= 0 or qqq_5d <= 0
-
-    defensive_rotation = (
-        defensive_count >= 2
-        and not growth_leadership
-        and broad_market_soft
-    )
-
+    defensive_rotation = defensive_count >= 2 and not growth_leadership and broad_market_soft
     bear_confirmed = (
         spy_trend == "down"
         and qqq_trend == "down"
@@ -441,8 +617,6 @@ def market_status(force=False):
 
     _market_cache["ts"] = now
     _market_cache["data"] = result
-    portfolio["last_market"] = result
-
     return result
 
 
@@ -451,422 +625,565 @@ def risk_parameters(market):
 
     if mode == "risk_on":
         return {
-            "max_positions": 4, "long_alloc_pct": 0.15, "short_alloc_pct": 0.10,
-            "long_scale_pct": 0.00, "short_scale_pct": 0.08,
-            "allow_longs": True, "allow_shorts": False,
-            "stop_loss": -0.012, "trail_long": 0.98, "trail_short": 1.02
+            "max_positions": 4,
+            "long_alloc_pct": 0.15,
+            "short_alloc_pct": 0.10,
+            "long_scale_pct": 0.0,
+            "short_scale_pct": 0.08,
+            "allow_longs": True,
+            "allow_shorts": False,
+            "stop_loss": -0.012,
+            "trail_long": 0.98,
+            "trail_short": 1.02
         }
 
     if mode == "constructive":
         return {
-            "max_positions": 4, "long_alloc_pct": 0.10, "short_alloc_pct": 0.15,
-            "long_scale_pct": 0.00, "short_scale_pct": 0.12,
-            "allow_longs": True, "allow_shorts": False,
-            "stop_loss": -0.012, "trail_long": 0.98, "trail_short": 1.03
-        }
-
-    if mode == "defensive_rotation":
-        return {
-            "max_positions": 3, "long_alloc_pct": 0.00, "short_alloc_pct": 0.00,
-            "long_scale_pct": 0.00, "short_scale_pct": 0.00,
-            "allow_longs": False, "allow_shorts": False,
-            "stop_loss": -0.015, "trail_long": 0.98, "trail_short": 1.025
+            "max_positions": 4,
+            "long_alloc_pct": 0.12,
+            "short_alloc_pct": 0.08,
+            "long_scale_pct": 0.0,
+            "short_scale_pct": 0.06,
+            "allow_longs": True,
+            "allow_shorts": False,
+            "stop_loss": -0.012,
+            "trail_long": 0.982,
+            "trail_short": 1.018
         }
 
     if mode == "neutral":
         return {
-            "max_positions": 4, "long_alloc_pct": 0.15, "short_alloc_pct": 0.00,
-            "long_scale_pct": 0.00, "short_scale_pct": 0.00,
-            "allow_longs": False, "allow_shorts": False,
-            "stop_loss": -0.018, "trail_long": 0.975, "trail_short": 1.025
+            "max_positions": 3,
+            "long_alloc_pct": 0.08,
+            "short_alloc_pct": 0.08,
+            "long_scale_pct": 0.0,
+            "short_scale_pct": 0.04,
+            "allow_longs": True,
+            "allow_shorts": False,
+            "stop_loss": -0.01,
+            "trail_long": 0.985,
+            "trail_short": 1.015
         }
 
     if mode == "risk_off":
-        bear_confirmed = bool(market.get("bear_confirmed", False))
         return {
-            "max_positions": 3, "long_alloc_pct": 0.00, "short_alloc_pct": 0.22 if bear_confirmed else 0.00,
-            "long_scale_pct": 0.00, "short_scale_pct": 0.12 if bear_confirmed else 0.00,
-            "allow_longs": False, "allow_shorts": bear_confirmed,
-            "stop_loss": -0.015, "trail_long": 0.98, "trail_short": 1.025
+            "max_positions": 3,
+            "long_alloc_pct": 0.05,
+            "short_alloc_pct": 0.10,
+            "long_scale_pct": 0.0,
+            "short_scale_pct": 0.08,
+            "allow_longs": False,
+            "allow_shorts": True,
+            "stop_loss": -0.01,
+            "trail_long": 0.985,
+            "trail_short": 1.02
         }
 
+    # Defensive rotation and crash-warning both protect capital first.
     return {
-        "max_positions": 2, "long_alloc_pct": 0.00, "short_alloc_pct": 0.18,
-        "long_scale_pct": 0.00, "short_scale_pct": 0.00,
-        "allow_longs": False, "allow_shorts": True,
-        "stop_loss": -0.012, "trail_long": 0.985, "trail_short": 1.02
+        "max_positions": 2,
+        "long_alloc_pct": 0.04,
+        "short_alloc_pct": 0.08,
+        "long_scale_pct": 0.0,
+        "short_scale_pct": 0.04,
+        "allow_longs": False,
+        "allow_shorts": mode == "crash_warning",
+        "stop_loss": -0.008,
+        "trail_long": 0.987,
+        "trail_short": 1.018
     }
 
-# ===== SCANNER =====
-def pre_scan(symbols, regime):
-    scored = []
-
-    for s in symbols:
-        try:
-            df = yf.download(s, period="5d", interval="15m", progress=False, auto_adjust=True)
-            prices = price_series(df)
-
-            if len(prices) < 20:
-                continue
-
-            r20 = pct_change(prices, 20)
-
-            if regime == "bear":
-                if r20 < -0.003:
-                    scored.append((s, abs(r20)))
-                elif r20 > 0.006:
-                    scored.append((s, r20 * 0.5))
-            elif regime == "defensive":
-                if r20 > 0.008:
-                    scored.append((s, r20 * 0.25))
-            else:
-                if r20 > 0.005:
-                    scored.append((s, r20))
-
-        except Exception:
-            continue
-
-    return [s for s, _ in sorted(scored, key=lambda x: x[1], reverse=True)[:30]]
-
-# ===== DATA =====
-def load_data(symbols):
-    data5, data15 = {}, {}
-
-    for s in symbols:
-        try:
-            df5 = yf.download(s, period="2d", interval="5m", progress=False, auto_adjust=True)
-            df15 = yf.download(s, period="5d", interval="15m", progress=False, auto_adjust=True)
-
-            c5 = price_series(df5)
-            c15 = price_series(df15)
-
-            if len(c5) > 20 and len(c15) > 20:
-                data5[s] = c5
-                data15[s] = c15
-        except Exception:
-            continue
-
-    return data5, data15
-
-# ===== REGIME =====
-def get_regime():
+# ===== DATA / SIGNALS =====
+def fetch_intraday(symbol):
     try:
-        return market_status().get("regime", "neutral")
+        df = yf.download(symbol, period="5d", interval="5m", progress=False, auto_adjust=True)
+        if df is None or df.empty:
+            return None
+        return df
     except Exception:
-        return "neutral"
+        return None
 
-# ===== SIGNALS =====
-def generate_signals(data5, data15, regime):
-    longs, shorts = [], []
 
-    for s in data5:
-        try:
-            p5 = data5[s]
-            p15 = data15[s]
+def intraday_arrays(df):
+    return {
+        "close": price_series(df, "Close"),
+        "open": price_series(df, "Open"),
+        "high": price_series(df, "High"),
+        "low": price_series(df, "Low"),
+        "volume": price_series(df, "Volume")
+    }
 
-            if len(p5) < 20 or len(p15) < 20:
-                continue
 
-            px = float(p5[-1])
-            r3 = pct_change(p5, 3)
-            r12 = pct_change(p5, 12)
-            score = r3 * 0.6 + r12 * 0.4
+def signal_score(symbol, prices, market, side="long"):
+    if len(prices) < 35:
+        return 0.0
 
-            if regime in ["bull"]:
-                if px > np.mean(p5[-20:]) and p15[-1] > np.mean(p15[-20:]):
-                    if px >= max(p5[-10:]) * 0.992 and r3 > 0 and score > 0.0035:
-                        longs.append((s, float(score)))
+    px = float(prices[-1])
+    ma8 = sma(prices, 8)
+    ma20 = sma(prices, 20)
+    ma34 = sma(prices, 34)
+    if ma8 is None or ma20 is None or ma34 is None or px <= 0:
+        return 0.0
 
-            if regime == "bear":
-                if px < np.mean(p5[-20:]) and p15[-1] < np.mean(p15[-20:]):
-                    if px <= min(p5[-10:]) * 1.005 and r3 < 0 and score < -0.0015:
-                        shorts.append((s, float(abs(score))))
+    r3 = pct_change(prices, 3)
+    r6 = pct_change(prices, 6)
+    r12 = pct_change(prices, 12)
+    r24 = pct_change(prices, 24)
+    sector = SYMBOL_SECTOR.get(symbol, "UNKNOWN")
+    sector_bonus = 0.003 if sector in market.get("sector_leaders", []) else 0.0
 
-        except Exception:
+    if side == "long":
+        if not (px > ma20 and ma8 >= ma20 and ma20 >= ma34):
+            return 0.0
+        score = (0.35 * r3) + (0.30 * r6) + (0.25 * r12) + (0.10 * r24)
+        if px > ma8:
+            score += 0.001
+        score += sector_bonus
+        return max(0.0, float(score))
+
+    if not (px < ma20 and ma8 <= ma20 and ma20 <= ma34):
+        return 0.0
+    score = (0.35 * -r3) + (0.30 * -r6) + (0.25 * -r12) + (0.10 * -r24)
+    if px < ma8:
+        score += 0.001
+    if sector in market.get("sector_leaders", []):
+        # Avoid shorting the strongest sectors unless the chart is very weak.
+        score -= 0.003
+    return max(0.0, float(score))
+
+
+def entry_extension_check(symbol, side, arrays):
+    closes = arrays.get("close", np.array([]))
+    opens = arrays.get("open", np.array([]))
+    highs = arrays.get("high", np.array([]))
+    lows = arrays.get("low", np.array([]))
+
+    if len(closes) < 20 or len(opens) == 0:
+        return True, "ok"
+
+    px = float(closes[-1])
+    day_open = float(opens[-1])
+
+    # Use current session stats from the most recent intraday bars. With 5m bars,
+    # 78 bars roughly equals one full regular U.S. equity session.
+    session_bars = min(len(closes), 78)
+    session_high = float(np.max(highs[-session_bars:])) if len(highs) >= session_bars else float(np.max(closes[-session_bars:]))
+    session_low = float(np.min(lows[-session_bars:])) if len(lows) >= session_bars else float(np.min(closes[-session_bars:]))
+    ma20 = sma(closes, 20)
+
+    if day_open <= 0 or px <= 0:
+        return True, "ok"
+
+    from_open = (px / day_open) - 1
+
+    if side == "long":
+        if from_open > EXTENSION_MAX_ABOVE_DAY_OPEN:
+            return False, "extended_above_day_open"
+        if from_open > EXTENSION_BIG_MOVE_CONFIRM and session_high > 0 and px >= session_high * EXTENSION_NEAR_HIGH_FACTOR:
+            return False, "too_close_to_intraday_high_after_big_move"
+        if ma20 and ma20 > 0 and (px / ma20 - 1) > EXTENSION_MAX_FROM_MA20:
+            return False, "extended_above_5m_ma20"
+        return True, "ok"
+
+    # Short side: avoid shorting after the move is already very stretched lower.
+    if from_open < -EXTENSION_MAX_BELOW_DAY_OPEN:
+        return False, "extended_below_day_open"
+    if from_open < -EXTENSION_BIG_MOVE_CONFIRM and session_low > 0 and px <= session_low * EXTENSION_NEAR_LOW_FACTOR:
+        return False, "too_close_to_intraday_low_after_big_move"
+    if ma20 and ma20 > 0 and (ma20 / px - 1) > EXTENSION_MAX_FROM_MA20:
+        return False, "extended_below_5m_ma20"
+    return True, "ok"
+
+
+def effective_position_score(symbol, pos, px, market):
+    score = float(pos.get("score", 0.0))
+    sector = pos.get("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN"))
+
+    if sector in market.get("sector_leaders", []):
+        score += 0.003
+
+    pnl_pct = position_pnl_pct(pos, px)
+    # Reward profitable holdings slightly, punish laggards slightly.
+    score += max(min(pnl_pct * 0.15, 0.004), -0.006)
+    return float(score)
+
+
+def choose_rotation_exit(new_symbol, side, new_score, latest_prices, market):
+    if len(portfolio.get("positions", {})) == 0:
+        return None, "no_positions"
+
+    now = time.time()
+    candidates = []
+
+    for symbol, pos in portfolio.get("positions", {}).items():
+        if symbol == new_symbol:
             continue
 
-    longs = sorted(longs, key=lambda x: x[1], reverse=True)[:5]
-    shorts = sorted(shorts, key=lambda x: x[1], reverse=True)[:3]
+        # Prefer replacing same-side positions. Opposite-side positions can be replaced
+        # when the market regime has made them inappropriate.
+        pos_side = pos.get("side", "long")
+        if pos_side != side:
+            if side == "long" and market.get("market_mode") not in ["risk_on", "constructive"]:
+                continue
+            if side == "short" and market.get("market_mode") not in ["risk_off", "crash_warning"]:
+                continue
 
-    return longs, shorts
+        px = float(latest_prices.get(symbol, pos.get("last_price", pos.get("entry", 0))))
+        pnl_pct = position_pnl_pct(pos, px)
+        held_seconds = now - float(pos.get("entry_time", now))
 
-# ===== HALT LIQUIDATION =====
-def liquidate_all_positions(reason, market, data5=None):
-    closed = []
+        # Do not churn fresh positions unless they are already losing.
+        if held_seconds < ROTATION_MIN_HOLD_SECONDS and pnl_pct > -0.004:
+            continue
 
-    for s, pos in list(portfolio["positions"].items()):
-        px = None
+        # Do not rotate out a healthy winner too quickly.
+        if pnl_pct >= ROTATION_KEEP_WINNER_PCT:
+            continue
 
-        try:
-            if data5 and s in data5 and len(data5[s]) > 0:
-                px = float(data5[s][-1])
-        except Exception:
-            px = None
+        eff_score = effective_position_score(symbol, pos, px, market)
+        candidates.append((eff_score, symbol, px, pnl_pct, held_seconds))
 
-        if px is None:
-            px = latest_price(s)
+    if not candidates:
+        return None, "no_rotation_candidate"
 
-        if px is None:
-            px = float(pos.get("last_price", pos["entry"]))
+    candidates.sort(key=lambda x: x[0])
+    weakest_score, weakest_symbol, weakest_px, weakest_pnl, held_seconds = candidates[0]
 
-        side = pos.get("side", "long")
-        shares = float(pos["shares"])
-        pnl = position_pnl_pct(pos, px)
+    sector = SYMBOL_SECTOR.get(new_symbol, "UNKNOWN")
+    sector_edge = sector in market.get("sector_leaders", [])
+    required = max(weakest_score * ROTATION_SCORE_MULTIPLIER, weakest_score + ROTATION_MIN_SCORE_EDGE)
+    if sector_edge:
+        required -= 0.001
 
-        portfolio["cash"] += position_value(pos, px)
-        record_trade("halt_exit", s, side, px, shares, {
-            "pnl_pct": round(float(pnl * 100), 2),
-            "market_mode": market.get("market_mode", "unknown"),
-            "halt_reason": reason,
-            "cooldown_seconds": COOLDOWN_SECONDS
-        })
-        set_cooldown(s)
-        closed.append(s)
-        del portfolio["positions"][s]
+    if float(new_score) >= required:
+        return weakest_symbol, {
+            "reason": "rotation_to_stronger_signal",
+            "weakest_score": round(float(weakest_score), 6),
+            "new_score": round(float(new_score), 6),
+            "weakest_pnl_pct": round(float(weakest_pnl * 100), 2),
+            "held_seconds": int(held_seconds),
+            "sector_aligned": sector_edge
+        }
 
-    return closed
+    return None, {
+        "reason": "rotation_threshold_not_met",
+        "weakest_symbol": weakest_symbol,
+        "weakest_score": round(float(weakest_score), 6),
+        "new_score": round(float(new_score), 6),
+        "required_score": round(float(required), 6),
+        "sector_aligned": sector_edge
+    }
+
+# ===== POSITION MANAGEMENT =====
+def exit_position(symbol, px, action, market, extra=None):
+    pos = portfolio.get("positions", {}).get(symbol)
+    if not pos:
+        return None
+
+    side = pos.get("side", "long")
+    shares = float(pos.get("shares", 0))
+    pnl_pct = position_pnl_pct(pos, px)
+    pnl_dollars = position_pnl_dollars(pos, px)
+
+    portfolio["cash"] = float(portfolio.get("cash", 0)) + position_value(pos, px)
+    add_realized_pnl(pnl_dollars)
+
+    details = {
+        "pnl_pct": round(float(pnl_pct * 100), 2),
+        "pnl_dollars": round(float(pnl_dollars), 2),
+        "market_mode": market.get("market_mode", "unknown"),
+        "cooldown_seconds": COOLDOWN_SECONDS
+    }
+    if extra:
+        details.update(extra)
+
+    record_trade(action, symbol, side, px, shares, details)
+    set_cooldown(symbol)
+    del portfolio["positions"][symbol]
+    return {"symbol": symbol, "action": action, **details}
+
+
+def enter_position(symbol, side, px, alloc, score, market):
+    if px is None or float(px) <= 0:
+        return None
+
+    alloc = float(max(0.0, alloc))
+    cash = float(portfolio.get("cash", 0.0))
+    alloc = min(alloc, cash)
+    if alloc < MIN_TRADE_ALLOC:
+        return None
+
+    shares = alloc / float(px)
+    portfolio["cash"] = cash - alloc
+
+    pos = {
+        "side": side,
+        "entry": float(px),
+        "last_price": float(px),
+        "shares": float(shares),
+        "adds": 0,
+        "entry_time": int(time.time()),
+        "score": float(score),
+        "sector": SYMBOL_SECTOR.get(symbol, "UNKNOWN")
+    }
+
+    if side == "short":
+        pos["margin"] = alloc
+        pos["trough"] = float(px)
+    else:
+        pos["peak"] = float(px)
+
+    portfolio.setdefault("positions", {})[symbol] = pos
+    record_trade("entry", symbol, side, px, shares, {
+        "score": round(float(score), 6),
+        "alloc": round(float(alloc), 2),
+        "market_mode": market.get("market_mode", "unknown"),
+        "sector": pos["sector"]
+    })
+    return pos
 
 
 def refresh_equity_from_positions():
-    equity = float(portfolio["cash"])
+    equity = float(portfolio.get("cash", 0.0))
 
-    for _, pos in portfolio["positions"].items():
-        px = float(pos.get("last_price", pos["entry"]))
+    for _, pos in portfolio.get("positions", {}).items():
+        px = float(pos.get("last_price", pos.get("entry", 0)))
         equity += position_value(pos, px)
 
     portfolio["equity"] = equity
     portfolio["peak"] = max(float(portfolio.get("peak", equity)), equity)
     return equity
 
+
+def liquidate_all_positions(reason, market, data_arrays=None):
+    closed = []
+    latest_prices = {}
+
+    for s, arrays in (data_arrays or {}).items():
+        closes = arrays.get("close", np.array([])) if isinstance(arrays, dict) else np.array([])
+        if len(closes) > 0:
+            latest_prices[s] = float(closes[-1])
+
+    for s in list(portfolio.get("positions", {}).keys()):
+        pos = portfolio["positions"].get(s)
+        px = latest_prices.get(s)
+        if px is None:
+            px = latest_price(s)
+        if px is None:
+            px = float(pos.get("last_price", pos.get("entry", 0)))
+
+        result = exit_position(s, px, "halt_exit", market, {"halt_reason": reason})
+        if result:
+            closed.append(result)
+
+    return closed
+
 # ===== ENGINE =====
 def run_engine():
     market = market_status(force=True)
     params = risk_parameters(market)
     regime = market.get("regime", "neutral")
+    risk_controls = get_risk_controls()
     halted_exits = []
+    blocked_entries = []
+    rotations = []
 
-    if market.get("regime") in ["defensive", "neutral", "chop"] or market.get("defensive_rotation"):
-        params["long_scale_pct"] = 0.00
+    data_arrays = {}
+    latest_prices = {}
 
-    scan_list = pre_scan(UNIVERSE, regime)
-
-    if len(scan_list) < 5:
-        scan_list = UNIVERSE
-
-    data5, data15 = load_data(scan_list)
-
-    if not data5:
-        return {"error": "no data", "market": market}
-
-    # MARK TO MARKET
-    equity = float(portfolio["cash"])
-
-    for s, pos in list(portfolio["positions"].items()):
-        px = float(data5[s][-1]) if s in data5 else latest_price(s)
-
-        if px is None:
+    for symbol in UNIVERSE:
+        df = fetch_intraday(symbol)
+        if df is None:
             continue
+        arrays = intraday_arrays(df)
+        closes = arrays.get("close", np.array([]))
+        if len(closes) == 0:
+            continue
+        data_arrays[symbol] = arrays
+        latest_prices[symbol] = float(closes[-1])
 
-        pos["last_price"] = px
-        side = pos.get("side", "long")
+    # Mark open positions to market and update peaks/troughs.
+    for s, pos in list(portfolio.get("positions", {}).items()):
+        px = latest_prices.get(s)
+        if px is None:
+            px = latest_price(s)
+        if px is None:
+            px = float(pos.get("last_price", pos.get("entry", 0)))
 
-        if side == "short":
-            pos["trough"] = min(float(pos.get("trough", px)), px)
-            pos.setdefault("margin", float(pos["entry"]) * float(pos["shares"]))
+        pos["last_price"] = float(px)
+        if pos.get("side", "long") == "short":
+            pos["trough"] = min(float(pos.get("trough", px)), float(px))
         else:
-            pos["peak"] = max(float(pos.get("peak", px)), px)
+            pos["peak"] = max(float(pos.get("peak", px)), float(px))
 
-        equity += position_value(pos, px)
-
-    portfolio["equity"] = equity
-    portfolio["peak"] = max(float(portfolio.get("peak", equity)), equity)
+    equity = refresh_equity_from_positions()
     risk_controls = update_daily_risk_controls(equity)
     prune_cooldowns()
 
     if risk_controls.get("halted", False) and portfolio.get("positions"):
-        halted_exits.extend(liquidate_all_positions(risk_controls.get("halt_reason", "risk halt"), market, data5))
+        halted_exits.extend(liquidate_all_positions(risk_controls.get("halt_reason", "risk halt"), market, data_arrays))
         equity = refresh_equity_from_positions()
         risk_controls = update_daily_risk_controls(equity)
 
-    # SCALE WINNERS
+    # Exit logic: stop loss, trailing stops, and regime mismatch exits.
     if not risk_controls.get("halted", False):
-        for s, pos in list(portfolio["positions"].items()):
-            px = float(pos.get("last_price", pos["entry"]))
+        for s, pos in list(portfolio.get("positions", {}).items()):
+            px = latest_prices.get(s, float(pos.get("last_price", pos.get("entry", 0))))
             side = pos.get("side", "long")
             pnl = position_pnl_pct(pos, px)
+            exit_reason = None
 
-            if side == "short":
-                trend_ok = px <= float(pos.get("trough", px)) * 1.015
-                alloc_pct = params["short_scale_pct"]
+            if pnl <= float(params.get("stop_loss", -0.012)):
+                exit_reason = "stop_loss"
+            elif side == "long":
+                peak = float(pos.get("peak", px))
+                if peak > 0 and px <= peak * float(params.get("trail_long", 0.98)):
+                    exit_reason = "trailing_stop_long"
+                elif not params.get("allow_longs", True) and market.get("market_mode") in ["risk_off", "crash_warning", "defensive_rotation"]:
+                    exit_reason = "regime_exit_long"
             else:
-                trend_ok = px >= float(pos.get("peak", px)) * 0.985
-                alloc_pct = params["long_scale_pct"]
+                trough = float(pos.get("trough", px))
+                if trough > 0 and px >= trough * float(params.get("trail_short", 1.02)):
+                    exit_reason = "trailing_stop_short"
+                elif not params.get("allow_shorts", False) and market.get("market_mode") in ["risk_on", "constructive"]:
+                    exit_reason = "regime_exit_short"
 
-            if alloc_pct > 0 and pnl > 0.0035 and trend_ok and pos.get("adds", 0) < 3:
-                alloc = float(portfolio["cash"]) * alloc_pct
+            if exit_reason:
+                exit_position(s, px, "exit", market, {"exit_reason": exit_reason})
 
-                if alloc <= 0:
-                    continue
-
-                new_shares = alloc / px
-                old_shares = float(pos["shares"])
-                total_shares = old_shares + new_shares
-                old_entry = float(pos["entry"])
-
-                pos["entry"] = ((old_entry * old_shares) + (px * new_shares)) / total_shares
-                pos["shares"] = total_shares
-                pos["adds"] = pos.get("adds", 0) + 1
-                portfolio["cash"] -= alloc
-
-                if side == "short":
-                    pos["margin"] = float(pos.get("margin", 0)) + alloc
-
-                record_trade("scale", s, side, px, new_shares, {
-                    "alloc": round(float(alloc), 2),
-                    "market_mode": market["market_mode"]
-                })
-
-    # EXITS
-    for s in list(portfolio["positions"].keys()):
-        pos = portfolio["positions"][s]
-        px = float(pos.get("last_price", pos["entry"]))
-        side = pos.get("side", "long")
-        pnl = position_pnl_pct(pos, px)
-        shares = float(pos["shares"])
-
-        if side == "short":
-            trailing_stop = px > float(pos.get("trough", px)) * params["trail_short"]
-            should_exit = pnl < params["stop_loss"] or trailing_stop or pnl > 0.20
-        else:
-            trailing_stop = px < float(pos.get("peak", px)) * params["trail_long"]
-            risk_exit = (
-                market["market_mode"] in ["crash_warning", "risk_off"] and pnl < 0.005
-            ) or (
-                market["market_mode"] in ["defensive_rotation", "neutral"] and pnl < 0
-            )
-            should_exit = pnl < params["stop_loss"] or trailing_stop or pnl > 0.20 or risk_exit
-
-        if should_exit:
-            portfolio["cash"] += position_value(pos, px)
-            record_trade("exit", s, side, px, shares, {
-                "pnl_pct": round(float(pnl * 100), 2),
-                "market_mode": market["market_mode"],
-                "cooldown_seconds": COOLDOWN_SECONDS
-            })
-            set_cooldown(s)
-            del portfolio["positions"][s]
-
-    interim_equity = float(portfolio["cash"])
-    for s, pos in portfolio["positions"].items():
-        interim_equity += position_value(pos, float(pos.get("last_price", pos["entry"])))
-    portfolio["equity"] = interim_equity
+    interim_equity = refresh_equity_from_positions()
     risk_controls = update_daily_risk_controls(interim_equity)
 
     if risk_controls.get("halted", False) and portfolio.get("positions"):
-        halted_exits.extend(liquidate_all_positions(risk_controls.get("halt_reason", "risk halt"), market, data5))
+        halted_exits.extend(liquidate_all_positions(risk_controls.get("halt_reason", "risk halt"), market, data_arrays))
         interim_equity = refresh_equity_from_positions()
         risk_controls = update_daily_risk_controls(interim_equity)
 
-    longs, shorts = generate_signals(data5, data15, regime)
+    longs = []
+    shorts = []
+    for s, arrays in data_arrays.items():
+        if s in ["SPY", "QQQ"]:
+            # Keep SPY/QQQ as macro inputs. Avoid using them as individual trades.
+            continue
+        if s in portfolio.get("positions", {}) or is_in_cooldown(s):
+            continue
 
-    new_entries_allowed = not risk_controls.get("halted", False)
+        closes = arrays.get("close", np.array([]))
+        long_score = signal_score(s, closes, market, "long")
+        short_score = signal_score(s, closes, market, "short")
 
-    # LONG ENTRIES
-    if new_entries_allowed and params["allow_longs"]:
+        if long_score >= 0.0045:
+            longs.append((s, long_score))
+        if short_score >= 0.0050:
+            shorts.append((s, short_score))
+
+    longs = sorted(longs, key=lambda x: x[1], reverse=True)
+    shorts = sorted(shorts, key=lambda x: x[1], reverse=True)
+
+    new_entries_allowed = (
+        not risk_controls.get("halted", False)
+        and market.get("trade_permission") not in ["protective", "defensive_pause"]
+    )
+
+    def maybe_enter(symbol, side, score):
+        nonlocal risk_controls
+        if not new_entries_allowed:
+            return
+        if symbol in portfolio.get("positions", {}):
+            return
+        if is_in_cooldown(symbol):
+            return
+        if side == "long" and not params.get("allow_longs", False):
+            return
+        if side == "short" and not params.get("allow_shorts", False):
+            return
+
+        arrays = data_arrays.get(symbol)
+        if not arrays:
+            return
+        closes = arrays.get("close", np.array([]))
+        if len(closes) == 0:
+            return
+        px = float(closes[-1])
+
+        ok, reason = entry_extension_check(symbol, side, arrays)
+        if not ok:
+            blocked_entries.append({
+                "symbol": symbol,
+                "side": side,
+                "reason": reason,
+                "score": round(float(score), 6),
+                "price": round(float(px), 4)
+            })
+            return
+
+        max_positions = int(params.get("max_positions", 4))
+        if len(portfolio.get("positions", {})) >= max_positions:
+            rotate_symbol, rotate_info = choose_rotation_exit(symbol, side, score, latest_prices, market)
+            if not rotate_symbol:
+                blocked_entries.append({
+                    "symbol": symbol,
+                    "side": side,
+                    "reason": "max_positions_full_no_rotation",
+                    "score": round(float(score), 6),
+                    "rotation_info": rotate_info
+                })
+                return
+
+            rotate_pos = portfolio["positions"].get(rotate_symbol)
+            rotate_px = latest_prices.get(rotate_symbol, float(rotate_pos.get("last_price", rotate_pos.get("entry", 0))))
+            result = exit_position(rotate_symbol, rotate_px, "rotation_exit", market, rotate_info if isinstance(rotate_info, dict) else {"rotation_reason": rotate_info})
+            rotations.append({"out": rotate_symbol, "in": symbol, "exit": result, "info": rotate_info})
+            risk_controls = update_daily_risk_controls(refresh_equity_from_positions())
+            if risk_controls.get("halted", False):
+                return
+
+        alloc_pct = float(params.get("long_alloc_pct" if side == "long" else "short_alloc_pct", 0.1))
+        alloc = float(portfolio.get("cash", 0.0)) * alloc_pct
+        enter_position(symbol, side, px, alloc, score, market)
+
+    if new_entries_allowed:
         for s, score in longs:
-            if s in portfolio["positions"] or is_in_cooldown(s):
-                continue
-            if len(portfolio["positions"]) >= params["max_positions"]:
+            if not params.get("allow_longs", False):
+                break
+            maybe_enter(s, "long", score)
+            if risk_controls.get("halted", False):
                 break
 
-            px = float(data5[s][-1])
-            alloc = float(portfolio["cash"]) * params["long_alloc_pct"]
-
-            if alloc <= 0:
-                continue
-
-            shares = alloc / px
-            portfolio["cash"] -= alloc
-
-            portfolio["positions"][s] = {
-                "entry": px,
-                "shares": shares,
-                "last_price": px,
-                "peak": px,
-                "adds": 0,
-                "side": "long"
-            }
-
-            record_trade("entry", s, "long", px, shares, {
-                "score": round(float(score), 6),
-                "alloc": round(float(alloc), 2),
-                "market_mode": market["market_mode"]
-            })
-
-    # SHORT ENTRIES
-    if new_entries_allowed and params["allow_shorts"]:
         for s, score in shorts:
-            if s in portfolio["positions"] or is_in_cooldown(s):
-                continue
-            if len(portfolio["positions"]) >= params["max_positions"]:
+            if not params.get("allow_shorts", False):
+                break
+            maybe_enter(s, "short", score)
+            if risk_controls.get("halted", False):
                 break
 
-            px = float(data5[s][-1])
-            alloc = float(portfolio["cash"]) * params["short_alloc_pct"]
-
-            if alloc <= 0:
-                continue
-
-            shares = alloc / px
-            portfolio["cash"] -= alloc
-
-            portfolio["positions"][s] = {
-                "entry": px,
-                "shares": shares,
-                "last_price": px,
-                "trough": px,
-                "margin": alloc,
-                "adds": 0,
-                "side": "short"
-            }
-
-            record_trade("entry", s, "short", px, shares, {
-                "score": round(float(score), 6),
-                "alloc": round(float(alloc), 2),
-                "market_mode": market["market_mode"]
-            })
-
-    final_equity = float(portfolio["cash"])
-
-    for s, pos in portfolio["positions"].items():
-        px = float(pos.get("last_price", pos["entry"]))
-        final_equity += position_value(pos, px)
-
-    portfolio["equity"] = final_equity
-    portfolio["peak"] = max(float(portfolio.get("peak", final_equity)), final_equity)
-    portfolio["history"].append(portfolio["equity"])
+    final_equity = refresh_equity_from_positions()
+    portfolio["history"].append(float(final_equity))
     portfolio["history"] = portfolio["history"][-500:]
     portfolio["last_market"] = market
     risk_controls = update_daily_risk_controls(final_equity)
-
+    perf = performance_snapshot()
     save_state(portfolio)
 
     return {
-        "equity": round(portfolio["equity"], 2),
-        "cash": round(portfolio["cash"], 2),
+        "equity": round(float(portfolio["equity"]), 2),
+        "cash": round(float(portfolio["cash"]), 2),
         "regime": regime,
-        "market_mode": market["market_mode"],
-        "risk_score": market["risk_score"],
-        "trade_permission": market["trade_permission"],
-        "positions": list(portfolio["positions"].keys()),
+        "market_mode": market.get("market_mode"),
+        "risk_score": market.get("risk_score"),
+        "trade_permission": market.get("trade_permission"),
+        "positions": list(portfolio.get("positions", {}).keys()),
         "halted_exits": halted_exits,
+        "rotations": rotations,
+        "blocked_entries": blocked_entries[-20:],
         "signals_found": len(longs) + len(shorts),
         "long_signals": [s for s, _ in longs],
         "short_signals": [s for s, _ in shorts],
         "new_entries_allowed": new_entries_allowed,
         "risk_controls": risk_controls,
         "risk_parameters": params,
-        "sector_leaders": market["sector_leaders"],
+        "performance": perf,
+        "sector_leaders": market.get("sector_leaders", []),
         "defensive_leadership": market.get("defensive_leadership", False),
         "growth_leadership": market.get("growth_leadership", False),
         "defensive_count": market.get("defensive_count", 0),
@@ -881,24 +1198,46 @@ def local_now():
     return datetime.datetime.now(MARKET_TZ)
 
 
-def market_open_now():
+def market_clock_status():
     now = local_now()
-
-    if now.weekday() >= 5:
-        return False
-
     regular_open = now.replace(hour=8, minute=30, second=0, microsecond=0)
     regular_close = now.replace(hour=15, minute=0, second=0, microsecond=0)
 
-    return regular_open <= now <= regular_close
+    if now.weekday() >= 5:
+        is_open = False
+        reason = "weekend"
+    elif now < regular_open:
+        is_open = False
+        reason = "before_regular_session"
+    elif now > regular_close:
+        is_open = False
+        reason = "after_regular_session"
+    else:
+        is_open = True
+        reason = "regular_session_open"
+
+    return {
+        "is_open": is_open,
+        "reason": reason,
+        "timezone": str(MARKET_TZ),
+        "now_local": now.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "regular_open_local": regular_open.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "regular_close_local": regular_close.strftime("%Y-%m-%d %H:%M:%S %Z")
+    }
+
+
+def market_open_now():
+    return market_clock_status()["is_open"]
 
 
 def update_auto_runner_status(extra=None):
     ar = portfolio.setdefault("auto_runner", default_auto_runner())
+    clock = market_clock_status()
     ar["enabled"] = AUTO_RUN_ENABLED
     ar["market_only"] = AUTO_RUN_MARKET_ONLY
     ar["interval_seconds"] = AUTO_RUN_INTERVAL_SECONDS
-    ar["market_open_now"] = market_open_now()
+    ar["market_open_now"] = clock["is_open"]
+    ar["market_clock"] = clock
     ar["thread_started"] = AUTO_THREAD_STARTED
 
     if extra:
@@ -913,8 +1252,18 @@ def update_auto_runner_status(extra=None):
 
 
 def run_engine_locked(source="manual"):
+    now = local_now()
+    update_auto_runner_status({
+        "last_attempt_ts": int(time.time()),
+        "last_attempt_local": now.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "last_attempt_source": source
+    })
+
     if not RUN_LOCK.acquire(blocking=False):
+        skip_now = local_now()
         update_auto_runner_status({
+            "last_skip_ts": int(time.time()),
+            "last_skip_local": skip_now.strftime("%Y-%m-%d %H:%M:%S %Z"),
             "last_skip_reason": "engine already running",
             "last_run_source": source
         })
@@ -922,13 +1271,21 @@ def run_engine_locked(source="manual"):
 
     try:
         result = run_engine()
-        now = local_now()
+        done = local_now()
         update_auto_runner_status({
+            # Compatibility fields
             "last_run_ts": int(time.time()),
-            "last_run_local": now.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            "last_run_local": done.strftime("%Y-%m-%d %H:%M:%S %Z"),
             "last_run_source": source,
             "last_result": result,
+
+            # Cleaner fields
+            "last_successful_run_ts": int(time.time()),
+            "last_successful_run_local": done.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            "last_successful_run_source": source,
+
             "last_error": None,
+            "last_error_trace": None,
             "last_skip_reason": None
         })
         return result
@@ -936,7 +1293,7 @@ def run_engine_locked(source="manual"):
         err = f"{type(e).__name__}: {str(e)}"
         update_auto_runner_status({
             "last_error": err,
-            "last_error_trace": traceback.format_exc()[-2000:],
+            "last_error_trace": traceback.format_exc()[-3000:],
             "last_run_source": source
         })
         return {"error": err, "source": source}
@@ -949,27 +1306,29 @@ def auto_runner_loop():
 
     while True:
         try:
-            is_open = market_open_now()
-
-            if not AUTO_RUN_ENABLED:
-                update_auto_runner_status({"last_skip_reason": "AUTO_RUN_ENABLED is false"})
-            elif AUTO_RUN_MARKET_ONLY and not is_open:
-                update_auto_runner_status({"last_skip_reason": "market closed"})
+            clock = market_clock_status()
+            if AUTO_RUN_MARKET_ONLY and not clock["is_open"]:
+                now = local_now()
+                update_auto_runner_status({
+                    "last_skip_ts": int(time.time()),
+                    "last_skip_local": now.strftime("%Y-%m-%d %H:%M:%S %Z"),
+                    "last_skip_reason": f"market closed: {clock['reason']}"
+                })
             else:
                 run_engine_locked(source="auto")
-        except Exception as e:
+        except Exception:
             update_auto_runner_status({
-                "last_error": f"auto loop error: {type(e).__name__}: {str(e)}",
-                "last_error_trace": traceback.format_exc()[-2000:]
+                "last_error": "auto loop error",
+                "last_error_trace": traceback.format_exc()[-3000:]
             })
 
-        time.sleep(max(60, AUTO_RUN_INTERVAL_SECONDS))
+        time.sleep(max(30, AUTO_RUN_INTERVAL_SECONDS))
 
 
 def start_auto_runner_once():
     global AUTO_THREAD_STARTED
-
-    if AUTO_THREAD_STARTED:
+    if AUTO_THREAD_STARTED or not AUTO_RUN_ENABLED:
+        update_auto_runner_status()
         return
 
     AUTO_THREAD_STARTED = True
@@ -978,13 +1337,66 @@ def start_auto_runner_once():
     update_auto_runner_status({"thread_started": True})
 
 # ===== ROUTES =====
-@app.route("/")
-@app.route("/paper")
-@app.route("/paper/dashboard")
-def dashboard():
-    market = portfolio.get("last_market") or market_status()
+@app.route("/health")
+def health():
     ar = update_auto_runner_status()
-    history = portfolio.get("history", [])[-200:]
+    return jsonify({
+        "ok": True,
+        "time_local": local_now().strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "auto_runner": ar,
+        "equity": round(float(portfolio.get("equity", 0)), 2),
+        "positions": list(portfolio.get("positions", {}).keys())
+    })
+
+
+@app.route("/paper/market")
+def paper_market():
+    force = request.args.get("force", "0") in ["1", "true", "yes"]
+    return jsonify(market_status(force=force))
+
+
+@app.route("/paper/status")
+def paper_status():
+    update_auto_runner_status()
+    perf = performance_snapshot()
+    save_state(portfolio)
+    return jsonify({
+        "cash": float(portfolio.get("cash", 0)),
+        "equity": float(portfolio.get("equity", 0)),
+        "peak": float(portfolio.get("peak", 0)),
+        "history": portfolio.get("history", []),
+        "positions": portfolio.get("positions", {}),
+        "trades": portfolio.get("trades", []),
+        "last_market": portfolio.get("last_market", {}),
+        "risk_controls": get_risk_controls(),
+        "performance": perf,
+        "auto_runner": portfolio.get("auto_runner", default_auto_runner())
+    })
+
+
+@app.route("/paper/run")
+def paper_run():
+    if not key_ok():
+        return jsonify({"error": "unauthorized"}), 401
+    return jsonify(run_engine_locked(source=request.args.get("source", "manual")))
+
+
+@app.route("/paper/reset")
+def paper_reset():
+    if not key_ok():
+        return jsonify({"error": "unauthorized"}), 401
+    cash = float(request.args.get("cash", "10000"))
+    reset_state(cash)
+    return jsonify({"ok": True, "cash": cash, "state": portfolio})
+
+
+@app.route("/")
+def dashboard():
+    market = portfolio.get("last_market") or market_status(force=False)
+    ar = update_auto_runner_status()
+    rc = get_risk_controls()
+    perf = performance_snapshot()
+    history = portfolio.get("history", [])
 
     html = """
 <!doctype html>
@@ -997,7 +1409,7 @@ def dashboard():
   <style>
     body { margin: 0; padding: 28px; font-family: Arial, sans-serif; background: #0f172a; color: #f8fafc; }
     h1 { font-size: 24px; margin: 0 0 24px; }
-    .line { font-size: 26px; font-weight: 800; line-height: 1.45; margin: 8px 0; }
+    .line { font-size: 22px; font-weight: 800; line-height: 1.45; margin: 8px 0; }
     .small { color: #cbd5e1; font-size: 15px; margin-top: 16px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 20px; }
     .card { background: #111c33; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; }
@@ -1005,6 +1417,7 @@ def dashboard():
     .value { font-size: 20px; font-weight: 800; margin-top: 6px; }
     canvas { margin-top: 24px; background: #111827; border-radius: 10px; padding: 10px; }
     a { color: #38bdf8; }
+    pre { white-space: pre-wrap; background: #0b1220; padding: 12px; border-radius: 10px; border: 1px solid #1e293b; }
   </style>
 </head>
 <body>
@@ -1012,19 +1425,19 @@ def dashboard():
   <div class="line">Market: {{ market.market_mode }} | Risk: {{ market.risk_score }} | Regime: {{ market.regime }} | Leaders: {{ leaders }}</div>
   <div class="line">Trading Halted: {{ halted }} | Daily DD: {{ daily_dd }}% | Intraday DD: {{ intraday_dd }}% | Cooldowns: {{ cooldowns }}</div>
   <div class="line">Auto Runner: {{ auto_on }} | Thread: {{ thread }} | Market Open: {{ market_open }} | Last Run: {{ last_run }} | Skip: {{ skip }} | Error: {{ error }}</div>
-  <div class="line">Defensive Rotation: {{ defensive_rotation }} | Defensive Count: {{ defensive_count }} | Risk-On Sector Count: {{ risk_on_sector_count }} | Broad Soft: {{ broad_market_soft }} | Bear Confirmed: {{ bear_confirmed }}</div>
+  <div class="line">Realized Today: ${{ realized_today }} | Unrealized: ${{ unrealized }} | Open Positions: {{ positions }}</div>
 
   <canvas id="equityChart" height="120"></canvas>
 
   <div class="grid">
     <div class="card"><div class="label">Equity</div><div class="value">${{ equity }}</div></div>
     <div class="card"><div class="label">Cash</div><div class="value">${{ cash }}</div></div>
-    <div class="card"><div class="label">Positions</div><div class="value">{{ positions }}</div></div>
     <div class="card"><div class="label">Trade Permission</div><div class="value">{{ market.trade_permission }}</div></div>
+    <div class="card"><div class="label">Clock</div><div class="value">{{ clock_reason }}</div></div>
   </div>
 
   <p class="small">
-    JSON: <a href="/paper/status">/paper/status</a> Â· Run once: <a href="/paper/run">/paper/run</a>
+    JSON: <a href="/paper/status">/paper/status</a> Â· Market: <a href="/paper/market?force=1">/paper/market?force=1</a> Â· Run once: <a href="/paper/run">/paper/run</a>
   </p>
 
 <script>
@@ -1049,7 +1462,7 @@ new Chart(document.getElementById('equityChart'), {
 </body>
 </html>
 """
-    rc = portfolio.get("risk_controls", default_risk_controls())
+
     return render_template_string(
         html,
         market=market,
@@ -1061,58 +1474,26 @@ new Chart(document.getElementById('equityChart'), {
         auto_on="ON" if ar.get("enabled") else "OFF",
         thread="RUNNING" if ar.get("thread_started") else "STOPPED",
         market_open="YES" if ar.get("market_open_now") else "NO",
-        last_run=ar.get("last_run_local") or "never",
+        last_run=ar.get("last_successful_run_local") or ar.get("last_run_local") or "never",
         skip=ar.get("last_skip_reason") or "none",
         error=ar.get("last_error") or "none",
-        defensive_rotation=market.get("defensive_rotation", False),
-        defensive_count=market.get("defensive_count", 0),
-        risk_on_sector_count=market.get("risk_on_sector_count", 0),
-        broad_market_soft=market.get("broad_market_soft", False),
-        bear_confirmed=market.get("bear_confirmed", False),
+        realized_today=round(float(perf.get("realized_pnl_today", 0)), 2),
+        unrealized=round(float(perf.get("unrealized_pnl", 0)), 2),
         equity=round(float(portfolio.get("equity", 0)), 2),
         cash=round(float(portfolio.get("cash", 0)), 2),
         positions=", ".join(portfolio.get("positions", {}).keys()) or "none",
+        clock_reason=ar.get("market_clock", {}).get("reason", "unknown"),
         history_json=json.dumps(history if history else [portfolio.get("equity", 10000.0)])
     )
 
 
-@app.route("/health")
-def health():
-    return jsonify({
-        "status": "ok",
-        "market_open_now": market_open_now(),
-        "auto_runner_started": AUTO_THREAD_STARTED
-    })
-
-
-@app.route("/paper/status")
-def status():
-    update_auto_runner_status()
-    return jsonify(portfolio)
-
-
-@app.route("/paper/market")
-def market():
-    return jsonify(market_status(force=request.args.get("force") == "1"))
-
-
-@app.route("/paper/run")
-def run():
-    if not key_ok():
-        return jsonify({"error": "unauthorized"}), 401
-    return jsonify(run_engine_locked(source="manual"))
-
-
-@app.route("/paper/reset")
-def reset():
-    if not key_ok():
-        return jsonify({"error": "unauthorized"}), 401
-    cash = float(request.args.get("cash", 10000.0))
-    return jsonify(reset_state(cash))
-
-
-start_auto_runner_once()
+# Start the auto runner at import time. This avoids Flask before_first_request,
+# which is unavailable in newer Flask versions and caused prior deployment crashes.
+try:
+    start_auto_runner_once()
+except Exception:
+    pass
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "5000"))
+    port = int(os.environ.get("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
