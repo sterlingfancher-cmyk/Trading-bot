@@ -14,9 +14,6 @@ MAX_DAILY_LOSS_PCT = 0.03
 MAX_INTRADAY_DRAWDOWN_PCT = 0.025
 COOLDOWN_SECONDS = 1800
 
-# Auto-run controls. Railway will serve the app continuously, but the trading
-# engine only runs when something calls it. This worker calls it automatically
-# during regular U.S. equity market hours.
 AUTO_RUN_ENABLED = os.environ.get("AUTO_RUN_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
 AUTO_RUN_INTERVAL_SECONDS = int(os.environ.get("AUTO_RUN_INTERVAL_SECONDS", "300"))
 AUTO_RUN_MARKET_ONLY = os.environ.get("AUTO_RUN_MARKET_ONLY", "true").lower() not in ["0", "false", "no", "off"]
@@ -385,7 +382,6 @@ def market_status(force=False):
         trade_permission = "protective"
         regime = "bear"
 
-    # Defensive rotation override: do not treat defensive leadership as full risk-on.
     defensive_rotation = defensive_leadership and not growth_leadership
     broad_market_soft = spy_5d <= 0 or qqq_5d <= 0
     bear_confirmed = (
@@ -436,18 +432,18 @@ def risk_parameters(market):
 
     if mode == "risk_on":
         return {
-            "max_positions": 4, "long_alloc_pct": 0.20, "short_alloc_pct": 0.10,
-            "long_scale_pct": 0.10, "short_scale_pct": 0.08,
+            "max_positions": 4, "long_alloc_pct": 0.15, "short_alloc_pct": 0.10,
+            "long_scale_pct": 0.00, "short_scale_pct": 0.08,
             "allow_longs": True, "allow_shorts": False,
-            "stop_loss": -0.015, "trail_long": 0.985, "trail_short": 1.02
+            "stop_loss": -0.012, "trail_long": 0.98, "trail_short": 1.02
         }
 
     if mode == "constructive":
         return {
-            "max_positions": 4, "long_alloc_pct": 0.35, "short_alloc_pct": 0.15,
-            "long_scale_pct": 0.25, "short_scale_pct": 0.12,
+            "max_positions": 4, "long_alloc_pct": 0.10, "short_alloc_pct": 0.15,
+            "long_scale_pct": 0.00, "short_scale_pct": 0.12,
             "allow_longs": True, "allow_shorts": False,
-            "stop_loss": -0.02, "trail_long": 0.97, "trail_short": 1.03
+            "stop_loss": -0.012, "trail_long": 0.98, "trail_short": 1.03
         }
 
     if mode == "defensive_rotation":
@@ -502,8 +498,6 @@ def pre_scan(symbols, regime):
                 elif r20 > 0.006:
                     scored.append((s, r20 * 0.5))
             elif regime == "defensive":
-                # Defensive rotation: keep scan light. Existing positions can be managed,
-                # but new entries are blocked by risk_parameters.
                 if r20 > 0.008:
                     scored.append((s, r20 * 0.25))
             else:
@@ -561,7 +555,7 @@ def generate_signals(data5, data15, regime):
 
             if regime in ["bull"]:
                 if px > np.mean(p5[-20:]) and p15[-1] > np.mean(p15[-20:]):
-                    if px >= max(p5[-10:]) * 0.992 and r3 > 0 and score > 0.0025:
+                    if px >= max(p5[-10:]) * 0.992 and r3 > 0 and score > 0.0035:
                         longs.append((s, float(score)))
 
             if regime == "bear":
@@ -625,7 +619,6 @@ def refresh_equity_from_positions():
     portfolio["peak"] = max(float(portfolio.get("peak", equity)), equity)
     return equity
 
-
 # ===== ENGINE =====
 def run_engine():
     market = market_status(force=True)
@@ -633,7 +626,6 @@ def run_engine():
     regime = market.get("regime", "neutral")
     halted_exits = []
 
-    # Never scale long exposure when the market is defensive, neutral, or choppy.
     if market.get("regime") in ["defensive", "neutral", "chop"] or market.get("defensive_rotation"):
         params["long_scale_pct"] = 0.00
 
@@ -672,7 +664,6 @@ def run_engine():
     risk_controls = update_daily_risk_controls(equity)
     prune_cooldowns()
 
-    # HARD HALT: if drawdown limits are hit, immediately flatten all positions.
     if risk_controls.get("halted", False) and portfolio.get("positions"):
         halted_exits.extend(liquidate_all_positions(risk_controls.get("halt_reason", "risk halt"), market, data5))
         equity = refresh_equity_from_positions()
@@ -729,7 +720,11 @@ def run_engine():
             should_exit = pnl < params["stop_loss"] or trailing_stop or pnl > 0.20
         else:
             trailing_stop = px < float(pos.get("peak", px)) * params["trail_long"]
-            risk_exit = market["market_mode"] in ["crash_warning", "risk_off"] and pnl < 0.005
+            risk_exit = (
+                market["market_mode"] in ["crash_warning", "risk_off"] and pnl < 0.005
+            ) or (
+                market["market_mode"] in ["defensive_rotation", "neutral"] and pnl < 0
+            )
             should_exit = pnl < params["stop_loss"] or trailing_stop or pnl > 0.20 or risk_exit
 
         if should_exit:
@@ -742,20 +737,17 @@ def run_engine():
             set_cooldown(s)
             del portfolio["positions"][s]
 
-    # Refresh equity and risk after exits before allowing new entries.
     interim_equity = float(portfolio["cash"])
     for s, pos in portfolio["positions"].items():
         interim_equity += position_value(pos, float(pos.get("last_price", pos["entry"])))
     portfolio["equity"] = interim_equity
     risk_controls = update_daily_risk_controls(interim_equity)
 
-    # HARD HALT: if exits/mark-to-market push drawdown through the limit, flatten leftovers.
     if risk_controls.get("halted", False) and portfolio.get("positions"):
         halted_exits.extend(liquidate_all_positions(risk_controls.get("halt_reason", "risk halt"), market, data5))
         interim_equity = refresh_equity_from_positions()
         risk_controls = update_daily_risk_controls(interim_equity)
 
-    # SIGNALS
     longs, shorts = generate_signals(data5, data15, regime)
 
     new_entries_allowed = not risk_controls.get("halted", False)
@@ -825,7 +817,6 @@ def run_engine():
                 "market_mode": market["market_mode"]
             })
 
-    # FINAL EQUITY SNAPSHOT
     final_equity = float(portfolio["cash"])
 
     for s, pos in portfolio["positions"].items():
@@ -1095,7 +1086,6 @@ def reset():
     return jsonify(reset_state(cash))
 
 
-# Start the auto-runner when the app boots on Railway/gunicorn.
 start_auto_runner_once()
 
 if __name__ == "__main__":
