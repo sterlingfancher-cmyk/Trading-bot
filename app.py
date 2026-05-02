@@ -1491,6 +1491,403 @@ def ensure_auto_thread():
     t.start()
 
 
+
+# ============================================================
+# DECISION SUPPORT / REVIEW LAYER
+# ============================================================
+def safe_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def pct(value):
+    return round(float(value) * 100, 2)
+
+
+def money(value):
+    return round(float(value), 2)
+
+
+def _count_by(items, key, default="UNKNOWN"):
+    counts = {}
+    for item in items:
+        value = item.get(key, default) if isinstance(item, dict) else default
+        if value in [None, ""]:
+            value = default
+        counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items(), key=lambda x: x[1], reverse=True))
+
+
+def _sum_by(items, key, value_key):
+    totals = {}
+    for item in items:
+        bucket = item.get(key, "UNKNOWN") if isinstance(item, dict) else "UNKNOWN"
+        if bucket in [None, ""]:
+            bucket = "UNKNOWN"
+        totals[bucket] = totals.get(bucket, 0.0) + safe_float(item.get(value_key, 0.0))
+    return dict(sorted(((k, round(v, 2)) for k, v in totals.items()), key=lambda x: abs(x[1]), reverse=True))
+
+
+def analyze_trading_journal(limit=20):
+    limit = max(5, min(int(limit), 100))
+    trades = list(portfolio.get("trades", []))[-limit:]
+    exits = [t for t in trades if t.get("action") in ["exit", "rotation_exit"] or "pnl_dollars" in t]
+    entries = [t for t in trades if t.get("action") == "entry"]
+    rotations = [t for t in trades if t.get("action") == "rotation_exit"]
+    stop_losses = [t for t in trades if t.get("exit_reason") == "stop_loss"]
+    trailing_exits = [t for t in trades if str(t.get("exit_reason", "")).startswith("trailing_stop")]
+
+    realized = [safe_float(t.get("pnl_dollars", 0.0)) for t in exits if "pnl_dollars" in t]
+    wins = [x for x in realized if x >= 0]
+    losses = [x for x in realized if x < 0]
+
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
+    profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else None
+    win_rate = round((len(wins) / len(realized)) * 100, 2) if realized else 0.0
+    avg_win = round(sum(wins) / len(wins), 2) if wins else 0.0
+    avg_loss = round(sum(losses) / len(losses), 2) if losses else 0.0
+
+    hold_values = [safe_float(t.get("held_seconds"), None) for t in exits if t.get("held_seconds") is not None]
+    avg_hold_minutes = round((sum(hold_values) / len(hold_values)) / 60, 1) if hold_values else None
+
+    warnings = []
+    if realized and len(losses) > len(wins):
+        warnings.append("Loss count is higher than win count in the reviewed sample; tighten entry quality and avoid low-edge rotations.")
+    if exits and len(rotations) / max(len(exits), 1) >= 0.35:
+        warnings.append("Rotation exits make up a large share of exits; the system may still be churning positions too often.")
+    if len(stop_losses) >= max(2, len(exits) * 0.30):
+        warnings.append("Stop-loss exits are recurring; entries may be late, too extended, or stops may be too tight for current volatility.")
+    if avg_win > 0 and avg_loss < 0 and abs(avg_loss) > avg_win:
+        warnings.append("Average loss is larger than average win; focus on earlier invalidation or better profit protection.")
+    if not warnings:
+        warnings.append("No major recurring execution problem detected from the reviewed sample.")
+
+    last_result = portfolio.get("auto_runner", {}).get("last_result") or {}
+    blocked = last_result.get("blocked_entries", []) if isinstance(last_result, dict) else []
+    rejected = last_result.get("rejected_signals", []) if isinstance(last_result, dict) else []
+
+    missed_opportunities = []
+    for item in blocked[:5]:
+        missed_opportunities.append({
+            "symbol": item.get("symbol"),
+            "side": item.get("side"),
+            "reason": item.get("reason"),
+            "score": item.get("score"),
+            "rotation_info": item.get("rotation_info")
+        })
+    for item in rejected[:5]:
+        missed_opportunities.append({
+            "symbol": item.get("symbol"),
+            "side": item.get("side"),
+            "reason": item.get("reason"),
+            "score": item.get("score")
+        })
+
+    rules = [
+        "Do not rotate unless the new setup clears both the score multiplier and minimum score-edge guard.",
+        "Do not add fresh risk when profit guard is active; manage existing positions only.",
+        "Treat repeated stop-loss exits in the same symbol as a cooldown problem, not a reason to re-enter faster."
+    ]
+
+    if len(rotations) >= 3:
+        rules.insert(0, "Cut rotation frequency first; prefer holding the strongest confirmed positions over constantly replacing marginal signals.")
+    if len(stop_losses) >= 3:
+        rules.insert(0, "After two stop-loss exits in the reviewed sample, require stronger sector alignment before new entries.")
+
+    return {
+        "reviewed_trades": len(trades),
+        "entries_reviewed": len(entries),
+        "exits_reviewed": len(exits),
+        "summary": {
+            "sample_realized_pnl": money(sum(realized)),
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate_pct": win_rate,
+            "gross_profit": money(gross_profit),
+            "gross_loss": money(gross_loss),
+            "profit_factor": profit_factor,
+            "average_win": avg_win,
+            "average_loss": avg_loss,
+            "average_hold_minutes": avg_hold_minutes
+        },
+        "breakdowns": {
+            "actions": _count_by(trades, "action"),
+            "exit_reasons": _count_by(exits, "exit_reason", default="unknown_exit"),
+            "symbols": _count_by(trades, "symbol"),
+            "sides": _count_by(trades, "side")
+        },
+        "diagnosis": warnings,
+        "missed_or_blocked_recent_setups": missed_opportunities[:10],
+        "rules_to_apply_now": rules[:5],
+        "recent_trades": trades
+    }
+
+
+def portfolio_risk_review():
+    try:
+        calculate_equity(refresh_prices=False)
+    except Exception:
+        pass
+
+    equity = max(float(portfolio.get("equity", 0.0)), 0.01)
+    cash = float(portfolio.get("cash", 0.0))
+    positions = portfolio.get("positions", {}) or {}
+    perf = performance_snapshot()
+    rc = get_risk_controls()
+    market = portfolio.get("last_market") or market_status(force=False)
+
+    rows = []
+    sector_exposure = {}
+    side_exposure = {}
+    total_position_value = 0.0
+    open_losers = 0
+    open_winners = 0
+
+    for symbol, pos in positions.items():
+        px = safe_float(pos.get("last_price", pos.get("entry", 0.0)))
+        value = position_value(pos, px)
+        pnl_dollars = position_pnl_dollars(pos, px)
+        pnl_pct = position_pnl_pct(pos, px)
+        sector = pos.get("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN"))
+        side = pos.get("side", "long")
+        total_position_value += value
+        sector_exposure[sector] = sector_exposure.get(sector, 0.0) + value
+        side_exposure[side] = side_exposure.get(side, 0.0) + value
+        if pnl_dollars >= 0:
+            open_winners += 1
+        else:
+            open_losers += 1
+        rows.append({
+            "symbol": symbol,
+            "side": side,
+            "sector": sector,
+            "position_value": money(value),
+            "position_pct_of_equity": pct(value / equity),
+            "pnl_dollars": money(pnl_dollars),
+            "pnl_pct": round(pnl_pct * 100, 2),
+            "score": round(safe_float(pos.get("score")), 6)
+        })
+
+    rows = sorted(rows, key=lambda r: r["position_pct_of_equity"], reverse=True)
+    sector_pct = {k: pct(v / equity) for k, v in sorted(sector_exposure.items(), key=lambda x: x[1], reverse=True)}
+    side_pct = {k: pct(v / equity) for k, v in sorted(side_exposure.items(), key=lambda x: x[1], reverse=True)}
+    cash_pct = pct(cash / equity)
+    invested_pct = pct(total_position_value / equity)
+
+    growth_sectors = ["XLK", "XLY", "XLF"]
+    defensive_sectors = ["XLV", "XLP", "XLU"]
+    growth_pct = pct(sum(sector_exposure.get(s, 0.0) for s in growth_sectors) / equity)
+    defensive_pct = pct(sum(sector_exposure.get(s, 0.0) for s in defensive_sectors) / equity)
+    energy_pct = pct(sector_exposure.get("XLE", 0.0) / equity)
+    unknown_pct = pct(sector_exposure.get("UNKNOWN", 0.0) / equity)
+
+    vulnerabilities = []
+    if rows and rows[0]["position_pct_of_equity"] >= 25:
+        vulnerabilities.append(f"Largest position is {rows[0]['symbol']} at {rows[0]['position_pct_of_equity']}% of equity.")
+    for sector, value_pct in sector_pct.items():
+        if value_pct >= 45:
+            vulnerabilities.append(f"Sector concentration is high in {sector} at {value_pct}% of equity.")
+    if cash_pct < 15:
+        vulnerabilities.append(f"Cash buffer is low at {cash_pct}% of equity.")
+    if unknown_pct >= 10:
+        vulnerabilities.append(f"Unknown/unmapped sector exposure is {unknown_pct}%; map those tickers before relying on sector controls.")
+    if rc.get("profit_guard_active"):
+        vulnerabilities.append(f"Profit guard is active: {rc.get('profit_guard_reason', '')}")
+    if safe_float(rc.get("intraday_drawdown_pct")) >= 1.0:
+        vulnerabilities.append(f"Intraday drawdown is elevated at {rc.get('intraday_drawdown_pct')}% from the day peak.")
+    if open_losers > open_winners and len(rows) >= 3:
+        vulnerabilities.append("More open positions are losing than winning; avoid adding risk until the open book improves.")
+    if not vulnerabilities:
+        vulnerabilities.append("No major concentration or drawdown vulnerability detected from current paper state.")
+
+    recommendations = []
+    if market.get("bear_confirmed"):
+        recommendations.append("Bear confirmation is active; longs should remain blocked and shorts may be allowed only under the short-bias rules.")
+    elif market.get("market_mode") in ["risk_on", "constructive"]:
+        recommendations.append("Market mode supports long bias, but position additions should still respect profit guard, sector alignment, and max-position limits.")
+    else:
+        recommendations.append("Market mode is not strongly risk-on; reduce fresh entries and prioritize preserving cash.")
+
+    if growth_pct >= 50:
+        recommendations.append("Growth exposure is heavy; avoid adding more XLK/XLY/XLF names unless they clearly outrank existing holdings.")
+    if cash_pct < 20:
+        recommendations.append("Keep a cash reserve; do not force full deployment just because signals are available.")
+    if safe_float(perf.get("unrealized_pnl")) > 0 and safe_float(rc.get("intraday_drawdown_pct")) > 0.75:
+        recommendations.append("Open gains exist but intraday giveback is visible; prioritize trailing stops and avoid discretionary re-entry.")
+
+    return {
+        "equity": money(equity),
+        "cash": money(cash),
+        "cash_pct": cash_pct,
+        "invested_pct": invested_pct,
+        "market_mode": market.get("market_mode"),
+        "regime": market.get("regime"),
+        "risk_score": market.get("risk_score"),
+        "risk_controls": rc,
+        "performance": perf,
+        "exposures": {
+            "by_sector_pct": sector_pct,
+            "by_side_pct": side_pct,
+            "growth_pct": growth_pct,
+            "defensive_pct": defensive_pct,
+            "energy_pct": energy_pct,
+            "unknown_pct": unknown_pct
+        },
+        "positions": rows,
+        "vulnerabilities": vulnerabilities,
+        "recommendations": recommendations
+    }
+
+
+def explain_current_system(force_market=False):
+    try:
+        calculate_equity(refresh_prices=False)
+    except Exception:
+        pass
+
+    market = market_status(force=force_market) if force_market else (portfolio.get("last_market") or market_status(force=False))
+    params = risk_parameters(market)
+    rc = get_risk_controls()
+    clock = market_clock()
+    ar = portfolio.setdefault("auto_runner", default_auto_runner())
+    last_result = ar.get("last_result") or {}
+
+    reasons = []
+    if market.get("risk_score", 0) >= 70:
+        reasons.append("Risk score is high enough for a long-biased risk-on posture.")
+    elif market.get("risk_score", 0) >= 55:
+        reasons.append("Risk score is constructive but not fully aggressive.")
+    else:
+        reasons.append("Risk score is not strong enough for aggressive long exposure.")
+
+    if market.get("bear_confirmed"):
+        reasons.append("Bear confirmation is active, so long entries should be blocked and short rules may activate.")
+    else:
+        reasons.append("Bear confirmation is not active, so shorts remain disabled by design.")
+
+    if rc.get("halted"):
+        reasons.append(f"Trading is halted by risk control: {rc.get('halt_reason')}")
+    elif rc.get("profit_guard_active"):
+        reasons.append(f"Fresh entries are restricted by profit guard: {rc.get('profit_guard_reason')}")
+    elif not clock.get("is_open"):
+        reasons.append(f"Market is currently closed: {clock.get('reason')}. Manual /paper/run will not trade unless after-hours trading is explicitly enabled.")
+    else:
+        reasons.append("Market is open and risk controls are not halted.")
+
+    long_allowed = bool(params.get("allow_longs")) and not rc.get("halted")
+    short_allowed = bool(params.get("allow_shorts")) and not rc.get("halted")
+    new_entries_allowed = bool(last_result.get("new_entries_allowed", not rc.get("halted") and not rc.get("profit_guard_active")))
+
+    return {
+        "market_clock": clock,
+        "market": market,
+        "risk_parameters": params,
+        "risk_controls": rc,
+        "current_permission": {
+            "longs_allowed_by_regime": bool(params.get("allow_longs")),
+            "shorts_allowed_by_regime": bool(params.get("allow_shorts")),
+            "longs_allowed_now": long_allowed,
+            "shorts_allowed_now": short_allowed,
+            "new_entries_allowed_last_cycle": new_entries_allowed,
+            "max_positions": params.get("max_positions")
+        },
+        "last_cycle": {
+            "last_run_local": ar.get("last_run_local"),
+            "last_skip_reason": ar.get("last_skip_reason"),
+            "long_signals": last_result.get("long_signals", []),
+            "short_signals": last_result.get("short_signals", []),
+            "blocked_entries": last_result.get("blocked_entries", [])[:10],
+            "rotations": last_result.get("rotations", [])[:10],
+            "entries": last_result.get("entries", [])[:10],
+            "exits": last_result.get("exits", [])[:10]
+        },
+        "plain_english": reasons
+    }
+
+
+def daily_trading_plan():
+    market = portfolio.get("last_market") or market_status(force=False)
+    params = risk_parameters(market)
+    rc = get_risk_controls()
+    clock = market_clock()
+
+    stance = "balanced / reduced"
+    if market.get("bear_confirmed"):
+        stance = "defensive / short-bias only"
+    elif market.get("market_mode") == "risk_on":
+        stance = "long-biased risk-on"
+    elif market.get("market_mode") == "constructive":
+        stance = "selective long-biased"
+    elif market.get("market_mode") in ["risk_off", "defensive_rotation", "crash_warning"]:
+        stance = "capital preservation"
+
+    guardrails = [
+        f"Max positions: {params.get('max_positions')}",
+        f"Longs allowed: {bool(params.get('allow_longs'))}",
+        f"Shorts allowed: {bool(params.get('allow_shorts'))}",
+        f"Stop loss: {round(abs(float(params.get('stop_loss', 0))) * 100, 2)}%",
+        f"Profit guard active: {bool(rc.get('profit_guard_active'))}"
+    ]
+
+    if rc.get("profit_guard_active"):
+        guardrails.append(f"Profit guard reason: {rc.get('profit_guard_reason')}")
+    if rc.get("halted"):
+        guardrails.append(f"Risk halt reason: {rc.get('halt_reason')}")
+
+    return {
+        "date": today_key(),
+        "clock": clock,
+        "market_stance": stance,
+        "market_mode": market.get("market_mode"),
+        "regime": market.get("regime"),
+        "risk_score": market.get("risk_score"),
+        "sector_leaders": market.get("sector_leaders", []),
+        "guardrails": guardrails,
+        "checklist": [
+            {
+                "phase": "Pre-market",
+                "time": "Before regular open",
+                "steps": [
+                    "Open /paper/market?force=1 and confirm market mode, risk score, QQQ/SPY trend, VIX direction, and sector leaders.",
+                    "Open /paper/risk-review and verify cash buffer, sector concentration, and open-position P/L.",
+                    "Do not override the bot into longs if bear_confirmed is true."
+                ]
+            },
+            {
+                "phase": "Opening window",
+                "time": "First 30-60 minutes",
+                "steps": [
+                    "Let the scanner rank setups; avoid manual entries outside the scanner.",
+                    "Reject entries that are extended above the 5-minute MA20 or too close to the intraday high after a big move.",
+                    "Avoid rotation unless the new score clearly beats the weakest holding by the configured rotation guard."
+                ]
+            },
+            {
+                "phase": "Midday management",
+                "time": "Late morning to early afternoon",
+                "steps": [
+                    "Use /paper/explain to confirm why entries, exits, blocks, or rotations happened.",
+                    "If profit guard is active, manage existing positions only and do not open fresh risk.",
+                    "If losses cluster in the same symbol or sector, respect cooldowns and stop re-entry churn."
+                ]
+            },
+            {
+                "phase": "Closing routine",
+                "time": "Final 30-45 minutes",
+                "steps": [
+                    "Review /paper/journal for stop-loss clusters, rotation churn, and average win/loss quality.",
+                    "Check whether open winners need trailing-stop protection into the close.",
+                    "Do not use /paper/run after close expecting trades; it is blocked by default after regular session."
+                ]
+            }
+        ]
+    }
+
 # ============================================================
 # HTML DASHBOARD
 # ============================================================
@@ -1598,6 +1995,10 @@ DASHBOARD = """
     <p class="small">
         JSON: <a href="/paper/status">/paper/status</a> Â·
         Market: <a href="/paper/market?force=1">/paper/market?force=1</a> Â·
+        Explain: <a href="/paper/explain">/paper/explain</a> Â·
+        Journal: <a href="/paper/journal">/paper/journal</a> Â·
+        Risk Review: <a href="/paper/risk-review">/paper/risk-review</a> Â·
+        Daily Plan: <a href="/paper/daily-plan">/paper/daily-plan</a> Â·
         Run once: <a href="/paper/run">/paper/run</a>
     </p>
 </body>
@@ -1703,6 +2104,36 @@ def close_all():
     save_state(portfolio)
     return jsonify({"closed": exits, "cash": portfolio["cash"], "equity": portfolio["equity"]})
 
+
+
+@app.route("/paper/journal")
+def paper_journal():
+    ensure_auto_thread()
+    limit = request.args.get("limit", "20")
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 20
+    return jsonify(analyze_trading_journal(limit=limit))
+
+
+@app.route("/paper/risk-review")
+def paper_risk_review():
+    ensure_auto_thread()
+    return jsonify(portfolio_risk_review())
+
+
+@app.route("/paper/explain")
+def paper_explain():
+    ensure_auto_thread()
+    force = request.args.get("force", "0").lower() in ["1", "true", "yes", "on"]
+    return jsonify(explain_current_system(force_market=force))
+
+
+@app.route("/paper/daily-plan")
+def paper_daily_plan():
+    ensure_auto_thread()
+    return jsonify(daily_trading_plan())
 
 @app.route("/paper/config")
 def paper_config():
