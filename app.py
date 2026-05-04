@@ -64,13 +64,26 @@ DAY_PROFIT_GIVEBACK_LOCK_PCT = float(os.environ.get("DAY_PROFIT_GIVEBACK_LOCK_PC
 # and single-sector overconcentration when one theme dominates the scanner.
 OPENING_WARMUP_MINUTES = int(os.environ.get("OPENING_WARMUP_MINUTES", "15"))
 MAX_NEW_ENTRIES_PER_CYCLE = int(os.environ.get("MAX_NEW_ENTRIES_PER_CYCLE", "2"))
-MIN_ENTRY_SCORE_RISK_ON = float(os.environ.get("MIN_ENTRY_SCORE_RISK_ON", "0.0100"))
+MIN_ENTRY_SCORE_RISK_ON = float(os.environ.get("MIN_ENTRY_SCORE_RISK_ON", "0.0120"))
 MIN_ENTRY_SCORE_CONSTRUCTIVE = float(os.environ.get("MIN_ENTRY_SCORE_CONSTRUCTIVE", "0.0120"))
 MIN_ENTRY_SCORE_NEUTRAL = float(os.environ.get("MIN_ENTRY_SCORE_NEUTRAL", "0.0140"))
 MIN_ENTRY_SCORE_DEFENSIVE = float(os.environ.get("MIN_ENTRY_SCORE_DEFENSIVE", "0.0160"))
 MIN_SHORT_ENTRY_SCORE = float(os.environ.get("MIN_SHORT_ENTRY_SCORE", "0.0120"))
 MAX_SECTOR_EXPOSURE_PCT = float(os.environ.get("MAX_SECTOR_EXPOSURE_PCT", "0.45"))
 MAX_POSITIONS_PER_SECTOR = int(os.environ.get("MAX_POSITIONS_PER_SECTOR", "3"))
+
+# Self-defense feedback loop. These rules make the bot stop hunting after a bad sequence
+# and automatically compile intraday/end-of-day diagnostics into state.json.
+SELF_DEFENSE_STOP_LOSS_LIMIT = int(os.environ.get("SELF_DEFENSE_STOP_LOSS_LIMIT", "2"))
+SELF_DEFENSE_REALIZED_LOSS_PAUSE_PCT = float(os.environ.get("SELF_DEFENSE_REALIZED_LOSS_PAUSE_PCT", "0.005"))
+SELF_DEFENSE_HARD_DAILY_LOSS_PCT = float(os.environ.get("SELF_DEFENSE_HARD_DAILY_LOSS_PCT", "0.010"))
+TRAIL_ACTIVATION_PROFIT_PCT = float(os.environ.get("TRAIL_ACTIVATION_PROFIT_PCT", "0.0075"))
+LATE_DAY_ENTRY_CUTOFF_MINUTES = int(os.environ.get("LATE_DAY_ENTRY_CUTOFF_MINUTES", "30"))
+ENTRY_SCORE_LOSS_STEP = float(os.environ.get("ENTRY_SCORE_LOSS_STEP", "0.004"))
+VIX_RISING_SCORE_BUMP = float(os.environ.get("VIX_RISING_SCORE_BUMP", "0.002"))
+RATES_RISING_SCORE_BUMP = float(os.environ.get("RATES_RISING_SCORE_BUMP", "0.001"))
+VIX_RISING_ALLOC_REDUCTION = float(os.environ.get("VIX_RISING_ALLOC_REDUCTION", "0.70"))
+MAX_REPORTS_STORED = int(os.environ.get("MAX_REPORTS_STORED", "80"))
 
 RUN_LOCK = threading.Lock()
 AUTO_THREAD_STARTED = False
@@ -193,6 +206,34 @@ def default_auto_runner():
     }
 
 
+def default_feedback_loop():
+    return {
+        "date": today_key(),
+        "updated_local": None,
+        "self_defense_mode": False,
+        "block_new_entries": False,
+        "hard_halt": False,
+        "late_day_entry_cutoff": False,
+        "reasons": [],
+        "actions": [],
+        "stop_losses_today": 0,
+        "realized_loss_pct": 0.0,
+        "dynamic_min_long_score": MIN_ENTRY_SCORE_RISK_ON,
+        "vix_rising": False,
+        "rates_rising": False
+    }
+
+
+def default_reports():
+    return {
+        "date": today_key(),
+        "last_intraday_report": None,
+        "last_end_of_day_report": None,
+        "intraday_history": [],
+        "daily_history": []
+    }
+
+
 def default_state():
     return {
         "cash": 10000.0,
@@ -205,7 +246,9 @@ def default_state():
         "risk_controls": default_risk_controls(),
         "auto_runner": default_auto_runner(),
         "realized_pnl": default_realized_pnl(),
-        "performance": default_performance()
+        "performance": default_performance(),
+        "feedback_loop": default_feedback_loop(),
+        "reports": default_reports()
     }
 
 
@@ -231,6 +274,8 @@ def load_state():
     state.setdefault("auto_runner", default_auto_runner())
     state.setdefault("realized_pnl", default_realized_pnl())
     state.setdefault("performance", default_performance())
+    state.setdefault("feedback_loop", default_feedback_loop())
+    state.setdefault("reports", default_reports())
 
     # Backfill newer fields without breaking old state.json.
     rc = state["risk_controls"]
@@ -239,6 +284,8 @@ def load_state():
     rc["daily_drawdown_pct"] = max(0.0, float(rc.get("daily_drawdown_pct", 0.0)))
     rc.setdefault("profit_guard_active", False)
     rc.setdefault("profit_guard_reason", "")
+    rc.setdefault("self_defense_active", False)
+    rc.setdefault("self_defense_reason", "")
     rc.setdefault("cooldowns", {})
 
     for symbol, pos in state.get("positions", {}).items():
@@ -520,6 +567,8 @@ def get_risk_controls():
     rc.setdefault("cooldowns", {})
     rc.setdefault("profit_guard_active", False)
     rc.setdefault("profit_guard_reason", "")
+    rc.setdefault("self_defense_active", False)
+    rc.setdefault("self_defense_reason", "")
     return rc
 
 
@@ -563,12 +612,19 @@ def update_daily_risk_controls(equity):
     daily_loss_triggered = daily_loss_pct >= MAX_DAILY_LOSS_PCT
     intraday_dd_triggered = intraday_drawdown_pct >= MAX_INTRADAY_DRAWDOWN_PCT
 
+    realized_today = float(get_realized_pnl().get("today", 0.0))
+    realized_loss_pct = max(0.0, -realized_today / start)
+    hard_realized_loss_triggered = realized_loss_pct >= SELF_DEFENSE_HARD_DAILY_LOSS_PCT
+
     if daily_loss_triggered:
         rc["halted"] = True
         rc["halt_reason"] = f"daily loss limit hit ({MAX_DAILY_LOSS_PCT * 100:.1f}%)"
     elif intraday_dd_triggered:
         rc["halted"] = True
         rc["halt_reason"] = f"intraday drawdown limit hit ({MAX_INTRADAY_DRAWDOWN_PCT * 100:.1f}%)"
+    elif hard_realized_loss_triggered:
+        rc["halted"] = True
+        rc["halt_reason"] = f"self-defense hard realized loss hit ({SELF_DEFENSE_HARD_DAILY_LOSS_PCT * 100:.2f}%)"
 
     # Profit guard controls entries/rotations only. Existing stops still work.
     peak_return_pct = (peak - start) / start
@@ -1023,15 +1079,54 @@ def min_entry_score_for_market(market, side="long"):
     mode = market.get("market_mode", "neutral")
 
     if side == "short":
-        return MIN_SHORT_ENTRY_SCORE
+        base = MIN_SHORT_ENTRY_SCORE
+    elif mode == "risk_on":
+        base = MIN_ENTRY_SCORE_RISK_ON
+    elif mode == "constructive":
+        base = MIN_ENTRY_SCORE_CONSTRUCTIVE
+    elif mode == "neutral":
+        base = MIN_ENTRY_SCORE_NEUTRAL
+    else:
+        base = MIN_ENTRY_SCORE_DEFENSIVE
 
-    if mode == "risk_on":
-        return MIN_ENTRY_SCORE_RISK_ON
-    if mode == "constructive":
-        return MIN_ENTRY_SCORE_CONSTRUCTIVE
-    if mode == "neutral":
-        return MIN_ENTRY_SCORE_NEUTRAL
-    return MIN_ENTRY_SCORE_DEFENSIVE
+    if side == "short":
+        return round(float(base), 6)
+
+    # Dynamic quality tightening: after losses or when VIX/rates are rising,
+    # the bot requires stronger signals instead of continuing to hunt.
+    rp = get_realized_pnl()
+    losses_today = int(rp.get("losses_today", 0))
+    adjusted = float(base) + min(losses_today, 1) * ENTRY_SCORE_LOSS_STEP
+
+    if float(market.get("vix_5d_pct", 0.0) or 0.0) > 0:
+        adjusted += VIX_RISING_SCORE_BUMP
+    if float(market.get("rates_5d_pct", 0.0) or 0.0) > 1.0:
+        adjusted += RATES_RISING_SCORE_BUMP
+
+    return round(float(adjusted), 6)
+
+
+def apply_aggression_adjustments(params, market):
+    """Reduce allocation when surface regime is risk-on but internals are less supportive."""
+    adjusted = dict(params or {})
+    vix_rising = float(market.get("vix_5d_pct", 0.0) or 0.0) > 0
+    rates_rising = float(market.get("rates_5d_pct", 0.0) or 0.0) > 1.0
+
+    if vix_rising or rates_rising:
+        factor = VIX_RISING_ALLOC_REDUCTION if vix_rising else 0.85
+        adjusted["long_alloc_pct"] = round(float(adjusted.get("long_alloc_pct", 0.0)) * factor, 4)
+        adjusted["aggression_reduced"] = True
+        adjusted["aggression_reduction_reason"] = ",".join([
+            reason for reason, active in [
+                ("vix_rising", vix_rising),
+                ("rates_rising", rates_rising)
+            ] if active
+        ])
+    else:
+        adjusted["aggression_reduced"] = False
+        adjusted["aggression_reduction_reason"] = ""
+
+    return adjusted
 
 
 def portfolio_sector_stats(exclude_symbol=None):
@@ -1116,7 +1211,7 @@ def entry_quality_check(signal, params, market, exclude_symbol=None):
 def entry_controls_snapshot(clock=None, market=None, params=None, risk_controls=None):
     clock = clock or market_clock()
     market = market or (portfolio.get("last_market") or market_status(force=False))
-    params = params or risk_parameters(market)
+    params = params or apply_aggression_adjustments(risk_parameters(market), market)
     risk_controls = risk_controls or get_risk_controls()
     warmup = opening_warmup_status(clock)
     equity, sector_values, sector_counts = portfolio_sector_stats()
@@ -1144,6 +1239,7 @@ def entry_controls_snapshot(clock=None, market=None, params=None, risk_controls=
         },
         "risk_halted": bool(risk_controls.get("halted", False)),
         "profit_guard_active": bool(risk_controls.get("profit_guard_active", False)),
+        "feedback_loop": feedback_loop_status(market=market, params=params, risk_controls=risk_controls, clock=clock, persist=False),
         "long_alloc_pct": params.get("long_alloc_pct"),
         "short_alloc_pct": params.get("short_alloc_pct")
     }
@@ -1303,16 +1399,22 @@ def manage_exits(params, market):
 
         if side == "long":
             pos["peak"] = max(float(pos.get("peak", px)), px)
-            if px <= float(pos.get("peak", px)) * float(params.get("trail_long", 0.98)):
-                exit_reason = exit_reason or "trailing_stop_long"
+            entry = max(float(pos.get("entry", px)), 0.01)
+            peak_profit_pct = (float(pos.get("peak", px)) - entry) / entry
+            if peak_profit_pct >= TRAIL_ACTIVATION_PROFIT_PCT:
+                if px <= float(pos.get("peak", px)) * float(params.get("trail_long", 0.98)):
+                    exit_reason = exit_reason or "trailing_stop_long"
 
             if market.get("bear_confirmed") or mode in ["risk_off", "crash_warning", "defensive_rotation"]:
                 exit_reason = exit_reason or "market_regime_protection"
 
         else:
             pos["trough"] = min(float(pos.get("trough", px)), px)
-            if px >= float(pos.get("trough", px)) * float(params.get("trail_short", 1.02)):
-                exit_reason = exit_reason or "trailing_stop_short"
+            entry = max(float(pos.get("entry", px)), 0.01)
+            trough_profit_pct = (entry - float(pos.get("trough", px))) / entry
+            if trough_profit_pct >= TRAIL_ACTIVATION_PROFIT_PCT:
+                if px >= float(pos.get("trough", px)) * float(params.get("trail_short", 1.02)):
+                    exit_reason = exit_reason or "trailing_stop_short"
 
             if not market.get("bear_confirmed", False) and mode in ["risk_on", "constructive"]:
                 exit_reason = exit_reason or "short_disabled_regime"
@@ -1624,6 +1726,13 @@ def run_cycle(source="manual", allow_after_hours=None):
         if market_only and not clock["is_open"] and not allow_after_hours:
             calculate_equity(refresh_prices=True)
             reason = f"market closed: {clock['reason']}"
+            market = portfolio.get("last_market") or market_status(force=False)
+            params = apply_aggression_adjustments(risk_parameters(market), market)
+            rc = update_daily_risk_controls(float(portfolio.get("equity", 0.0)))
+            feedback = feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=True)
+            report = None
+            if clock.get("reason") == "after_regular_session":
+                report = store_compiled_report("end_of_day", market=market, params=params, risk_controls=rc, clock=clock)
             set_auto_skip(reason, clock)
             save_state(portfolio)
             return {
@@ -1635,16 +1744,19 @@ def run_cycle(source="manual", allow_after_hours=None):
                 "equity": round(float(portfolio.get("equity", 0.0)), 2),
                 "positions": list(portfolio.get("positions", {}).keys()),
                 "performance": performance_snapshot(),
-                "risk_controls": get_risk_controls()
+                "risk_controls": get_risk_controls(),
+                "feedback_loop": feedback,
+                "compiled_report": report
             }
 
         market = market_status(force=True)
-        params = risk_parameters(market)
+        params = apply_aggression_adjustments(risk_parameters(market), market)
 
         exits = manage_exits(params, market)
         equity = calculate_equity(refresh_prices=True)
         rc = update_daily_risk_controls(equity)
         prune_cooldowns()
+        feedback = feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=True)
 
         long_signals, short_signals, rejected = scan_signals(market)
 
@@ -1656,6 +1768,10 @@ def run_cycle(source="manual", allow_after_hours=None):
             entry_block_reasons.append("profit_guard_active")
         if bool(warmup.get("active", False)):
             entry_block_reasons.append("opening_warmup_active")
+        if bool(feedback.get("block_new_entries", False)):
+            entry_block_reasons.append("self_defense_feedback_loop")
+        if bool(feedback.get("late_day_entry_cutoff", False)):
+            entry_block_reasons.append("late_day_entry_cutoff")
 
         new_entries_allowed = len(entry_block_reasons) == 0
         entry_block_reason = ",".join(entry_block_reasons) if entry_block_reasons else None
@@ -1671,8 +1787,10 @@ def run_cycle(source="manual", allow_after_hours=None):
 
         equity = calculate_equity(refresh_prices=True)
         rc = update_daily_risk_controls(equity)
+        feedback = feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=True)
         perf = performance_snapshot()
         controls = entry_controls_snapshot(clock=clock, market=market, params=params, risk_controls=rc)
+        compiled_report = store_compiled_report("intraday", market=market, params=params, risk_controls=rc, clock=clock)
 
         result = {
             **market,
@@ -1684,6 +1802,8 @@ def run_cycle(source="manual", allow_after_hours=None):
             "new_entries_allowed": bool(new_entries_allowed),
             "entry_block_reason": entry_block_reason,
             "entry_quality_controls": controls,
+            "feedback_loop": feedback,
+            "compiled_report": compiled_report,
             "entries": entries,
             "exits": exits,
             "rotations": rotations,
@@ -1769,6 +1889,230 @@ def _sum_by(items, key, value_key):
             bucket = "UNKNOWN"
         totals[bucket] = totals.get(bucket, 0.0) + safe_float(item.get(value_key, 0.0))
     return dict(sorted(((k, round(v, 2)) for k, v in totals.items()), key=lambda x: abs(x[1]), reverse=True))
+
+
+def local_date_from_ts(ts):
+    try:
+        return datetime.datetime.fromtimestamp(float(ts), MARKET_TZ).strftime("%Y-%m-%d")
+    except Exception:
+        return today_key()
+
+
+def trades_for_date(date_key=None):
+    date_key = date_key or today_key()
+    return [t for t in portfolio.get("trades", []) if local_date_from_ts(t.get("time", 0)) == date_key]
+
+
+def minutes_to_regular_close(clock=None):
+    clock = clock or market_clock()
+    try:
+        now = now_local()
+        close_dt = now.replace(
+            hour=REGULAR_CLOSE_HOUR,
+            minute=REGULAR_CLOSE_MINUTE,
+            second=0,
+            microsecond=0
+        )
+        return max(0.0, (close_dt - now).total_seconds() / 60.0)
+    except Exception:
+        return None
+
+
+def late_day_cutoff_status(clock=None):
+    clock = clock or market_clock()
+    minutes_left = minutes_to_regular_close(clock)
+    active = bool(clock.get("is_open")) and minutes_left is not None and minutes_left <= LATE_DAY_ENTRY_CUTOFF_MINUTES
+    return {
+        "active": bool(active),
+        "minutes_to_close": round(float(minutes_left or 0.0), 2),
+        "cutoff_minutes": LATE_DAY_ENTRY_CUTOFF_MINUTES,
+        "reason": "late_day_entry_cutoff" if active else "ok"
+    }
+
+
+def feedback_loop_status(market=None, params=None, risk_controls=None, clock=None, persist=True):
+    market = market or (portfolio.get("last_market") or market_status(force=False))
+    params = params or apply_aggression_adjustments(risk_parameters(market), market)
+    risk_controls = risk_controls or get_risk_controls()
+    clock = clock or market_clock()
+
+    rp = get_realized_pnl()
+    trades_today = trades_for_date(today_key())
+    stop_losses_today = sum(
+        1 for t in trades_today
+        if t.get("action") == "exit" and t.get("exit_reason") == "stop_loss"
+    )
+    trailing_exits_today = sum(
+        1 for t in trades_today
+        if t.get("action") == "exit" and str(t.get("exit_reason", "")).startswith("trailing")
+    )
+
+    start_equity = max(float(risk_controls.get("day_start_equity", portfolio.get("equity", 10000.0))), 0.01)
+    realized_today = float(rp.get("today", 0.0))
+    realized_loss_pct = max(0.0, -realized_today / start_equity)
+    late_day = late_day_cutoff_status(clock)
+    vix_rising = float(market.get("vix_5d_pct", 0.0) or 0.0) > 0
+    rates_rising = float(market.get("rates_5d_pct", 0.0) or 0.0) > 1.0
+
+    reasons = []
+    actions = []
+    block_new_entries = False
+    hard_halt = False
+
+    if stop_losses_today >= SELF_DEFENSE_STOP_LOSS_LIMIT:
+        block_new_entries = True
+        reasons.append(f"{stop_losses_today} stop-loss exits today")
+        actions.append("block_new_entries_after_loss_streak")
+
+    if realized_loss_pct >= SELF_DEFENSE_REALIZED_LOSS_PAUSE_PCT:
+        block_new_entries = True
+        reasons.append(f"realized daily loss {realized_loss_pct * 100:.2f}% reached soft pause")
+        actions.append("pause_new_entries_after_soft_loss")
+
+    if realized_loss_pct >= SELF_DEFENSE_HARD_DAILY_LOSS_PCT:
+        block_new_entries = True
+        hard_halt = True
+        reasons.append(f"realized daily loss {realized_loss_pct * 100:.2f}% reached hard halt")
+        actions.append("hard_halt_after_realized_loss")
+
+    if late_day.get("active"):
+        block_new_entries = True
+        reasons.append(f"inside final {LATE_DAY_ENTRY_CUTOFF_MINUTES} minutes before close")
+        actions.append("late_day_manage_only")
+
+    if vix_rising:
+        actions.append("raise_score_floor_for_rising_vix")
+    if rates_rising:
+        actions.append("reduce_aggression_for_rising_rates")
+
+    if not reasons:
+        reasons.append("feedback loop clear")
+
+    feedback = {
+        "date": today_key(),
+        "updated_local": local_ts_text(),
+        "self_defense_mode": bool(block_new_entries or hard_halt),
+        "block_new_entries": bool(block_new_entries),
+        "hard_halt": bool(hard_halt),
+        "late_day_entry_cutoff": bool(late_day.get("active")),
+        "late_day_status": late_day,
+        "reasons": reasons,
+        "actions": actions,
+        "stop_losses_today": int(stop_losses_today),
+        "trailing_exits_today": int(trailing_exits_today),
+        "realized_pnl_today": round(realized_today, 2),
+        "realized_loss_pct": round(realized_loss_pct * 100, 3),
+        "dynamic_min_long_score": min_entry_score_for_market(market, "long"),
+        "base_min_long_score": (
+            MIN_ENTRY_SCORE_RISK_ON if market.get("market_mode") == "risk_on" else
+            MIN_ENTRY_SCORE_CONSTRUCTIVE if market.get("market_mode") == "constructive" else
+            MIN_ENTRY_SCORE_NEUTRAL if market.get("market_mode") == "neutral" else
+            MIN_ENTRY_SCORE_DEFENSIVE
+        ),
+        "vix_rising": bool(vix_rising),
+        "rates_rising": bool(rates_rising),
+        "aggression_reduced": bool(params.get("aggression_reduced", False)),
+        "aggression_reduction_reason": params.get("aggression_reduction_reason", "")
+    }
+
+    if persist:
+        portfolio["feedback_loop"] = feedback
+        risk_controls["self_defense_active"] = bool(feedback["self_defense_mode"])
+        risk_controls["self_defense_reason"] = "; ".join(feedback["reasons"])
+        if hard_halt:
+            risk_controls["halted"] = True
+            risk_controls["halt_reason"] = "self-defense hard daily realized loss halt"
+
+    return feedback
+
+
+def compile_trading_report(report_type="intraday", market=None, params=None, risk_controls=None, clock=None):
+    try:
+        calculate_equity(refresh_prices=False)
+    except Exception:
+        pass
+
+    market = market or (portfolio.get("last_market") or market_status(force=False))
+    params = params or apply_aggression_adjustments(risk_parameters(market), market)
+    risk_controls = risk_controls or get_risk_controls()
+    clock = clock or market_clock()
+    perf = performance_snapshot()
+    feedback = feedback_loop_status(market=market, params=params, risk_controls=risk_controls, clock=clock, persist=True)
+    journal = analyze_trading_journal(limit=50)
+    risk_review = portfolio_risk_review()
+
+    report = {
+        "type": report_type,
+        "date": today_key(),
+        "generated_local": local_ts_text(),
+        "market_clock": clock,
+        "headline": {
+            "equity": round(float(portfolio.get("equity", 0.0)), 2),
+            "cash": round(float(portfolio.get("cash", 0.0)), 2),
+            "day_pnl_pct": risk_controls.get("day_pnl_pct"),
+            "daily_loss_pct": risk_controls.get("daily_loss_pct"),
+            "intraday_drawdown_pct": risk_controls.get("intraday_drawdown_pct"),
+            "realized_pnl_today": perf.get("realized_pnl_today"),
+            "unrealized_pnl": perf.get("unrealized_pnl"),
+            "open_positions": list(portfolio.get("positions", {}).keys())
+        },
+        "market": market,
+        "risk_controls": risk_controls,
+        "feedback_loop": feedback,
+        "journal_summary": journal.get("summary", {}),
+        "journal_diagnosis": journal.get("diagnosis", []),
+        "risk_vulnerabilities": risk_review.get("vulnerabilities", []),
+        "risk_recommendations": risk_review.get("recommendations", []),
+        "entry_quality_controls": entry_controls_snapshot(clock=clock, market=market, params=params, risk_controls=risk_controls),
+        "recent_trades": journal.get("recent_trades", [])[-20:]
+    }
+
+    report["plain_english"] = generate_report_plain_english(report)
+    return report
+
+
+def generate_report_plain_english(report):
+    h = report.get("headline", {})
+    fb = report.get("feedback_loop", {})
+    lines = []
+    lines.append(
+        f"{report.get('type', 'report')} report: equity ${h.get('equity')}, day P/L {h.get('day_pnl_pct')}%, realized ${h.get('realized_pnl_today')}."
+    )
+    if fb.get("self_defense_mode"):
+        lines.append("Self-defense mode is active: " + "; ".join(fb.get("reasons", [])))
+    else:
+        lines.append("Self-defense mode is not active.")
+    if report.get("journal_summary", {}).get("profit_factor") == 0 and report.get("journal_summary", {}).get("losses", 0) > 0:
+        lines.append("Trade quality is weak: losses exist and no realized wins are present in the reviewed sample.")
+    for vuln in report.get("risk_vulnerabilities", [])[:2]:
+        lines.append("Risk note: " + str(vuln))
+    return lines
+
+
+def store_compiled_report(report_type="intraday", market=None, params=None, risk_controls=None, clock=None):
+    reports = portfolio.setdefault("reports", default_reports())
+    if reports.get("date") != today_key():
+        reports["date"] = today_key()
+        reports["last_intraday_report"] = None
+        reports["last_end_of_day_report"] = None
+
+    report = compile_trading_report(report_type, market=market, params=params, risk_controls=risk_controls, clock=clock)
+
+    if report_type == "end_of_day":
+        reports["last_end_of_day_report"] = report
+        history = reports.setdefault("daily_history", [])
+        # Replace same-date EOD report if present.
+        history = [r for r in history if r.get("date") != report.get("date") or r.get("type") != "end_of_day"]
+        history.append(report)
+        reports["daily_history"] = history[-MAX_REPORTS_STORED:]
+    else:
+        reports["last_intraday_report"] = report
+        history = reports.setdefault("intraday_history", [])
+        history.append(report)
+        reports["intraday_history"] = history[-MAX_REPORTS_STORED:]
+
+    portfolio["reports"] = reports
+    return report
 
 
 def analyze_trading_journal(limit=20):
@@ -1988,6 +2332,7 @@ def portfolio_risk_review():
             "sector_position_counts": _count_by(rows, "sector")
         },
         "entry_quality_controls": entry_controls_snapshot(market=market, risk_controls=rc),
+        "feedback_loop": feedback_loop_status(market=market, risk_controls=rc, persist=False),
         "positions": rows,
         "vulnerabilities": vulnerabilities,
         "recommendations": recommendations
@@ -2001,7 +2346,7 @@ def explain_current_system(force_market=False):
         pass
 
     market = market_status(force=force_market) if force_market else (portfolio.get("last_market") or market_status(force=False))
-    params = risk_parameters(market)
+    params = apply_aggression_adjustments(risk_parameters(market), market)
     rc = get_risk_controls()
     clock = market_clock()
     ar = portfolio.setdefault("auto_runner", default_auto_runner())
@@ -2044,6 +2389,7 @@ def explain_current_system(force_market=False):
         "risk_parameters": params,
         "risk_controls": rc,
         "entry_quality_controls": entry_controls_snapshot(clock=clock, market=market, params=params, risk_controls=rc),
+        "feedback_loop": feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=False),
         "current_permission": {
             "longs_allowed_by_regime": bool(params.get("allow_longs")),
             "shorts_allowed_by_regime": bool(params.get("allow_shorts")),
@@ -2072,7 +2418,7 @@ def explain_current_system(force_market=False):
 
 def daily_trading_plan():
     market = portfolio.get("last_market") or market_status(force=False)
-    params = risk_parameters(market)
+    params = apply_aggression_adjustments(risk_parameters(market), market)
     rc = get_risk_controls()
     clock = market_clock()
 
@@ -2096,7 +2442,12 @@ def daily_trading_plan():
         f"Max new entries per cycle: {MAX_NEW_ENTRIES_PER_CYCLE}",
         f"Minimum active long score: {min_entry_score_for_market(market, 'long')}",
         f"Max sector exposure: {round(MAX_SECTOR_EXPOSURE_PCT * 100, 2)}%",
-        f"Max positions per sector: {MAX_POSITIONS_PER_SECTOR}"
+        f"Max positions per sector: {MAX_POSITIONS_PER_SECTOR}",
+        f"Self-defense stop-loss limit: {SELF_DEFENSE_STOP_LOSS_LIMIT}",
+        f"Soft realized-loss pause: {round(SELF_DEFENSE_REALIZED_LOSS_PAUSE_PCT * 100, 2)}%",
+        f"Hard realized-loss halt: {round(SELF_DEFENSE_HARD_DAILY_LOSS_PCT * 100, 2)}%",
+        f"Trailing stop activates after: {round(TRAIL_ACTIVATION_PROFIT_PCT * 100, 2)}% profit",
+        f"Late-day entry cutoff: final {LATE_DAY_ENTRY_CUTOFF_MINUTES} minutes"
     ]
 
     if rc.get("profit_guard_active"):
@@ -2222,6 +2573,13 @@ DASHBOARD = """
         Max/Sector: {{ entry_controls.sector_controls.max_positions_per_sector }}
     </div>
 
+    <div class="hero {{ 'warn' if entry_controls.feedback_loop.self_defense_mode else '' }}">
+        Feedback Loop: {{ "SELF-DEFENSE" if entry_controls.feedback_loop.self_defense_mode else "CLEAR" }} |
+        Stop Losses Today: {{ entry_controls.feedback_loop.stop_losses_today }} |
+        Realized Loss: {{ entry_controls.feedback_loop.realized_loss_pct }}% |
+        Late Cutoff: {{ "ON" if entry_controls.feedback_loop.late_day_entry_cutoff else "OFF" }}
+    </div>
+
     <div class="hero">
         Auto Runner: {{ "ON" if auto.enabled else "OFF" }} |
         Thread: {{ "RUNNING" if auto.thread_started else "OFF" }} |
@@ -2275,6 +2633,9 @@ DASHBOARD = """
         Journal: <a href="/paper/journal">/paper/journal</a> Â·
         Risk Review: <a href="/paper/risk-review">/paper/risk-review</a> Â·
         Daily Plan: <a href="/paper/daily-plan">/paper/daily-plan</a> Â·
+        Feedback: <a href="/paper/feedback-loop">/paper/feedback-loop</a> Â·
+        Intraday Report: <a href="/paper/intraday-report">/paper/intraday-report</a> Â·
+        EOD Report: <a href="/paper/end-of-day-report">/paper/end-of-day-report</a> Â·
         Run once: <a href="/paper/run">/paper/run</a>
     </p>
 </body>
@@ -2412,6 +2773,59 @@ def paper_daily_plan():
     ensure_auto_thread()
     return jsonify(daily_trading_plan())
 
+@app.route("/paper/feedback-loop")
+def paper_feedback_loop():
+    ensure_auto_thread()
+    market = portfolio.get("last_market") or market_status(force=False)
+    params = apply_aggression_adjustments(risk_parameters(market), market)
+    rc = get_risk_controls()
+    clock = market_clock()
+    feedback = feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=True)
+    save_state(portfolio)
+    return jsonify(feedback)
+
+
+@app.route("/paper/intraday-report")
+def paper_intraday_report():
+    ensure_auto_thread()
+    market = portfolio.get("last_market") or market_status(force=False)
+    params = apply_aggression_adjustments(risk_parameters(market), market)
+    rc = get_risk_controls()
+    clock = market_clock()
+    report = store_compiled_report("intraday", market=market, params=params, risk_controls=rc, clock=clock)
+    save_state(portfolio)
+    return jsonify(report)
+
+
+@app.route("/paper/end-of-day-report")
+def paper_end_of_day_report():
+    ensure_auto_thread()
+    market = portfolio.get("last_market") or market_status(force=False)
+    params = apply_aggression_adjustments(risk_parameters(market), market)
+    rc = get_risk_controls()
+    clock = market_clock()
+    report = store_compiled_report("end_of_day", market=market, params=params, risk_controls=rc, clock=clock)
+    save_state(portfolio)
+    return jsonify(report)
+
+
+@app.route("/paper/reports")
+def paper_reports():
+    ensure_auto_thread()
+    return jsonify(portfolio.setdefault("reports", default_reports()))
+
+
+@app.route("/paper/report/today")
+def paper_report_today():
+    ensure_auto_thread()
+    reports = portfolio.setdefault("reports", default_reports())
+    report = reports.get("last_end_of_day_report") or reports.get("last_intraday_report")
+    if not report:
+        report = store_compiled_report("intraday")
+        save_state(portfolio)
+    return jsonify(report)
+
+
 @app.route("/paper/config")
 def paper_config():
     return jsonify({
@@ -2436,7 +2850,17 @@ def paper_config():
         "min_entry_score_defensive": MIN_ENTRY_SCORE_DEFENSIVE,
         "min_short_entry_score": MIN_SHORT_ENTRY_SCORE,
         "max_sector_exposure_pct": MAX_SECTOR_EXPOSURE_PCT,
-        "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR
+        "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR,
+        "self_defense_stop_loss_limit": SELF_DEFENSE_STOP_LOSS_LIMIT,
+        "self_defense_realized_loss_pause_pct": SELF_DEFENSE_REALIZED_LOSS_PAUSE_PCT,
+        "self_defense_hard_daily_loss_pct": SELF_DEFENSE_HARD_DAILY_LOSS_PCT,
+        "trail_activation_profit_pct": TRAIL_ACTIVATION_PROFIT_PCT,
+        "late_day_entry_cutoff_minutes": LATE_DAY_ENTRY_CUTOFF_MINUTES,
+        "entry_score_loss_step": ENTRY_SCORE_LOSS_STEP,
+        "vix_rising_score_bump": VIX_RISING_SCORE_BUMP,
+        "rates_rising_score_bump": RATES_RISING_SCORE_BUMP,
+        "vix_rising_alloc_reduction": VIX_RISING_ALLOC_REDUCTION,
+        "max_reports_stored": MAX_REPORTS_STORED
     })
 
 
