@@ -60,6 +60,18 @@ DAY_PROFIT_PAUSE_NEW_ENTRIES_PCT = float(os.environ.get("DAY_PROFIT_PAUSE_NEW_EN
 DAY_PROFIT_HARD_LOCK_PCT = float(os.environ.get("DAY_PROFIT_HARD_LOCK_PCT", "0.0100"))
 DAY_PROFIT_GIVEBACK_LOCK_PCT = float(os.environ.get("DAY_PROFIT_GIVEBACK_LOCK_PCT", "0.0030"))
 
+# Entry quality controls. These reduce opening-churn, weak low-score fills,
+# and single-sector overconcentration when one theme dominates the scanner.
+OPENING_WARMUP_MINUTES = int(os.environ.get("OPENING_WARMUP_MINUTES", "15"))
+MAX_NEW_ENTRIES_PER_CYCLE = int(os.environ.get("MAX_NEW_ENTRIES_PER_CYCLE", "2"))
+MIN_ENTRY_SCORE_RISK_ON = float(os.environ.get("MIN_ENTRY_SCORE_RISK_ON", "0.0100"))
+MIN_ENTRY_SCORE_CONSTRUCTIVE = float(os.environ.get("MIN_ENTRY_SCORE_CONSTRUCTIVE", "0.0120"))
+MIN_ENTRY_SCORE_NEUTRAL = float(os.environ.get("MIN_ENTRY_SCORE_NEUTRAL", "0.0140"))
+MIN_ENTRY_SCORE_DEFENSIVE = float(os.environ.get("MIN_ENTRY_SCORE_DEFENSIVE", "0.0160"))
+MIN_SHORT_ENTRY_SCORE = float(os.environ.get("MIN_SHORT_ENTRY_SCORE", "0.0120"))
+MAX_SECTOR_EXPOSURE_PCT = float(os.environ.get("MAX_SECTOR_EXPOSURE_PCT", "0.45"))
+MAX_POSITIONS_PER_SECTOR = int(os.environ.get("MAX_POSITIONS_PER_SECTOR", "3"))
+
 RUN_LOCK = threading.Lock()
 AUTO_THREAD_STARTED = False
 
@@ -295,6 +307,34 @@ def market_clock():
         "regular_open_local": open_dt.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "regular_close_local": close_dt.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "timezone": str(MARKET_TZ)
+    }
+
+
+def regular_open_datetime(reference=None):
+    reference = reference or now_local()
+    return reference.replace(
+        hour=REGULAR_OPEN_HOUR,
+        minute=REGULAR_OPEN_MINUTE,
+        second=0,
+        microsecond=0
+    )
+
+
+def opening_warmup_status(clock=None):
+    """Return whether fresh entries should be paused during the opening noise window."""
+    clock = clock or market_clock()
+    current = now_local()
+    open_dt = regular_open_datetime(current)
+    elapsed_seconds = max(0, int((current - open_dt).total_seconds()))
+    warmup_seconds = max(0, OPENING_WARMUP_MINUTES * 60)
+    active = bool(clock.get("is_open", False)) and elapsed_seconds < warmup_seconds
+
+    return {
+        "active": bool(active),
+        "minutes_since_open": round(elapsed_seconds / 60, 1),
+        "required_warmup_minutes": OPENING_WARMUP_MINUTES,
+        "seconds_remaining": max(0, warmup_seconds - elapsed_seconds) if active else 0,
+        "reason": "opening_warmup_active" if active else "ok"
     }
 
 
@@ -979,6 +1019,136 @@ def scan_signals(market):
     return long_signals, short_signals, rejected
 
 
+def min_entry_score_for_market(market, side="long"):
+    mode = market.get("market_mode", "neutral")
+
+    if side == "short":
+        return MIN_SHORT_ENTRY_SCORE
+
+    if mode == "risk_on":
+        return MIN_ENTRY_SCORE_RISK_ON
+    if mode == "constructive":
+        return MIN_ENTRY_SCORE_CONSTRUCTIVE
+    if mode == "neutral":
+        return MIN_ENTRY_SCORE_NEUTRAL
+    return MIN_ENTRY_SCORE_DEFENSIVE
+
+
+def portfolio_sector_stats(exclude_symbol=None):
+    equity = max(float(portfolio.get("equity", portfolio.get("cash", 0.0))), 0.01)
+    sector_values = {}
+    sector_counts = {}
+
+    for symbol, pos in portfolio.get("positions", {}).items():
+        if exclude_symbol and symbol == exclude_symbol:
+            continue
+
+        px = float(pos.get("last_price", pos.get("entry", 0.0)))
+        value = position_value(pos, px)
+        sector = pos.get("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN"))
+        sector_values[sector] = sector_values.get(sector, 0.0) + value
+        sector_counts[sector] = sector_counts.get(sector, 0) + 1
+
+    return equity, sector_values, sector_counts
+
+
+def estimated_trade_allocation(signal, params):
+    side = signal.get("side", "long")
+    alloc_pct = float(params.get("short_alloc_pct" if side == "short" else "long_alloc_pct", 0.0))
+    equity = max(float(portfolio.get("equity", portfolio.get("cash", 0.0))), 0.01)
+    cash = max(float(portfolio.get("cash", 0.0)), 0.0)
+    return min(cash, equity * alloc_pct)
+
+
+def entry_quality_check(signal, params, market, exclude_symbol=None):
+    """Validate signal quality before opening a new position or rotating into one."""
+    symbol = signal.get("symbol")
+    side = signal.get("side", "long")
+    sector = signal.get("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN"))
+    score = float(signal.get("score", 0.0))
+    min_score = float(min_entry_score_for_market(market, side))
+
+    if score < min_score:
+        return False, {
+            "reason": "entry_score_below_minimum",
+            "symbol": symbol,
+            "score": round(score, 6),
+            "required_score": round(min_score, 6),
+            "market_mode": market.get("market_mode")
+        }
+
+    equity, sector_values, sector_counts = portfolio_sector_stats(exclude_symbol=exclude_symbol)
+    sector_count = int(sector_counts.get(sector, 0))
+
+    if sector not in [None, "", "UNKNOWN"] and sector_count >= MAX_POSITIONS_PER_SECTOR:
+        return False, {
+            "reason": "sector_position_limit",
+            "symbol": symbol,
+            "sector": sector,
+            "current_sector_positions": sector_count,
+            "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR
+        }
+
+    proposed_alloc = estimated_trade_allocation(signal, params)
+    projected_sector_value = float(sector_values.get(sector, 0.0)) + proposed_alloc
+    projected_sector_pct = projected_sector_value / equity if equity > 0 else 0.0
+
+    if sector not in [None, "", "UNKNOWN"] and projected_sector_pct > MAX_SECTOR_EXPOSURE_PCT:
+        return False, {
+            "reason": "sector_exposure_cap",
+            "symbol": symbol,
+            "sector": sector,
+            "projected_sector_pct": round(projected_sector_pct * 100, 2),
+            "max_sector_exposure_pct": round(MAX_SECTOR_EXPOSURE_PCT * 100, 2)
+        }
+
+    return True, {
+        "reason": "entry_quality_ok",
+        "symbol": symbol,
+        "score": round(score, 6),
+        "required_score": round(min_score, 6),
+        "sector": sector,
+        "projected_sector_pct": round(projected_sector_pct * 100, 2),
+        "sector_positions_after_entry": sector_count + 1
+    }
+
+
+def entry_controls_snapshot(clock=None, market=None, params=None, risk_controls=None):
+    clock = clock or market_clock()
+    market = market or (portfolio.get("last_market") or market_status(force=False))
+    params = params or risk_parameters(market)
+    risk_controls = risk_controls or get_risk_controls()
+    warmup = opening_warmup_status(clock)
+    equity, sector_values, sector_counts = portfolio_sector_stats()
+
+    return {
+        "opening_warmup": warmup,
+        "max_new_entries_per_cycle": MAX_NEW_ENTRIES_PER_CYCLE,
+        "min_entry_score": {
+            "risk_on": MIN_ENTRY_SCORE_RISK_ON,
+            "constructive": MIN_ENTRY_SCORE_CONSTRUCTIVE,
+            "neutral": MIN_ENTRY_SCORE_NEUTRAL,
+            "defensive": MIN_ENTRY_SCORE_DEFENSIVE,
+            "short": MIN_SHORT_ENTRY_SCORE,
+            "active_long_floor": min_entry_score_for_market(market, "long"),
+            "active_short_floor": min_entry_score_for_market(market, "short")
+        },
+        "sector_controls": {
+            "max_sector_exposure_pct": round(MAX_SECTOR_EXPOSURE_PCT * 100, 2),
+            "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR,
+            "current_sector_exposure_pct": {
+                k: round((v / max(equity, 0.01)) * 100, 2)
+                for k, v in sorted(sector_values.items(), key=lambda x: x[1], reverse=True)
+            },
+            "current_sector_position_counts": dict(sorted(sector_counts.items(), key=lambda x: x[1], reverse=True))
+        },
+        "risk_halted": bool(risk_controls.get("halted", False)),
+        "profit_guard_active": bool(risk_controls.get("profit_guard_active", False)),
+        "long_alloc_pct": params.get("long_alloc_pct"),
+        "short_alloc_pct": params.get("short_alloc_pct")
+    }
+
+
 # ============================================================
 # PORTFOLIO OPERATIONS
 # ============================================================
@@ -1259,13 +1429,10 @@ def rotation_allowed(new_signal, weakest, market):
     }
 
 
-def try_entries_and_rotations(long_signals, short_signals, params, market, new_entries_allowed=True):
+def try_entries_and_rotations(long_signals, short_signals, params, market, new_entries_allowed=True, entry_block_reason=None):
     entries = []
     rotations = []
     blocked_entries = []
-
-    if not new_entries_allowed:
-        return entries, rotations, blocked_entries
 
     max_positions = int(params.get("max_positions", 0))
     mode = market.get("market_mode", "neutral")
@@ -1278,6 +1445,19 @@ def try_entries_and_rotations(long_signals, short_signals, params, market, new_e
 
     candidate_signals = sorted(candidate_signals, key=lambda x: x["score"], reverse=True)
 
+    if not new_entries_allowed:
+        block_reason = entry_block_reason or "new_entries_not_allowed"
+        for signal in candidate_signals[:10]:
+            blocked_entries.append({
+                "symbol": signal.get("symbol"),
+                "side": signal.get("side"),
+                "score": signal.get("score"),
+                "reason": block_reason
+            })
+        return entries, rotations, blocked_entries
+
+    entries_this_cycle = 0
+
     for signal in candidate_signals:
         symbol = signal["symbol"]
         side = signal["side"]
@@ -1286,10 +1466,37 @@ def try_entries_and_rotations(long_signals, short_signals, params, market, new_e
             blocked_entries.append({"symbol": symbol, "side": side, "reason": "already_held", "score": signal.get("score")})
             continue
 
+        if is_in_cooldown(symbol):
+            blocked_entries.append({"symbol": symbol, "side": side, "reason": "cooldown", "score": signal.get("score")})
+            continue
+
+        if entries_this_cycle >= MAX_NEW_ENTRIES_PER_CYCLE:
+            blocked_entries.append({
+                "symbol": symbol,
+                "side": side,
+                "score": signal.get("score"),
+                "reason": "max_new_entries_per_cycle",
+                "max_new_entries_per_cycle": MAX_NEW_ENTRIES_PER_CYCLE
+            })
+            continue
+
         if len(portfolio.get("positions", {})) < max_positions:
+            ok, quality_info = entry_quality_check(signal, params, market)
+            if not ok:
+                blocked_entries.append({
+                    "symbol": symbol,
+                    "side": side,
+                    "score": signal.get("score"),
+                    "reason": "entry_quality_block",
+                    "quality_info": quality_info
+                })
+                continue
+
             entry = enter_position(signal, params, market_mode=mode)
             if entry and not entry.get("blocked"):
+                entry["quality_info"] = quality_info
                 entries.append(entry)
+                entries_this_cycle += 1
             else:
                 blocked_entries.append(entry)
             continue
@@ -1311,6 +1518,18 @@ def try_entries_and_rotations(long_signals, short_signals, params, market, new_e
             continue
 
         weakest_symbol = weakest["symbol"]
+        ok, quality_info = entry_quality_check(signal, params, market, exclude_symbol=weakest_symbol)
+        if not ok:
+            blocked_entries.append({
+                "symbol": symbol,
+                "side": side,
+                "score": signal.get("score"),
+                "reason": "rotation_entry_quality_block",
+                "rotation_info": info,
+                "quality_info": quality_info
+            })
+            continue
+
         pos = portfolio.get("positions", {}).get(weakest_symbol)
         if not pos:
             continue
@@ -1331,12 +1550,17 @@ def try_entries_and_rotations(long_signals, short_signals, params, market, new_e
         )
 
         entry_result = enter_position(signal, params, market_mode=mode)
+        if entry_result and not entry_result.get("blocked"):
+            entry_result["quality_info"] = quality_info
+            entries_this_cycle += 1
+
         rotations.append({
             "out": weakest_symbol,
             "in": symbol,
             "exit": exit_result,
             "entry": entry_result,
-            "info": info
+            "info": info,
+            "quality_info": quality_info
         })
 
     return entries, rotations, blocked_entries
@@ -1424,18 +1648,31 @@ def run_cycle(source="manual", allow_after_hours=None):
 
         long_signals, short_signals, rejected = scan_signals(market)
 
-        new_entries_allowed = not bool(rc.get("halted", False)) and not bool(rc.get("profit_guard_active", False))
+        warmup = opening_warmup_status(clock)
+        entry_block_reasons = []
+        if bool(rc.get("halted", False)):
+            entry_block_reasons.append("risk_halted")
+        if bool(rc.get("profit_guard_active", False)):
+            entry_block_reasons.append("profit_guard_active")
+        if bool(warmup.get("active", False)):
+            entry_block_reasons.append("opening_warmup_active")
+
+        new_entries_allowed = len(entry_block_reasons) == 0
+        entry_block_reason = ",".join(entry_block_reasons) if entry_block_reasons else None
+
         entries, rotations, blocked_entries = try_entries_and_rotations(
             long_signals,
             short_signals,
             params,
             market,
-            new_entries_allowed=new_entries_allowed
+            new_entries_allowed=new_entries_allowed,
+            entry_block_reason=entry_block_reason
         )
 
         equity = calculate_equity(refresh_prices=True)
         rc = update_daily_risk_controls(equity)
         perf = performance_snapshot()
+        controls = entry_controls_snapshot(clock=clock, market=market, params=params, risk_controls=rc)
 
         result = {
             **market,
@@ -1445,6 +1682,8 @@ def run_cycle(source="manual", allow_after_hours=None):
             "risk_parameters": params,
             "risk_controls": rc,
             "new_entries_allowed": bool(new_entries_allowed),
+            "entry_block_reason": entry_block_reason,
+            "entry_quality_controls": controls,
             "entries": entries,
             "exits": exits,
             "rotations": rotations,
@@ -1690,8 +1929,17 @@ def portfolio_risk_review():
     if rows and rows[0]["position_pct_of_equity"] >= 25:
         vulnerabilities.append(f"Largest position is {rows[0]['symbol']} at {rows[0]['position_pct_of_equity']}% of equity.")
     for sector, value_pct in sector_pct.items():
-        if value_pct >= 45:
-            vulnerabilities.append(f"Sector concentration is high in {sector} at {value_pct}% of equity.")
+        if value_pct >= round(MAX_SECTOR_EXPOSURE_PCT * 100, 2):
+            vulnerabilities.append(
+                f"Sector concentration is high in {sector} at {value_pct}% of equity; cap is {round(MAX_SECTOR_EXPOSURE_PCT * 100, 2)}%."
+            )
+
+    sector_counts = _count_by(rows, "sector")
+    for sector, count in sector_counts.items():
+        if sector not in [None, "", "UNKNOWN"] and count > MAX_POSITIONS_PER_SECTOR:
+            vulnerabilities.append(
+                f"Too many open positions in {sector}: {count}; limit is {MAX_POSITIONS_PER_SECTOR}."
+            )
     if cash_pct < 15:
         vulnerabilities.append(f"Cash buffer is low at {cash_pct}% of equity.")
     if unknown_pct >= 10:
@@ -1736,8 +1984,10 @@ def portfolio_risk_review():
             "growth_pct": growth_pct,
             "defensive_pct": defensive_pct,
             "energy_pct": energy_pct,
-            "unknown_pct": unknown_pct
+            "unknown_pct": unknown_pct,
+            "sector_position_counts": _count_by(rows, "sector")
         },
+        "entry_quality_controls": entry_controls_snapshot(market=market, risk_controls=rc),
         "positions": rows,
         "vulnerabilities": vulnerabilities,
         "recommendations": recommendations
@@ -1776,6 +2026,11 @@ def explain_current_system(force_market=False):
         reasons.append(f"Fresh entries are restricted by profit guard: {rc.get('profit_guard_reason')}")
     elif not clock.get("is_open"):
         reasons.append(f"Market is currently closed: {clock.get('reason')}. Manual /paper/run will not trade unless after-hours trading is explicitly enabled.")
+    elif opening_warmup_status(clock).get("active"):
+        warmup = opening_warmup_status(clock)
+        reasons.append(
+            f"Opening warm-up is active: fresh entries are paused until {OPENING_WARMUP_MINUTES} minutes after regular open."
+        )
     else:
         reasons.append("Market is open and risk controls are not halted.")
 
@@ -1788,13 +2043,18 @@ def explain_current_system(force_market=False):
         "market": market,
         "risk_parameters": params,
         "risk_controls": rc,
+        "entry_quality_controls": entry_controls_snapshot(clock=clock, market=market, params=params, risk_controls=rc),
         "current_permission": {
             "longs_allowed_by_regime": bool(params.get("allow_longs")),
             "shorts_allowed_by_regime": bool(params.get("allow_shorts")),
             "longs_allowed_now": long_allowed,
             "shorts_allowed_now": short_allowed,
             "new_entries_allowed_last_cycle": new_entries_allowed,
-            "max_positions": params.get("max_positions")
+            "max_positions": params.get("max_positions"),
+            "max_new_entries_per_cycle": MAX_NEW_ENTRIES_PER_CYCLE,
+            "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR,
+            "max_sector_exposure_pct": round(MAX_SECTOR_EXPOSURE_PCT * 100, 2),
+            "active_min_entry_score": min_entry_score_for_market(market, "long")
         },
         "last_cycle": {
             "last_run_local": ar.get("last_run_local"),
@@ -1831,7 +2091,12 @@ def daily_trading_plan():
         f"Longs allowed: {bool(params.get('allow_longs'))}",
         f"Shorts allowed: {bool(params.get('allow_shorts'))}",
         f"Stop loss: {round(abs(float(params.get('stop_loss', 0))) * 100, 2)}%",
-        f"Profit guard active: {bool(rc.get('profit_guard_active'))}"
+        f"Profit guard active: {bool(rc.get('profit_guard_active'))}",
+        f"Opening warm-up: {OPENING_WARMUP_MINUTES} minutes",
+        f"Max new entries per cycle: {MAX_NEW_ENTRIES_PER_CYCLE}",
+        f"Minimum active long score: {min_entry_score_for_market(market, 'long')}",
+        f"Max sector exposure: {round(MAX_SECTOR_EXPOSURE_PCT * 100, 2)}%",
+        f"Max positions per sector: {MAX_POSITIONS_PER_SECTOR}"
     ]
 
     if rc.get("profit_guard_active"):
@@ -1862,8 +2127,11 @@ def daily_trading_plan():
                 "phase": "Opening window",
                 "time": "First 30-60 minutes",
                 "steps": [
-                    "Let the scanner rank setups; avoid manual entries outside the scanner.",
+                    f"Wait through the {OPENING_WARMUP_MINUTES}-minute opening warm-up before fresh entries are allowed.",
+                    f"Limit new positions to {MAX_NEW_ENTRIES_PER_CYCLE} per cycle; do not fill the whole book from one scan.",
                     "Reject entries that are extended above the 5-minute MA20 or too close to the intraday high after a big move.",
+                    f"Reject low-score entries below the active floor of {min_entry_score_for_market(market, 'long')}.",
+                    f"Keep sector exposure under {round(MAX_SECTOR_EXPOSURE_PCT * 100, 2)}% and positions per sector at or below {MAX_POSITIONS_PER_SECTOR}.",
                     "Avoid rotation unless the new score clearly beats the weakest holding by the configured rotation guard."
                 ]
             },
@@ -1947,6 +2215,14 @@ DASHBOARD = """
     {% endif %}
 
     <div class="hero">
+        Entry Guard: Warm-up {{ entry_controls.opening_warmup.required_warmup_minutes }} min |
+        Max Entries/Cycle: {{ entry_controls.max_new_entries_per_cycle }} |
+        Active Min Score: {{ entry_controls.min_entry_score.active_long_floor }} |
+        Sector Cap: {{ entry_controls.sector_controls.max_sector_exposure_pct }}% |
+        Max/Sector: {{ entry_controls.sector_controls.max_positions_per_sector }}
+    </div>
+
+    <div class="hero">
         Auto Runner: {{ "ON" if auto.enabled else "OFF" }} |
         Thread: {{ "RUNNING" if auto.thread_started else "OFF" }} |
         Market Open: {{ "YES" if auto.market_open_now else "NO" }} |
@@ -2024,7 +2300,8 @@ def home():
         market=portfolio.get("last_market") or market_status(force=False),
         risk=get_risk_controls(),
         auto=portfolio.setdefault("auto_runner", default_auto_runner()),
-        performance=performance_snapshot()
+        performance=performance_snapshot(),
+        entry_controls=entry_controls_snapshot()
     )
 
 
@@ -2150,7 +2427,16 @@ def paper_config():
         "rotation_keep_winner_pct": ROTATION_KEEP_WINNER_PCT,
         "day_profit_pause_new_entries_pct": DAY_PROFIT_PAUSE_NEW_ENTRIES_PCT,
         "day_profit_hard_lock_pct": DAY_PROFIT_HARD_LOCK_PCT,
-        "day_profit_giveback_lock_pct": DAY_PROFIT_GIVEBACK_LOCK_PCT
+        "day_profit_giveback_lock_pct": DAY_PROFIT_GIVEBACK_LOCK_PCT,
+        "opening_warmup_minutes": OPENING_WARMUP_MINUTES,
+        "max_new_entries_per_cycle": MAX_NEW_ENTRIES_PER_CYCLE,
+        "min_entry_score_risk_on": MIN_ENTRY_SCORE_RISK_ON,
+        "min_entry_score_constructive": MIN_ENTRY_SCORE_CONSTRUCTIVE,
+        "min_entry_score_neutral": MIN_ENTRY_SCORE_NEUTRAL,
+        "min_entry_score_defensive": MIN_ENTRY_SCORE_DEFENSIVE,
+        "min_short_entry_score": MIN_SHORT_ENTRY_SCORE,
+        "max_sector_exposure_pct": MAX_SECTOR_EXPOSURE_PCT,
+        "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR
     })
 
 
