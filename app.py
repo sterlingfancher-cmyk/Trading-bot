@@ -2644,191 +2644,123 @@ DASHBOARD = """
 
 
 # ============================================================
-# ROUTES
+# API VISIBILITY / SAFE JSON HELPERS
 # ============================================================
-@app.route("/")
-def home():
-    ensure_auto_thread()
+def to_jsonable(value):
+    """Convert numpy/datetime/sets and nested objects into JSON-safe primitives."""
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (np.ndarray,)):
+        return [to_jsonable(v) for v in value.tolist()]
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [to_jsonable(v) for v in value]
     try:
-        calculate_equity(refresh_prices=False)
+        return float(value)
     except Exception:
-        pass
-
-    return render_template_string(
-        DASHBOARD,
-        cash=float(portfolio.get("cash", 0.0)),
-        equity=float(portfolio.get("equity", 0.0)),
-        market=portfolio.get("last_market") or market_status(force=False),
-        risk=get_risk_controls(),
-        auto=portfolio.setdefault("auto_runner", default_auto_runner()),
-        performance=performance_snapshot(),
-        entry_controls=entry_controls_snapshot()
-    )
+        return str(value)
 
 
-@app.route("/health")
-def health():
-    return jsonify({"status": "running", "time": local_ts_text(), "market_clock": market_clock()})
+def add_endpoint_meta(payload, endpoint, ok=True, warning=None, error=None):
+    meta = {
+        "ok": bool(ok),
+        "endpoint": endpoint,
+        "generated_local": local_ts_text(),
+        "market_clock": market_clock(),
+        "payload_present": payload is not None,
+        "content_type": "application/json",
+        "version": "visibility-fallback-2026-05-05"
+    }
+    if warning:
+        meta["warning"] = str(warning)
+    if error:
+        meta["error"] = str(error)
+
+    if isinstance(payload, dict):
+        result = dict(payload)
+        result["_endpoint_health"] = meta
+        return result
+
+    return {"_endpoint_health": meta, "data": payload}
 
 
-@app.route("/paper/status")
-def paper_status():
-    ensure_auto_thread()
-    calculate_equity(refresh_prices=False)
-    portfolio.setdefault("auto_runner", default_auto_runner())["market_clock"] = market_clock()
-    portfolio["auto_runner"]["market_open_now"] = bool(portfolio["auto_runner"]["market_clock"].get("is_open", False))
-    performance_snapshot()
-    save_state(portfolio)
-    return jsonify(portfolio)
+def json_response(payload, endpoint="unknown", status=200, ok=True, warning=None, error=None):
+    body = add_endpoint_meta(payload, endpoint=endpoint, ok=ok, warning=warning, error=error)
+    resp = jsonify(to_jsonable(body))
+    resp.status_code = status
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["X-Bot-Endpoint"] = endpoint
+    return resp
 
 
-@app.route("/paper/market")
-def paper_market():
-    force = request.args.get("force", "0") in ["1", "true", "yes"]
-    market = market_status(force=force)
-    portfolio["last_market"] = market
-    save_state(portfolio)
-    return jsonify(market)
-
-
-@app.route("/paper/run")
-def paper_run():
-    if not key_ok():
-        return jsonify({"error": "unauthorized", "hint": "set RUN_KEY or pass ?key=YOUR_KEY"}), 401
-
-    force_after_hours = request.args.get("after_hours", "0").lower() in ["1", "true", "yes", "on"]
-    allow_after_hours = ALLOW_MANUAL_AFTER_HOURS_TRADING and force_after_hours
-
+def state_file_diagnostic():
     try:
-        result = run_cycle(source="manual", allow_after_hours=allow_after_hours)
-        return jsonify(result)
-    except Exception as exc:
-        set_auto_error(exc)
-        save_state(portfolio)
-        return jsonify({"error": str(exc), "trace": traceback.format_exc()}), 500
-
-
-@app.route("/paper/reset")
-def paper_reset():
-    if not key_ok():
-        return jsonify({"error": "unauthorized", "hint": "set RUN_KEY or pass ?key=YOUR_KEY"}), 401
-    cash = float(request.args.get("cash", "10000"))
-    reset_state(cash)
-    return jsonify({"status": "reset", "cash": cash, "equity": cash})
-
-
-@app.route("/paper/close_all")
-def close_all():
-    if not key_ok():
-        return jsonify({"error": "unauthorized", "hint": "set RUN_KEY or pass ?key=YOUR_KEY"}), 401
-
-    clock = market_clock()
-    if not clock["is_open"] and not ALLOW_MANUAL_AFTER_HOURS_TRADING:
-        return jsonify({
-            "blocked": True,
-            "reason": f"market closed: {clock['reason']}",
-            "market_clock": clock
-        }), 409
-
-    exits = []
-    mode = portfolio.get("last_market", {}).get("market_mode", "manual_close")
-    for symbol, pos in list(portfolio.get("positions", {}).items()):
-        px = latest_price(symbol) or float(pos.get("last_price", pos.get("entry", 0)))
-        result = exit_position(symbol, px, "manual_close_all", market_mode=mode)
-        if result:
-            exits.append(result)
-
-    calculate_equity(refresh_prices=True)
-    save_state(portfolio)
-    return jsonify({"closed": exits, "cash": portfolio["cash"], "equity": portfolio["equity"]})
-
-
-
-@app.route("/paper/journal")
-def paper_journal():
-    ensure_auto_thread()
-    limit = request.args.get("limit", "20")
-    try:
-        limit = int(limit)
+        exists = os.path.exists(STATE_FILE)
+        size = os.path.getsize(STATE_FILE) if exists else 0
     except Exception:
-        limit = 20
-    return jsonify(analyze_trading_journal(limit=limit))
+        exists = False
+        size = 0
+    return {
+        "state_file": STATE_FILE,
+        "exists": bool(exists),
+        "size_bytes": int(size),
+        "positions_count": len(portfolio.get("positions", {}) or {}),
+        "trades_count": len(portfolio.get("trades", []) or []),
+        "history_count": len(portfolio.get("history", []) or []),
+        "reports_present": bool(portfolio.get("reports")),
+        "feedback_loop_present": bool(portfolio.get("feedback_loop"))
+    }
 
 
-@app.route("/paper/risk-review")
-def paper_risk_review():
-    ensure_auto_thread()
-    return jsonify(portfolio_risk_review())
+def compact_report(report):
+    if not isinstance(report, dict):
+        return report
+    return {
+        "type": report.get("type"),
+        "date": report.get("date"),
+        "generated_local": report.get("generated_local"),
+        "headline": report.get("headline", {}),
+        "feedback_loop": report.get("feedback_loop", {}),
+        "journal_summary": report.get("journal_summary", {}),
+        "journal_diagnosis": report.get("journal_diagnosis", []),
+        "risk_vulnerabilities": report.get("risk_vulnerabilities", []),
+        "risk_recommendations": report.get("risk_recommendations", []),
+        "plain_english": report.get("plain_english", []),
+        "recent_trades": (report.get("recent_trades", []) or [])[-12:]
+    }
 
 
-@app.route("/paper/explain")
-def paper_explain():
-    ensure_auto_thread()
-    force = request.args.get("force", "0").lower() in ["1", "true", "yes", "on"]
-    return jsonify(explain_current_system(force_market=force))
-
-
-@app.route("/paper/daily-plan")
-def paper_daily_plan():
-    ensure_auto_thread()
-    return jsonify(daily_trading_plan())
-
-@app.route("/paper/feedback-loop")
-def paper_feedback_loop():
-    ensure_auto_thread()
-    market = portfolio.get("last_market") or market_status(force=False)
-    params = apply_aggression_adjustments(risk_parameters(market), market)
-    rc = get_risk_controls()
-    clock = market_clock()
-    feedback = feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=True)
-    save_state(portfolio)
-    return jsonify(feedback)
-
-
-@app.route("/paper/intraday-report")
-def paper_intraday_report():
-    ensure_auto_thread()
-    market = portfolio.get("last_market") or market_status(force=False)
-    params = apply_aggression_adjustments(risk_parameters(market), market)
-    rc = get_risk_controls()
-    clock = market_clock()
-    report = store_compiled_report("intraday", market=market, params=params, risk_controls=rc, clock=clock)
-    save_state(portfolio)
-    return jsonify(report)
-
-
-@app.route("/paper/end-of-day-report")
-def paper_end_of_day_report():
-    ensure_auto_thread()
-    market = portfolio.get("last_market") or market_status(force=False)
-    params = apply_aggression_adjustments(risk_parameters(market), market)
-    rc = get_risk_controls()
-    clock = market_clock()
-    report = store_compiled_report("end_of_day", market=market, params=params, risk_controls=rc, clock=clock)
-    save_state(portfolio)
-    return jsonify(report)
-
-
-@app.route("/paper/reports")
-def paper_reports():
-    ensure_auto_thread()
-    return jsonify(portfolio.setdefault("reports", default_reports()))
-
-
-@app.route("/paper/report/today")
-def paper_report_today():
-    ensure_auto_thread()
+def reports_snapshot(full=False):
     reports = portfolio.setdefault("reports", default_reports())
-    report = reports.get("last_end_of_day_report") or reports.get("last_intraday_report")
-    if not report:
-        report = store_compiled_report("intraday")
-        save_state(portfolio)
-    return jsonify(report)
+    if full:
+        return reports
+    return {
+        "date": reports.get("date"),
+        "last_intraday_report": compact_report(reports.get("last_intraday_report")),
+        "last_end_of_day_report": compact_report(reports.get("last_end_of_day_report")),
+        "intraday_history_count": len(reports.get("intraday_history", []) or []),
+        "daily_history_count": len(reports.get("daily_history", []) or []),
+        "latest_intraday_times": [
+            r.get("generated_local") for r in (reports.get("intraday_history", []) or [])[-5:]
+            if isinstance(r, dict)
+        ],
+        "latest_daily_dates": [
+            r.get("date") for r in (reports.get("daily_history", []) or [])[-5:]
+            if isinstance(r, dict)
+        ]
+    }
 
 
-@app.route("/paper/config")
-def paper_config():
-    return jsonify({
+def config_snapshot():
+    return {
         "auto_run_enabled": AUTO_RUN_ENABLED,
         "auto_run_interval_seconds": AUTO_RUN_INTERVAL_SECONDS,
         "auto_run_market_only": AUTO_RUN_MARKET_ONLY,
@@ -2861,6 +2793,438 @@ def paper_config():
         "rates_rising_score_bump": RATES_RISING_SCORE_BUMP,
         "vix_rising_alloc_reduction": VIX_RISING_ALLOC_REDUCTION,
         "max_reports_stored": MAX_REPORTS_STORED
+    }
+
+
+def compact_status_snapshot(include_last_result=True):
+    clock = market_clock()
+    auto = portfolio.setdefault("auto_runner", default_auto_runner())
+    auto["market_clock"] = clock
+    auto["market_open_now"] = bool(clock.get("is_open", False))
+
+    perf = performance_snapshot()
+    rc = get_risk_controls()
+    market = portfolio.get("last_market") or {}
+    feedback = portfolio.get("feedback_loop") or default_feedback_loop()
+    reports = reports_snapshot(full=False)
+
+    last_result = auto.get("last_result") if include_last_result else None
+    if isinstance(last_result, dict):
+        last_result = {
+            "market_mode": last_result.get("market_mode"),
+            "regime": last_result.get("regime"),
+            "risk_score": last_result.get("risk_score"),
+            "trade_permission": last_result.get("trade_permission"),
+            "entries": last_result.get("entries", []),
+            "exits": last_result.get("exits", []),
+            "rotations": last_result.get("rotations", []),
+            "blocked_entries": (last_result.get("blocked_entries", []) or [])[:12],
+            "rejected_signals": (last_result.get("rejected_signals", []) or [])[:12],
+            "long_signals": last_result.get("long_signals", []),
+            "short_signals": last_result.get("short_signals", []),
+            "entry_block_reason": last_result.get("entry_block_reason"),
+            "new_entries_allowed": last_result.get("new_entries_allowed"),
+            "feedback_loop": last_result.get("feedback_loop")
+        }
+
+    return {
+        "status": "running",
+        "time": local_ts_text(),
+        "market_clock": clock,
+        "cash": round(float(portfolio.get("cash", 0.0)), 2),
+        "equity": round(float(portfolio.get("equity", 0.0)), 2),
+        "peak": round(float(portfolio.get("peak", portfolio.get("equity", 0.0))), 2),
+        "positions": portfolio.get("positions", {}),
+        "position_symbols": list((portfolio.get("positions", {}) or {}).keys()),
+        "performance": perf,
+        "realized_pnl": portfolio.get("realized_pnl", default_realized_pnl()),
+        "risk_controls": rc,
+        "feedback_loop": feedback,
+        "last_market": market,
+        "auto_runner": {
+            "enabled": auto.get("enabled"),
+            "market_only": auto.get("market_only"),
+            "interval_seconds": auto.get("interval_seconds"),
+            "market_open_now": auto.get("market_open_now"),
+            "market_clock": auto.get("market_clock"),
+            "thread_started": auto.get("thread_started"),
+            "last_run_local": auto.get("last_run_local"),
+            "last_run_source": auto.get("last_run_source"),
+            "last_successful_run_local": auto.get("last_successful_run_local"),
+            "last_skip_local": auto.get("last_skip_local"),
+            "last_skip_reason": auto.get("last_skip_reason"),
+            "last_error": auto.get("last_error"),
+            "last_error_trace": auto.get("last_error_trace"),
+            "last_result": last_result
+        },
+        "recent_trades": (portfolio.get("trades", []) or [])[-20:],
+        "history_tail": (portfolio.get("history", []) or [])[-30:],
+        "reports": reports,
+        "state_diagnostic": state_file_diagnostic()
+    }
+
+
+def build_checkup_snapshot(force_market=False, compile_report=False):
+    ensure_auto_thread()
+    try:
+        calculate_equity(refresh_prices=False)
+    except Exception:
+        pass
+
+    clock = market_clock()
+    market = portfolio.get("last_market") or {}
+    if force_market:
+        try:
+            market = market_status(force=True)
+            portfolio["last_market"] = market
+        except Exception:
+            market = portfolio.get("last_market") or {}
+
+    params = apply_aggression_adjustments(risk_parameters(market), market)
+    rc = get_risk_controls()
+    feedback = feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=True)
+    perf = performance_snapshot()
+    journal = analyze_trading_journal(limit=30)
+    risk = portfolio_risk_review()
+
+    report = None
+    if compile_report:
+        try:
+            report = store_compiled_report("intraday", market=market, params=params, risk_controls=rc, clock=clock)
+        except Exception as exc:
+            report = {"error": str(exc), "fallback": "report_compile_failed"}
+
+    save_state(portfolio)
+
+    plain_english = []
+    if feedback.get("self_defense_mode"):
+        plain_english.append("Self-defense mode is active: " + "; ".join(feedback.get("reasons", [])))
+    else:
+        plain_english.append("Self-defense mode is not active.")
+    plain_english.append(
+        f"Equity ${round(float(portfolio.get('equity', 0.0)), 2)}, realized today ${perf.get('realized_pnl_today')}, unrealized ${perf.get('unrealized_pnl')}."
+    )
+    if market:
+        plain_english.append(
+            f"Market mode {market.get('market_mode')} / regime {market.get('regime')} / risk score {market.get('risk_score')}."
+        )
+    if risk.get("vulnerabilities"):
+        plain_english.append("Top risk: " + str(risk.get("vulnerabilities", [])[0]))
+
+    return {
+        "status": "ok",
+        "summary": plain_english,
+        "market_clock": clock,
+        "health": {"status": "running", "time": local_ts_text()},
+        "compact_status": compact_status_snapshot(),
+        "feedback_loop": feedback,
+        "intraday_report": compact_report(report) if report else reports_snapshot(full=False).get("last_intraday_report"),
+        "risk_review": risk,
+        "journal": journal,
+        "explain": explain_current_system(force_market=False),
+        "config": config_snapshot(),
+        "state_diagnostic": state_file_diagnostic(),
+        "links": {
+            "health": "/health",
+            "compact_status": "/paper/status",
+            "full_status": "/paper/status?full=1",
+            "checkup": "/paper/checkup",
+            "feedback_loop": "/paper/feedback-loop",
+            "intraday_report": "/paper/intraday-report",
+            "risk_review": "/paper/risk-review",
+            "journal": "/paper/journal",
+            "explain": "/paper/explain"
+        }
+    }
+
+
+def safe_route(endpoint, builder, status=200, fallback_builder=None):
+    try:
+        payload = builder()
+        return json_response(payload, endpoint=endpoint, status=status, ok=True)
+    except Exception as exc:
+        error_payload = None
+        if fallback_builder:
+            try:
+                error_payload = fallback_builder()
+            except Exception:
+                error_payload = None
+        if error_payload is None:
+            error_payload = compact_status_snapshot(include_last_result=False)
+        error_payload["route_error"] = {
+            "message": str(exc),
+            "trace": traceback.format_exc()[-4000:]
+        }
+        return json_response(error_payload, endpoint=endpoint, status=500, ok=False, error=exc)
+
+
+# ============================================================
+# ROUTES
+# ============================================================
+@app.route("/")
+def home():
+    ensure_auto_thread()
+    try:
+        calculate_equity(refresh_prices=False)
+    except Exception:
+        pass
+
+    return render_template_string(
+        DASHBOARD,
+        cash=float(portfolio.get("cash", 0.0)),
+        equity=float(portfolio.get("equity", 0.0)),
+        market=portfolio.get("last_market") or market_status(force=False),
+        risk=get_risk_controls(),
+        auto=portfolio.setdefault("auto_runner", default_auto_runner()),
+        performance=performance_snapshot(),
+        entry_controls=entry_controls_snapshot()
+    )
+
+
+@app.route("/health")
+def health():
+    return json_response({
+        "status": "running",
+        "time": local_ts_text(),
+        "market_clock": market_clock(),
+        "state_diagnostic": state_file_diagnostic(),
+        "important_links": {
+            "checkup": "/paper/checkup",
+            "status": "/paper/status",
+            "full_status": "/paper/status?full=1",
+            "feedback_loop": "/paper/feedback-loop",
+            "intraday_report": "/paper/intraday-report"
+        }
+    }, endpoint="health")
+
+
+@app.route("/paper/checkup")
+def paper_checkup():
+    force = request.args.get("force", "0").lower() in ["1", "true", "yes", "on"]
+    compile_report = request.args.get("compile", "0").lower() in ["1", "true", "yes", "on"]
+    return safe_route(
+        "paper_checkup",
+        lambda: build_checkup_snapshot(force_market=force, compile_report=compile_report),
+        fallback_builder=lambda: compact_status_snapshot(include_last_result=True)
+    )
+
+
+@app.route("/paper/heartbeat")
+def paper_heartbeat():
+    return safe_route("paper_heartbeat", lambda: {
+        "status": "running",
+        "time": local_ts_text(),
+        "market_clock": market_clock(),
+        "compact_status": compact_status_snapshot(include_last_result=False),
+        "state_diagnostic": state_file_diagnostic()
+    })
+
+
+@app.route("/paper/status")
+def paper_status():
+    def build():
+        ensure_auto_thread()
+        calculate_equity(refresh_prices=False)
+        portfolio.setdefault("auto_runner", default_auto_runner())["market_clock"] = market_clock()
+        portfolio["auto_runner"]["market_open_now"] = bool(portfolio["auto_runner"]["market_clock"].get("is_open", False))
+        performance_snapshot()
+        save_state(portfolio)
+        full = request.args.get("full", "0").lower() in ["1", "true", "yes", "on"]
+        if full:
+            payload = dict(portfolio)
+            payload["state_diagnostic"] = state_file_diagnostic()
+            payload["note"] = "Full status requested. For scheduled check-ins use /paper/status or /paper/checkup."
+            return payload
+        return compact_status_snapshot(include_last_result=True)
+    return safe_route("paper_status", build, fallback_builder=lambda: compact_status_snapshot(include_last_result=True))
+
+
+@app.route("/paper/market")
+def paper_market():
+    def build():
+        force = request.args.get("force", "0").lower() in ["1", "true", "yes", "on"]
+        market = market_status(force=force)
+        portfolio["last_market"] = market
+        save_state(portfolio)
+        return market
+    return safe_route("paper_market", build, fallback_builder=lambda: portfolio.get("last_market") or {"market_mode": "unknown", "warning": "market unavailable"})
+
+
+@app.route("/paper/run")
+def paper_run():
+    if not key_ok():
+        return json_response({"error": "unauthorized", "hint": "set RUN_KEY or pass ?key=YOUR_KEY"}, endpoint="paper_run", status=401, ok=False)
+
+    force_after_hours = request.args.get("after_hours", "0").lower() in ["1", "true", "yes", "on"]
+    allow_after_hours = ALLOW_MANUAL_AFTER_HOURS_TRADING and force_after_hours
+
+    def build():
+        return run_cycle(source="manual", allow_after_hours=allow_after_hours)
+
+    return safe_route("paper_run", build, fallback_builder=lambda: compact_status_snapshot(include_last_result=True))
+
+
+@app.route("/paper/reset")
+def paper_reset():
+    if not key_ok():
+        return json_response({"error": "unauthorized", "hint": "set RUN_KEY or pass ?key=YOUR_KEY"}, endpoint="paper_reset", status=401, ok=False)
+    cash = float(request.args.get("cash", "10000"))
+    reset_state(cash)
+    return json_response({"status": "reset", "cash": cash, "equity": cash}, endpoint="paper_reset")
+
+
+@app.route("/paper/close_all")
+def close_all():
+    if not key_ok():
+        return json_response({"error": "unauthorized", "hint": "set RUN_KEY or pass ?key=YOUR_KEY"}, endpoint="paper_close_all", status=401, ok=False)
+
+    def build():
+        clock = market_clock()
+        if not clock["is_open"] and not ALLOW_MANUAL_AFTER_HOURS_TRADING:
+            return {
+                "blocked": True,
+                "reason": f"market closed: {clock['reason']}",
+                "market_clock": clock
+            }
+
+        exits = []
+        mode = portfolio.get("last_market", {}).get("market_mode", "manual_close")
+        for symbol, pos in list(portfolio.get("positions", {}).items()):
+            px = latest_price(symbol) or float(pos.get("last_price", pos.get("entry", 0)))
+            result = exit_position(symbol, px, "manual_close_all", market_mode=mode)
+            if result:
+                exits.append(result)
+
+        calculate_equity(refresh_prices=True)
+        save_state(portfolio)
+        return {"closed": exits, "cash": portfolio["cash"], "equity": portfolio["equity"]}
+    return safe_route("paper_close_all", build, fallback_builder=lambda: compact_status_snapshot())
+
+
+@app.route("/paper/journal")
+def paper_journal():
+    def build():
+        ensure_auto_thread()
+        limit = request.args.get("limit", "30")
+        try:
+            limit = int(limit)
+        except Exception:
+            limit = 30
+        journal = analyze_trading_journal(limit=limit)
+        if not journal.get("recent_trades"):
+            journal["note"] = "No recent trades found. Endpoint is working and returning an empty journal safely."
+        return journal
+    return safe_route("paper_journal", build, fallback_builder=lambda: {"recent_trades": [], "summary": {}, "diagnosis": ["journal unavailable fallback"]})
+
+
+@app.route("/paper/risk-review")
+def paper_risk_review():
+    return safe_route("paper_risk_review", lambda: portfolio_risk_review(), fallback_builder=lambda: {
+        "cash": round(float(portfolio.get("cash", 0.0)), 2),
+        "equity": round(float(portfolio.get("equity", 0.0)), 2),
+        "positions": list((portfolio.get("positions", {}) or {}).keys()),
+        "risk_controls": get_risk_controls(),
+        "vulnerabilities": ["risk review fallback returned because full risk review failed"]
+    })
+
+
+@app.route("/paper/explain")
+def paper_explain():
+    def build():
+        ensure_auto_thread()
+        force = request.args.get("force", "0").lower() in ["1", "true", "yes", "on"]
+        return explain_current_system(force_market=force)
+    return safe_route("paper_explain", build, fallback_builder=lambda: {
+        "plain_english": ["Explain endpoint fallback: bot is running, but full explanation failed."],
+        "compact_status": compact_status_snapshot(include_last_result=True)
+    })
+
+
+@app.route("/paper/daily-plan")
+def paper_daily_plan():
+    return safe_route("paper_daily_plan", lambda: daily_trading_plan(), fallback_builder=lambda: {
+        "date": today_key(),
+        "market_clock": market_clock(),
+        "checklist": [],
+        "guardrails": [],
+        "warning": "daily plan fallback returned because full plan failed"
+    })
+
+
+@app.route("/paper/feedback-loop")
+def paper_feedback_loop():
+    def build():
+        ensure_auto_thread()
+        market = portfolio.get("last_market") or market_status(force=False)
+        params = apply_aggression_adjustments(risk_parameters(market), market)
+        rc = get_risk_controls()
+        clock = market_clock()
+        feedback = feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=True)
+        save_state(portfolio)
+        return feedback
+    return safe_route("paper_feedback_loop", build, fallback_builder=lambda: portfolio.get("feedback_loop") or default_feedback_loop())
+
+
+@app.route("/paper/intraday-report")
+def paper_intraday_report():
+    def build():
+        ensure_auto_thread()
+        market = portfolio.get("last_market") or market_status(force=False)
+        params = apply_aggression_adjustments(risk_parameters(market), market)
+        rc = get_risk_controls()
+        clock = market_clock()
+        report = store_compiled_report("intraday", market=market, params=params, risk_controls=rc, clock=clock)
+        save_state(portfolio)
+        return compact_report(report) if request.args.get("full", "0").lower() not in ["1", "true", "yes", "on"] else report
+    return safe_route("paper_intraday_report", build, fallback_builder=lambda: reports_snapshot(full=False).get("last_intraday_report") or {"note": "no intraday report yet"})
+
+
+@app.route("/paper/end-of-day-report")
+def paper_end_of_day_report():
+    def build():
+        ensure_auto_thread()
+        market = portfolio.get("last_market") or market_status(force=False)
+        params = apply_aggression_adjustments(risk_parameters(market), market)
+        rc = get_risk_controls()
+        clock = market_clock()
+        report = store_compiled_report("end_of_day", market=market, params=params, risk_controls=rc, clock=clock)
+        save_state(portfolio)
+        return compact_report(report) if request.args.get("full", "0").lower() not in ["1", "true", "yes", "on"] else report
+    return safe_route("paper_end_of_day_report", build, fallback_builder=lambda: reports_snapshot(full=False).get("last_end_of_day_report") or {"note": "no end-of-day report yet"})
+
+
+@app.route("/paper/reports")
+def paper_reports():
+    full = request.args.get("full", "0").lower() in ["1", "true", "yes", "on"]
+    return safe_route("paper_reports", lambda: reports_snapshot(full=full), fallback_builder=lambda: default_reports())
+
+
+@app.route("/paper/report/today")
+def paper_report_today():
+    def build():
+        ensure_auto_thread()
+        reports = portfolio.setdefault("reports", default_reports())
+        report = reports.get("last_end_of_day_report") or reports.get("last_intraday_report")
+        if not report:
+            report = store_compiled_report("intraday")
+            save_state(portfolio)
+        full = request.args.get("full", "0").lower() in ["1", "true", "yes", "on"]
+        return report if full else compact_report(report)
+    return safe_route("paper_report_today", build, fallback_builder=lambda: {"note": "no report available yet", "compact_status": compact_status_snapshot()})
+
+
+@app.route("/paper/config")
+def paper_config():
+    return safe_route("paper_config", lambda: config_snapshot())
+
+
+@app.route("/paper/state-diagnostic")
+def paper_state_diagnostic():
+    return safe_route("paper_state_diagnostic", lambda: {
+        "state_diagnostic": state_file_diagnostic(),
+        "compact_status": compact_status_snapshot(include_last_result=False),
+        "reports": reports_snapshot(full=False),
+        "config": config_snapshot()
     })
 
 
