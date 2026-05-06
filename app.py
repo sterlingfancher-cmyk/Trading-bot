@@ -72,6 +72,21 @@ MIN_SHORT_ENTRY_SCORE = float(os.environ.get("MIN_SHORT_ENTRY_SCORE", "0.0120"))
 MAX_SECTOR_EXPOSURE_PCT = float(os.environ.get("MAX_SECTOR_EXPOSURE_PCT", "0.45"))
 MAX_POSITIONS_PER_SECTOR = int(os.environ.get("MAX_POSITIONS_PER_SECTOR", "3"))
 
+# Adaptive Tech Leadership Mode. This loosens tech/growth exposure limits only
+# when QQQ/XLK-style leadership is confirmed. The goal is to participate in real
+# tech-led bull trends without blindly chasing every tech signal. Non-tech sectors
+# still use the normal caps above.
+TECH_LEADERSHIP_MODE_ENABLED = os.environ.get("TECH_LEADERSHIP_MODE_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
+TECH_LEADERSHIP_SECTORS = [s.strip().upper() for s in os.environ.get("TECH_LEADERSHIP_SECTORS", "XLK,XLY").split(",") if s.strip()]
+TECH_LEADERSHIP_MIN_RISK_SCORE = int(os.environ.get("TECH_LEADERSHIP_MIN_RISK_SCORE", "70"))
+TECH_LEADERSHIP_MAX_EXPOSURE_PCT = float(os.environ.get("TECH_LEADERSHIP_MAX_EXPOSURE_PCT", "0.65"))
+TECH_LEADERSHIP_CAUTION_EXPOSURE_PCT = float(os.environ.get("TECH_LEADERSHIP_CAUTION_EXPOSURE_PCT", "0.60"))
+TECH_LEADERSHIP_MAX_POSITIONS_PER_SECTOR = int(os.environ.get("TECH_LEADERSHIP_MAX_POSITIONS_PER_SECTOR", "4"))
+TECH_LEADERSHIP_SCORE_RELIEF = float(os.environ.get("TECH_LEADERSHIP_SCORE_RELIEF", "0.0015"))
+TECH_LEADERSHIP_BREADTH_SCORE_BUMP = float(os.environ.get("TECH_LEADERSHIP_BREADTH_SCORE_BUMP", "0.0005"))
+TECH_LEADERSHIP_BREADTH_ALLOC_REDUCTION = float(os.environ.get("TECH_LEADERSHIP_BREADTH_ALLOC_REDUCTION", "0.95"))
+TECH_LEADERSHIP_ALLOW_GAP_PULLBACK = os.environ.get("TECH_LEADERSHIP_ALLOW_GAP_PULLBACK", "true").lower() not in ["0", "false", "no", "off"]
+
 # Self-defense feedback loop. These rules make the bot stop hunting after a bad sequence
 # and automatically compile intraday/end-of-day diagnostics into state.json.
 SELF_DEFENSE_STOP_LOSS_LIMIT = int(os.environ.get("SELF_DEFENSE_STOP_LOSS_LIMIT", "2"))
@@ -1082,6 +1097,8 @@ def market_status(force=False):
         "breadth": breadth
     }
 
+    result["tech_leadership"] = tech_leadership_status(result)
+
     _market_cache["ts"] = now
     _market_cache["data"] = result
     return result
@@ -1413,6 +1430,96 @@ def scan_signals(market):
     return long_signals, short_signals, rejected
 
 
+def tech_leadership_status(market):
+    """Return adaptive tech/growth leadership permissions for XLK/XLY-style markets."""
+    market = market or {}
+    futures = market.get("futures_bias", {}) or {}
+    breadth = market.get("breadth", {}) or {}
+    sector_leaders = market.get("sector_leaders", []) or []
+
+    qqq_5d = safe_float(market.get("qqq_5d_pct"))
+    spy_5d = safe_float(market.get("spy_5d_pct"))
+    risk_score = int(safe_float(market.get("risk_score")))
+    qqq_trend = market.get("qqq_trend")
+    spy_trend = market.get("spy_trend")
+    mode = market.get("market_mode")
+
+    tech_sector_leading = any(s in sector_leaders for s in TECH_LEADERSHIP_SECTORS)
+    qqq_outperforming = qqq_5d > spy_5d
+    strong_index_context = (
+        mode in ["risk_on", "constructive"]
+        and risk_score >= TECH_LEADERSHIP_MIN_RISK_SCORE
+        and qqq_trend == "up"
+        and spy_trend in ["up", "flat", "unknown"]
+        and qqq_5d > 0
+        and qqq_outperforming
+    )
+
+    futures_breakdown = futures.get("action") in ["block_opening_longs"] or futures.get("bias") in ["bearish", "mixed_bearish"]
+    active = bool(TECH_LEADERSHIP_MODE_ENABLED and strong_index_context and tech_sector_leading and not futures_breakdown)
+
+    caution_reasons = []
+    if safe_float(market.get("vix_5d_pct")) > 0:
+        caution_reasons.append("vix_rising")
+    if futures.get("action") in ["gap_chase_protection", "reduce_aggression", "tech_caution"]:
+        caution_reasons.append(f"futures_{futures.get('action')}")
+    if breadth.get("action") in ["tech_caution", "reduce_aggression"]:
+        caution_reasons.append(f"breadth_{breadth.get('state')}")
+
+    if not active:
+        cap = MAX_SECTOR_EXPOSURE_PCT
+        max_pos = MAX_POSITIONS_PER_SECTOR
+        state = "inactive"
+        reason = "tech leadership not confirmed"
+    elif caution_reasons:
+        cap = max(MAX_SECTOR_EXPOSURE_PCT, TECH_LEADERSHIP_CAUTION_EXPOSURE_PCT)
+        max_pos = max(MAX_POSITIONS_PER_SECTOR, TECH_LEADERSHIP_MAX_POSITIONS_PER_SECTOR)
+        state = "active_cautious"
+        reason = ",".join(caution_reasons)
+    else:
+        cap = max(MAX_SECTOR_EXPOSURE_PCT, TECH_LEADERSHIP_MAX_EXPOSURE_PCT)
+        max_pos = max(MAX_POSITIONS_PER_SECTOR, TECH_LEADERSHIP_MAX_POSITIONS_PER_SECTOR)
+        state = "active_confirmed"
+        reason = "qqq_outperforming_with_tech_sector_leadership"
+
+    return {
+        "enabled": bool(TECH_LEADERSHIP_MODE_ENABLED),
+        "active": bool(active),
+        "state": state,
+        "reason": reason,
+        "sectors": TECH_LEADERSHIP_SECTORS,
+        "risk_score": risk_score,
+        "qqq_5d_pct": round(qqq_5d, 2),
+        "spy_5d_pct": round(spy_5d, 2),
+        "qqq_outperforming_spy": bool(qqq_outperforming),
+        "sector_leaders": sector_leaders,
+        "tech_sector_leading": bool(tech_sector_leading),
+        "max_tech_sector_exposure_pct": round(cap * 100, 2),
+        "max_tech_positions_per_sector": int(max_pos),
+        "score_relief": TECH_LEADERSHIP_SCORE_RELIEF if active else 0.0,
+        "caution_reasons": caution_reasons
+    }
+
+
+def effective_sector_exposure_cap(market, sector):
+    tech = tech_leadership_status(market)
+    if sector in TECH_LEADERSHIP_SECTORS and tech.get("active"):
+        return (TECH_LEADERSHIP_CAUTION_EXPOSURE_PCT if tech.get("state") == "active_cautious" else TECH_LEADERSHIP_MAX_EXPOSURE_PCT)
+    return MAX_SECTOR_EXPOSURE_PCT
+
+
+def effective_max_positions_per_sector(market, sector):
+    tech = tech_leadership_status(market)
+    if sector in TECH_LEADERSHIP_SECTORS and tech.get("active"):
+        return max(MAX_POSITIONS_PER_SECTOR, TECH_LEADERSHIP_MAX_POSITIONS_PER_SECTOR)
+    return MAX_POSITIONS_PER_SECTOR
+
+
+def tech_leadership_entry_context(market, sector):
+    tech = tech_leadership_status(market)
+    return bool(sector in TECH_LEADERSHIP_SECTORS and tech.get("active")), tech
+
+
 def min_entry_score_for_market(market, side="long"):
     mode = market.get("market_mode", "neutral")
 
@@ -1460,8 +1567,16 @@ def min_entry_score_for_market(market, side="long"):
         adjusted += FUTURES_SCORE_BUMP_BEARISH
 
     breadth = market.get("breadth", {}) or {}
+    tech = tech_leadership_status(market)
     if breadth.get("action") in ["reduce_aggression", "tech_caution"]:
-        adjusted += BREADTH_SCORE_BUMP_NARROW
+        if tech.get("active"):
+            adjusted += TECH_LEADERSHIP_BREADTH_SCORE_BUMP
+        else:
+            adjusted += BREADTH_SCORE_BUMP_NARROW
+
+    if tech.get("active"):
+        adjusted -= TECH_LEADERSHIP_SCORE_RELIEF
+        adjusted = max(float(base), adjusted)
 
     return round(float(adjusted), 6)
 
@@ -1491,9 +1606,17 @@ def apply_aggression_adjustments(params, market):
         reduction_reasons.append("futures_bearish")
 
     breadth = market.get("breadth", {}) or {}
+    tech = tech_leadership_status(market)
     if breadth.get("action") in ["reduce_aggression", "tech_caution"]:
-        factor *= BREADTH_ALLOC_REDUCTION_NARROW
-        reduction_reasons.append(f"breadth_{breadth.get('state')}")
+        if tech.get("active"):
+            factor *= TECH_LEADERSHIP_BREADTH_ALLOC_REDUCTION
+            reduction_reasons.append(f"adaptive_tech_{breadth.get('state')}")
+        else:
+            factor *= BREADTH_ALLOC_REDUCTION_NARROW
+            reduction_reasons.append(f"breadth_{breadth.get('state')}")
+
+    if tech.get("active"):
+        adjusted["tech_leadership_mode"] = tech
 
     if reduction_reasons:
         adjusted["long_alloc_pct"] = round(float(adjusted.get("long_alloc_pct", 0.0)) * factor, 4)
@@ -1674,23 +1797,27 @@ def controlled_pullback_entry_check(signal, params, market, dynamic_min_score, e
 
     equity, sector_values, sector_counts = portfolio_sector_stats(exclude_symbol=exclude_symbol)
     sector_count = int(sector_counts.get(sector, 0))
-    if sector not in [None, "", "UNKNOWN"] and sector_count >= MAX_POSITIONS_PER_SECTOR:
+    max_sector_positions = effective_max_positions_per_sector(market, sector)
+    if sector not in [None, "", "UNKNOWN"] and sector_count >= max_sector_positions:
         return False, {
             "reason": "controlled_pullback_sector_position_limit",
             "sector": sector,
             "current_sector_positions": sector_count,
-            "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR
+            "max_positions_per_sector": max_sector_positions,
+            "tech_leadership": tech_leadership_status(market)
         }
 
     proposed_alloc = estimated_trade_allocation(signal, params) * CONTROLLED_PULLBACK_ALLOC_FACTOR
     projected_sector_value = float(sector_values.get(sector, 0.0)) + proposed_alloc
     projected_sector_pct = projected_sector_value / equity if equity > 0 else 0.0
-    if sector not in [None, "", "UNKNOWN"] and projected_sector_pct > MAX_SECTOR_EXPOSURE_PCT:
+    sector_cap = effective_sector_exposure_cap(market, sector)
+    if sector not in [None, "", "UNKNOWN"] and projected_sector_pct > sector_cap:
         return False, {
             "reason": "controlled_pullback_sector_exposure_cap",
             "sector": sector,
             "projected_sector_pct": round(projected_sector_pct * 100, 2),
-            "max_sector_exposure_pct": round(MAX_SECTOR_EXPOSURE_PCT * 100, 2)
+            "max_sector_exposure_pct": round(sector_cap * 100, 2),
+            "tech_leadership": tech_leadership_status(market)
         }
 
     return True, {
@@ -1780,26 +1907,30 @@ def entry_quality_check(signal, params, market, exclude_symbol=None):
     equity, sector_values, sector_counts = portfolio_sector_stats(exclude_symbol=exclude_symbol)
     sector_count = int(sector_counts.get(sector, 0))
 
-    if sector not in [None, "", "UNKNOWN"] and sector_count >= MAX_POSITIONS_PER_SECTOR:
+    max_sector_positions = effective_max_positions_per_sector(market, sector)
+    if sector not in [None, "", "UNKNOWN"] and sector_count >= max_sector_positions:
         return False, {
             "reason": "sector_position_limit",
             "symbol": symbol,
             "sector": sector,
             "current_sector_positions": sector_count,
-            "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR
+            "max_positions_per_sector": max_sector_positions,
+            "tech_leadership": tech_leadership_status(market)
         }
 
     proposed_alloc = estimated_trade_allocation(signal, params)
     projected_sector_value = float(sector_values.get(sector, 0.0)) + proposed_alloc
     projected_sector_pct = projected_sector_value / equity if equity > 0 else 0.0
 
-    if sector not in [None, "", "UNKNOWN"] and projected_sector_pct > MAX_SECTOR_EXPOSURE_PCT:
+    sector_cap = effective_sector_exposure_cap(market, sector)
+    if sector not in [None, "", "UNKNOWN"] and projected_sector_pct > sector_cap:
         return False, {
             "reason": "sector_exposure_cap",
             "symbol": symbol,
             "sector": sector,
             "projected_sector_pct": round(projected_sector_pct * 100, 2),
-            "max_sector_exposure_pct": round(MAX_SECTOR_EXPOSURE_PCT * 100, 2)
+            "max_sector_exposure_pct": round(sector_cap * 100, 2),
+            "tech_leadership": tech_leadership_status(market)
         }
 
     return True, {
@@ -1809,7 +1940,10 @@ def entry_quality_check(signal, params, market, exclude_symbol=None):
         "required_score": round(min_score, 6),
         "sector": sector,
         "projected_sector_pct": round(projected_sector_pct * 100, 2),
-        "sector_positions_after_entry": sector_count + 1
+        "max_sector_exposure_pct": round(effective_sector_exposure_cap(market, sector) * 100, 2),
+        "sector_positions_after_entry": sector_count + 1,
+        "max_positions_per_sector": effective_max_positions_per_sector(market, sector),
+        "tech_leadership": tech_leadership_status(market)
     }
 
 
@@ -1859,6 +1993,15 @@ def entry_controls_snapshot(clock=None, market=None, params=None, risk_controls=
         "sector_controls": {
             "max_sector_exposure_pct": round(MAX_SECTOR_EXPOSURE_PCT * 100, 2),
             "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR,
+            "adaptive_tech_leadership": tech_leadership_status(market),
+            "effective_sector_caps_pct": {
+                sector: round(effective_sector_exposure_cap(market, sector) * 100, 2)
+                for sector in sorted(set(list(sector_values.keys()) + TECH_LEADERSHIP_SECTORS))
+            },
+            "effective_sector_position_limits": {
+                sector: effective_max_positions_per_sector(market, sector)
+                for sector in sorted(set(list(sector_counts.keys()) + TECH_LEADERSHIP_SECTORS))
+            },
             "current_sector_exposure_pct": {
                 k: round((v / max(equity, 0.01)) * 100, 2)
                 for k, v in sorted(sector_values.items(), key=lambda x: x[1], reverse=True)
@@ -2770,7 +2913,8 @@ def feedback_loop_status(market=None, params=None, risk_controls=None, clock=Non
         "aggression_reduction_reason": params.get("aggression_reduction_reason", ""),
         "aggression_reduction_factor": params.get("aggression_reduction_factor", 1.0),
         "futures_bias": futures,
-        "breadth": breadth
+        "breadth": breadth,
+        "tech_leadership": tech_leadership_status(market)
     }
 
     if persist:
@@ -3031,16 +3175,18 @@ def portfolio_risk_review():
     if rows and rows[0]["position_pct_of_equity"] >= 25:
         vulnerabilities.append(f"Largest position is {rows[0]['symbol']} at {rows[0]['position_pct_of_equity']}% of equity.")
     for sector, value_pct in sector_pct.items():
-        if value_pct >= round(MAX_SECTOR_EXPOSURE_PCT * 100, 2):
+        cap_pct = round(effective_sector_exposure_cap(market, sector) * 100, 2)
+        if value_pct >= cap_pct:
             vulnerabilities.append(
-                f"Sector concentration is high in {sector} at {value_pct}% of equity; cap is {round(MAX_SECTOR_EXPOSURE_PCT * 100, 2)}%."
+                f"Sector concentration is high in {sector} at {value_pct}% of equity; adaptive cap is {cap_pct}%."
             )
 
     sector_counts = _count_by(rows, "sector")
     for sector, count in sector_counts.items():
-        if sector not in [None, "", "UNKNOWN"] and count > MAX_POSITIONS_PER_SECTOR:
+        max_count = effective_max_positions_per_sector(market, sector)
+        if sector not in [None, "", "UNKNOWN"] and count > max_count:
             vulnerabilities.append(
-                f"Too many open positions in {sector}: {count}; limit is {MAX_POSITIONS_PER_SECTOR}."
+                f"Too many open positions in {sector}: {count}; adaptive limit is {max_count}."
             )
     if cash_pct < 15:
         vulnerabilities.append(f"Cash buffer is low at {cash_pct}% of equity.")
@@ -3064,7 +3210,11 @@ def portfolio_risk_review():
         recommendations.append("Market mode is not strongly risk-on; reduce fresh entries and prioritize preserving cash.")
 
     if growth_pct >= 50:
-        recommendations.append("Growth exposure is heavy; avoid adding more XLK/XLY/XLF names unless they clearly outrank existing holdings.")
+        tech = tech_leadership_status(market)
+        if tech.get("active"):
+            recommendations.append("Growth/tech exposure is elevated, but adaptive tech leadership mode allows higher XLK/XLY exposure while leadership remains confirmed; keep entries staggered and scores strong.")
+        else:
+            recommendations.append("Growth exposure is heavy; avoid adding more XLK/XLY/XLF names unless they clearly outrank existing holdings.")
     if cash_pct < 20:
         recommendations.append("Keep a cash reserve; do not force full deployment just because signals are available.")
     if safe_float(perf.get("unrealized_pnl")) > 0 and safe_float(rc.get("intraday_drawdown_pct")) > 0.75:
@@ -3080,6 +3230,7 @@ def portfolio_risk_review():
         "risk_score": market.get("risk_score"),
         "futures_bias": market.get("futures_bias", {}),
         "breadth": market.get("breadth", {}),
+        "tech_leadership": tech_leadership_status(market),
         "risk_controls": rc,
         "performance": perf,
         "exposures": {
@@ -3544,6 +3695,15 @@ def config_snapshot():
         "min_short_entry_score": MIN_SHORT_ENTRY_SCORE,
         "max_sector_exposure_pct": MAX_SECTOR_EXPOSURE_PCT,
         "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR,
+        "tech_leadership_mode_enabled": TECH_LEADERSHIP_MODE_ENABLED,
+        "tech_leadership_sectors": TECH_LEADERSHIP_SECTORS,
+        "tech_leadership_min_risk_score": TECH_LEADERSHIP_MIN_RISK_SCORE,
+        "tech_leadership_max_exposure_pct": TECH_LEADERSHIP_MAX_EXPOSURE_PCT,
+        "tech_leadership_caution_exposure_pct": TECH_LEADERSHIP_CAUTION_EXPOSURE_PCT,
+        "tech_leadership_max_positions_per_sector": TECH_LEADERSHIP_MAX_POSITIONS_PER_SECTOR,
+        "tech_leadership_score_relief": TECH_LEADERSHIP_SCORE_RELIEF,
+        "tech_leadership_breadth_score_bump": TECH_LEADERSHIP_BREADTH_SCORE_BUMP,
+        "tech_leadership_breadth_alloc_reduction": TECH_LEADERSHIP_BREADTH_ALLOC_REDUCTION,
         "self_defense_stop_loss_limit": SELF_DEFENSE_STOP_LOSS_LIMIT,
         "self_defense_realized_loss_pause_pct": SELF_DEFENSE_REALIZED_LOSS_PAUSE_PCT,
         "self_defense_hard_daily_loss_pct": SELF_DEFENSE_HARD_DAILY_LOSS_PCT,
