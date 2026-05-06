@@ -131,6 +131,21 @@ PULLBACK_WATCH_TTL_SECONDS = int(os.environ.get("PULLBACK_WATCH_TTL_SECONDS", "3
 PULLBACK_MAX_ABOVE_MA20 = float(os.environ.get("PULLBACK_MAX_ABOVE_MA20", "0.0120"))
 PULLBACK_RECLAIM_SCORE_BONUS = float(os.environ.get("PULLBACK_RECLAIM_SCORE_BONUS", "0.0010"))
 
+# Controlled pullback starter. This is a conservative participation valve for
+# strong trend days where futures are extended and breadth is tech-concentrated.
+# It allows at most a small, high-quality starter after the opening noise has
+# passed, while preserving all late-day, self-defense, sector, and stop controls.
+CONTROLLED_PULLBACK_ENTRY_ENABLED = os.environ.get("CONTROLLED_PULLBACK_ENTRY_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
+CONTROLLED_PULLBACK_MIN_SCORE = float(os.environ.get("CONTROLLED_PULLBACK_MIN_SCORE", "0.0120"))
+CONTROLLED_PULLBACK_SCORE_DISCOUNT = float(os.environ.get("CONTROLLED_PULLBACK_SCORE_DISCOUNT", "0.0050"))
+CONTROLLED_PULLBACK_MINUTES_AFTER_OPEN = int(os.environ.get("CONTROLLED_PULLBACK_MINUTES_AFTER_OPEN", "60"))
+CONTROLLED_PULLBACK_NO_ENTRY_LAST_MINUTES = int(os.environ.get("CONTROLLED_PULLBACK_NO_ENTRY_LAST_MINUTES", "60"))
+CONTROLLED_PULLBACK_MAX_ENTRIES_PER_DAY = int(os.environ.get("CONTROLLED_PULLBACK_MAX_ENTRIES_PER_DAY", "1"))
+CONTROLLED_PULLBACK_ALLOC_FACTOR = float(os.environ.get("CONTROLLED_PULLBACK_ALLOC_FACTOR", "0.50"))
+CONTROLLED_PULLBACK_REQUIRE_CAUTION_CONTEXT = os.environ.get("CONTROLLED_PULLBACK_REQUIRE_CAUTION_CONTEXT", "true").lower() not in ["0", "false", "no", "off"]
+CONTROLLED_PULLBACK_REQUIRE_SECTOR_LEADER = os.environ.get("CONTROLLED_PULLBACK_REQUIRE_SECTOR_LEADER", "true").lower() not in ["0", "false", "no", "off"]
+CONTROLLED_PULLBACK_ALLOW_EMPTY_BOOK_ONLY = os.environ.get("CONTROLLED_PULLBACK_ALLOW_EMPTY_BOOK_ONLY", "true").lower() not in ["0", "false", "no", "off"]
+
 RUN_LOCK = threading.Lock()
 AUTO_THREAD_STARTED = False
 
@@ -1519,6 +1534,179 @@ def estimated_trade_allocation(signal, params):
     return min(cash, equity * alloc_pct)
 
 
+
+
+def controlled_pullback_window_status(clock=None):
+    """Return whether a controlled pullback starter is allowed by time-of-day."""
+    clock = clock or market_clock()
+    current = now_local()
+    open_dt = regular_open_datetime(current)
+    close_dt = current.replace(
+        hour=REGULAR_CLOSE_HOUR,
+        minute=REGULAR_CLOSE_MINUTE,
+        second=0,
+        microsecond=0
+    )
+
+    minutes_since_open = max(0.0, (current - open_dt).total_seconds() / 60.0)
+    minutes_to_close = max(0.0, (close_dt - current).total_seconds() / 60.0)
+
+    active = (
+        bool(clock.get("is_open", False))
+        and minutes_since_open >= CONTROLLED_PULLBACK_MINUTES_AFTER_OPEN
+        and minutes_to_close > CONTROLLED_PULLBACK_NO_ENTRY_LAST_MINUTES
+    )
+
+    if not bool(clock.get("is_open", False)):
+        reason = "market_not_open"
+    elif minutes_since_open < CONTROLLED_PULLBACK_MINUTES_AFTER_OPEN:
+        reason = "waiting_after_open"
+    elif minutes_to_close <= CONTROLLED_PULLBACK_NO_ENTRY_LAST_MINUTES:
+        reason = "too_close_to_close"
+    else:
+        reason = "ok"
+
+    return {
+        "active": bool(active),
+        "reason": reason,
+        "minutes_since_open": round(minutes_since_open, 1),
+        "required_minutes_after_open": CONTROLLED_PULLBACK_MINUTES_AFTER_OPEN,
+        "minutes_to_close": round(minutes_to_close, 1),
+        "no_entry_last_minutes": CONTROLLED_PULLBACK_NO_ENTRY_LAST_MINUTES
+    }
+
+
+def controlled_pullback_entries_today():
+    try:
+        return sum(
+            1 for t in trades_for_date(today_key())
+            if t.get("action") == "entry"
+            and str(t.get("entry_context", "")).startswith("controlled_pullback")
+        )
+    except Exception:
+        return 0
+
+
+def controlled_pullback_context_active(market):
+    futures = market.get("futures_bias", {}) or {}
+    breadth = market.get("breadth", {}) or {}
+    return (
+        futures.get("action") in ["gap_chase_protection", "reduce_aggression", "tech_caution"]
+        or breadth.get("action") in ["tech_caution", "reduce_aggression"]
+    )
+
+
+def controlled_pullback_entry_check(signal, params, market, dynamic_min_score, exclude_symbol=None):
+    """Conservative starter override for valid long signals on extended trend days.
+
+    This does not override halts, self-defense, late-day cutoff, sector caps, or cooldowns.
+    It only lets one small starter through when the regular dynamic score floor is high
+    because futures/breadth/VIX are cautionary, but the candidate still has acceptable
+    momentum, sector alignment, and enough time left in the session.
+    """
+    symbol = signal.get("symbol")
+    side = signal.get("side", "long")
+    sector = signal.get("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN"))
+    score = float(signal.get("score", 0.0) or 0.0)
+    clock = market_clock()
+    window = controlled_pullback_window_status(clock)
+    rc = get_risk_controls()
+    feedback = portfolio.get("feedback_loop") or default_feedback_loop()
+
+    if not CONTROLLED_PULLBACK_ENTRY_ENABLED:
+        return False, {"reason": "controlled_pullback_disabled"}
+    if side != "long":
+        return False, {"reason": "controlled_pullback_long_only"}
+    if not window.get("active", False):
+        return False, {"reason": "controlled_pullback_time_filter", "window": window}
+    if bool(rc.get("halted", False)) or bool(rc.get("profit_guard_active", False)):
+        return False, {"reason": "risk_or_profit_guard_active"}
+    if bool(feedback.get("block_new_entries", False)) or bool(feedback.get("hard_halt", False)):
+        return False, {"reason": "feedback_loop_blocks_entries"}
+    if bool(feedback.get("late_day_entry_cutoff", False)):
+        return False, {"reason": "late_day_entry_cutoff"}
+    if CONTROLLED_PULLBACK_REQUIRE_CAUTION_CONTEXT and not controlled_pullback_context_active(market):
+        return False, {"reason": "controlled_pullback_context_not_active"}
+    if CONTROLLED_PULLBACK_ALLOW_EMPTY_BOOK_ONLY and len(portfolio.get("positions", {}) or {}) > 0:
+        return False, {"reason": "controlled_pullback_empty_book_only"}
+    if controlled_pullback_entries_today() >= CONTROLLED_PULLBACK_MAX_ENTRIES_PER_DAY:
+        return False, {
+            "reason": "controlled_pullback_daily_limit",
+            "max_entries_per_day": CONTROLLED_PULLBACK_MAX_ENTRIES_PER_DAY
+        }
+
+    try:
+        stop_losses_today = sum(
+            1 for t in trades_for_date(today_key())
+            if t.get("action") == "exit" and t.get("exit_reason") == "stop_loss"
+        )
+    except Exception:
+        stop_losses_today = 0
+    if stop_losses_today > 0:
+        return False, {"reason": "controlled_pullback_no_after_stop_loss", "stop_losses_today": stop_losses_today}
+
+    sector_aligned = sector in market.get("sector_leaders", [])
+    if CONTROLLED_PULLBACK_REQUIRE_SECTOR_LEADER and not sector_aligned and score < POST_STOP_EXCEPTIONAL_SCORE:
+        return False, {
+            "reason": "controlled_pullback_sector_alignment_required",
+            "sector": sector,
+            "sector_leaders": market.get("sector_leaders", []),
+            "score": round(score, 6),
+            "required_exceptional_score": POST_STOP_EXCEPTIONAL_SCORE
+        }
+
+    base_floor = max(CONTROLLED_PULLBACK_MIN_SCORE, MIN_ENTRY_SCORE_RISK_ON)
+    # Do not let very weak names bypass the dynamic filter. The starter may only
+    # use a modest discount from the active floor, and still must beat the base floor.
+    discounted_dynamic_floor = max(base_floor, float(dynamic_min_score) - CONTROLLED_PULLBACK_SCORE_DISCOUNT)
+    required_score = min(float(dynamic_min_score), discounted_dynamic_floor)
+    required_score = max(base_floor, required_score)
+
+    if score < required_score:
+        return False, {
+            "reason": "controlled_pullback_score_below_required",
+            "symbol": symbol,
+            "score": round(score, 6),
+            "required_score": round(required_score, 6),
+            "dynamic_required_score": round(float(dynamic_min_score), 6),
+            "base_floor": round(base_floor, 6)
+        }
+
+    equity, sector_values, sector_counts = portfolio_sector_stats(exclude_symbol=exclude_symbol)
+    sector_count = int(sector_counts.get(sector, 0))
+    if sector not in [None, "", "UNKNOWN"] and sector_count >= MAX_POSITIONS_PER_SECTOR:
+        return False, {
+            "reason": "controlled_pullback_sector_position_limit",
+            "sector": sector,
+            "current_sector_positions": sector_count,
+            "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR
+        }
+
+    proposed_alloc = estimated_trade_allocation(signal, params) * CONTROLLED_PULLBACK_ALLOC_FACTOR
+    projected_sector_value = float(sector_values.get(sector, 0.0)) + proposed_alloc
+    projected_sector_pct = projected_sector_value / equity if equity > 0 else 0.0
+    if sector not in [None, "", "UNKNOWN"] and projected_sector_pct > MAX_SECTOR_EXPOSURE_PCT:
+        return False, {
+            "reason": "controlled_pullback_sector_exposure_cap",
+            "sector": sector,
+            "projected_sector_pct": round(projected_sector_pct * 100, 2),
+            "max_sector_exposure_pct": round(MAX_SECTOR_EXPOSURE_PCT * 100, 2)
+        }
+
+    return True, {
+        "reason": "controlled_pullback_entry_ok",
+        "symbol": symbol,
+        "score": round(score, 6),
+        "required_score": round(required_score, 6),
+        "dynamic_required_score": round(float(dynamic_min_score), 6),
+        "alloc_factor": CONTROLLED_PULLBACK_ALLOC_FACTOR,
+        "sector": sector,
+        "sector_aligned": sector_aligned,
+        "window": window,
+        "futures_bias": market.get("futures_bias", {}),
+        "breadth": market.get("breadth", {})
+    }
+
 def entry_quality_check(signal, params, market, exclude_symbol=None):
     """Validate signal quality before opening a new position or rotating into one."""
     symbol = signal.get("symbol")
@@ -1528,12 +1716,21 @@ def entry_quality_check(signal, params, market, exclude_symbol=None):
     min_score = float(min_entry_score_for_market(market, side))
 
     if score < min_score:
+        controlled_ok, controlled_info = controlled_pullback_entry_check(
+            signal, params, market, min_score, exclude_symbol=exclude_symbol
+        )
+        if controlled_ok:
+            signal["entry_context"] = "controlled_pullback_starter"
+            signal["alloc_factor"] = CONTROLLED_PULLBACK_ALLOC_FACTOR
+            return True, controlled_info
+
         return False, {
             "reason": "entry_score_below_minimum",
             "symbol": symbol,
             "score": round(score, 6),
             "required_score": round(min_score, 6),
-            "market_mode": market.get("market_mode")
+            "market_mode": market.get("market_mode"),
+            "controlled_pullback_info": controlled_info
         }
 
     try:
@@ -1648,6 +1845,17 @@ def entry_controls_snapshot(clock=None, market=None, params=None, risk_controls=
             "profit_lock_level_3_pct": round(PROFIT_LOCK_LEVEL_3_PCT * 100, 2)
         },
         "pullback_watchlist_count": len(portfolio.get("pullback_watchlist", {}) or {}),
+        "controlled_pullback": {
+            "enabled": CONTROLLED_PULLBACK_ENTRY_ENABLED,
+            "window": controlled_pullback_window_status(clock),
+            "min_score": CONTROLLED_PULLBACK_MIN_SCORE,
+            "max_entries_per_day": CONTROLLED_PULLBACK_MAX_ENTRIES_PER_DAY,
+            "entries_today": controlled_pullback_entries_today(),
+            "alloc_factor": CONTROLLED_PULLBACK_ALLOC_FACTOR,
+            "require_caution_context": CONTROLLED_PULLBACK_REQUIRE_CAUTION_CONTEXT,
+            "require_sector_leader": CONTROLLED_PULLBACK_REQUIRE_SECTOR_LEADER,
+            "empty_book_only": CONTROLLED_PULLBACK_ALLOW_EMPTY_BOOK_ONLY
+        },
         "sector_controls": {
             "max_sector_exposure_pct": round(MAX_SECTOR_EXPOSURE_PCT * 100, 2),
             "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR,
@@ -1807,8 +2015,10 @@ def enter_position(signal, params, market_mode=None):
         return {"symbol": symbol, "side": side, "blocked": True, "reason": "cooldown"}
 
     alloc_pct = float(params["short_alloc_pct"] if side == "short" else params["long_alloc_pct"])
+    alloc_factor = float(signal.get("alloc_factor", 1.0) or 1.0)
+    alloc_factor = max(0.05, min(1.0, alloc_factor))
     equity = max(float(portfolio.get("equity", portfolio.get("cash", 0.0))), 0.01)
-    alloc = min(float(portfolio.get("cash", 0.0)), equity * alloc_pct)
+    alloc = min(float(portfolio.get("cash", 0.0)), equity * alloc_pct * alloc_factor)
 
     if alloc < MIN_TRADE_ALLOC or px <= 0:
         return {"symbol": symbol, "side": side, "blocked": True, "reason": "insufficient_cash_or_bad_price"}
@@ -1837,14 +2047,20 @@ def enter_position(signal, params, market_mode=None):
 
     portfolio.setdefault("positions", {})[symbol] = pos
 
-    record_trade("entry", symbol, side, px, shares, {
+    trade_extra = {
         "alloc": round(float(alloc), 2),
         "score": round(float(signal.get("score", 0.0)), 6),
         "sector": pos["sector"],
         "market_mode": market_mode
-    })
+    }
+    if signal.get("entry_context"):
+        trade_extra["entry_context"] = signal.get("entry_context")
+    if alloc_factor < 1.0:
+        trade_extra["alloc_factor"] = round(float(alloc_factor), 4)
 
-    return {
+    record_trade("entry", symbol, side, px, shares, trade_extra)
+
+    result = {
         "symbol": symbol,
         "side": side,
         "entry": round(px, 4),
@@ -1852,6 +2068,11 @@ def enter_position(signal, params, market_mode=None):
         "alloc": round(alloc, 2),
         "score": round(float(signal.get("score", 0.0)), 6)
     }
+    if signal.get("entry_context"):
+        result["entry_context"] = signal.get("entry_context")
+    if alloc_factor < 1.0:
+        result["alloc_factor"] = round(float(alloc_factor), 4)
+    return result
 
 
 def manage_exits(params, market):
@@ -3364,6 +3585,16 @@ def config_snapshot():
         "pullback_watch_ttl_seconds": PULLBACK_WATCH_TTL_SECONDS,
         "pullback_max_above_ma20": PULLBACK_MAX_ABOVE_MA20,
         "pullback_reclaim_score_bonus": PULLBACK_RECLAIM_SCORE_BONUS,
+        "controlled_pullback_entry_enabled": CONTROLLED_PULLBACK_ENTRY_ENABLED,
+        "controlled_pullback_min_score": CONTROLLED_PULLBACK_MIN_SCORE,
+        "controlled_pullback_score_discount": CONTROLLED_PULLBACK_SCORE_DISCOUNT,
+        "controlled_pullback_minutes_after_open": CONTROLLED_PULLBACK_MINUTES_AFTER_OPEN,
+        "controlled_pullback_no_entry_last_minutes": CONTROLLED_PULLBACK_NO_ENTRY_LAST_MINUTES,
+        "controlled_pullback_max_entries_per_day": CONTROLLED_PULLBACK_MAX_ENTRIES_PER_DAY,
+        "controlled_pullback_alloc_factor": CONTROLLED_PULLBACK_ALLOC_FACTOR,
+        "controlled_pullback_require_caution_context": CONTROLLED_PULLBACK_REQUIRE_CAUTION_CONTEXT,
+        "controlled_pullback_require_sector_leader": CONTROLLED_PULLBACK_REQUIRE_SECTOR_LEADER,
+        "controlled_pullback_allow_empty_book_only": CONTROLLED_PULLBACK_ALLOW_EMPTY_BOOK_ONLY,
         "max_reports_stored": MAX_REPORTS_STORED
     }
 
