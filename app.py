@@ -85,6 +85,52 @@ RATES_RISING_SCORE_BUMP = float(os.environ.get("RATES_RISING_SCORE_BUMP", "0.001
 VIX_RISING_ALLOC_REDUCTION = float(os.environ.get("VIX_RISING_ALLOC_REDUCTION", "0.70"))
 MAX_REPORTS_STORED = int(os.environ.get("MAX_REPORTS_STORED", "80"))
 
+# Futures / breadth / relative-strength confirmation. These are confirmation layers,
+# not standalone trade triggers. They raise quality requirements or reduce size when
+# index futures or breadth conflict with the regular-session risk-on signal.
+FUTURES_BIAS_ENABLED = os.environ.get("FUTURES_BIAS_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
+FUTURES_ES_SYMBOL = os.environ.get("FUTURES_ES_SYMBOL", "ES=F")
+FUTURES_NQ_SYMBOL = os.environ.get("FUTURES_NQ_SYMBOL", "NQ=F")
+FUTURES_BULLISH_NQ_PCT = float(os.environ.get("FUTURES_BULLISH_NQ_PCT", "0.0035"))
+FUTURES_BULLISH_ES_PCT = float(os.environ.get("FUTURES_BULLISH_ES_PCT", "0.0020"))
+FUTURES_BEARISH_NQ_PCT = float(os.environ.get("FUTURES_BEARISH_NQ_PCT", "-0.0035"))
+FUTURES_BEARISH_ES_PCT = float(os.environ.get("FUTURES_BEARISH_ES_PCT", "-0.0030"))
+FUTURES_GAP_UP_CHASE_PCT = float(os.environ.get("FUTURES_GAP_UP_CHASE_PCT", "0.0075"))
+FUTURES_SCORE_BUMP_CAUTION = float(os.environ.get("FUTURES_SCORE_BUMP_CAUTION", "0.0025"))
+FUTURES_SCORE_BUMP_BEARISH = float(os.environ.get("FUTURES_SCORE_BUMP_BEARISH", "0.0040"))
+FUTURES_ALLOC_REDUCTION_CAUTION = float(os.environ.get("FUTURES_ALLOC_REDUCTION_CAUTION", "0.80"))
+FUTURES_ALLOC_REDUCTION_BEARISH = float(os.environ.get("FUTURES_ALLOC_REDUCTION_BEARISH", "0.55"))
+
+BREADTH_CONFIRMATION_ENABLED = os.environ.get("BREADTH_CONFIRMATION_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
+BREADTH_SCORE_BUMP_NARROW = float(os.environ.get("BREADTH_SCORE_BUMP_NARROW", "0.0020"))
+BREADTH_ALLOC_REDUCTION_NARROW = float(os.environ.get("BREADTH_ALLOC_REDUCTION_NARROW", "0.85"))
+RELATIVE_STRENGTH_SCORE_BONUS = float(os.environ.get("RELATIVE_STRENGTH_SCORE_BONUS", "0.0020"))
+RELATIVE_STRENGTH_SCORE_PENALTY = float(os.environ.get("RELATIVE_STRENGTH_SCORE_PENALTY", "0.0015"))
+
+# Winner protection / profit-taking. These stop good trades from becoming full losers
+# and bank part of a move while leaving a runner.
+PARTIAL_PROFIT_ENABLED = os.environ.get("PARTIAL_PROFIT_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
+PARTIAL_PROFIT_TRIGGER_PCT = float(os.environ.get("PARTIAL_PROFIT_TRIGGER_PCT", "0.0200"))
+PARTIAL_PROFIT_FRACTION = float(os.environ.get("PARTIAL_PROFIT_FRACTION", "0.33"))
+PROFIT_LOCK_LEVEL_1_PCT = float(os.environ.get("PROFIT_LOCK_LEVEL_1_PCT", "0.0075"))
+PROFIT_LOCK_LEVEL_2_PCT = float(os.environ.get("PROFIT_LOCK_LEVEL_2_PCT", "0.0125"))
+PROFIT_LOCK_LEVEL_3_PCT = float(os.environ.get("PROFIT_LOCK_LEVEL_3_PCT", "0.0200"))
+PROFIT_LOCK_BREAKEVEN_PCT = float(os.environ.get("PROFIT_LOCK_BREAKEVEN_PCT", "0.0010"))
+PROFIT_LOCK_LEVEL_3_FLOOR_PCT = float(os.environ.get("PROFIT_LOCK_LEVEL_3_FLOOR_PCT", "0.0075"))
+
+# Stricter behavior after stop-outs. One stop forces stronger, sector-aligned entries;
+# two stop-outs already trigger self-defense from the feedback loop.
+POST_STOP_SCORE_BUMP = float(os.environ.get("POST_STOP_SCORE_BUMP", "0.0040"))
+POST_STOP_REQUIRE_SECTOR_LEADER = os.environ.get("POST_STOP_REQUIRE_SECTOR_LEADER", "true").lower() not in ["0", "false", "no", "off"]
+POST_STOP_EXCEPTIONAL_SCORE = float(os.environ.get("POST_STOP_EXCEPTIONAL_SCORE", "0.0300"))
+
+# Pullback/reclaim watchlist for strong symbols that were rejected only because they
+# were extended. The bot can consider them again after a controlled pullback.
+PULLBACK_RECLAIM_ENABLED = os.environ.get("PULLBACK_RECLAIM_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
+PULLBACK_WATCH_TTL_SECONDS = int(os.environ.get("PULLBACK_WATCH_TTL_SECONDS", "3600"))
+PULLBACK_MAX_ABOVE_MA20 = float(os.environ.get("PULLBACK_MAX_ABOVE_MA20", "0.0120"))
+PULLBACK_RECLAIM_SCORE_BONUS = float(os.environ.get("PULLBACK_RECLAIM_SCORE_BONUS", "0.0010"))
+
 RUN_LOCK = threading.Lock()
 AUTO_THREAD_STARTED = False
 
@@ -101,7 +147,9 @@ UNIVERSE = [
 ]
 
 SECTOR_ETFS = ["XLK", "XLY", "XLF", "XLE", "XLV", "XLU", "XLI", "XLP"]
-MACRO_SYMBOLS = ["SPY", "QQQ", "^VIX", "^TNX"] + SECTOR_ETFS
+FUTURES_SYMBOLS = [FUTURES_ES_SYMBOL, FUTURES_NQ_SYMBOL]
+BREADTH_SYMBOLS = ["RSP", "IWM", "DIA", "ARKK"]
+MACRO_SYMBOLS = ["SPY", "QQQ", "^VIX", "^TNX"] + SECTOR_ETFS + BREADTH_SYMBOLS
 
 SYMBOL_SECTOR = {
     "NVDA": "XLK", "AMD": "XLK", "AVGO": "XLK", "TSM": "XLK", "MU": "XLK", "ARM": "XLK",
@@ -248,7 +296,8 @@ def default_state():
         "realized_pnl": default_realized_pnl(),
         "performance": default_performance(),
         "feedback_loop": default_feedback_loop(),
-        "reports": default_reports()
+        "reports": default_reports(),
+        "pullback_watchlist": {}
     }
 
 
@@ -276,6 +325,7 @@ def load_state():
     state.setdefault("performance", default_performance())
     state.setdefault("feedback_loop", default_feedback_loop())
     state.setdefault("reports", default_reports())
+    state.setdefault("pullback_watchlist", {})
 
     # Backfill newer fields without breaking old state.json.
     rc = state["risk_controls"]
@@ -296,6 +346,7 @@ def load_state():
         pos.setdefault("score", 0.0)
         pos.setdefault("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN"))
         pos.setdefault("adds", 0)
+        pos.setdefault("partial_taken", False)
         pos.setdefault("last_price", pos.get("entry", 0))
         if pos.get("side", "long") == "short":
             pos.setdefault("trough", pos.get("last_price", pos.get("entry", 0)))
@@ -700,6 +751,165 @@ def reset_state(starting_cash=10000.0):
     return portfolio
 
 
+
+# ============================================================
+# FUTURES / BREADTH CONFIRMATION
+# ============================================================
+def _safe_pct_change_from_first(prices):
+    prices = clean(prices)
+    if len(prices) < 2 or float(prices[0]) == 0:
+        return 0.0
+    return float((prices[-1] / prices[0]) - 1)
+
+
+def _intraday_trend(prices):
+    prices = clean(prices)
+    if len(prices) < 20:
+        return "unknown"
+    ma20 = sma(prices, 20)
+    ma8 = sma(prices, 8)
+    if ma20 is None or ma8 is None:
+        return "unknown"
+    if prices[-1] > ma20 and ma8 >= ma20:
+        return "up"
+    if prices[-1] < ma20 and ma8 <= ma20:
+        return "down"
+    return "flat"
+
+
+def futures_bias_status():
+    if not FUTURES_BIAS_ENABLED:
+        return {"enabled": False, "bias": "disabled", "action": "normal"}
+
+    payload = {
+        "enabled": True,
+        "es_symbol": FUTURES_ES_SYMBOL,
+        "nq_symbol": FUTURES_NQ_SYMBOL,
+        "es_pct": 0.0,
+        "nq_pct": 0.0,
+        "nq_vs_es_pct": 0.0,
+        "es_trend": "unknown",
+        "nq_trend": "unknown",
+        "bias": "unknown",
+        "action": "normal",
+        "reason": "insufficient_futures_data"
+    }
+
+    try:
+        es_df = download_prices(FUTURES_ES_SYMBOL, period="2d", interval="5m")
+        nq_df = download_prices(FUTURES_NQ_SYMBOL, period="2d", interval="5m")
+        es = price_series(es_df, "Close")
+        nq = price_series(nq_df, "Close")
+        if len(es) < 20 or len(nq) < 20:
+            return payload
+
+        es_pct = _safe_pct_change_from_first(es)
+        nq_pct = _safe_pct_change_from_first(nq)
+        nq_vs_es = nq_pct - es_pct
+        es_trend = _intraday_trend(es)
+        nq_trend = _intraday_trend(nq)
+
+        payload.update({
+            "es_pct": round(es_pct * 100, 3),
+            "nq_pct": round(nq_pct * 100, 3),
+            "nq_vs_es_pct": round(nq_vs_es * 100, 3),
+            "es_trend": es_trend,
+            "nq_trend": nq_trend
+        })
+
+        if nq_pct >= FUTURES_GAP_UP_CHASE_PCT:
+            payload.update({
+                "bias": "bullish_but_extended",
+                "action": "gap_chase_protection",
+                "reason": "nq_gap_up_extended_avoid_chasing_first_move"
+            })
+        elif nq_pct >= FUTURES_BULLISH_NQ_PCT and es_pct >= FUTURES_BULLISH_ES_PCT and nq_vs_es >= 0 and nq_trend != "down":
+            payload.update({
+                "bias": "bullish",
+                "action": "normal",
+                "reason": "es_and_nq_confirm_risk_on_with_nq_leadership"
+            })
+        elif nq_pct <= FUTURES_BEARISH_NQ_PCT or es_pct <= FUTURES_BEARISH_ES_PCT or (nq_trend == "down" and es_trend == "down"):
+            payload.update({
+                "bias": "bearish",
+                "action": "block_opening_longs",
+                "reason": "futures_weak_or_downtrend"
+            })
+        elif es_pct > 0 and nq_pct < 0:
+            payload.update({
+                "bias": "mixed_tech_caution",
+                "action": "tech_caution",
+                "reason": "es_green_but_nq_red_avoid_aggressive_tech_concentration"
+            })
+        elif es_pct < 0 or nq_pct < 0 or nq_trend == "flat":
+            payload.update({
+                "bias": "cautious",
+                "action": "reduce_aggression",
+                "reason": "futures_mixed_or_soft"
+            })
+        else:
+            payload.update({
+                "bias": "mixed",
+                "action": "normal",
+                "reason": "futures_not_decisive"
+            })
+    except Exception as exc:
+        payload["error"] = str(exc)
+
+    return payload
+
+
+def breadth_status(series=None, spy_5d=None, qqq_5d=None):
+    if not BREADTH_CONFIRMATION_ENABLED:
+        return {"enabled": False, "state": "disabled", "action": "normal"}
+
+    series = series or {}
+    spy_5d = 0.0 if spy_5d is None else float(spy_5d)
+    qqq_5d = 0.0 if qqq_5d is None else float(qqq_5d)
+
+    rsp_5d = pct_change(series.get("RSP", np.array([])), 5)
+    iwm_5d = pct_change(series.get("IWM", np.array([])), 5)
+    dia_5d = pct_change(series.get("DIA", np.array([])), 5)
+    arkk_5d = pct_change(series.get("ARKK", np.array([])), 5)
+
+    participation = sum(1 for x in [rsp_5d, iwm_5d, dia_5d] if x > 0)
+    qqq_minus_rsp = qqq_5d - rsp_5d
+
+    state = "supportive"
+    action = "normal"
+    reason = "broad_participation_supportive"
+
+    if qqq_5d > 0 and rsp_5d <= 0 and iwm_5d <= 0:
+        state = "narrow_mega_cap_led"
+        action = "reduce_aggression"
+        reason = "qqq_positive_but_equal_weight_and_small_caps_weak"
+    elif participation <= 1 and (spy_5d > 0 or qqq_5d > 0):
+        state = "mixed_narrow"
+        action = "reduce_aggression"
+        reason = "limited_breadth_under_index_strength"
+    elif qqq_minus_rsp > 0.025:
+        state = "tech_concentrated"
+        action = "tech_caution"
+        reason = "qqq_outperforming_equal_weight_by_large_margin"
+    elif spy_5d < 0 and qqq_5d < 0:
+        state = "weak"
+        action = "risk_off_confirmation"
+        reason = "major_indices_weak"
+
+    return {
+        "enabled": True,
+        "state": state,
+        "action": action,
+        "reason": reason,
+        "rsp_5d_pct": round(rsp_5d * 100, 2),
+        "iwm_5d_pct": round(iwm_5d * 100, 2),
+        "dia_5d_pct": round(dia_5d * 100, 2),
+        "arkk_5d_pct": round(arkk_5d * 100, 2),
+        "qqq_minus_rsp_5d_pct": round(qqq_minus_rsp * 100, 2),
+        "positive_breadth_count": int(participation)
+    }
+
+
 # ============================================================
 # MARKET / REGIME ENGINE
 # ============================================================
@@ -819,6 +1029,21 @@ def market_status(force=False):
         trade_permission = "defensive_pause"
         regime = "defensive"
 
+    futures = futures_bias_status()
+    breadth = breadth_status(series=series, spy_5d=spy_5d, qqq_5d=qqq_5d)
+
+    # Futures and breadth are confirmation layers. They do not override the whole
+    # regime by themselves, but they do inform risk score and downstream sizing.
+    if futures.get("action") in ["block_opening_longs", "tech_caution"]:
+        risk_score = int(max(0, risk_score - 5))
+    elif futures.get("bias") == "bullish":
+        risk_score = int(min(100, risk_score + 3))
+
+    if breadth.get("action") in ["reduce_aggression", "tech_caution"]:
+        risk_score = int(max(0, risk_score - 3))
+    elif breadth.get("state") == "supportive":
+        risk_score = int(min(100, risk_score + 2))
+
     result = {
         "market_mode": mode,
         "risk_score": risk_score,
@@ -837,7 +1062,9 @@ def market_status(force=False):
         "risk_on_sector_count": risk_on_sector_count,
         "defensive_rotation": defensive_rotation,
         "broad_market_soft": broad_market_soft,
-        "bear_confirmed": bear_confirmed
+        "bear_confirmed": bear_confirmed,
+        "futures_bias": futures,
+        "breadth": breadth
     }
 
     _market_cache["ts"] = now
@@ -938,7 +1165,7 @@ def intraday_arrays(df):
     }
 
 
-def signal_score(symbol, prices, market, side="long"):
+def signal_score(symbol, prices, market, side="long", benchmark_prices=None):
     if len(prices) < 35:
         return 0.0
 
@@ -958,13 +1185,33 @@ def signal_score(symbol, prices, market, side="long"):
     sector = SYMBOL_SECTOR.get(symbol, "UNKNOWN")
     sector_bonus = 0.003 if sector in market.get("sector_leaders", []) else 0.0
 
+    # Relative-strength overlay: prefer names that are beating QQQ/SPY rather than
+    # merely drifting higher with the index.
+    rs_adjustment = 0.0
+    if benchmark_prices is not None and len(benchmark_prices) > 24:
+        symbol_12 = pct_change(prices, 12)
+        bench_12 = pct_change(benchmark_prices, 12)
+        symbol_24 = pct_change(prices, 24)
+        bench_24 = pct_change(benchmark_prices, 24)
+        rs_edge = (0.60 * (symbol_12 - bench_12)) + (0.40 * (symbol_24 - bench_24))
+        if side == "long":
+            if rs_edge > 0.003:
+                rs_adjustment += RELATIVE_STRENGTH_SCORE_BONUS
+            elif rs_edge < -0.003:
+                rs_adjustment -= RELATIVE_STRENGTH_SCORE_PENALTY
+        else:
+            if rs_edge < -0.003:
+                rs_adjustment += RELATIVE_STRENGTH_SCORE_BONUS
+            elif rs_edge > 0.003:
+                rs_adjustment -= RELATIVE_STRENGTH_SCORE_PENALTY
+
     if side == "long":
         if not (px > ma20 and ma8 >= ma20 and ma20 >= ma34):
             return 0.0
         score = (0.35 * r3) + (0.30 * r6) + (0.25 * r12) + (0.10 * r24)
         if px > ma8:
             score += 0.001
-        score += sector_bonus
+        score += sector_bonus + rs_adjustment
         return max(0.0, float(score))
 
     if not (px < ma20 and ma8 <= ma20 and ma20 <= ma34):
@@ -975,6 +1222,7 @@ def signal_score(symbol, prices, market, side="long"):
         score += 0.001
     if sector in market.get("sector_leaders", []):
         score -= 0.003
+    score += rs_adjustment
     return max(0.0, float(score))
 
 
@@ -1019,10 +1267,73 @@ def entry_extension_check(symbol, side, arrays):
     return True, "ok"
 
 
+
+def prune_pullback_watchlist():
+    watch = portfolio.setdefault("pullback_watchlist", {})
+    now = time.time()
+    expired = [s for s, item in watch.items() if now - float(item.get("ts", 0)) > PULLBACK_WATCH_TTL_SECONDS]
+    for s in expired:
+        watch.pop(s, None)
+    return watch
+
+
+def register_pullback_candidate(symbol, side, score, reason, arrays):
+    if not PULLBACK_RECLAIM_ENABLED or side != "long":
+        return
+    if reason not in ["extended_above_5m_ma20", "too_close_to_intraday_high_after_big_move", "extended_above_day_open"]:
+        return
+    closes = arrays.get("close", np.array([]))
+    if len(closes) < 20:
+        return
+    portfolio.setdefault("pullback_watchlist", {})[symbol] = {
+        "symbol": symbol,
+        "side": side,
+        "score": round(float(score), 6),
+        "reason": reason,
+        "ts": time.time(),
+        "created_local": local_ts_text(),
+        "last_price": round(float(closes[-1]), 4),
+        "ma20": round(float(sma(closes, 20) or closes[-1]), 4)
+    }
+
+
+def pullback_reclaim_check(symbol, side, score, arrays):
+    if not PULLBACK_RECLAIM_ENABLED or side != "long":
+        return False, "pullback_reclaim_disabled"
+    watch = prune_pullback_watchlist()
+    item = watch.get(symbol)
+    if not item:
+        return False, "not_on_pullback_watchlist"
+    closes = arrays.get("close", np.array([]))
+    if len(closes) < 25:
+        return False, "not_enough_bars_for_reclaim"
+    px = float(closes[-1])
+    ma8 = sma(closes, 8)
+    ma20 = sma(closes, 20)
+    if not ma8 or not ma20 or ma20 <= 0:
+        return False, "missing_ma_for_reclaim"
+    near_ma20 = px <= ma20 * (1 + PULLBACK_MAX_ABOVE_MA20)
+    reclaimed_ma8 = px > ma8 and closes[-2] <= ma8
+    trend_ok = ma8 >= ma20 * 0.997
+    score_ok = float(score) >= max(MIN_ENTRY_SCORE_RISK_ON, float(item.get("score", 0)) * 0.70)
+    if near_ma20 and (reclaimed_ma8 or trend_ok) and score_ok:
+        watch.pop(symbol, None)
+        return True, "pullback_reclaim_after_extension"
+    return False, "waiting_for_pullback_reclaim"
+
+
 def scan_signals(market):
     long_signals = []
     short_signals = []
     rejected = []
+    prune_pullback_watchlist()
+
+    benchmark_prices = np.array([])
+    try:
+        qqq_df = fetch_intraday("QQQ")
+        benchmark_prices = price_series(qqq_df, "Close")
+    except Exception:
+        benchmark_prices = np.array([])
 
     for symbol in UNIVERSE:
         if is_in_cooldown(symbol):
@@ -1041,8 +1352,8 @@ def scan_signals(market):
             continue
 
         px = float(closes[-1])
-        long_score = signal_score(symbol, closes, market, "long")
-        short_score = signal_score(symbol, closes, market, "short")
+        long_score = signal_score(symbol, closes, market, "long", benchmark_prices=benchmark_prices)
+        short_score = signal_score(symbol, closes, market, "short", benchmark_prices=benchmark_prices)
 
         if long_score > 0:
             ok, reason = entry_extension_check(symbol, "long", arrays)
@@ -1055,7 +1366,19 @@ def scan_signals(market):
                     "sector": SYMBOL_SECTOR.get(symbol, "UNKNOWN")
                 })
             else:
-                rejected.append({"symbol": symbol, "side": "long", "score": round(float(long_score), 6), "reason": reason})
+                register_pullback_candidate(symbol, "long", long_score, reason, arrays)
+                reclaim_ok, reclaim_reason = pullback_reclaim_check(symbol, "long", long_score, arrays)
+                if reclaim_ok:
+                    long_signals.append({
+                        "symbol": symbol,
+                        "side": "long",
+                        "score": round(float(long_score) + PULLBACK_RECLAIM_SCORE_BONUS, 6),
+                        "price": px,
+                        "sector": SYMBOL_SECTOR.get(symbol, "UNKNOWN"),
+                        "entry_context": reclaim_reason
+                    })
+                else:
+                    rejected.append({"symbol": symbol, "side": "long", "score": round(float(long_score), 6), "reason": reason, "pullback_reclaim_status": reclaim_reason})
 
         if short_score > 0:
             ok, reason = entry_extension_check(symbol, "short", arrays)
@@ -1098,10 +1421,32 @@ def min_entry_score_for_market(market, side="long"):
     losses_today = int(rp.get("losses_today", 0))
     adjusted = float(base) + min(losses_today, 1) * ENTRY_SCORE_LOSS_STEP
 
+    # Stop-loss specific bump: after one stop-out, require materially stronger
+    # signals; after two, the feedback loop blocks entries entirely.
+    try:
+        stop_losses_today = sum(
+            1 for t in trades_for_date(today_key())
+            if t.get("action") == "exit" and t.get("exit_reason") == "stop_loss"
+        )
+        if stop_losses_today >= 1:
+            adjusted += POST_STOP_SCORE_BUMP
+    except Exception:
+        pass
+
     if float(market.get("vix_5d_pct", 0.0) or 0.0) > 0:
         adjusted += VIX_RISING_SCORE_BUMP
     if float(market.get("rates_5d_pct", 0.0) or 0.0) > 1.0:
         adjusted += RATES_RISING_SCORE_BUMP
+
+    futures = market.get("futures_bias", {}) or {}
+    if futures.get("action") in ["reduce_aggression", "tech_caution", "gap_chase_protection"]:
+        adjusted += FUTURES_SCORE_BUMP_CAUTION
+    elif futures.get("action") == "block_opening_longs":
+        adjusted += FUTURES_SCORE_BUMP_BEARISH
+
+    breadth = market.get("breadth", {}) or {}
+    if breadth.get("action") in ["reduce_aggression", "tech_caution"]:
+        adjusted += BREADTH_SCORE_BUMP_NARROW
 
     return round(float(adjusted), 6)
 
@@ -1112,19 +1457,38 @@ def apply_aggression_adjustments(params, market):
     vix_rising = float(market.get("vix_5d_pct", 0.0) or 0.0) > 0
     rates_rising = float(market.get("rates_5d_pct", 0.0) or 0.0) > 1.0
 
-    if vix_rising or rates_rising:
-        factor = VIX_RISING_ALLOC_REDUCTION if vix_rising else 0.85
+    reduction_reasons = []
+    factor = 1.0
+
+    if vix_rising:
+        factor *= VIX_RISING_ALLOC_REDUCTION
+        reduction_reasons.append("vix_rising")
+    if rates_rising:
+        factor *= 0.85
+        reduction_reasons.append("rates_rising")
+
+    futures = market.get("futures_bias", {}) or {}
+    if futures.get("action") in ["reduce_aggression", "tech_caution", "gap_chase_protection"]:
+        factor *= FUTURES_ALLOC_REDUCTION_CAUTION
+        reduction_reasons.append(f"futures_{futures.get('action')}")
+    elif futures.get("action") == "block_opening_longs":
+        factor *= FUTURES_ALLOC_REDUCTION_BEARISH
+        reduction_reasons.append("futures_bearish")
+
+    breadth = market.get("breadth", {}) or {}
+    if breadth.get("action") in ["reduce_aggression", "tech_caution"]:
+        factor *= BREADTH_ALLOC_REDUCTION_NARROW
+        reduction_reasons.append(f"breadth_{breadth.get('state')}")
+
+    if reduction_reasons:
         adjusted["long_alloc_pct"] = round(float(adjusted.get("long_alloc_pct", 0.0)) * factor, 4)
         adjusted["aggression_reduced"] = True
-        adjusted["aggression_reduction_reason"] = ",".join([
-            reason for reason, active in [
-                ("vix_rising", vix_rising),
-                ("rates_rising", rates_rising)
-            ] if active
-        ])
+        adjusted["aggression_reduction_reason"] = ",".join(reduction_reasons)
+        adjusted["aggression_reduction_factor"] = round(float(factor), 4)
     else:
         adjusted["aggression_reduced"] = False
         adjusted["aggression_reduction_reason"] = ""
+        adjusted["aggression_reduction_factor"] = 1.0
 
     return adjusted
 
@@ -1170,6 +1534,50 @@ def entry_quality_check(signal, params, market, exclude_symbol=None):
             "score": round(score, 6),
             "required_score": round(min_score, 6),
             "market_mode": market.get("market_mode")
+        }
+
+    try:
+        stop_losses_today = sum(
+            1 for t in trades_for_date(today_key())
+            if t.get("action") == "exit" and t.get("exit_reason") == "stop_loss"
+        )
+    except Exception:
+        stop_losses_today = 0
+
+    if (
+        side == "long"
+        and POST_STOP_REQUIRE_SECTOR_LEADER
+        and stop_losses_today >= 1
+        and sector not in market.get("sector_leaders", [])
+        and score < POST_STOP_EXCEPTIONAL_SCORE
+    ):
+        return False, {
+            "reason": "post_stop_sector_alignment_required",
+            "symbol": symbol,
+            "sector": sector,
+            "score": round(score, 6),
+            "required_exceptional_score": POST_STOP_EXCEPTIONAL_SCORE,
+            "sector_leaders": market.get("sector_leaders", []),
+            "stop_losses_today": stop_losses_today
+        }
+
+    futures = market.get("futures_bias", {}) or {}
+    if side == "long" and futures.get("action") == "block_opening_longs":
+        return False, {
+            "reason": "futures_bias_block_opening_longs",
+            "symbol": symbol,
+            "score": round(score, 6),
+            "futures_bias": futures
+        }
+
+    if side == "long" and futures.get("action") == "tech_caution" and sector == "XLK" and score < POST_STOP_EXCEPTIONAL_SCORE:
+        return False, {
+            "reason": "futures_tech_caution_requires_exceptional_score",
+            "symbol": symbol,
+            "sector": sector,
+            "score": round(score, 6),
+            "required_exceptional_score": POST_STOP_EXCEPTIONAL_SCORE,
+            "futures_bias": futures
         }
 
     equity, sector_values, sector_counts = portfolio_sector_stats(exclude_symbol=exclude_symbol)
@@ -1228,6 +1636,18 @@ def entry_controls_snapshot(clock=None, market=None, params=None, risk_controls=
             "active_long_floor": min_entry_score_for_market(market, "long"),
             "active_short_floor": min_entry_score_for_market(market, "short")
         },
+        "futures_bias": market.get("futures_bias", {}),
+        "breadth": market.get("breadth", {}),
+        "winner_protection": {
+            "partial_profit_enabled": PARTIAL_PROFIT_ENABLED,
+            "partial_profit_trigger_pct": round(PARTIAL_PROFIT_TRIGGER_PCT * 100, 2),
+            "partial_profit_fraction_pct": round(PARTIAL_PROFIT_FRACTION * 100, 2),
+            "trail_activation_profit_pct": round(TRAIL_ACTIVATION_PROFIT_PCT * 100, 2),
+            "profit_lock_level_1_pct": round(PROFIT_LOCK_LEVEL_1_PCT * 100, 2),
+            "profit_lock_level_2_pct": round(PROFIT_LOCK_LEVEL_2_PCT * 100, 2),
+            "profit_lock_level_3_pct": round(PROFIT_LOCK_LEVEL_3_PCT * 100, 2)
+        },
+        "pullback_watchlist_count": len(portfolio.get("pullback_watchlist", {}) or {}),
         "sector_controls": {
             "max_sector_exposure_pct": round(MAX_SECTOR_EXPOSURE_PCT * 100, 2),
             "max_positions_per_sector": MAX_POSITIONS_PER_SECTOR,
@@ -1320,6 +1740,61 @@ def exit_position(symbol, px, reason, market_mode=None, extra=None):
     }
 
 
+
+def reduce_position(symbol, px, fraction, reason, market_mode=None, extra=None):
+    """Take partial profit while leaving the remaining position open."""
+    pos = portfolio.get("positions", {}).get(symbol)
+    if not pos:
+        return None
+
+    fraction = max(0.0, min(float(fraction), 0.95))
+    shares_total = float(pos.get("shares", 0.0))
+    shares_to_close = shares_total * fraction
+    if shares_to_close <= 0:
+        return None
+
+    side = pos.get("side", "long")
+    entry = float(pos.get("entry", 0.0))
+    realized_pnl = (float(px) - entry) * shares_to_close
+    if side == "short":
+        realized_pnl = (entry - float(px)) * shares_to_close
+        margin_total = float(pos.get("margin", entry * shares_total))
+        margin_released = margin_total * fraction
+        pos["margin"] = max(0.0, margin_total - margin_released)
+        portfolio["cash"] = float(portfolio.get("cash", 0.0)) + margin_released + realized_pnl
+    else:
+        portfolio["cash"] = float(portfolio.get("cash", 0.0)) + shares_to_close * float(px)
+
+    pos["shares"] = max(0.0, shares_total - shares_to_close)
+    pos["partial_taken"] = True
+    pos["last_partial_exit_time"] = int(time.time())
+
+    add_realized_pnl(realized_pnl)
+
+    details = {
+        "exit_reason": reason,
+        "pnl_dollars": round(float(realized_pnl), 2),
+        "pnl_pct": round(float(position_pnl_pct(pos, px)) * 100, 2),
+        "fraction_closed": round(float(fraction), 4),
+        "remaining_shares": round(float(pos.get("shares", 0.0)), 6),
+        "market_mode": market_mode
+    }
+    if extra:
+        details.update(extra)
+
+    record_trade("partial_exit", symbol, side, px, shares_to_close, details)
+
+    return {
+        "symbol": symbol,
+        "side": side,
+        "price": round(float(px), 4),
+        "shares_closed": round(shares_to_close, 6),
+        "remaining_shares": round(float(pos.get("shares", 0.0)), 6),
+        "pnl_dollars": round(float(realized_pnl), 2),
+        "reason": reason
+    }
+
+
 def enter_position(signal, params, market_mode=None):
     symbol = signal["symbol"]
     side = signal["side"]
@@ -1349,7 +1824,9 @@ def enter_position(signal, params, market_mode=None):
         "entry_time": int(time.time()),
         "score": float(signal.get("score", 0.0)),
         "sector": signal.get("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN")),
-        "adds": 0
+        "adds": 0,
+        "partial_taken": False,
+        "entry_context": signal.get("entry_context", "scanner")
     }
 
     if side == "short":
@@ -1401,6 +1878,32 @@ def manage_exits(params, market):
             pos["peak"] = max(float(pos.get("peak", px)), px)
             entry = max(float(pos.get("entry", px)), 0.01)
             peak_profit_pct = (float(pos.get("peak", px)) - entry) / entry
+
+            if PARTIAL_PROFIT_ENABLED and not bool(pos.get("partial_taken", False)) and pnl_pct >= PARTIAL_PROFIT_TRIGGER_PCT:
+                partial = reduce_position(
+                    symbol,
+                    px,
+                    PARTIAL_PROFIT_FRACTION,
+                    "partial_profit_long",
+                    market_mode=mode,
+                    extra={"peak_profit_pct": round(peak_profit_pct * 100, 2)}
+                )
+                if partial:
+                    exits.append(partial)
+                    # Refresh remaining position reference after share reduction.
+                    pos = portfolio.get("positions", {}).get(symbol)
+                    if not pos:
+                        continue
+
+            # Winner-lock tiers. These are distinct from a normal trailing stop:
+            # they make sure a good trade does not round-trip back into a loser.
+            if peak_profit_pct >= PROFIT_LOCK_LEVEL_3_PCT and pnl_pct <= PROFIT_LOCK_LEVEL_3_FLOOR_PCT:
+                exit_reason = exit_reason or "profit_lock_long_level_3"
+            elif peak_profit_pct >= PROFIT_LOCK_LEVEL_2_PCT and pnl_pct <= PROFIT_LOCK_BREAKEVEN_PCT:
+                exit_reason = exit_reason or "profit_lock_long_breakeven"
+            elif peak_profit_pct >= PROFIT_LOCK_LEVEL_1_PCT and pnl_pct <= 0:
+                exit_reason = exit_reason or "profit_lock_long_no_red"
+
             if peak_profit_pct >= TRAIL_ACTIVATION_PROFIT_PCT:
                 if px <= float(pos.get("peak", px)) * float(params.get("trail_long", 0.98)):
                     exit_reason = exit_reason or "trailing_stop_long"
@@ -1412,6 +1915,29 @@ def manage_exits(params, market):
             pos["trough"] = min(float(pos.get("trough", px)), px)
             entry = max(float(pos.get("entry", px)), 0.01)
             trough_profit_pct = (entry - float(pos.get("trough", px))) / entry
+
+            if PARTIAL_PROFIT_ENABLED and not bool(pos.get("partial_taken", False)) and pnl_pct >= PARTIAL_PROFIT_TRIGGER_PCT:
+                partial = reduce_position(
+                    symbol,
+                    px,
+                    PARTIAL_PROFIT_FRACTION,
+                    "partial_profit_short",
+                    market_mode=mode,
+                    extra={"trough_profit_pct": round(trough_profit_pct * 100, 2)}
+                )
+                if partial:
+                    exits.append(partial)
+                    pos = portfolio.get("positions", {}).get(symbol)
+                    if not pos:
+                        continue
+
+            if trough_profit_pct >= PROFIT_LOCK_LEVEL_3_PCT and pnl_pct <= PROFIT_LOCK_LEVEL_3_FLOOR_PCT:
+                exit_reason = exit_reason or "profit_lock_short_level_3"
+            elif trough_profit_pct >= PROFIT_LOCK_LEVEL_2_PCT and pnl_pct <= PROFIT_LOCK_BREAKEVEN_PCT:
+                exit_reason = exit_reason or "profit_lock_short_breakeven"
+            elif trough_profit_pct >= PROFIT_LOCK_LEVEL_1_PCT and pnl_pct <= 0:
+                exit_reason = exit_reason or "profit_lock_short_no_red"
+
             if trough_profit_pct >= TRAIL_ACTIVATION_PROFIT_PCT:
                 if px >= float(pos.get("trough", px)) * float(params.get("trail_short", 1.02)):
                     exit_reason = exit_reason or "trailing_stop_short"
@@ -1985,6 +2511,14 @@ def feedback_loop_status(market=None, params=None, risk_controls=None, clock=Non
     if rates_rising:
         actions.append("reduce_aggression_for_rising_rates")
 
+    futures = market.get("futures_bias", {}) or {}
+    if futures.get("action") in ["reduce_aggression", "tech_caution", "gap_chase_protection", "block_opening_longs"]:
+        actions.append(f"futures_bias_{futures.get('action')}")
+
+    breadth = market.get("breadth", {}) or {}
+    if breadth.get("action") in ["reduce_aggression", "tech_caution", "risk_off_confirmation"]:
+        actions.append(f"breadth_{breadth.get('action')}")
+
     if not reasons:
         reasons.append("feedback loop clear")
 
@@ -2012,7 +2546,10 @@ def feedback_loop_status(market=None, params=None, risk_controls=None, clock=Non
         "vix_rising": bool(vix_rising),
         "rates_rising": bool(rates_rising),
         "aggression_reduced": bool(params.get("aggression_reduced", False)),
-        "aggression_reduction_reason": params.get("aggression_reduction_reason", "")
+        "aggression_reduction_reason": params.get("aggression_reduction_reason", ""),
+        "aggression_reduction_factor": params.get("aggression_reduction_factor", 1.0),
+        "futures_bias": futures,
+        "breadth": breadth
     }
 
     if persist:
@@ -2320,6 +2857,8 @@ def portfolio_risk_review():
         "market_mode": market.get("market_mode"),
         "regime": market.get("regime"),
         "risk_score": market.get("risk_score"),
+        "futures_bias": market.get("futures_bias", {}),
+        "breadth": market.get("breadth", {}),
         "risk_controls": rc,
         "performance": perf,
         "exposures": {
@@ -2716,7 +3255,8 @@ def state_file_diagnostic():
         "trades_count": len(portfolio.get("trades", []) or []),
         "history_count": len(portfolio.get("history", []) or []),
         "reports_present": bool(portfolio.get("reports")),
-        "feedback_loop_present": bool(portfolio.get("feedback_loop"))
+        "feedback_loop_present": bool(portfolio.get("feedback_loop")),
+        "pullback_watchlist_count": len(portfolio.get("pullback_watchlist", {}) or {})
     }
 
 
@@ -2792,6 +3332,38 @@ def config_snapshot():
         "vix_rising_score_bump": VIX_RISING_SCORE_BUMP,
         "rates_rising_score_bump": RATES_RISING_SCORE_BUMP,
         "vix_rising_alloc_reduction": VIX_RISING_ALLOC_REDUCTION,
+        "futures_bias_enabled": FUTURES_BIAS_ENABLED,
+        "futures_es_symbol": FUTURES_ES_SYMBOL,
+        "futures_nq_symbol": FUTURES_NQ_SYMBOL,
+        "futures_bullish_nq_pct": FUTURES_BULLISH_NQ_PCT,
+        "futures_bullish_es_pct": FUTURES_BULLISH_ES_PCT,
+        "futures_bearish_nq_pct": FUTURES_BEARISH_NQ_PCT,
+        "futures_bearish_es_pct": FUTURES_BEARISH_ES_PCT,
+        "futures_gap_up_chase_pct": FUTURES_GAP_UP_CHASE_PCT,
+        "futures_score_bump_caution": FUTURES_SCORE_BUMP_CAUTION,
+        "futures_score_bump_bearish": FUTURES_SCORE_BUMP_BEARISH,
+        "futures_alloc_reduction_caution": FUTURES_ALLOC_REDUCTION_CAUTION,
+        "futures_alloc_reduction_bearish": FUTURES_ALLOC_REDUCTION_BEARISH,
+        "breadth_confirmation_enabled": BREADTH_CONFIRMATION_ENABLED,
+        "breadth_score_bump_narrow": BREADTH_SCORE_BUMP_NARROW,
+        "breadth_alloc_reduction_narrow": BREADTH_ALLOC_REDUCTION_NARROW,
+        "relative_strength_score_bonus": RELATIVE_STRENGTH_SCORE_BONUS,
+        "relative_strength_score_penalty": RELATIVE_STRENGTH_SCORE_PENALTY,
+        "partial_profit_enabled": PARTIAL_PROFIT_ENABLED,
+        "partial_profit_trigger_pct": PARTIAL_PROFIT_TRIGGER_PCT,
+        "partial_profit_fraction": PARTIAL_PROFIT_FRACTION,
+        "profit_lock_level_1_pct": PROFIT_LOCK_LEVEL_1_PCT,
+        "profit_lock_level_2_pct": PROFIT_LOCK_LEVEL_2_PCT,
+        "profit_lock_level_3_pct": PROFIT_LOCK_LEVEL_3_PCT,
+        "profit_lock_breakeven_pct": PROFIT_LOCK_BREAKEVEN_PCT,
+        "profit_lock_level_3_floor_pct": PROFIT_LOCK_LEVEL_3_FLOOR_PCT,
+        "post_stop_score_bump": POST_STOP_SCORE_BUMP,
+        "post_stop_require_sector_leader": POST_STOP_REQUIRE_SECTOR_LEADER,
+        "post_stop_exceptional_score": POST_STOP_EXCEPTIONAL_SCORE,
+        "pullback_reclaim_enabled": PULLBACK_RECLAIM_ENABLED,
+        "pullback_watch_ttl_seconds": PULLBACK_WATCH_TTL_SECONDS,
+        "pullback_max_above_ma20": PULLBACK_MAX_ABOVE_MA20,
+        "pullback_reclaim_score_bonus": PULLBACK_RECLAIM_SCORE_BONUS,
         "max_reports_stored": MAX_REPORTS_STORED
     }
 
@@ -2815,6 +3387,8 @@ def compact_status_snapshot(include_last_result=True):
             "regime": last_result.get("regime"),
             "risk_score": last_result.get("risk_score"),
             "trade_permission": last_result.get("trade_permission"),
+            "futures_bias": last_result.get("futures_bias", {}),
+            "breadth": last_result.get("breadth", {}),
             "entries": last_result.get("entries", []),
             "exits": last_result.get("exits", []),
             "rotations": last_result.get("rotations", []),
@@ -2841,6 +3415,9 @@ def compact_status_snapshot(include_last_result=True):
         "risk_controls": rc,
         "feedback_loop": feedback,
         "last_market": market,
+        "futures_bias": market.get("futures_bias", {}) if isinstance(market, dict) else {},
+        "breadth": market.get("breadth", {}) if isinstance(market, dict) else {},
+        "pullback_watchlist": portfolio.get("pullback_watchlist", {}),
         "auto_runner": {
             "enabled": auto.get("enabled"),
             "market_only": auto.get("market_only"),
@@ -3231,5 +3808,3 @@ def paper_state_diagnostic():
 ensure_auto_thread()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "8080"))
-    app.run(host="0.0.0.0", port=port)
