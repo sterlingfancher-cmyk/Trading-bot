@@ -3318,7 +3318,209 @@ def feedback_loop_status(market=None, params=None, risk_controls=None, clock=Non
             risk_controls["halted"] = True
             risk_controls["halt_reason"] = "self-defense hard daily realized loss halt"
 
+
     return feedback
+
+
+def build_recommended_actions(market=None, risk_controls=None, feedback=None, journal=None, risk_review=None):
+    """Create a prioritized, plain-English action plan for /checkup, /risk-review, and reports.
+
+    This is intentionally advisory: it does not place trades. It translates the bot's
+    current state into what to do next, what not to do, and what to monitor.
+    """
+    market = market or (portfolio.get("last_market") or {})
+    risk_controls = risk_controls or get_risk_controls()
+    params = apply_aggression_adjustments(risk_parameters(market), market)
+    clock = market_clock()
+    perf = performance_snapshot()
+    feedback = feedback or feedback_loop_status(market=market, params=params, risk_controls=risk_controls, clock=clock, persist=False)
+    journal = journal or analyze_trading_journal(limit=30)
+
+    last_result = (portfolio.setdefault("auto_runner", default_auto_runner()).get("last_result") or {})
+    blocked = last_result.get("blocked_entries", []) or []
+    open_positions = perf.get("open_positions", {}) or {}
+    realized_today = safe_float(perf.get("realized_pnl_today"))
+    unrealized_today = safe_float(perf.get("unrealized_pnl"))
+    equity = max(safe_float(portfolio.get("equity", 0.0)), 0.01)
+    cash = safe_float(portfolio.get("cash", 0.0))
+    cash_pct = round((cash / equity) * 100, 2)
+    invested_pct = round(max(0.0, 100.0 - cash_pct), 2)
+    stop_losses_today = int(feedback.get("stop_losses_today", 0) or 0)
+    winners = [sym for sym, pos in open_positions.items() if safe_float(pos.get("pnl_dollars")) > 0]
+    losers = [sym for sym, pos in open_positions.items() if safe_float(pos.get("pnl_dollars")) < 0]
+
+    actions = []
+
+    def add(priority, category, action, reason, urgency="normal"):
+        actions.append({
+            "priority": int(priority),
+            "urgency": urgency,
+            "category": category,
+            "action": action,
+            "reason": reason
+        })
+
+    if not clock.get("is_open"):
+        add(
+            10,
+            "market_clock",
+            "No manual trade runs after close; use this period for review only.",
+            f"Market clock is {clock.get('reason')}; after-hours trading is disabled by default.",
+            "normal"
+        )
+
+    if feedback.get("self_defense_mode") or feedback.get("block_new_entries"):
+        add(
+            1,
+            "self_defense",
+            "Stay in manage-only mode; do not override blocked new entries.",
+            "; ".join(feedback.get("reasons", [])) or "Self-defense feedback loop is active.",
+            "high"
+        )
+        if open_positions:
+            add(
+                2,
+                "position_management",
+                "Manage existing winners and stops before considering any new scanner signals.",
+                f"Open positions: {', '.join(open_positions.keys())}; blocked entries are expected while defense mode is active.",
+                "high"
+            )
+
+    if stop_losses_today >= SELF_DEFENSE_STOP_LOSS_LIMIT:
+        add(
+            3,
+            "loss_control",
+            "Keep fresh entries paused until the next clean session or until the code explicitly resets the daily loss cluster.",
+            f"Stop-loss count is {stop_losses_today}, meeting the self-defense limit of {SELF_DEFENSE_STOP_LOSS_LIMIT}.",
+            "high"
+        )
+    elif stop_losses_today == 1:
+        add(
+            4,
+            "loss_control",
+            "Require stronger scores and sector alignment for any replacement trade.",
+            "There has already been one stop-loss today; replacement trades need higher conviction.",
+            "normal"
+        )
+
+    if winners:
+        best = max(open_positions.items(), key=lambda kv: safe_float(kv[1].get("pnl_pct")))
+        best_sym, best_pos = best
+        best_pct = safe_float(best_pos.get("pnl_pct"))
+        if best_pct >= 2.0:
+            add(
+                5,
+                "profit_protection",
+                f"Protect {best_sym}'s open gain; partial profit and profit-lock logic should remain active.",
+                f"{best_sym} is up {best_pct}% and should not be allowed to round-trip into a full loss.",
+                "high"
+            )
+        else:
+            add(
+                6,
+                "profit_protection",
+                "Let green positions work, but keep trailing/profit-lock protection active.",
+                f"Open winners: {', '.join(winners)}; unrealized P/L is ${round(unrealized_today, 2)}.",
+                "normal"
+            )
+
+    if losers and len(losers) > len(winners):
+        add(
+            7,
+            "risk_reduction",
+            "Do not add risk while more open positions are losing than winning.",
+            f"Open losers: {', '.join(losers)}.",
+            "high"
+        )
+
+    # Interpret blocked entries so the scheduled check-in can explain why attractive names are not being taken.
+    if blocked:
+        top_blocked = [b for b in blocked if isinstance(b, dict)][:5]
+        symbols = [str(b.get("symbol")) for b in top_blocked if b.get("symbol")]
+        reasons = sorted({str(b.get("reason")) for b in top_blocked if b.get("reason")})
+        if symbols:
+            add(
+                8,
+                "blocked_entries",
+                "Do not manually chase blocked scanner names unless self-defense is off and the setup reappears with fresh confirmation.",
+                f"Recent blocked names: {', '.join(symbols)}. Reasons: {', '.join(reasons) if reasons else 'not specified'}.",
+                "normal"
+            )
+
+    market_mode = market.get("market_mode")
+    risk_score = safe_float(market.get("risk_score"))
+    tech = market.get("tech_leadership") or tech_leadership_status(market)
+    if market_mode in ["risk_on", "constructive"] and not feedback.get("block_new_entries"):
+        add(
+            20,
+            "entry_permission",
+            "Allow selective long entries only when score, bucket size, and sector/theme rules align.",
+            f"Market mode is {market_mode} with risk score {risk_score}; entry floor is {feedback.get('dynamic_min_long_score')}.",
+            "normal"
+        )
+    if tech.get("active"):
+        add(
+            21,
+            "tech_leadership",
+            "Continue allowing adaptive tech exposure, but keep entries staggered and avoid gap-chase fills.",
+            f"Tech leadership is {tech.get('state')}; QQQ 5-day {tech.get('qqq_5d_pct')}% vs SPY {tech.get('spy_5d_pct')}%.",
+            "normal"
+        )
+
+    metals = market.get("precious_metals", {}) or {}
+    if metals.get("action") in ["allow_defensive_metals", "allow_metals_momentum"]:
+        add(
+            22,
+            "precious_metals",
+            "Allow precious-metals candidates to compete with tech when their scores clear the bucket rules.",
+            f"Metals state is {metals.get('state')}; this may help if dollar weakness, falling rates, or risk-off rotation appears.",
+            "normal"
+        )
+
+    if invested_pct < 20 and not feedback.get("block_new_entries") and clock.get("is_open"):
+        add(
+            30,
+            "capital_deployment",
+            "The book is lightly invested; it is acceptable to take a small controlled starter only if the signal is high quality.",
+            f"Invested exposure is {invested_pct}% and cash is {cash_pct}%; avoid forcing full deployment.",
+            "low"
+        )
+
+    if risk_controls.get("profit_guard_active"):
+        add(
+            40,
+            "profit_guard",
+            "Do not open fresh risk while profit guard is active; protect the day.",
+            str(risk_controls.get("profit_guard_reason", "profit guard active")),
+            "high"
+        )
+
+    if not actions:
+        add(
+            50,
+            "baseline",
+            "No manual intervention recommended; let the bot follow its scanner and risk controls.",
+            "No active halt, profit guard, or major concentration issue was detected.",
+            "normal"
+        )
+
+    actions = sorted(actions, key=lambda x: x["priority"])
+    return {
+        "generated_local": local_ts_text(),
+        "mode": "manage_only" if feedback.get("block_new_entries") else "selective_entries_allowed",
+        "top_actions": actions[:5],
+        "all_actions": actions,
+        "do_not_do": [
+            "Do not manually override self-defense blocks after clustered stop-losses.",
+            "Do not chase gap-up or extended names after the bot blocks them for quality reasons.",
+            "Do not use URL-based RUN_KEY links; use X-Run-Key header authentication."
+        ],
+        "watch_next": [
+            "Whether self-defense clears on the next session.",
+            "Whether open winners keep profit-lock protection active.",
+            "Whether expanded-universe, precious-metals, and tech-leadership signals appear with valid scores."
+        ]
+    }
 
 
 def compile_trading_report(report_type="intraday", market=None, params=None, risk_controls=None, clock=None):
@@ -3358,6 +3560,7 @@ def compile_trading_report(report_type="intraday", market=None, params=None, ris
         "journal_diagnosis": journal.get("diagnosis", []),
         "risk_vulnerabilities": risk_review.get("vulnerabilities", []),
         "risk_recommendations": risk_review.get("recommendations", []),
+        "recommended_action_plan": risk_review.get("recommended_action_plan", build_recommended_actions(market=market, risk_controls=risk_controls, feedback=feedback, journal=journal, risk_review=risk_review)),
         "entry_quality_controls": entry_controls_snapshot(clock=clock, market=market, params=params, risk_controls=risk_controls),
         "recent_trades": journal.get("recent_trades", [])[-20:]
     }
@@ -3609,24 +3812,8 @@ def portfolio_risk_review():
     if not vulnerabilities:
         vulnerabilities.append("No major concentration or drawdown vulnerability detected from current paper state.")
 
-    recommendations = []
-    if market.get("bear_confirmed"):
-        recommendations.append("Bear confirmation is active; longs should remain blocked and shorts may be allowed only under the short-bias rules.")
-    elif market.get("market_mode") in ["risk_on", "constructive"]:
-        recommendations.append("Market mode supports long bias, but position additions should still respect profit guard, sector alignment, and max-position limits.")
-    else:
-        recommendations.append("Market mode is not strongly risk-on; reduce fresh entries and prioritize preserving cash.")
-
-    if growth_pct >= 50:
-        tech = tech_leadership_status(market)
-        if tech.get("active"):
-            recommendations.append("Growth/tech exposure is elevated, but adaptive tech leadership mode allows higher XLK/XLY exposure while leadership remains confirmed; keep entries staggered and scores strong.")
-        else:
-            recommendations.append("Growth exposure is heavy; avoid adding more XLK/XLY/XLF names unless they clearly outrank existing holdings.")
-    if cash_pct < 20:
-        recommendations.append("Keep a cash reserve; do not force full deployment just because signals are available.")
-    if safe_float(perf.get("unrealized_pnl")) > 0 and safe_float(rc.get("intraday_drawdown_pct")) > 0.75:
-        recommendations.append("Open gains exist but intraday giveback is visible; prioritize trailing stops and avoid discretionary re-entry.")
+    recommendation_plan = build_recommended_actions(market=market, risk_controls=rc, feedback=feedback_loop_status(market=market, risk_controls=rc, persist=False))
+    recommendations = [item.get("action") for item in recommendation_plan.get("top_actions", [])]
 
     return {
         "equity": money(equity),
@@ -3656,7 +3843,8 @@ def portfolio_risk_review():
         "feedback_loop": feedback_loop_status(market=market, risk_controls=rc, persist=False),
         "positions": rows,
         "vulnerabilities": vulnerabilities,
-        "recommendations": recommendations
+        "recommendations": recommendations,
+        "recommended_action_plan": recommendation_plan
     }
 
 
@@ -3711,6 +3899,7 @@ def explain_current_system(force_market=False):
         "risk_controls": rc,
         "entry_quality_controls": entry_controls_snapshot(clock=clock, market=market, params=params, risk_controls=rc),
         "feedback_loop": feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=False),
+        "recommended_action_plan": build_recommended_actions(market=market, risk_controls=rc),
         "current_permission": {
             "longs_allowed_by_regime": bool(params.get("allow_longs")),
             "shorts_allowed_by_regime": bool(params.get("allow_shorts")),
@@ -4056,6 +4245,7 @@ def compact_report(report):
         "journal_diagnosis": report.get("journal_diagnosis", []),
         "risk_vulnerabilities": report.get("risk_vulnerabilities", []),
         "risk_recommendations": report.get("risk_recommendations", []),
+        "recommended_action_plan": report.get("recommended_action_plan", {}),
         "plain_english": report.get("plain_english", []),
         "recent_trades": (report.get("recent_trades", []) or [])[-12:]
     }
@@ -4294,6 +4484,7 @@ def build_checkup_snapshot(force_market=False, compile_report=False):
     perf = performance_snapshot()
     journal = analyze_trading_journal(limit=30)
     risk = portfolio_risk_review()
+    recommended_actions = risk.get("recommended_action_plan", build_recommended_actions(market=market, risk_controls=rc, feedback=feedback, journal=journal, risk_review=risk))
 
     report = None
     if compile_report:
@@ -4318,6 +4509,9 @@ def build_checkup_snapshot(force_market=False, compile_report=False):
         )
     if risk.get("vulnerabilities"):
         plain_english.append("Top risk: " + str(risk.get("vulnerabilities", [])[0]))
+    top_actions = recommended_actions.get("top_actions", []) if isinstance(recommended_actions, dict) else []
+    if top_actions:
+        plain_english.append("Recommended action: " + str(top_actions[0].get("action")))
 
     return {
         "status": "ok",
@@ -4328,6 +4522,7 @@ def build_checkup_snapshot(force_market=False, compile_report=False):
         "feedback_loop": feedback,
         "intraday_report": compact_report(report) if report else reports_snapshot(full=False).get("last_intraday_report"),
         "risk_review": risk,
+        "recommended_action_plan": recommended_actions,
         "journal": journal,
         "explain": explain_current_system(force_market=False),
         "config": config_snapshot(),
