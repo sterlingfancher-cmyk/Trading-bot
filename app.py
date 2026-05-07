@@ -16,6 +16,11 @@ app = Flask(__name__)
 # CONFIG
 # ============================================================
 SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
+# Secret-safe auth hardening:
+# Prefer passing RUN_KEY via the X-Run-Key header. URL query keys are still
+# supported temporarily for backward compatibility, but they are deprecated
+# because platform access logs can expose full request URLs.
+ALLOW_QUERY_KEY_AUTH = os.environ.get("ALLOW_QUERY_KEY_AUTH", "true").lower() in ["1", "true", "yes", "on"]
 STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 MARKET_CACHE_TTL = int(os.environ.get("MARKET_CACHE_TTL", "300"))
 
@@ -185,6 +190,16 @@ BITCOIN_AI_COMPUTE_ALLOC_FACTOR = float(os.environ.get("BITCOIN_AI_COMPUTE_ALLOC
 SMALL_CAP_MOMENTUM_ALLOC_FACTOR = float(os.environ.get("SMALL_CAP_MOMENTUM_ALLOC_FACTOR", "0.35"))
 BENCHMARK_ETF_ALLOC_FACTOR = float(os.environ.get("BENCHMARK_ETF_ALLOC_FACTOR", "0.75"))
 
+# Precious metals / safe-haven bucket. These are separate from tech and small-cap momentum
+# so gold, silver, miners, and royalty/streaming names can be used during dollar/rate weakness
+# or defensive rotations without over-sizing high-beta miners.
+PRECIOUS_METALS_ALLOC_FACTOR = float(os.environ.get("PRECIOUS_METALS_ALLOC_FACTOR", "0.55"))
+PRECIOUS_METALS_MAX_EXPOSURE_PCT = float(os.environ.get("PRECIOUS_METALS_MAX_EXPOSURE_PCT", "0.30"))
+PRECIOUS_METALS_MAX_POSITIONS = int(os.environ.get("PRECIOUS_METALS_MAX_POSITIONS", "3"))
+PRECIOUS_METALS_SAFE_HAVEN_SCORE_BONUS = float(os.environ.get("PRECIOUS_METALS_SAFE_HAVEN_SCORE_BONUS", "0.0030"))
+PRECIOUS_METALS_TREND_SCORE_BONUS = float(os.environ.get("PRECIOUS_METALS_TREND_SCORE_BONUS", "0.0015"))
+PRECIOUS_METALS_WEAK_DOLLAR_SCORE_BONUS = float(os.environ.get("PRECIOUS_METALS_WEAK_DOLLAR_SCORE_BONUS", "0.0010"))
+
 DATA_CENTER_INFRA_MAX_EXPOSURE_PCT = float(os.environ.get("DATA_CENTER_INFRA_MAX_EXPOSURE_PCT", "0.40"))
 BITCOIN_AI_COMPUTE_MAX_EXPOSURE_PCT = float(os.environ.get("BITCOIN_AI_COMPUTE_MAX_EXPOSURE_PCT", "0.25"))
 SMALL_CAP_MOMENTUM_MAX_EXPOSURE_PCT = float(os.environ.get("SMALL_CAP_MOMENTUM_MAX_EXPOSURE_PCT", "0.15"))
@@ -206,6 +221,10 @@ DATA_CENTER_POWER_COOLING = ["VRT", "ETN", "PWR", "GEV", "VST", "CEG", "NRG", "M
 BITCOIN_AI_COMPUTE = ["HUT", "IREN", "CIFR", "WULF", "CLSK", "MARA", "RIOT", "BTDR", "CORZ", "APLD"]
 SMALL_CAP_MOMENTUM = ["SOUN", "RGTI", "QBTS", "IONQ", "RKLB", "JOBY", "ACHR", "RXRX", "TEM", "BBAI", "AI"]
 ENERGY_LEADERS = ["XOM", "CVX"]
+PRECIOUS_METAL_ETFS = ["GLD", "IAU", "PHYS", "SLV", "PSLV"]
+PRECIOUS_METAL_MINERS = ["GDX", "GDXJ", "SIL", "SILJ", "NEM", "GOLD", "AEM", "WPM", "FNV", "RGLD", "PAAS", "AG", "HL", "CDE"]
+PRECIOUS_METALS = PRECIOUS_METAL_ETFS + PRECIOUS_METAL_MINERS
+PRECIOUS_METALS_MACRO = ["GLD", "SLV", "GDX", "GDXJ", "UUP"]
 BENCHMARKS = ["SPY", "QQQ"]
 
 UNIVERSE = list(dict.fromkeys(
@@ -216,6 +235,7 @@ UNIVERSE = list(dict.fromkeys(
     + DATA_CENTER_POWER_COOLING
     + BITCOIN_AI_COMPUTE
     + SMALL_CAP_MOMENTUM
+    + PRECIOUS_METALS
     + ENERGY_LEADERS
     + BENCHMARKS
 ))
@@ -223,7 +243,7 @@ UNIVERSE = list(dict.fromkeys(
 SECTOR_ETFS = ["XLK", "XLY", "XLF", "XLE", "XLV", "XLU", "XLI", "XLP"]
 FUTURES_SYMBOLS = [FUTURES_ES_SYMBOL, FUTURES_NQ_SYMBOL]
 BREADTH_SYMBOLS = ["RSP", "IWM", "DIA", "ARKK"]
-MACRO_SYMBOLS = ["SPY", "QQQ", "^VIX", "^TNX"] + SECTOR_ETFS + BREADTH_SYMBOLS
+MACRO_SYMBOLS = ["SPY", "QQQ", "^VIX", "^TNX"] + SECTOR_ETFS + BREADTH_SYMBOLS + PRECIOUS_METALS_MACRO
 
 SYMBOL_SECTOR = {
     "NVDA": "XLK", "AMD": "XLK", "AVGO": "XLK", "TSM": "XLK", "MU": "XLK", "ARM": "XLK",
@@ -238,6 +258,12 @@ SYMBOL_SECTOR = {
     "HUT": "XLK", "IREN": "XLK", "CIFR": "XLK", "WULF": "XLK", "CLSK": "XLK", "MARA": "XLK", "RIOT": "XLK", "BTDR": "XLK", "CORZ": "XLK", "APLD": "XLK",
     "SOUN": "XLK", "RGTI": "XLK", "QBTS": "XLK", "IONQ": "XLK", "RKLB": "XLI", "JOBY": "XLI", "ACHR": "XLI",
     "RXRX": "XLV", "TEM": "XLV", "BBAI": "XLK", "AI": "XLK",
+    "GLD": "PRECIOUS_METALS", "IAU": "PRECIOUS_METALS", "PHYS": "PRECIOUS_METALS",
+    "SLV": "PRECIOUS_METALS", "PSLV": "PRECIOUS_METALS",
+    "GDX": "PRECIOUS_METALS", "GDXJ": "PRECIOUS_METALS", "SIL": "PRECIOUS_METALS", "SILJ": "PRECIOUS_METALS",
+    "NEM": "PRECIOUS_METALS", "GOLD": "PRECIOUS_METALS", "AEM": "PRECIOUS_METALS",
+    "WPM": "PRECIOUS_METALS", "FNV": "PRECIOUS_METALS", "RGLD": "PRECIOUS_METALS",
+    "PAAS": "PRECIOUS_METALS", "AG": "PRECIOUS_METALS", "HL": "PRECIOUS_METALS", "CDE": "PRECIOUS_METALS",
     "XOM": "XLE", "CVX": "XLE",
     "SPY": "SPY", "QQQ": "QQQ"
 }
@@ -255,6 +281,8 @@ for _s in BITCOIN_AI_COMPUTE:
     SYMBOL_BUCKET[_s] = "bitcoin_ai_compute"
 for _s in SMALL_CAP_MOMENTUM:
     SYMBOL_BUCKET[_s] = "small_cap_momentum"
+for _s in PRECIOUS_METALS:
+    SYMBOL_BUCKET[_s] = "precious_metals"
 for _s in ENERGY_LEADERS:
     SYMBOL_BUCKET[_s] = "energy_leaders"
 for _s in BENCHMARKS:
@@ -267,6 +295,7 @@ BUCKET_CONFIG = {
     "data_center_infra": {"alloc_factor": DATA_CENTER_INFRA_ALLOC_FACTOR, "max_exposure_pct": DATA_CENTER_INFRA_MAX_EXPOSURE_PCT, "max_positions": DATA_CENTER_INFRA_MAX_POSITIONS},
     "bitcoin_ai_compute": {"alloc_factor": BITCOIN_AI_COMPUTE_ALLOC_FACTOR, "max_exposure_pct": BITCOIN_AI_COMPUTE_MAX_EXPOSURE_PCT, "max_positions": BITCOIN_AI_COMPUTE_MAX_POSITIONS},
     "small_cap_momentum": {"alloc_factor": SMALL_CAP_MOMENTUM_ALLOC_FACTOR, "max_exposure_pct": SMALL_CAP_MOMENTUM_MAX_EXPOSURE_PCT, "max_positions": SMALL_CAP_MOMENTUM_MAX_POSITIONS},
+    "precious_metals": {"alloc_factor": PRECIOUS_METALS_ALLOC_FACTOR, "max_exposure_pct": PRECIOUS_METALS_MAX_EXPOSURE_PCT, "max_positions": PRECIOUS_METALS_MAX_POSITIONS},
     "energy_leaders": {"alloc_factor": 0.75, "max_exposure_pct": 0.35, "max_positions": 2},
     "benchmark_etf": {"alloc_factor": BENCHMARK_ETF_ALLOC_FACTOR, "max_exposure_pct": 0.35, "max_positions": 2},
     "default": {"alloc_factor": 0.75, "max_exposure_pct": 0.30, "max_positions": 2},
@@ -551,9 +580,68 @@ def opening_warmup_status(clock=None):
 # ============================================================
 # HELPERS
 # ============================================================
+AUTH_HINT = "Set RUN_KEY in Railway and send it with the X-Run-Key header. Do not put secrets in the URL."
+
+
+def auth_context():
+    """Return sanitized auth status. Never returns or logs the supplied key."""
+    header_key = request.headers.get("X-Run-Key")
+    query_key_present = "key" in request.args
+    query_key = request.args.get("key") if ALLOW_QUERY_KEY_AUTH else None
+
+    supplied = header_key or query_key
+    method = "header" if header_key else ("query" if query_key_present else "none")
+
+    ok = SECRET_KEY == "changeme" or (supplied is not None and supplied == SECRET_KEY)
+    deprecated_query_key_used = bool(query_key_present)
+
+    warning = None
+    if deprecated_query_key_used:
+        warning = (
+            "URL query-key authentication is deprecated because request URLs can appear "
+            "in Railway/Gunicorn access logs. Rotate RUN_KEY if it was exposed and use "
+            "the X-Run-Key header going forward."
+        )
+
+    if query_key_present and not ALLOW_QUERY_KEY_AUTH:
+        ok = False
+        warning = "URL query-key authentication is disabled. Use the X-Run-Key header."
+
+    return {
+        "ok": bool(ok),
+        "method": method,
+        "query_key_present": bool(query_key_present),
+        "deprecated_query_key_used": deprecated_query_key_used,
+        "warning": warning,
+        "header_supported": True,
+        "query_key_auth_allowed": bool(ALLOW_QUERY_KEY_AUTH)
+    }
+
+
 def key_ok():
-    supplied = request.args.get("key") or request.headers.get("X-Run-Key")
-    return SECRET_KEY == "changeme" or supplied == SECRET_KEY
+    return bool(auth_context().get("ok", False))
+
+
+def auth_failed_payload():
+    return {
+        "error": "unauthorized",
+        "hint": AUTH_HINT,
+        "preferred_auth": "X-Run-Key header",
+        "curl_example": 'curl -H "X-Run-Key: YOUR_RUN_KEY" https://trading-bot-clean.up.railway.app/paper/run',
+        "query_key_auth_allowed_temporarily": bool(ALLOW_QUERY_KEY_AUTH)
+    }
+
+
+def attach_auth_warning(payload):
+    ctx = auth_context()
+    if isinstance(payload, dict) and ctx.get("warning"):
+        payload.setdefault("_auth_warning", {
+            "message": ctx.get("warning"),
+            "auth_method_used": ctx.get("method"),
+            "preferred_auth": "X-Run-Key header",
+            "rotate_run_key_recommended_if_exposed": True
+        })
+    return payload
 
 
 def clean(arr):
@@ -1022,6 +1110,78 @@ def breadth_status(series=None, spy_5d=None, qqq_5d=None):
     }
 
 
+def precious_metals_status(series=None, spy_5d=None, qqq_5d=None, vix_5d=None, rates_5d=None):
+    """Evaluate whether gold/silver/miners deserve defensive or momentum attention."""
+    series = series or {}
+    spy_5d = 0.0 if spy_5d is None else float(spy_5d)
+    qqq_5d = 0.0 if qqq_5d is None else float(qqq_5d)
+    vix_5d = 0.0 if vix_5d is None else float(vix_5d)
+    rates_5d = 0.0 if rates_5d is None else float(rates_5d)
+
+    gld = series.get("GLD", np.array([]))
+    slv = series.get("SLV", np.array([]))
+    gdx = series.get("GDX", np.array([]))
+    gdxj = series.get("GDXJ", np.array([]))
+    uup = series.get("UUP", np.array([]))
+
+    gld_5d = pct_change(gld, 5)
+    slv_5d = pct_change(slv, 5)
+    gdx_5d = pct_change(gdx, 5)
+    gdxj_5d = pct_change(gdxj, 5)
+    uup_5d = pct_change(uup, 5)
+
+    gld_trend = trend_state(gld)
+    slv_trend = trend_state(slv)
+    miners_confirming = (gdx_5d > 0 and gdxj_5d > 0)
+    metals_positive_count = sum(1 for x in [gld_5d, slv_5d, gdx_5d, gdxj_5d] if x > 0)
+    metals_outperform_spy = max(gld_5d, slv_5d, gdx_5d, gdxj_5d) > spy_5d
+    dollar_weak = uup_5d < 0
+    rates_falling = rates_5d < 0
+    market_soft = spy_5d < 0 or qqq_5d < 0
+    volatility_rising = vix_5d > 0
+
+    state = "neutral"
+    action = "normal"
+    reason = "precious_metals_not_confirmed"
+    score_bonus = 0.0
+
+    if metals_positive_count >= 2 and metals_outperform_spy and (market_soft or volatility_rising or rates_falling or dollar_weak):
+        state = "safe_haven_bid"
+        action = "allow_defensive_metals"
+        reason = "metals_outperforming_with_safe_haven_macro_support"
+        score_bonus = PRECIOUS_METALS_SAFE_HAVEN_SCORE_BONUS
+        if dollar_weak:
+            score_bonus += PRECIOUS_METALS_WEAK_DOLLAR_SCORE_BONUS
+    elif metals_positive_count >= 3 and (gld_trend == "up" or slv_trend == "up") and miners_confirming:
+        state = "bullish_momentum"
+        action = "allow_metals_momentum"
+        reason = "gold_silver_miners_confirming_uptrend"
+        score_bonus = PRECIOUS_METALS_TREND_SCORE_BONUS
+    elif gld_5d < 0 and slv_5d < 0 and gdx_5d < 0:
+        state = "weak"
+        action = "avoid_metals"
+        reason = "gold_silver_miners_not_confirming"
+
+    return {
+        "enabled": True,
+        "state": state,
+        "action": action,
+        "reason": reason,
+        "score_bonus": round(float(score_bonus), 6),
+        "gld_5d_pct": round(gld_5d * 100, 2),
+        "slv_5d_pct": round(slv_5d * 100, 2),
+        "gdx_5d_pct": round(gdx_5d * 100, 2),
+        "gdxj_5d_pct": round(gdxj_5d * 100, 2),
+        "uup_5d_pct": round(uup_5d * 100, 2),
+        "dollar_weak": bool(dollar_weak),
+        "rates_falling": bool(rates_falling),
+        "market_soft": bool(market_soft),
+        "volatility_rising": bool(volatility_rising),
+        "metals_positive_count": int(metals_positive_count),
+        "miners_confirming": bool(miners_confirming)
+    }
+
+
 # ============================================================
 # MARKET / REGIME ENGINE
 # ============================================================
@@ -1143,8 +1303,9 @@ def market_status(force=False):
 
     futures = futures_bias_status()
     breadth = breadth_status(series=series, spy_5d=spy_5d, qqq_5d=qqq_5d)
+    precious_metals = precious_metals_status(series=series, spy_5d=spy_5d, qqq_5d=qqq_5d, vix_5d=vix_5d, rates_5d=tnx_5d)
 
-    # Futures and breadth are confirmation layers. They do not override the whole
+    # Futures, breadth, and precious metals are confirmation layers. They do not override the whole
     # regime by themselves, but they do inform risk score and downstream sizing.
     if futures.get("action") in ["block_opening_longs", "tech_caution"]:
         risk_score = int(max(0, risk_score - 5))
@@ -1155,6 +1316,9 @@ def market_status(force=False):
         risk_score = int(max(0, risk_score - 3))
     elif breadth.get("state") == "supportive":
         risk_score = int(min(100, risk_score + 2))
+
+    if precious_metals.get("action") == "allow_defensive_metals" and broad_market_soft:
+        risk_score = int(max(0, risk_score - 2))
 
     result = {
         "market_mode": mode,
@@ -1176,7 +1340,8 @@ def market_status(force=False):
         "broad_market_soft": broad_market_soft,
         "bear_confirmed": bear_confirmed,
         "futures_bias": futures,
-        "breadth": breadth
+        "breadth": breadth,
+        "precious_metals": precious_metals
     }
 
     result["tech_leadership"] = tech_leadership_status(result)
@@ -1335,7 +1500,7 @@ def catalyst_momentum_context(symbol, arrays, market):
         base_avg_6bar = float(np.mean(base_slice)) * 6 if len(base_slice) > 0 else 0.0
         volume_surge = recent_vol / base_avg_6bar if base_avg_6bar > 0 else 0.0
     bucket = symbol_bucket(symbol)
-    catalyst_bucket = bucket in ["bitcoin_ai_compute", "data_center_infra", "small_cap_momentum", "semi_leaders"]
+    catalyst_bucket = bucket in ["bitcoin_ai_compute", "data_center_infra", "small_cap_momentum", "semi_leaders", "precious_metals"]
     strong_move = intraday_move >= CATALYST_MIN_INTRADAY_MOVE_PCT
     volume_confirmed = volume_surge >= CATALYST_VOLUME_SURGE_RATIO
     medium_move_confirmed = intraday_move >= (CATALYST_MIN_INTRADAY_MOVE_PCT * 0.625) and volume_confirmed
@@ -1417,6 +1582,10 @@ def signal_score(symbol, prices, market, side="long", benchmark_prices=None):
         if px > ma8:
             score += 0.001
         score += sector_bonus + rs_adjustment
+        if symbol_bucket(symbol) == "precious_metals":
+            metals = market.get("precious_metals", {}) or {}
+            if metals.get("action") in ["allow_defensive_metals", "allow_metals_momentum"]:
+                score += float(metals.get("score_bonus", 0.0) or 0.0)
         return max(0.0, float(score))
 
     if not (px < ma20 and ma8 <= ma20 and ma20 <= ma34):
@@ -2184,6 +2353,7 @@ def entry_controls_snapshot(clock=None, market=None, params=None, risk_controls=
         },
         "futures_bias": market.get("futures_bias", {}),
         "breadth": market.get("breadth", {}),
+        "precious_metals": market.get("precious_metals", {}),
         "winner_protection": {
             "partial_profit_enabled": PARTIAL_PROFIT_ENABLED,
             "partial_profit_trigger_pct": round(PARTIAL_PROFIT_TRIGGER_PCT * 100, 2),
@@ -3102,6 +3272,10 @@ def feedback_loop_status(market=None, params=None, risk_controls=None, clock=Non
     if breadth.get("action") in ["reduce_aggression", "tech_caution", "risk_off_confirmation"]:
         actions.append(f"breadth_{breadth.get('action')}")
 
+    metals = market.get("precious_metals", {}) or {}
+    if metals.get("action") in ["allow_defensive_metals", "allow_metals_momentum"]:
+        actions.append(f"precious_metals_{metals.get('state')}")
+
     if not reasons:
         reasons.append("feedback loop clear")
 
@@ -3464,6 +3638,7 @@ def portfolio_risk_review():
         "risk_score": market.get("risk_score"),
         "futures_bias": market.get("futures_bias", {}),
         "breadth": market.get("breadth", {}),
+        "precious_metals": market.get("precious_metals", {}),
         "tech_leadership": tech_leadership_status(market),
         "risk_controls": rc,
         "performance": perf,
@@ -3473,6 +3648,7 @@ def portfolio_risk_review():
             "growth_pct": growth_pct,
             "defensive_pct": defensive_pct,
             "energy_pct": energy_pct,
+            "precious_metals_pct": round(sum(r["position_pct_of_equity"] for r in rows if r.get("bucket") == "precious_metals"), 2),
             "unknown_pct": unknown_pct,
             "sector_position_counts": _count_by(rows, "sector")
         },
@@ -3781,7 +3957,8 @@ DASHBOARD = """
         Feedback: <a href="/paper/feedback-loop">/paper/feedback-loop</a> Â·
         Intraday Report: <a href="/paper/intraday-report">/paper/intraday-report</a> Â·
         EOD Report: <a href="/paper/end-of-day-report">/paper/end-of-day-report</a> Â·
-        Run once: <a href="/paper/run">/paper/run</a>
+        Run once: <a href="/paper/run">/paper/run</a> Â·
+        Auth Help: <a href="/paper/auth-help">/paper/auth-help</a>
     </p>
 </body>
 </html>
@@ -3821,7 +3998,7 @@ def add_endpoint_meta(payload, endpoint, ok=True, warning=None, error=None):
         "market_clock": market_clock(),
         "payload_present": payload is not None,
         "content_type": "application/json",
-        "version": "visibility-fallback-2026-05-05"
+        "version": "metals-scanner-2026-05-07"
     }
     if warning:
         meta["warning"] = str(warning)
@@ -3911,6 +4088,14 @@ def config_snapshot():
         "auto_run_interval_seconds": AUTO_RUN_INTERVAL_SECONDS,
         "auto_run_market_only": AUTO_RUN_MARKET_ONLY,
         "allow_manual_after_hours_trading": ALLOW_MANUAL_AFTER_HOURS_TRADING,
+        "auth": {
+            "preferred_auth": "X-Run-Key header",
+            "query_key_auth_allowed_temporarily": bool(ALLOW_QUERY_KEY_AUTH),
+            "query_key_auth_deprecated": True,
+            "run_key_is_default": SECRET_KEY == "changeme",
+            "rotate_run_key_recommended_if_exposed": True,
+            "note": "Do not send RUN_KEY in the URL; Railway/Gunicorn access logs can expose full request URLs."
+        },
         "max_daily_loss_pct": MAX_DAILY_LOSS_PCT,
         "max_intraday_drawdown_pct": MAX_INTRADAY_DRAWDOWN_PCT,
         "rotation_score_multiplier": ROTATION_SCORE_MULTIPLIER,
@@ -3990,6 +4175,12 @@ def config_snapshot():
         "controlled_pullback_require_sector_leader": CONTROLLED_PULLBACK_REQUIRE_SECTOR_LEADER,
         "controlled_pullback_allow_empty_book_only": CONTROLLED_PULLBACK_ALLOW_EMPTY_BOOK_ONLY,
         "expanded_scanner_enabled": EXPANDED_SCANNER_ENABLED,
+        "precious_metals_alloc_factor": PRECIOUS_METALS_ALLOC_FACTOR,
+        "precious_metals_max_exposure_pct": PRECIOUS_METALS_MAX_EXPOSURE_PCT,
+        "precious_metals_max_positions": PRECIOUS_METALS_MAX_POSITIONS,
+        "precious_metals_safe_haven_score_bonus": PRECIOUS_METALS_SAFE_HAVEN_SCORE_BONUS,
+        "precious_metals_trend_score_bonus": PRECIOUS_METALS_TREND_SCORE_BONUS,
+        "precious_metals_weak_dollar_score_bonus": PRECIOUS_METALS_WEAK_DOLLAR_SCORE_BONUS,
         "scanner_universe_count": len(UNIVERSE),
         "scanner_universe": UNIVERSE,
         "scanner_buckets": {k: [sym for sym, b in SYMBOL_BUCKET.items() if b == k] for k in sorted(set(SYMBOL_BUCKET.values()))},
@@ -4027,6 +4218,7 @@ def compact_status_snapshot(include_last_result=True):
             "trade_permission": last_result.get("trade_permission"),
             "futures_bias": last_result.get("futures_bias", {}),
             "breadth": last_result.get("breadth", {}),
+            "precious_metals": last_result.get("precious_metals", {}),
             "entries": last_result.get("entries", []),
             "exits": last_result.get("exits", []),
             "rotations": last_result.get("rotations", []),
@@ -4055,6 +4247,7 @@ def compact_status_snapshot(include_last_result=True):
         "last_market": market,
         "futures_bias": market.get("futures_bias", {}) if isinstance(market, dict) else {},
         "breadth": market.get("breadth", {}) if isinstance(market, dict) else {},
+        "precious_metals": market.get("precious_metals", {}) if isinstance(market, dict) else {},
         "pullback_watchlist": portfolio.get("pullback_watchlist", {}),
         "auto_runner": {
             "enabled": auto.get("enabled"),
@@ -4205,6 +4398,7 @@ def health():
         "state_diagnostic": state_file_diagnostic(),
         "important_links": {
             "checkup": "/paper/checkup",
+            "auth_help": "/paper/auth-help",
             "status": "/paper/status",
             "full_status": "/paper/status?full=1",
             "feedback_loop": "/paper/feedback-loop",
@@ -4265,16 +4459,35 @@ def paper_market():
     return safe_route("paper_market", build, fallback_builder=lambda: portfolio.get("last_market") or {"market_mode": "unknown", "warning": "market unavailable"})
 
 
+@app.route("/paper/auth-help")
+def paper_auth_help():
+    return json_response({
+        "status": "ok",
+        "preferred_auth": "X-Run-Key header",
+        "why": "URL query parameters can be written to Railway/Gunicorn access logs, which can expose secrets.",
+        "recommended_steps": [
+            "Rotate RUN_KEY in Railway if the old key appeared in logs or screenshots.",
+            "Call /paper/run with the X-Run-Key header instead of ?key=...",
+            "Remove old URLs containing ?key=... from bookmarks, screenshots, notes, and automations."
+        ],
+        "curl_example": 'curl -H "X-Run-Key: YOUR_RUN_KEY" https://trading-bot-clean.up.railway.app/paper/run',
+        "backward_compatibility": {
+            "query_key_auth_allowed_temporarily": bool(ALLOW_QUERY_KEY_AUTH),
+            "disable_with_env": "ALLOW_QUERY_KEY_AUTH=false"
+        }
+    }, endpoint="paper_auth_help")
+
+
 @app.route("/paper/run")
 def paper_run():
     if not key_ok():
-        return json_response({"error": "unauthorized", "hint": "set RUN_KEY or pass ?key=YOUR_KEY"}, endpoint="paper_run", status=401, ok=False)
+        return json_response(auth_failed_payload(), endpoint="paper_run", status=401, ok=False)
 
     force_after_hours = request.args.get("after_hours", "0").lower() in ["1", "true", "yes", "on"]
     allow_after_hours = ALLOW_MANUAL_AFTER_HOURS_TRADING and force_after_hours
 
     def build():
-        return run_cycle(source="manual", allow_after_hours=allow_after_hours)
+        return attach_auth_warning(run_cycle(source="manual", allow_after_hours=allow_after_hours))
 
     return safe_route("paper_run", build, fallback_builder=lambda: compact_status_snapshot(include_last_result=True))
 
@@ -4282,25 +4495,25 @@ def paper_run():
 @app.route("/paper/reset")
 def paper_reset():
     if not key_ok():
-        return json_response({"error": "unauthorized", "hint": "set RUN_KEY or pass ?key=YOUR_KEY"}, endpoint="paper_reset", status=401, ok=False)
+        return json_response(auth_failed_payload(), endpoint="paper_reset", status=401, ok=False)
     cash = float(request.args.get("cash", "10000"))
     reset_state(cash)
-    return json_response({"status": "reset", "cash": cash, "equity": cash}, endpoint="paper_reset")
+    return json_response(attach_auth_warning({"status": "reset", "cash": cash, "equity": cash}), endpoint="paper_reset")
 
 
 @app.route("/paper/close_all")
 def close_all():
     if not key_ok():
-        return json_response({"error": "unauthorized", "hint": "set RUN_KEY or pass ?key=YOUR_KEY"}, endpoint="paper_close_all", status=401, ok=False)
+        return json_response(auth_failed_payload(), endpoint="paper_close_all", status=401, ok=False)
 
     def build():
         clock = market_clock()
         if not clock["is_open"] and not ALLOW_MANUAL_AFTER_HOURS_TRADING:
-            return {
+            return attach_auth_warning({
                 "blocked": True,
                 "reason": f"market closed: {clock['reason']}",
                 "market_clock": clock
-            }
+            })
 
         exits = []
         mode = portfolio.get("last_market", {}).get("market_mode", "manual_close")
@@ -4312,7 +4525,7 @@ def close_all():
 
         calculate_equity(refresh_prices=True)
         save_state(portfolio)
-        return {"closed": exits, "cash": portfolio["cash"], "equity": portfolio["equity"]}
+        return attach_auth_warning({"closed": exits, "cash": portfolio["cash"], "equity": portfolio["equity"]})
     return safe_route("paper_close_all", build, fallback_builder=lambda: compact_status_snapshot())
 
 
@@ -4446,5 +4659,4 @@ def paper_state_diagnostic():
 ensure_auto_thread()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "8080"))
-    app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", "8080"
