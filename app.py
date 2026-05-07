@@ -21,7 +21,20 @@ SECRET_KEY = os.environ.get("RUN_KEY", "changeme")
 # supported temporarily for backward compatibility, but they are deprecated
 # because platform access logs can expose full request URLs.
 ALLOW_QUERY_KEY_AUTH = os.environ.get("ALLOW_QUERY_KEY_AUTH", "true").lower() in ["1", "true", "yes", "on"]
-STATE_FILE = os.environ.get("STATE_FILE", "state.json")
+# State persistence: use a mounted Railway volume or explicit STATE_DIR when available.
+# This solves the phone/GitHub redeploy problem where local state.json can reset on every deploy.
+STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+STATE_FILENAME = os.environ.get("STATE_FILENAME", os.environ.get("STATE_FILE", "state.json"))
+if STATE_DIR:
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+    except Exception:
+        pass
+    STATE_FILE = os.path.join(STATE_DIR, os.path.basename(STATE_FILENAME))
+    STATE_PERSISTENCE_MODE = "persistent_volume"
+else:
+    STATE_FILE = STATE_FILENAME
+    STATE_PERSISTENCE_MODE = "local_ephemeral"
 MARKET_CACHE_TTL = int(os.environ.get("MARKET_CACHE_TTL", "300"))
 
 MARKET_TZ = pytz.timezone(os.environ.get("MARKET_TZ", "America/Chicago"))
@@ -422,6 +435,22 @@ def default_reports():
     }
 
 
+def default_scanner_audit():
+    return {
+        "date": today_key(),
+        "last_updated_local": None,
+        "last_cycle_source": None,
+        "signals_found": 0,
+        "accepted_entries": [],
+        "blocked_entries": [],
+        "rejected_signals": [],
+        "long_signals": [],
+        "short_signals": [],
+        "bucket_summary": {},
+        "notes": []
+    }
+
+
 def default_state():
     return {
         "cash": 10000.0,
@@ -437,7 +466,8 @@ def default_state():
         "performance": default_performance(),
         "feedback_loop": default_feedback_loop(),
         "reports": default_reports(),
-        "pullback_watchlist": {}
+        "pullback_watchlist": {},
+        "scanner_audit": default_scanner_audit()
     }
 
 
@@ -466,6 +496,7 @@ def load_state():
     state.setdefault("feedback_loop", default_feedback_loop())
     state.setdefault("reports", default_reports())
     state.setdefault("pullback_watchlist", {})
+    state.setdefault("scanner_audit", default_scanner_audit())
 
     # Backfill newer fields without breaking old state.json.
     rc = state["risk_controls"]
@@ -499,9 +530,19 @@ def load_state():
 
 
 def save_state(state):
+    directory = os.path.dirname(os.path.abspath(STATE_FILE))
+    if directory:
+        os.makedirs(directory, exist_ok=True)
     tmp = STATE_FILE + ".tmp"
+    backup = STATE_FILE + ".bak"
     with open(tmp, "w") as f:
         json.dump(state, f)
+    if os.path.exists(STATE_FILE):
+        try:
+            import shutil
+            shutil.copy2(STATE_FILE, backup)
+        except Exception:
+            pass
     os.replace(tmp, STATE_FILE)
 
 
@@ -2980,8 +3021,60 @@ def set_auto_success(source, result, clock):
     ar["last_successful_run_local"] = local_ts_text(ts)
     ar["last_successful_run_source"] = source
     ar["last_result"] = result
+    record_scanner_audit(result, source=source)
     ar["market_open_now"] = bool(clock.get("is_open", False))
     ar["market_clock"] = clock
+
+
+def _summarize_signal_buckets(symbols):
+    summary = {}
+    for sym in symbols or []:
+        bucket = symbol_bucket(sym)
+        summary[bucket] = summary.get(bucket, 0) + 1
+    return dict(sorted(summary.items(), key=lambda kv: kv[0]))
+
+
+def record_scanner_audit(result, source="auto"):
+    if not isinstance(result, dict):
+        return default_scanner_audit()
+    long_signals = result.get("long_signals", []) or []
+    short_signals = result.get("short_signals", []) or []
+    accepted = [e.get("symbol") for e in (result.get("entries", []) or []) if isinstance(e, dict) and e.get("symbol")]
+    blocked = result.get("blocked_entries", []) or []
+    rejected = result.get("rejected_signals", []) or []
+    names_for_buckets = list(long_signals) + list(short_signals) + list(accepted)
+    audit = {
+        "date": today_key(),
+        "last_updated_local": local_ts_text(),
+        "last_cycle_source": source,
+        "market_mode": result.get("market_mode"),
+        "regime": result.get("regime"),
+        "risk_score": result.get("risk_score"),
+        "signals_found": int(result.get("signals_found", len(long_signals) + len(short_signals)) or 0),
+        "accepted_entries": result.get("entries", []) or [],
+        "blocked_entries": blocked[:25],
+        "rejected_signals": rejected[:25],
+        "long_signals": long_signals[:25],
+        "short_signals": short_signals[:25],
+        "bucket_summary": _summarize_signal_buckets(names_for_buckets),
+        "top_blocked_symbols": [b.get("symbol") for b in blocked[:10] if isinstance(b, dict) and b.get("symbol")],
+        "top_rejected_symbols": [r.get("symbol") for r in rejected[:10] if isinstance(r, dict) and r.get("symbol")],
+        "notes": []
+    }
+    if not audit["accepted_entries"] and audit["signals_found"] > 0:
+        audit["notes"].append("Scanner found candidates, but risk/quality controls blocked entries.")
+    if audit["signals_found"] == 0:
+        audit["notes"].append("No scanner signals were available in the latest cycle or the market was closed.")
+    portfolio["scanner_audit"] = audit
+    return audit
+
+
+def scanner_result_log():
+    audit = portfolio.get("scanner_audit") or default_scanner_audit()
+    last_result = (portfolio.setdefault("auto_runner", default_auto_runner()).get("last_result") or {})
+    if isinstance(last_result, dict) and last_result and audit.get("last_updated_local") is None:
+        audit = record_scanner_audit(last_result, source=portfolio.get("auto_runner", {}).get("last_run_source") or "unknown")
+    return audit
 
 
 def set_auto_error(exc):
@@ -3812,7 +3905,8 @@ def portfolio_risk_review():
     if not vulnerabilities:
         vulnerabilities.append("No major concentration or drawdown vulnerability detected from current paper state.")
 
-    recommendation_plan = build_recommended_actions(market=market, risk_controls=rc, feedback=feedback_loop_status(market=market, risk_controls=rc, persist=False))
+    feedback = feedback_loop_status(market=market, risk_controls=rc, persist=False)
+    recommendation_plan = build_recommended_actions(market=market, risk_controls=rc, feedback=feedback)
     recommendations = [item.get("action") for item in recommendation_plan.get("top_actions", [])]
 
     return {
@@ -3840,7 +3934,7 @@ def portfolio_risk_review():
             "sector_position_counts": _count_by(rows, "sector")
         },
         "entry_quality_controls": entry_controls_snapshot(market=market, risk_controls=rc),
-        "feedback_loop": feedback_loop_status(market=market, risk_controls=rc, persist=False),
+        "feedback_loop": feedback,
         "positions": rows,
         "vulnerabilities": vulnerabilities,
         "recommendations": recommendations,
@@ -4137,16 +4231,16 @@ DASHBOARD = """
     </div>
 
     <p class="small">
-        JSON: <a href="/paper/status">/paper/status</a> Â·
-        Market: <a href="/paper/market?force=1">/paper/market?force=1</a> Â·
-        Explain: <a href="/paper/explain">/paper/explain</a> Â·
-        Journal: <a href="/paper/journal">/paper/journal</a> Â·
-        Risk Review: <a href="/paper/risk-review">/paper/risk-review</a> Â·
-        Daily Plan: <a href="/paper/daily-plan">/paper/daily-plan</a> Â·
-        Feedback: <a href="/paper/feedback-loop">/paper/feedback-loop</a> Â·
-        Intraday Report: <a href="/paper/intraday-report">/paper/intraday-report</a> Â·
-        EOD Report: <a href="/paper/end-of-day-report">/paper/end-of-day-report</a> Â·
-        Run once: <a href="/paper/run">/paper/run</a> Â·
+        JSON: <a href="/paper/status">/paper/status</a> ·
+        Market: <a href="/paper/market?force=1">/paper/market?force=1</a> ·
+        Explain: <a href="/paper/explain">/paper/explain</a> ·
+        Journal: <a href="/paper/journal">/paper/journal</a> ·
+        Risk Review: <a href="/paper/risk-review">/paper/risk-review</a> ·
+        Daily Plan: <a href="/paper/daily-plan">/paper/daily-plan</a> ·
+        Feedback: <a href="/paper/feedback-loop">/paper/feedback-loop</a> ·
+        Intraday Report: <a href="/paper/intraday-report">/paper/intraday-report</a> ·
+        EOD Report: <a href="/paper/end-of-day-report">/paper/end-of-day-report</a> ·
+        Run once: <a href="/paper/run">/paper/run</a> ·
         Auth Help: <a href="/paper/auth-help">/paper/auth-help</a>
     </p>
 </body>
@@ -4187,7 +4281,7 @@ def add_endpoint_meta(payload, endpoint, ok=True, warning=None, error=None):
         "market_clock": market_clock(),
         "payload_present": payload is not None,
         "content_type": "application/json",
-        "version": "metals-scanner-2026-05-07"
+        "version": "ops-readiness-2026-05-07"
     }
     if warning:
         meta["warning"] = str(warning)
@@ -4221,6 +4315,9 @@ def state_file_diagnostic():
         size = 0
     return {
         "state_file": STATE_FILE,
+        "state_dir": STATE_DIR or "",
+        "state_persistence_mode": STATE_PERSISTENCE_MODE,
+        "persistent_storage_configured": STATE_PERSISTENCE_MODE == "persistent_volume",
         "exists": bool(exists),
         "size_bytes": int(size),
         "positions_count": len(portfolio.get("positions", {}) or {}),
@@ -4228,7 +4325,9 @@ def state_file_diagnostic():
         "history_count": len(portfolio.get("history", []) or []),
         "reports_present": bool(portfolio.get("reports")),
         "feedback_loop_present": bool(portfolio.get("feedback_loop")),
-        "pullback_watchlist_count": len(portfolio.get("pullback_watchlist", {}) or {})
+        "scanner_audit_present": bool(portfolio.get("scanner_audit")),
+        "pullback_watchlist_count": len(portfolio.get("pullback_watchlist", {}) or {}),
+        "warning": "Local ephemeral state may reset on deploy; set STATE_DIR to a Railway volume path for persistence." if STATE_PERSISTENCE_MODE == "local_ephemeral" else "Persistent state path is configured."
     }
 
 
@@ -4278,6 +4377,16 @@ def config_snapshot():
         "auto_run_interval_seconds": AUTO_RUN_INTERVAL_SECONDS,
         "auto_run_market_only": AUTO_RUN_MARKET_ONLY,
         "allow_manual_after_hours_trading": ALLOW_MANUAL_AFTER_HOURS_TRADING,
+        "state_persistence": {
+            "mode": STATE_PERSISTENCE_MODE,
+            "state_file": STATE_FILE,
+            "state_dir": STATE_DIR or "",
+            "recommendation": "Set STATE_DIR to a Railway volume mount path for deploy-safe state." if STATE_PERSISTENCE_MODE == "local_ephemeral" else "Persistent state path configured."
+        },
+        "new_monitoring_endpoints": {
+            "next_session_readiness": "/paper/next-session-readiness",
+            "scanner_log": "/paper/scanner-log"
+        },
         "auth": {
             "preferred_auth": "X-Run-Key header",
             "query_key_auth_allowed_temporarily": bool(ALLOW_QUERY_KEY_AUTH),
@@ -4439,6 +4548,7 @@ def compact_status_snapshot(include_last_result=True):
         "breadth": market.get("breadth", {}) if isinstance(market, dict) else {},
         "precious_metals": market.get("precious_metals", {}) if isinstance(market, dict) else {},
         "pullback_watchlist": portfolio.get("pullback_watchlist", {}),
+        "scanner_audit": scanner_result_log(),
         "auto_runner": {
             "enabled": auto.get("enabled"),
             "market_only": auto.get("market_only"),
@@ -4483,7 +4593,9 @@ def build_checkup_snapshot(force_market=False, compile_report=False):
     feedback = feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=True)
     perf = performance_snapshot()
     journal = analyze_trading_journal(limit=30)
+    portfolio["feedback_loop"] = feedback
     risk = portfolio_risk_review()
+    risk["feedback_loop"] = feedback
     recommended_actions = risk.get("recommended_action_plan", build_recommended_actions(market=market, risk_controls=rc, feedback=feedback, journal=journal, risk_review=risk))
 
     report = None
@@ -4523,6 +4635,8 @@ def build_checkup_snapshot(force_market=False, compile_report=False):
         "intraday_report": compact_report(report) if report else reports_snapshot(full=False).get("last_intraday_report"),
         "risk_review": risk,
         "recommended_action_plan": recommended_actions,
+        "next_session_readiness": next_session_readiness(),
+        "scanner_log": scanner_result_log(),
         "journal": journal,
         "explain": explain_current_system(force_market=False),
         "config": config_snapshot(),
@@ -4534,10 +4648,58 @@ def build_checkup_snapshot(force_market=False, compile_report=False):
             "checkup": "/paper/checkup",
             "feedback_loop": "/paper/feedback-loop",
             "intraday_report": "/paper/intraday-report",
+            "next_session_readiness": "/paper/next-session-readiness",
+            "scanner_log": "/paper/scanner-log",
             "risk_review": "/paper/risk-review",
             "journal": "/paper/journal",
-            "explain": "/paper/explain"
+            "explain": "/paper/explain",
+            "next_session_readiness": "/paper/next-session-readiness",
+            "scanner_log": "/paper/scanner-log"
         }
+    }
+
+
+def next_session_readiness():
+    clock = market_clock()
+    market = portfolio.get("last_market") or {}
+    rc = get_risk_controls()
+    params = apply_aggression_adjustments(risk_parameters(market), market) if market else risk_parameters({})
+    feedback = feedback_loop_status(market=market, params=params, risk_controls=rc, clock=clock, persist=False)
+    risk = portfolio_risk_review()
+    scanner = scanner_result_log()
+    ready = not bool(rc.get("halted")) and not bool(feedback.get("hard_halt"))
+    blockers = []
+    if rc.get("halted"):
+        blockers.append(rc.get("halt_reason") or "risk_halted")
+    if feedback.get("block_new_entries"):
+        blockers.append("feedback_loop_blocks_new_entries")
+    if not clock.get("is_open"):
+        blockers.append(f"market_{clock.get('reason')}")
+    if STATE_PERSISTENCE_MODE == "local_ephemeral":
+        blockers.append("state_is_ephemeral_until_STATE_DIR_is_configured")
+    return {
+        "ready_for_next_regular_session": bool(ready),
+        "market_clock": clock,
+        "market_mode": market.get("market_mode"),
+        "regime": market.get("regime"),
+        "risk_score": market.get("risk_score"),
+        "entry_floor": feedback.get("dynamic_min_long_score"),
+        "self_defense_mode": feedback.get("self_defense_mode"),
+        "hard_halt": feedback.get("hard_halt"),
+        "risk_halted": rc.get("halted"),
+        "blockers_or_notes": blockers,
+        "allowed_themes": {
+            "adaptive_tech": market.get("tech_leadership", {}).get("state"),
+            "precious_metals": market.get("precious_metals", {}).get("state"),
+            "expanded_scanner": bool(EXPANDED_SCANNER_ENABLED)
+        },
+        "state_diagnostic": state_file_diagnostic(),
+        "scanner_log_summary": {
+            "signals_found": scanner.get("signals_found"),
+            "bucket_summary": scanner.get("bucket_summary"),
+            "last_updated_local": scanner.get("last_updated_local")
+        },
+        "recommended_action_plan": build_recommended_actions(market=market, risk_controls=rc, feedback=feedback, risk_review=risk)
     }
 
 
@@ -4836,6 +4998,20 @@ def paper_report_today():
     return safe_route("paper_report_today", build, fallback_builder=lambda: {"note": "no report available yet", "compact_status": compact_status_snapshot()})
 
 
+@app.route("/paper/next-session-readiness")
+def paper_next_session_readiness():
+    return safe_route("paper_next_session_readiness", lambda: next_session_readiness(), fallback_builder=lambda: {
+        "ready_for_next_regular_session": False,
+        "fallback": True,
+        "state_diagnostic": state_file_diagnostic()
+    })
+
+
+@app.route("/paper/scanner-log")
+def paper_scanner_log():
+    return safe_route("paper_scanner_log", lambda: scanner_result_log(), fallback_builder=lambda: default_scanner_audit())
+
+
 @app.route("/paper/config")
 def paper_config():
     return safe_route("paper_config", lambda: config_snapshot())
@@ -4847,6 +5023,8 @@ def paper_state_diagnostic():
         "state_diagnostic": state_file_diagnostic(),
         "compact_status": compact_status_snapshot(include_last_result=False),
         "reports": reports_snapshot(full=False),
+        "scanner_log": scanner_result_log(),
+        "next_session_readiness": next_session_readiness(),
         "config": config_snapshot()
     })
 
