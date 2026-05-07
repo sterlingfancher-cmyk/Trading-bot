@@ -161,20 +161,64 @@ CONTROLLED_PULLBACK_REQUIRE_CAUTION_CONTEXT = os.environ.get("CONTROLLED_PULLBAC
 CONTROLLED_PULLBACK_REQUIRE_SECTOR_LEADER = os.environ.get("CONTROLLED_PULLBACK_REQUIRE_SECTOR_LEADER", "true").lower() not in ["0", "false", "no", "off"]
 CONTROLLED_PULLBACK_ALLOW_EMPTY_BOOK_ONLY = os.environ.get("CONTROLLED_PULLBACK_ALLOW_EMPTY_BOOK_ONLY", "true").lower() not in ["0", "false", "no", "off"]
 
+
+# Expanded scanner universe and bucket-risk controls. These let the bot scan
+# AI/data-center infrastructure, bitcoin-miner/HPC compute, power/cooling,
+# and small-cap momentum without treating those volatile names like mega-cap tech.
+EXPANDED_SCANNER_ENABLED = os.environ.get("EXPANDED_SCANNER_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
+CATALYST_MOMENTUM_ENABLED = os.environ.get("CATALYST_MOMENTUM_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
+CATALYST_MIN_INTRADAY_MOVE_PCT = float(os.environ.get("CATALYST_MIN_INTRADAY_MOVE_PCT", "0.08"))
+CATALYST_VOLUME_SURGE_RATIO = float(os.environ.get("CATALYST_VOLUME_SURGE_RATIO", "2.0"))
+CATALYST_SCORE_BONUS = float(os.environ.get("CATALYST_SCORE_BONUS", "0.0040"))
+CATALYST_STRONG_SCORE_BONUS = float(os.environ.get("CATALYST_STRONG_SCORE_BONUS", "0.0060"))
+THEME_CONFIRMATION_ENABLED = os.environ.get("THEME_CONFIRMATION_ENABLED", "true").lower() not in ["0", "false", "no", "off"]
+THEME_CONFIRMATION_MIN_SIGNALS = int(os.environ.get("THEME_CONFIRMATION_MIN_SIGNALS", "2"))
+THEME_CONFIRMATION_MIN_SCORE = float(os.environ.get("THEME_CONFIRMATION_MIN_SCORE", "0.0060"))
+THEME_CONFIRMATION_SCORE_BONUS = float(os.environ.get("THEME_CONFIRMATION_SCORE_BONUS", "0.0015"))
+
+# Bucket-level exposure limits and sizing factors. These are applied in addition
+# to sector caps, self-defense, stop losses, controlled pullbacks, and profit guards.
+MEGA_CAP_AI_ALLOC_FACTOR = float(os.environ.get("MEGA_CAP_AI_ALLOC_FACTOR", "1.00"))
+SEMI_LEADER_ALLOC_FACTOR = float(os.environ.get("SEMI_LEADER_ALLOC_FACTOR", "0.85"))
+DATA_CENTER_INFRA_ALLOC_FACTOR = float(os.environ.get("DATA_CENTER_INFRA_ALLOC_FACTOR", "0.70"))
+BITCOIN_AI_COMPUTE_ALLOC_FACTOR = float(os.environ.get("BITCOIN_AI_COMPUTE_ALLOC_FACTOR", "0.45"))
+SMALL_CAP_MOMENTUM_ALLOC_FACTOR = float(os.environ.get("SMALL_CAP_MOMENTUM_ALLOC_FACTOR", "0.35"))
+BENCHMARK_ETF_ALLOC_FACTOR = float(os.environ.get("BENCHMARK_ETF_ALLOC_FACTOR", "0.75"))
+
+DATA_CENTER_INFRA_MAX_EXPOSURE_PCT = float(os.environ.get("DATA_CENTER_INFRA_MAX_EXPOSURE_PCT", "0.40"))
+BITCOIN_AI_COMPUTE_MAX_EXPOSURE_PCT = float(os.environ.get("BITCOIN_AI_COMPUTE_MAX_EXPOSURE_PCT", "0.25"))
+SMALL_CAP_MOMENTUM_MAX_EXPOSURE_PCT = float(os.environ.get("SMALL_CAP_MOMENTUM_MAX_EXPOSURE_PCT", "0.15"))
+DATA_CENTER_INFRA_MAX_POSITIONS = int(os.environ.get("DATA_CENTER_INFRA_MAX_POSITIONS", "3"))
+BITCOIN_AI_COMPUTE_MAX_POSITIONS = int(os.environ.get("BITCOIN_AI_COMPUTE_MAX_POSITIONS", "2"))
+SMALL_CAP_MOMENTUM_MAX_POSITIONS = int(os.environ.get("SMALL_CAP_MOMENTUM_MAX_POSITIONS", "2"))
+
 RUN_LOCK = threading.Lock()
 AUTO_THREAD_STARTED = False
 
 # ============================================================
 # UNIVERSE
 # ============================================================
-UNIVERSE = [
-    "NVDA", "AMD", "AVGO", "TSM", "MU", "ARM",
-    "MSFT", "AMZN", "GOOGL", "META", "PLTR", "SNOW", "NET", "CRWD", "PANW",
-    "SHOP", "ROKU", "COIN",
-    "XOM", "CVX",
-    "WDC", "STX", "GLW", "TER", "CIEN",
-    "SPY", "QQQ"
-]
+MEGA_CAP_AI = ["MSFT", "AMZN", "GOOGL", "META", "PLTR"]
+SEMI_LEADERS = ["NVDA", "AMD", "AVGO", "TSM", "MU", "ARM", "MRVL", "ON", "LSCC", "MPWR", "MCHP", "ALAB", "ACLS", "UCTT"]
+CLOUD_CYBER_SOFTWARE = ["SNOW", "NET", "CRWD", "PANW", "SHOP", "ROKU", "COIN"]
+DATA_CENTER_HARDWARE_NETWORKING = ["SMCI", "ANET", "DELL", "HPE", "CIEN", "GLW", "COHR", "LITE", "AAOI", "WDC", "STX", "TER"]
+DATA_CENTER_POWER_COOLING = ["VRT", "ETN", "PWR", "GEV", "VST", "CEG", "NRG", "MOD", "POWL", "IESC"]
+BITCOIN_AI_COMPUTE = ["HUT", "IREN", "CIFR", "WULF", "CLSK", "MARA", "RIOT", "BTDR", "CORZ", "APLD"]
+SMALL_CAP_MOMENTUM = ["SOUN", "RGTI", "QBTS", "IONQ", "RKLB", "JOBY", "ACHR", "RXRX", "TEM", "BBAI", "AI"]
+ENERGY_LEADERS = ["XOM", "CVX"]
+BENCHMARKS = ["SPY", "QQQ"]
+
+UNIVERSE = list(dict.fromkeys(
+    SEMI_LEADERS
+    + MEGA_CAP_AI
+    + CLOUD_CYBER_SOFTWARE
+    + DATA_CENTER_HARDWARE_NETWORKING
+    + DATA_CENTER_POWER_COOLING
+    + BITCOIN_AI_COMPUTE
+    + SMALL_CAP_MOMENTUM
+    + ENERGY_LEADERS
+    + BENCHMARKS
+))
 
 SECTOR_ETFS = ["XLK", "XLY", "XLF", "XLE", "XLV", "XLU", "XLI", "XLP"]
 FUTURES_SYMBOLS = [FUTURES_ES_SYMBOL, FUTURES_NQ_SYMBOL]
@@ -183,12 +227,49 @@ MACRO_SYMBOLS = ["SPY", "QQQ", "^VIX", "^TNX"] + SECTOR_ETFS + BREADTH_SYMBOLS
 
 SYMBOL_SECTOR = {
     "NVDA": "XLK", "AMD": "XLK", "AVGO": "XLK", "TSM": "XLK", "MU": "XLK", "ARM": "XLK",
-    "MSFT": "XLK", "SNOW": "XLK", "NET": "XLK", "CRWD": "XLK", "PANW": "XLK",
-    "WDC": "XLK", "STX": "XLK", "GLW": "XLK", "TER": "XLK", "CIEN": "XLK",
+    "MRVL": "XLK", "ON": "XLK", "LSCC": "XLK", "MPWR": "XLK", "MCHP": "XLK", "ALAB": "XLK", "ACLS": "XLK", "UCTT": "XLK",
+    "MSFT": "XLK", "PLTR": "XLK", "SNOW": "XLK", "NET": "XLK", "CRWD": "XLK", "PANW": "XLK",
     "AMZN": "XLY", "SHOP": "XLY", "ROKU": "XLY", "GOOGL": "XLY", "META": "XLY",
     "COIN": "XLF",
+    "SMCI": "XLK", "ANET": "XLK", "DELL": "XLK", "HPE": "XLK", "CIEN": "XLK", "GLW": "XLK", "COHR": "XLK", "LITE": "XLK", "AAOI": "XLK",
+    "WDC": "XLK", "STX": "XLK", "TER": "XLK",
+    "VRT": "XLI", "ETN": "XLI", "PWR": "XLI", "GEV": "XLI", "MOD": "XLI", "POWL": "XLI", "IESC": "XLI",
+    "VST": "XLU", "CEG": "XLU", "NRG": "XLU",
+    "HUT": "XLK", "IREN": "XLK", "CIFR": "XLK", "WULF": "XLK", "CLSK": "XLK", "MARA": "XLK", "RIOT": "XLK", "BTDR": "XLK", "CORZ": "XLK", "APLD": "XLK",
+    "SOUN": "XLK", "RGTI": "XLK", "QBTS": "XLK", "IONQ": "XLK", "RKLB": "XLI", "JOBY": "XLI", "ACHR": "XLI",
+    "RXRX": "XLV", "TEM": "XLV", "BBAI": "XLK", "AI": "XLK",
     "XOM": "XLE", "CVX": "XLE",
     "SPY": "SPY", "QQQ": "QQQ"
+}
+
+SYMBOL_BUCKET = {}
+for _s in MEGA_CAP_AI:
+    SYMBOL_BUCKET[_s] = "mega_cap_ai"
+for _s in SEMI_LEADERS:
+    SYMBOL_BUCKET[_s] = "semi_leaders"
+for _s in CLOUD_CYBER_SOFTWARE:
+    SYMBOL_BUCKET[_s] = "cloud_cyber_software"
+for _s in DATA_CENTER_HARDWARE_NETWORKING + DATA_CENTER_POWER_COOLING:
+    SYMBOL_BUCKET[_s] = "data_center_infra"
+for _s in BITCOIN_AI_COMPUTE:
+    SYMBOL_BUCKET[_s] = "bitcoin_ai_compute"
+for _s in SMALL_CAP_MOMENTUM:
+    SYMBOL_BUCKET[_s] = "small_cap_momentum"
+for _s in ENERGY_LEADERS:
+    SYMBOL_BUCKET[_s] = "energy_leaders"
+for _s in BENCHMARKS:
+    SYMBOL_BUCKET[_s] = "benchmark_etf"
+
+BUCKET_CONFIG = {
+    "mega_cap_ai": {"alloc_factor": MEGA_CAP_AI_ALLOC_FACTOR, "max_exposure_pct": 0.65, "max_positions": 4},
+    "semi_leaders": {"alloc_factor": SEMI_LEADER_ALLOC_FACTOR, "max_exposure_pct": 0.60, "max_positions": 4},
+    "cloud_cyber_software": {"alloc_factor": 0.85, "max_exposure_pct": 0.45, "max_positions": 3},
+    "data_center_infra": {"alloc_factor": DATA_CENTER_INFRA_ALLOC_FACTOR, "max_exposure_pct": DATA_CENTER_INFRA_MAX_EXPOSURE_PCT, "max_positions": DATA_CENTER_INFRA_MAX_POSITIONS},
+    "bitcoin_ai_compute": {"alloc_factor": BITCOIN_AI_COMPUTE_ALLOC_FACTOR, "max_exposure_pct": BITCOIN_AI_COMPUTE_MAX_EXPOSURE_PCT, "max_positions": BITCOIN_AI_COMPUTE_MAX_POSITIONS},
+    "small_cap_momentum": {"alloc_factor": SMALL_CAP_MOMENTUM_ALLOC_FACTOR, "max_exposure_pct": SMALL_CAP_MOMENTUM_MAX_EXPOSURE_PCT, "max_positions": SMALL_CAP_MOMENTUM_MAX_POSITIONS},
+    "energy_leaders": {"alloc_factor": 0.75, "max_exposure_pct": 0.35, "max_positions": 2},
+    "benchmark_etf": {"alloc_factor": BENCHMARK_ETF_ALLOC_FACTOR, "max_exposure_pct": 0.35, "max_positions": 2},
+    "default": {"alloc_factor": 0.75, "max_exposure_pct": 0.30, "max_positions": 2},
 }
 
 _market_cache = {"ts": 0, "data": None}
@@ -375,6 +456,7 @@ def load_state():
         pos.setdefault("entry_time", int(time.time()))
         pos.setdefault("score", 0.0)
         pos.setdefault("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN"))
+        pos.setdefault("bucket", SYMBOL_BUCKET.get(symbol, "default"))
         pos.setdefault("adds", 0)
         pos.setdefault("partial_taken", False)
         pos.setdefault("last_price", pos.get("entry", 0))
@@ -1197,6 +1279,97 @@ def intraday_arrays(df):
     }
 
 
+
+def symbol_bucket(symbol):
+    return SYMBOL_BUCKET.get(symbol, "default")
+
+
+def bucket_config(symbol_or_bucket):
+    bucket = symbol_or_bucket if symbol_or_bucket in BUCKET_CONFIG else symbol_bucket(symbol_or_bucket)
+    cfg = dict(BUCKET_CONFIG.get(bucket, BUCKET_CONFIG["default"]))
+    cfg["bucket"] = bucket
+    return cfg
+
+
+def bucket_alloc_factor(symbol):
+    return float(bucket_config(symbol).get("alloc_factor", 1.0))
+
+
+def portfolio_bucket_stats(exclude_symbol=None):
+    equity = max(float(portfolio.get("equity", portfolio.get("cash", 0.0))), 0.01)
+    bucket_values = {}
+    bucket_counts = {}
+    for symbol, pos in portfolio.get("positions", {}).items():
+        if exclude_symbol and symbol == exclude_symbol:
+            continue
+        px = float(pos.get("last_price", pos.get("entry", 0.0)))
+        value = position_value(pos, px)
+        bucket = pos.get("bucket") or symbol_bucket(symbol)
+        bucket_values[bucket] = bucket_values.get(bucket, 0.0) + value
+        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+    return equity, bucket_values, bucket_counts
+
+
+def catalyst_momentum_context(symbol, arrays, market):
+    default = {"active": False, "score_bonus": 0.0, "reason": "not_active", "bucket": symbol_bucket(symbol)}
+    if not CATALYST_MOMENTUM_ENABLED:
+        default["reason"] = "catalyst_momentum_disabled"
+        return default
+    closes = arrays.get("close", np.array([]))
+    opens = arrays.get("open", np.array([]))
+    vols = arrays.get("volume", np.array([]))
+    if len(closes) < 25 or len(opens) == 0:
+        default["reason"] = "not_enough_intraday_data"
+        return default
+    session_bars = min(len(closes), 78)
+    session_open = float(opens[-session_bars]) if len(opens) >= session_bars else float(opens[0])
+    px = float(closes[-1])
+    if session_open <= 0 or px <= 0:
+        default["reason"] = "bad_price"
+        return default
+    intraday_move = (px / session_open) - 1.0
+    volume_surge = 0.0
+    if len(vols) >= 30:
+        recent_vol = float(np.sum(vols[-6:]))
+        base_slice = vols[-60:-6] if len(vols) >= 66 else vols[:-6]
+        base_avg_6bar = float(np.mean(base_slice)) * 6 if len(base_slice) > 0 else 0.0
+        volume_surge = recent_vol / base_avg_6bar if base_avg_6bar > 0 else 0.0
+    bucket = symbol_bucket(symbol)
+    catalyst_bucket = bucket in ["bitcoin_ai_compute", "data_center_infra", "small_cap_momentum", "semi_leaders"]
+    strong_move = intraday_move >= CATALYST_MIN_INTRADAY_MOVE_PCT
+    volume_confirmed = volume_surge >= CATALYST_VOLUME_SURGE_RATIO
+    medium_move_confirmed = intraday_move >= (CATALYST_MIN_INTRADAY_MOVE_PCT * 0.625) and volume_confirmed
+    if catalyst_bucket and (strong_move or medium_move_confirmed):
+        bonus = CATALYST_STRONG_SCORE_BONUS if strong_move and volume_confirmed else CATALYST_SCORE_BONUS
+        return {
+            "active": True,
+            "bucket": bucket,
+            "score_bonus": float(bonus),
+            "intraday_move_pct": round(intraday_move * 100, 2),
+            "volume_surge_ratio": round(volume_surge, 2),
+            "reason": "catalyst_momentum_confirmed" if volume_confirmed else "large_move_catalyst_watch",
+            "theme": "ai_data_center_compute" if bucket in ["bitcoin_ai_compute", "data_center_infra"] else bucket,
+        }
+    return {"active": False, "bucket": bucket, "score_bonus": 0.0, "intraday_move_pct": round(intraday_move * 100, 2), "volume_surge_ratio": round(volume_surge, 2), "reason": "no_catalyst_threshold"}
+
+
+def apply_theme_confirmation(signals):
+    if not THEME_CONFIRMATION_ENABLED or not signals:
+        return signals
+    counts = {}
+    for sig in signals:
+        bucket = sig.get("bucket") or symbol_bucket(sig.get("symbol"))
+        if float(sig.get("score", 0.0) or 0.0) >= THEME_CONFIRMATION_MIN_SCORE:
+            counts[bucket] = counts.get(bucket, 0) + 1
+    confirmed = {bucket for bucket, count in counts.items() if count >= THEME_CONFIRMATION_MIN_SIGNALS}
+    for sig in signals:
+        bucket = sig.get("bucket") or symbol_bucket(sig.get("symbol"))
+        if bucket in confirmed and bucket not in ["benchmark_etf", "default"]:
+            sig["score"] = round(float(sig.get("score", 0.0)) + THEME_CONFIRMATION_SCORE_BONUS, 6)
+            sig["theme_confirmation"] = {"active": True, "bucket": bucket, "bucket_signal_count": counts.get(bucket, 0), "score_bonus": THEME_CONFIRMATION_SCORE_BONUS}
+    return signals
+
+
 def signal_score(symbol, prices, market, side="long", benchmark_prices=None):
     if len(prices) < 35:
         return 0.0
@@ -1384,47 +1557,44 @@ def scan_signals(market):
             continue
 
         px = float(closes[-1])
+        catalyst = catalyst_momentum_context(symbol, arrays, market)
         long_score = signal_score(symbol, closes, market, "long", benchmark_prices=benchmark_prices)
         short_score = signal_score(symbol, closes, market, "short", benchmark_prices=benchmark_prices)
+        if catalyst.get("active") and long_score > 0:
+            long_score += float(catalyst.get("score_bonus", 0.0))
+
+        bucket = symbol_bucket(symbol)
+        sector = SYMBOL_SECTOR.get(symbol, "UNKNOWN")
 
         if long_score > 0:
             ok, reason = entry_extension_check(symbol, "long", arrays)
             if ok:
                 long_signals.append({
-                    "symbol": symbol,
-                    "side": "long",
-                    "score": round(float(long_score), 6),
-                    "price": px,
-                    "sector": SYMBOL_SECTOR.get(symbol, "UNKNOWN")
+                    "symbol": symbol, "side": "long", "score": round(float(long_score), 6),
+                    "price": px, "sector": sector, "bucket": bucket, "catalyst": catalyst
                 })
             else:
                 register_pullback_candidate(symbol, "long", long_score, reason, arrays)
                 reclaim_ok, reclaim_reason = pullback_reclaim_check(symbol, "long", long_score, arrays)
                 if reclaim_ok:
                     long_signals.append({
-                        "symbol": symbol,
-                        "side": "long",
-                        "score": round(float(long_score) + PULLBACK_RECLAIM_SCORE_BONUS, 6),
-                        "price": px,
-                        "sector": SYMBOL_SECTOR.get(symbol, "UNKNOWN"),
-                        "entry_context": reclaim_reason
+                        "symbol": symbol, "side": "long", "score": round(float(long_score) + PULLBACK_RECLAIM_SCORE_BONUS, 6),
+                        "price": px, "sector": sector, "bucket": bucket, "entry_context": reclaim_reason, "catalyst": catalyst
                     })
                 else:
-                    rejected.append({"symbol": symbol, "side": "long", "score": round(float(long_score), 6), "reason": reason, "pullback_reclaim_status": reclaim_reason})
+                    rejected.append({"symbol": symbol, "side": "long", "score": round(float(long_score), 6), "reason": reason, "bucket": bucket, "catalyst": catalyst, "pullback_reclaim_status": reclaim_reason})
 
         if short_score > 0:
             ok, reason = entry_extension_check(symbol, "short", arrays)
             if ok:
                 short_signals.append({
-                    "symbol": symbol,
-                    "side": "short",
-                    "score": round(float(short_score), 6),
-                    "price": px,
-                    "sector": SYMBOL_SECTOR.get(symbol, "UNKNOWN")
+                    "symbol": symbol, "side": "short", "score": round(float(short_score), 6),
+                    "price": px, "sector": sector, "bucket": bucket
                 })
             else:
-                rejected.append({"symbol": symbol, "side": "short", "score": round(float(short_score), 6), "reason": reason})
+                rejected.append({"symbol": symbol, "side": "short", "score": round(float(short_score), 6), "reason": reason, "bucket": bucket})
 
+    long_signals = apply_theme_confirmation(long_signals)
     long_signals = sorted(long_signals, key=lambda x: x["score"], reverse=True)
     short_signals = sorted(short_signals, key=lambda x: x["score"], reverse=True)
     return long_signals, short_signals, rejected
@@ -1651,10 +1821,13 @@ def portfolio_sector_stats(exclude_symbol=None):
 
 def estimated_trade_allocation(signal, params):
     side = signal.get("side", "long")
+    symbol = signal.get("symbol", "")
     alloc_pct = float(params.get("short_alloc_pct" if side == "short" else "long_alloc_pct", 0.0))
     equity = max(float(portfolio.get("equity", portfolio.get("cash", 0.0))), 0.01)
     cash = max(float(portfolio.get("cash", 0.0)), 0.0)
-    return min(cash, equity * alloc_pct)
+    alloc_factor = float(signal.get("alloc_factor", 1.0) or 1.0)
+    bucket_factor = bucket_alloc_factor(symbol) if side == "long" else 0.75
+    return min(cash, equity * alloc_pct * alloc_factor * bucket_factor)
 
 
 
@@ -1820,6 +1993,17 @@ def controlled_pullback_entry_check(signal, params, market, dynamic_min_score, e
             "tech_leadership": tech_leadership_status(market)
         }
 
+    bucket = signal.get("bucket") or symbol_bucket(symbol)
+    cfg = bucket_config(bucket)
+    _, bucket_values, bucket_counts = portfolio_bucket_stats(exclude_symbol=exclude_symbol)
+    bucket_count = int(bucket_counts.get(bucket, 0))
+    projected_bucket_value = float(bucket_values.get(bucket, 0.0)) + proposed_alloc
+    projected_bucket_pct = projected_bucket_value / equity if equity > 0 else 0.0
+    if bucket_count >= int(cfg.get("max_positions", 99)):
+        return False, {"reason": "controlled_pullback_bucket_position_limit", "bucket": bucket, "current_bucket_positions": bucket_count, "max_bucket_positions": int(cfg.get("max_positions", 99))}
+    if projected_bucket_pct > float(cfg.get("max_exposure_pct", 1.0)):
+        return False, {"reason": "controlled_pullback_bucket_exposure_cap", "bucket": bucket, "projected_bucket_pct": round(projected_bucket_pct * 100, 2), "max_bucket_exposure_pct": round(float(cfg.get("max_exposure_pct", 1.0)) * 100, 2)}
+
     return True, {
         "reason": "controlled_pullback_entry_ok",
         "symbol": symbol,
@@ -1827,6 +2011,8 @@ def controlled_pullback_entry_check(signal, params, market, dynamic_min_score, e
         "required_score": round(required_score, 6),
         "dynamic_required_score": round(float(dynamic_min_score), 6),
         "alloc_factor": CONTROLLED_PULLBACK_ALLOC_FACTOR,
+        "bucket": bucket,
+        "bucket_alloc_factor": bucket_alloc_factor(symbol),
         "sector": sector,
         "sector_aligned": sector_aligned,
         "window": window,
@@ -1933,16 +2119,45 @@ def entry_quality_check(signal, params, market, exclude_symbol=None):
             "tech_leadership": tech_leadership_status(market)
         }
 
+    bucket = signal.get("bucket") or symbol_bucket(symbol)
+    cfg = bucket_config(bucket)
+    bucket_equity, bucket_values, bucket_counts = portfolio_bucket_stats(exclude_symbol=exclude_symbol)
+    bucket_count = int(bucket_counts.get(bucket, 0))
+    if bucket_count >= int(cfg.get("max_positions", 99)):
+        return False, {
+            "reason": "bucket_position_limit",
+            "symbol": symbol,
+            "bucket": bucket,
+            "current_bucket_positions": bucket_count,
+            "max_bucket_positions": int(cfg.get("max_positions", 99))
+        }
+    projected_bucket_value = float(bucket_values.get(bucket, 0.0)) + proposed_alloc
+    projected_bucket_pct = projected_bucket_value / bucket_equity if bucket_equity > 0 else 0.0
+    if projected_bucket_pct > float(cfg.get("max_exposure_pct", 1.0)):
+        return False, {
+            "reason": "bucket_exposure_cap",
+            "symbol": symbol,
+            "bucket": bucket,
+            "projected_bucket_pct": round(projected_bucket_pct * 100, 2),
+            "max_bucket_exposure_pct": round(float(cfg.get("max_exposure_pct", 1.0)) * 100, 2)
+        }
+
     return True, {
         "reason": "entry_quality_ok",
         "symbol": symbol,
         "score": round(score, 6),
         "required_score": round(min_score, 6),
         "sector": sector,
+        "bucket": bucket,
+        "bucket_alloc_factor": bucket_alloc_factor(symbol),
         "projected_sector_pct": round(projected_sector_pct * 100, 2),
         "max_sector_exposure_pct": round(effective_sector_exposure_cap(market, sector) * 100, 2),
+        "projected_bucket_pct": round(projected_bucket_pct * 100, 2),
+        "max_bucket_exposure_pct": round(float(cfg.get("max_exposure_pct", 1.0)) * 100, 2),
         "sector_positions_after_entry": sector_count + 1,
+        "bucket_positions_after_entry": bucket_count + 1,
         "max_positions_per_sector": effective_max_positions_per_sector(market, sector),
+        "max_positions_per_bucket": int(cfg.get("max_positions", 99)),
         "tech_leadership": tech_leadership_status(market)
     }
 
@@ -2160,8 +2375,9 @@ def enter_position(signal, params, market_mode=None):
     alloc_pct = float(params["short_alloc_pct"] if side == "short" else params["long_alloc_pct"])
     alloc_factor = float(signal.get("alloc_factor", 1.0) or 1.0)
     alloc_factor = max(0.05, min(1.0, alloc_factor))
+    bucket_factor = bucket_alloc_factor(symbol) if side == "long" else 0.75
     equity = max(float(portfolio.get("equity", portfolio.get("cash", 0.0))), 0.01)
-    alloc = min(float(portfolio.get("cash", 0.0)), equity * alloc_pct * alloc_factor)
+    alloc = min(float(portfolio.get("cash", 0.0)), equity * alloc_pct * alloc_factor * bucket_factor)
 
     if alloc < MIN_TRADE_ALLOC or px <= 0:
         return {"symbol": symbol, "side": side, "blocked": True, "reason": "insufficient_cash_or_bad_price"}
@@ -2177,9 +2393,12 @@ def enter_position(signal, params, market_mode=None):
         "entry_time": int(time.time()),
         "score": float(signal.get("score", 0.0)),
         "sector": signal.get("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN")),
+        "bucket": signal.get("bucket", symbol_bucket(symbol)),
         "adds": 0,
         "partial_taken": False,
-        "entry_context": signal.get("entry_context", "scanner")
+        "entry_context": signal.get("entry_context", "scanner"),
+        "catalyst": signal.get("catalyst", {}),
+        "theme_confirmation": signal.get("theme_confirmation", {})
     }
 
     if side == "short":
@@ -3128,6 +3347,7 @@ def portfolio_risk_review():
 
     rows = []
     sector_exposure = {}
+    bucket_exposure = {}
     side_exposure = {}
     total_position_value = 0.0
     open_losers = 0
@@ -3139,9 +3359,11 @@ def portfolio_risk_review():
         pnl_dollars = position_pnl_dollars(pos, px)
         pnl_pct = position_pnl_pct(pos, px)
         sector = pos.get("sector", SYMBOL_SECTOR.get(symbol, "UNKNOWN"))
+        bucket = pos.get("bucket") or symbol_bucket(symbol)
         side = pos.get("side", "long")
         total_position_value += value
         sector_exposure[sector] = sector_exposure.get(sector, 0.0) + value
+        bucket_exposure[bucket] = bucket_exposure.get(bucket, 0.0) + value
         side_exposure[side] = side_exposure.get(side, 0.0) + value
         if pnl_dollars >= 0:
             open_winners += 1
@@ -3151,6 +3373,7 @@ def portfolio_risk_review():
             "symbol": symbol,
             "side": side,
             "sector": sector,
+            "bucket": bucket,
             "position_value": money(value),
             "position_pct_of_equity": pct(value / equity),
             "pnl_dollars": money(pnl_dollars),
@@ -3160,6 +3383,7 @@ def portfolio_risk_review():
 
     rows = sorted(rows, key=lambda r: r["position_pct_of_equity"], reverse=True)
     sector_pct = {k: pct(v / equity) for k, v in sorted(sector_exposure.items(), key=lambda x: x[1], reverse=True)}
+    bucket_pct = {k: pct(v / equity) for k, v in sorted(bucket_exposure.items(), key=lambda x: x[1], reverse=True)}
     side_pct = {k: pct(v / equity) for k, v in sorted(side_exposure.items(), key=lambda x: x[1], reverse=True)}
     cash_pct = pct(cash / equity)
     invested_pct = pct(total_position_value / equity)
@@ -3188,6 +3412,16 @@ def portfolio_risk_review():
             vulnerabilities.append(
                 f"Too many open positions in {sector}: {count}; adaptive limit is {max_count}."
             )
+    bucket_counts = _count_by(rows, "bucket")
+    for bucket, count in bucket_counts.items():
+        cfg = bucket_config(bucket)
+        if count > int(cfg.get("max_positions", 99)):
+            vulnerabilities.append(f"Too many open positions in bucket {bucket}: {count}; limit is {int(cfg.get('max_positions', 99))}.")
+    for bucket, value_pct in bucket_pct.items():
+        cfg = bucket_config(bucket)
+        cap = round(float(cfg.get("max_exposure_pct", 1.0)) * 100, 2)
+        if value_pct >= cap:
+            vulnerabilities.append(f"Bucket exposure is high in {bucket} at {value_pct}% of equity; cap is {cap}%.")
     if cash_pct < 15:
         vulnerabilities.append(f"Cash buffer is low at {cash_pct}% of equity.")
     if unknown_pct >= 10:
@@ -3755,6 +3989,19 @@ def config_snapshot():
         "controlled_pullback_require_caution_context": CONTROLLED_PULLBACK_REQUIRE_CAUTION_CONTEXT,
         "controlled_pullback_require_sector_leader": CONTROLLED_PULLBACK_REQUIRE_SECTOR_LEADER,
         "controlled_pullback_allow_empty_book_only": CONTROLLED_PULLBACK_ALLOW_EMPTY_BOOK_ONLY,
+        "expanded_scanner_enabled": EXPANDED_SCANNER_ENABLED,
+        "scanner_universe_count": len(UNIVERSE),
+        "scanner_universe": UNIVERSE,
+        "scanner_buckets": {k: [sym for sym, b in SYMBOL_BUCKET.items() if b == k] for k in sorted(set(SYMBOL_BUCKET.values()))},
+        "bucket_config": BUCKET_CONFIG,
+        "catalyst_momentum_enabled": CATALYST_MOMENTUM_ENABLED,
+        "catalyst_min_intraday_move_pct": CATALYST_MIN_INTRADAY_MOVE_PCT,
+        "catalyst_volume_surge_ratio": CATALYST_VOLUME_SURGE_RATIO,
+        "catalyst_score_bonus": CATALYST_SCORE_BONUS,
+        "catalyst_strong_score_bonus": CATALYST_STRONG_SCORE_BONUS,
+        "theme_confirmation_enabled": THEME_CONFIRMATION_ENABLED,
+        "theme_confirmation_min_signals": THEME_CONFIRMATION_MIN_SIGNALS,
+        "theme_confirmation_score_bonus": THEME_CONFIRMATION_SCORE_BONUS,
         "max_reports_stored": MAX_REPORTS_STORED
     }
 
