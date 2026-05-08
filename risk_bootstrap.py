@@ -1,12 +1,15 @@
 """Direct risk-control bootstrap routes for the trading bot.
 
-This module is designed to be loaded by usercustomize.py during Python startup.
-It avoids importing app.py directly, so it works with the current Railway Procfile
-that executes app.py as __main__.
+This module is intentionally self-contained because it is already confirmed to
+load on Railway. It applies the conservative risk controls and also exposes the
+live-volatility status route directly, so /paper/live-volatility-status no
+longer depends on any secondary bootstrap path.
 """
 from __future__ import annotations
 
 import datetime as dt
+import functools
+import inspect
 import json
 import math
 import os
@@ -15,17 +18,20 @@ from typing import Any, Dict, Iterable, List
 
 try:
     import pytz
-except Exception:
+except Exception:  # pragma: no cover
     pytz = None
 
 try:
     import yfinance as yf
-except Exception:
+except Exception:  # pragma: no cover
     yf = None
 
-VERSION = "risk-bootstrap-2026-05-08"
-REGISTERED_APP_IDS: set[int] = set()
+VERSION = "risk-bootstrap-live-vol-2026-05-08"
+LIVE_VOL_VERSION = "live-volatility-stops-2026-05-08"
+REGISTERED_APP_IDS = set()
 APPLIED: Dict[str, Dict[str, Any]] = {}
+LIVE_APPLIED: Dict[str, Any] = {}
+_PATCHED_FUNCTION_IDS = set()
 
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
 STATE_FILENAME = os.environ.get("STATE_FILENAME", os.environ.get("STATE_FILE", "state.json"))
@@ -47,6 +53,16 @@ HYBRID_VOL_STOP_MIN_PCT = float(os.environ.get("HYBRID_VOL_STOP_MIN_PCT", "0.012
 HYBRID_VOL_STOP_MAX_PCT = float(os.environ.get("HYBRID_VOL_STOP_MAX_PCT", "0.028"))
 HYBRID_VOL_STOP_MULTIPLIER = float(os.environ.get("HYBRID_VOL_STOP_MULTIPLIER", "1.35"))
 HYBRID_HIGH_VOL_ALLOC_REDUCTION = float(os.environ.get("HYBRID_HIGH_VOL_ALLOC_REDUCTION", "0.65"))
+HYBRID_LIVE_VOL_STOP_DEFAULT_PCT = float(os.environ.get("HYBRID_LIVE_VOL_STOP_DEFAULT_PCT", str(HYBRID_VOL_STOP_MAX_PCT)))
+
+BUCKET_ALLOC_REDUCTIONS = {
+    "small_cap_momentum": float(os.environ.get("HYBRID_SMALL_CAP_LIVE_ALLOC_REDUCTION", str(HYBRID_HIGH_VOL_ALLOC_REDUCTION))),
+    "bitcoin_ai_compute": float(os.environ.get("HYBRID_BITCOIN_COMPUTE_LIVE_ALLOC_REDUCTION", str(HYBRID_HIGH_VOL_ALLOC_REDUCTION))),
+    "precious_metals": float(os.environ.get("HYBRID_METALS_LIVE_ALLOC_REDUCTION", str(HYBRID_HIGH_VOL_ALLOC_REDUCTION))),
+    "semi_leaders": float(os.environ.get("HYBRID_SEMI_LIVE_ALLOC_REDUCTION", "0.75")),
+    "cloud_cyber_software": float(os.environ.get("HYBRID_SOFTWARE_LIVE_ALLOC_REDUCTION", "0.75")),
+    "data_center_infra": float(os.environ.get("HYBRID_DATA_CENTER_LIVE_ALLOC_REDUCTION", "0.75")),
+}
 
 
 def _now() -> dt.datetime:
@@ -132,6 +148,117 @@ def _patch(module: Any, name: str, value: Any, mode: str) -> None:
         APPLIED[name] = {"old": old, "new": value, "mode": mode, "applied": False, "error": str(exc)}
 
 
+def _patch_bucket_allocations(module: Any) -> None:
+    cfg = getattr(module, "BUCKET_CONFIG", None)
+    if not isinstance(cfg, dict):
+        LIVE_APPLIED["bucket_allocation_controls"] = {"applied": False, "reason": "BUCKET_CONFIG not found"}
+        return
+    changes: Dict[str, Any] = {}
+    for bucket, reduction in BUCKET_ALLOC_REDUCTIONS.items():
+        row = cfg.get(bucket)
+        if not isinstance(row, dict):
+            continue
+        old = _f(row.get("alloc_factor"), 1.0)
+        new = max(0.20, round(old * reduction, 4))
+        row["alloc_factor"] = new
+        changes[bucket] = {"old_alloc_factor": old, "new_alloc_factor": new, "reduction": reduction}
+    LIVE_APPLIED["bucket_allocation_controls"] = {"applied": bool(changes), "bucket_changes": changes}
+
+
+def _stop_pct() -> float:
+    return max(HYBRID_VOL_STOP_MIN_PCT, min(HYBRID_VOL_STOP_MAX_PCT, HYBRID_LIVE_VOL_STOP_DEFAULT_PCT))
+
+
+def _patch_global_stop_names(module: Any) -> None:
+    stop = _stop_pct()
+    live_changes: Dict[str, Any] = {}
+    for name, value in {
+        "STOP_LOSS": -stop,
+        "STOP_LOSS_PCT": -stop,
+        "LONG_STOP_LOSS": -stop,
+        "LONG_STOP_LOSS_PCT": -stop,
+        "DEFAULT_STOP_LOSS": -stop,
+        "DEFAULT_STOP_LOSS_PCT": -stop,
+        "TRAIL_LONG": 1.0 - stop,
+        "LONG_TRAIL": 1.0 - stop,
+        "TRAIL_LONG_PCT": 1.0 - stop,
+        "TRAIL_SHORT": 1.0 + stop,
+        "SHORT_TRAIL": 1.0 + stop,
+        "TRAIL_SHORT_PCT": 1.0 + stop,
+        "HYBRID_LIVE_VOLATILITY_STOP_PCT": stop,
+        "HYBRID_LIVE_HIGH_VOL_ALLOC_REDUCTION": HYBRID_HIGH_VOL_ALLOC_REDUCTION,
+    }.items():
+        old = getattr(module, name, None)
+        try:
+            setattr(module, name, value)
+            live_changes[name] = {"old": old, "new": value, "applied": True}
+        except Exception as exc:
+            live_changes[name] = {"old": old, "new": value, "applied": False, "error": str(exc)}
+    try:
+        setattr(module, "HYBRID_LIVE_VOLATILITY_VERSION", LIVE_VOL_VERSION)
+    except Exception:
+        pass
+    LIVE_APPLIED["global_stop_values"] = live_changes
+
+
+def _transform_risk_dict(obj: Any) -> Any:
+    if isinstance(obj, list):
+        return [_transform_risk_dict(x) for x in obj]
+    if not isinstance(obj, dict):
+        return obj
+    out = {k: _transform_risk_dict(v) for k, v in obj.items()}
+    stop = _stop_pct()
+    if "stop_loss" in out:
+        old = _f(out.get("stop_loss"), 0.0)
+        out["stop_loss"] = -max(abs(old), stop) if old <= 0 else max(old, stop)
+        out["volatility_stop_applied"] = True
+        out["volatility_stop_pct"] = round(stop, 6)
+    if "trail_long" in out:
+        out["trail_long"] = min(_f(out.get("trail_long"), 1.0), 1.0 - stop)
+    if "trail_short" in out:
+        out["trail_short"] = max(_f(out.get("trail_short"), 1.0), 1.0 + stop)
+    if "risk_parameters" in out and isinstance(out["risk_parameters"], dict):
+        out["risk_parameters"].setdefault("live_volatility_controls", {})
+        out["risk_parameters"]["live_volatility_controls"].update({
+            "enabled": True,
+            "version": LIVE_VOL_VERSION,
+            "default_stop_pct": round(stop * 100, 2),
+            "high_vol_alloc_reduction": HYBRID_HIGH_VOL_ALLOC_REDUCTION,
+        })
+    return out
+
+
+def _function_mentions_risk(fn: Any) -> bool:
+    try:
+        consts = " ".join(str(c) for c in getattr(fn, "__code__", None).co_consts)
+    except Exception:
+        consts = ""
+    name = getattr(fn, "__name__", "").lower()
+    haystack = f"{name} {consts}".lower()
+    return any(x in haystack for x in ["stop_loss", "trail_long", "trail_short", "risk_parameters"])
+
+
+def _patch_risk_functions(module: Any) -> None:
+    wrapped: List[str] = []
+    for name, fn in list(getattr(module, "__dict__", {}).items()):
+        if not inspect.isfunction(fn) or getattr(fn, "_live_vol_wrapped", False) or id(fn) in _PATCHED_FUNCTION_IDS:
+            continue
+        if not _function_mentions_risk(fn):
+            continue
+        @functools.wraps(fn)
+        def wrapper(*args, __fn=fn, **kwargs):
+            result = __fn(*args, **kwargs)
+            return _transform_risk_dict(result)
+        wrapper._live_vol_wrapped = True  # type: ignore[attr-defined]
+        try:
+            setattr(module, name, wrapper)
+            _PATCHED_FUNCTION_IDS.add(id(fn))
+            wrapped.append(name)
+        except Exception:
+            pass
+    LIVE_APPLIED["risk_function_wrappers"] = {"wrapped_count": len(wrapped), "wrapped_functions": wrapped[:40]}
+
+
 def apply_runtime_overrides(module: Any | None = None) -> Dict[str, Any]:
     if module is None:
         for mod in list(sys.modules.values()):
@@ -155,6 +282,10 @@ def apply_runtime_overrides(module: Any | None = None) -> Dict[str, Any]:
     except Exception:
         pass
 
+    _patch_bucket_allocations(module)
+    _patch_global_stop_names(module)
+    _patch_risk_functions(module)
+
     state = _load_state()
     state.setdefault("hybrid_risk_layer", {})
     state["hybrid_risk_layer"].update({
@@ -165,8 +296,17 @@ def apply_runtime_overrides(module: Any | None = None) -> Dict[str, Any]:
         "mode": "intraday_churn_reduction_plus_eod_confirmation_bias",
         "ml_phase": "phase_1_shadow_logging",
     })
+    state.setdefault("live_volatility_controls", {})
+    state["live_volatility_controls"].update({
+        "version": LIVE_VOL_VERSION,
+        "enabled": True,
+        "updated_local": _now_text(),
+        "applied_controls": LIVE_APPLIED,
+        "default_stop_pct": round(_stop_pct() * 100, 2),
+        "high_vol_alloc_reduction": HYBRID_HIGH_VOL_ALLOC_REDUCTION,
+    })
     _save_state(state)
-    return {"status": "ok", "version": VERSION, "overrides": APPLIED}
+    return {"status": "ok", "version": VERSION, "overrides": APPLIED, "live_volatility_controls": LIVE_APPLIED}
 
 
 def _symbols_from_state(state: Dict[str, Any]) -> List[str]:
@@ -215,11 +355,11 @@ def _vol(vals: List[float]) -> float:
     if len(rets) < 2:
         return 0.0
     mean = sum(rets) / len(rets)
-    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+    var = sum((r - mean) ** 2 for r in rets) / max(1, len(rets) - 1)
     return math.sqrt(max(0.0, var))
 
 
-def _volatility_stop_plan() -> Dict[str, Any]:
+def _volatility_rows() -> List[Dict[str, Any]]:
     state = _load_state()
     symbols = _symbols_from_state(state)
     px = _prices(symbols)
@@ -236,6 +376,11 @@ def _volatility_stop_plan() -> Dict[str, Any]:
             "high_volatility": high_vol,
         })
     rows.sort(key=lambda r: r["recommended_stop_pct"], reverse=True)
+    return rows
+
+
+def _volatility_stop_plan() -> Dict[str, Any]:
+    rows = _volatility_rows()
     return {
         "status": "ok",
         "type": "volatility_stop_plan",
@@ -249,7 +394,30 @@ def _volatility_stop_plan() -> Dict[str, Any]:
             "high_vol_alloc_reduction": HYBRID_HIGH_VOL_ALLOC_REDUCTION,
         },
         "positions_and_recent_scanner_symbols": rows,
-        "execution_note": "Advisory stop-sizing plan. Full adaptive exit replacement requires a later core app.py execution update.",
+        "execution_note": "Advisory stop-sizing view. Live runtime controls are exposed at /paper/live-volatility-status.",
+    }
+
+
+def _live_volatility_status() -> Dict[str, Any]:
+    rows = _volatility_rows()
+    state = _load_state()
+    live_state = state.get("live_volatility_controls", {}) if isinstance(state.get("live_volatility_controls"), dict) else {}
+    return {
+        "status": "ok",
+        "type": "live_volatility_status",
+        "version": LIVE_VOL_VERSION,
+        "generated_local": _now_text(),
+        "state_file": STATE_FILE,
+        "enabled": {"live_vol_stops": True, "live_vol_alloc": True},
+        "runtime_expectation": {
+            "default_live_stop_pct": round(_stop_pct() * 100, 2),
+            "high_vol_alloc_reduction": HYBRID_HIGH_VOL_ALLOC_REDUCTION,
+            "max_new_entries_per_cycle_should_remain": 1,
+        },
+        "applied_runtime_overrides": APPLIED,
+        "applied_live_controls": LIVE_APPLIED or live_state.get("applied_controls", {}),
+        "recent_symbol_profiles": rows,
+        "note": "This route is registered directly by risk_bootstrap, the same module that already powers /paper/risk-improvement-status.",
     }
 
 
@@ -302,7 +470,7 @@ def _next_session_risk_plan() -> Dict[str, Any]:
             "cash": round(_f(state.get("cash", 0)), 2),
             "open_positions": list(positions.keys()),
             "realized_pnl_today": round(_f(realized.get("today", perf.get("realized_pnl_today", 0))), 2),
-            "wins_today": int(_f(realized.get("wins_today", perf.get("wins_today", 0)))) ,
+            "wins_today": int(_f(realized.get("wins_today", perf.get("wins_today", 0)))),
             "losses_today": losses_today,
             "intraday_drawdown_pct": round(_f(risk.get("intraday_drawdown_pct", 0)), 3),
             "self_defense_inferred": self_defense,
@@ -313,21 +481,21 @@ def _next_session_risk_plan() -> Dict[str, Any]:
             "Block entries farther than 2.5% above 5-minute MA20 unless full EOD allocation is active.",
             "After one stop-loss, require a stronger score and sector leadership before a new entry.",
             "Use controlled-pullback starters at reduced size only; reserve full-size risk for EOD allocation confirmation.",
-            "Review stopped-out symbols after the close; if they recover repeatedly, switch to wider stops plus smaller size.",
+            "Use volatility-aware stops with smaller allocation instead of tight flat stops on high-beta symbols.",
             "Keep ML in Phase 1 shadow logging until 100+ scanner rows and 2-4 weeks of paper data are collected.",
         ],
     }
 
 
 def register_routes(flask_app: Any) -> None:
-    if id(flask_app) in REGISTERED_APP_IDS:
-        return
     from flask import jsonify
     try:
         existing = {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
     except Exception:
         existing = set()
 
+    # Do not return early. Route registration is idempotent by URL check, and
+    # avoiding early return ensures newly added endpoints appear after deploys.
     if "/paper/risk-improvement-status" not in existing:
         flask_app.add_url_rule("/paper/risk-improvement-status", "risk_improvement_status_bootstrap", lambda: jsonify({
             "status": "ok",
@@ -336,9 +504,12 @@ def register_routes(flask_app: Any) -> None:
             "state_file": STATE_FILE,
             "market_clock": _market_clock(),
             "applied_runtime_overrides": APPLIED,
+            "applied_live_controls": LIVE_APPLIED,
             "mode": "intraday_churn_reduction_plus_eod_confirmation_bias",
             "live_ml_decider": False,
         }))
+    if "/paper/live-volatility-status" not in existing:
+        flask_app.add_url_rule("/paper/live-volatility-status", "live_volatility_status_bootstrap", lambda: jsonify(_live_volatility_status()))
     if "/paper/next-session-risk-plan" not in existing:
         flask_app.add_url_rule("/paper/next-session-risk-plan", "next_session_risk_plan_bootstrap", lambda: jsonify(_next_session_risk_plan()))
     if "/paper/volatility-stop-plan" not in existing:
