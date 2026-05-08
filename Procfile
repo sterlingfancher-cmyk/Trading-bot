@@ -1,1 +1,1 @@
-web: PYTHONPATH=. python -c "import ml_bootstrap; import risk_autopatch; g=globals(); g['__file__']='app.py'; exec(compile(open('app.py','rb').read(),'app.py','exec'), g)"
+web: PYTHONPATH=. gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
