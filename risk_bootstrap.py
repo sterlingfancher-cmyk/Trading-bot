@@ -1,9 +1,19 @@
-"""Direct risk-control bootstrap routes for the trading bot.
+"""State-safe risk-control bootstrap routes for the trading bot.
 
 This module is intentionally self-contained because it is already confirmed to
-load on Railway. It applies the conservative risk controls and also exposes the
-live-volatility status route directly, so /paper/live-volatility-status no
-longer depends on any secondary bootstrap path.
+load on Railway. It applies conservative runtime risk controls, exposes the
+live-volatility status route directly, and avoids writing bootstrap metadata
+into /data/state.json.
+
+State-safety upgrade:
+- Runtime-control metadata is written to /data/runtime_controls.json instead of
+  the trading state file.
+- state.json is read-only from this module.
+- Valid state snapshots are backed up to /data/state_backup_latest.json.
+- The largest valid state snapshot seen by this module is preserved at
+  /data/state_backup_largest.json.
+- /paper/state-safety-status verifies backup status and whether state writes are
+  isolated away from state.json.
 """
 from __future__ import annotations
 
@@ -13,6 +23,7 @@ import inspect
 import json
 import math
 import os
+import shutil
 import sys
 from typing import Any, Dict, Iterable, List
 
@@ -26,8 +37,9 @@ try:
 except Exception:  # pragma: no cover
     yf = None
 
-VERSION = "risk-bootstrap-live-vol-2026-05-08"
+VERSION = "risk-bootstrap-state-safe-2026-05-08"
 LIVE_VOL_VERSION = "live-volatility-stops-2026-05-08"
+STATE_SAFETY_VERSION = "state-safety-2026-05-08"
 REGISTERED_APP_IDS = set()
 APPLIED: Dict[str, Dict[str, Any]] = {}
 LIVE_APPLIED: Dict[str, Any] = {}
@@ -36,6 +48,9 @@ _PATCHED_FUNCTION_IDS = set()
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
 STATE_FILENAME = os.environ.get("STATE_FILENAME", os.environ.get("STATE_FILE", "state.json"))
 STATE_FILE = os.path.join(STATE_DIR, os.path.basename(STATE_FILENAME)) if STATE_DIR else STATE_FILENAME
+RUNTIME_CONTROLS_FILE = os.path.join(STATE_DIR or ".", "runtime_controls.json")
+STATE_BACKUP_LATEST = os.path.join(STATE_DIR or ".", "state_backup_latest.json")
+STATE_BACKUP_LARGEST = os.path.join(STATE_DIR or ".", "state_backup_largest.json")
 MARKET_TZ_NAME = os.environ.get("MARKET_TZ", "America/Chicago")
 REGULAR_OPEN_HOUR = int(os.environ.get("REGULAR_OPEN_HOUR", "8"))
 REGULAR_OPEN_MINUTE = int(os.environ.get("REGULAR_OPEN_MINUTE", "30"))
@@ -85,26 +100,126 @@ def _f(x: Any, default: float = 0.0) -> float:
         return default
 
 
-def _load_state() -> Dict[str, Any]:
+def _file_size(path: str) -> int:
     try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
+        return int(os.path.getsize(path))
+    except Exception:
+        return 0
+
+
+def _atomic_json_write(path: str, payload: Dict[str, Any]) -> bool:
+    try:
+        folder = os.path.dirname(path)
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+
+def _load_json_file(path: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
             obj = json.load(f)
             return obj if isinstance(obj, dict) else {}
     except Exception:
         return {}
 
 
-def _save_state(state: Dict[str, Any]) -> None:
+def _state_quality(state: Dict[str, Any]) -> Dict[str, Any]:
+    trades = state.get("trades", []) if isinstance(state.get("trades"), list) else []
+    history = state.get("history", []) if isinstance(state.get("history"), list) else []
+    reports = state.get("reports", {}) if isinstance(state.get("reports"), dict) else {}
+    positions = state.get("positions", {}) if isinstance(state.get("positions"), dict) else {}
+    has_account = any(k in state for k in ["cash", "equity", "peak"])
+    has_trading_data = bool(trades or history or reports or positions or state.get("scanner_audit"))
+    score = 0
+    score += 3 if has_account else 0
+    score += 2 if has_trading_data else 0
+    score += min(len(trades), 10)
+    score += min(len(history), 50) // 10
+    return {
+        "valid": bool(has_account or has_trading_data),
+        "score": score,
+        "trades_count": len(trades),
+        "history_count": len(history),
+        "reports_present": bool(reports),
+        "positions_count": len(positions),
+        "has_account_fields": has_account,
+    }
+
+
+def _backup_state_if_valid(state: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    state = state if isinstance(state, dict) else _load_json_file(STATE_FILE)
+    quality = _state_quality(state)
+    state_size = _file_size(STATE_FILE)
+    result = {
+        "state_file": STATE_FILE,
+        "state_size_bytes": state_size,
+        "state_quality": quality,
+        "latest_backup_file": STATE_BACKUP_LATEST,
+        "largest_backup_file": STATE_BACKUP_LARGEST,
+        "latest_backup_written": False,
+        "largest_backup_written": False,
+        "reason": "",
+    }
+    if not quality.get("valid") or state_size <= 0:
+        result["reason"] = "state_not_valid_enough_for_backup"
+        return result
+
     try:
-        folder = os.path.dirname(STATE_FILE)
-        if folder:
-            os.makedirs(folder, exist_ok=True)
-        tmp = STATE_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, sort_keys=True)
-        os.replace(tmp, STATE_FILE)
-    except Exception:
-        pass
+        os.makedirs(os.path.dirname(STATE_BACKUP_LATEST) or ".", exist_ok=True)
+        shutil.copy2(STATE_FILE, STATE_BACKUP_LATEST)
+        result["latest_backup_written"] = True
+        if state_size >= _file_size(STATE_BACKUP_LARGEST):
+            shutil.copy2(STATE_FILE, STATE_BACKUP_LARGEST)
+            result["largest_backup_written"] = True
+        result["reason"] = "backup_complete"
+    except Exception as exc:
+        result["reason"] = f"backup_failed: {exc}"
+    return result
+
+
+def _load_state() -> Dict[str, Any]:
+    state = _load_json_file(STATE_FILE)
+    _backup_state_if_valid(state)
+    return state
+
+
+def _write_runtime_controls(extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    state = _load_json_file(STATE_FILE)
+    backup = _backup_state_if_valid(state)
+    payload: Dict[str, Any] = {
+        "status": "ok",
+        "version": STATE_SAFETY_VERSION,
+        "generated_local": _now_text(),
+        "state_write_isolation": "bootstrap_writes_runtime_controls_only",
+        "state_file": STATE_FILE,
+        "runtime_controls_file": RUNTIME_CONTROLS_FILE,
+        "state_backup_latest": STATE_BACKUP_LATEST,
+        "state_backup_largest": STATE_BACKUP_LARGEST,
+        "state_file_size_bytes": _file_size(STATE_FILE),
+        "runtime_controls_size_bytes_before": _file_size(RUNTIME_CONTROLS_FILE),
+        "backup": backup,
+        "runtime_controls": {
+            "risk_bootstrap_version": VERSION,
+            "live_volatility_version": LIVE_VOL_VERSION,
+            "applied_runtime_overrides": APPLIED,
+            "applied_live_controls": LIVE_APPLIED,
+            "default_stop_pct": round(_stop_pct() * 100, 2),
+            "high_vol_alloc_reduction": HYBRID_HIGH_VOL_ALLOC_REDUCTION,
+        },
+    }
+    if extra:
+        payload.update(extra)
+    ok = _atomic_json_write(RUNTIME_CONTROLS_FILE, payload)
+    payload["runtime_controls_write_ok"] = ok
+    payload["runtime_controls_size_bytes_after"] = _file_size(RUNTIME_CONTROLS_FILE)
+    return payload
 
 
 def _market_clock() -> Dict[str, Any]:
@@ -286,27 +401,26 @@ def apply_runtime_overrides(module: Any | None = None) -> Dict[str, Any]:
     _patch_global_stop_names(module)
     _patch_risk_functions(module)
 
-    state = _load_state()
-    state.setdefault("hybrid_risk_layer", {})
-    state["hybrid_risk_layer"].update({
+    runtime_payload = _write_runtime_controls({
+        "risk_bootstrap": {
+            "version": VERSION,
+            "enabled": True,
+            "updated_local": _now_text(),
+            "mode": "intraday_churn_reduction_plus_eod_confirmation_bias",
+            "ml_phase": "phase_1_shadow_logging",
+        }
+    })
+    return {
+        "status": "ok",
         "version": VERSION,
-        "enabled": True,
-        "updated_local": _now_text(),
         "overrides": APPLIED,
-        "mode": "intraday_churn_reduction_plus_eod_confirmation_bias",
-        "ml_phase": "phase_1_shadow_logging",
-    })
-    state.setdefault("live_volatility_controls", {})
-    state["live_volatility_controls"].update({
-        "version": LIVE_VOL_VERSION,
-        "enabled": True,
-        "updated_local": _now_text(),
-        "applied_controls": LIVE_APPLIED,
-        "default_stop_pct": round(_stop_pct() * 100, 2),
-        "high_vol_alloc_reduction": HYBRID_HIGH_VOL_ALLOC_REDUCTION,
-    })
-    _save_state(state)
-    return {"status": "ok", "version": VERSION, "overrides": APPLIED, "live_volatility_controls": LIVE_APPLIED}
+        "live_volatility_controls": LIVE_APPLIED,
+        "state_safety": {
+            "state_json_written_by_bootstrap": False,
+            "runtime_controls_file": RUNTIME_CONTROLS_FILE,
+            "runtime_controls_write_ok": runtime_payload.get("runtime_controls_write_ok"),
+        },
+    }
 
 
 def _symbols_from_state(state: Dict[str, Any]) -> List[str]:
@@ -400,24 +514,26 @@ def _volatility_stop_plan() -> Dict[str, Any]:
 
 def _live_volatility_status() -> Dict[str, Any]:
     rows = _volatility_rows()
-    state = _load_state()
-    live_state = state.get("live_volatility_controls", {}) if isinstance(state.get("live_volatility_controls"), dict) else {}
+    runtime = _load_json_file(RUNTIME_CONTROLS_FILE)
+    live_state = runtime.get("runtime_controls", {}) if isinstance(runtime.get("runtime_controls"), dict) else {}
     return {
         "status": "ok",
         "type": "live_volatility_status",
         "version": LIVE_VOL_VERSION,
         "generated_local": _now_text(),
         "state_file": STATE_FILE,
+        "runtime_controls_file": RUNTIME_CONTROLS_FILE,
         "enabled": {"live_vol_stops": True, "live_vol_alloc": True},
         "runtime_expectation": {
             "default_live_stop_pct": round(_stop_pct() * 100, 2),
             "high_vol_alloc_reduction": HYBRID_HIGH_VOL_ALLOC_REDUCTION,
             "max_new_entries_per_cycle_should_remain": 1,
         },
-        "applied_runtime_overrides": APPLIED,
-        "applied_live_controls": LIVE_APPLIED or live_state.get("applied_controls", {}),
+        "applied_runtime_overrides": APPLIED or live_state.get("applied_runtime_overrides", {}),
+        "applied_live_controls": LIVE_APPLIED or live_state.get("applied_live_controls", {}),
         "recent_symbol_profiles": rows,
-        "note": "This route is registered directly by risk_bootstrap, the same module that already powers /paper/risk-improvement-status.",
+        "state_write_isolation": "runtime_controls_json_only",
+        "note": "This route is registered directly by risk_bootstrap. Bootstrap runtime metadata no longer writes into state.json.",
     }
 
 
@@ -475,7 +591,13 @@ def _next_session_risk_plan() -> Dict[str, Any]:
             "intraday_drawdown_pct": round(_f(risk.get("intraday_drawdown_pct", 0)), 3),
             "self_defense_inferred": self_defense,
         },
-        "applied_runtime_overrides": APPLIED or state.get("hybrid_risk_layer", {}).get("overrides", {}),
+        "applied_runtime_overrides": APPLIED,
+        "state_safety": {
+            "state_json_written_by_bootstrap": False,
+            "runtime_controls_file": RUNTIME_CONTROLS_FILE,
+            "state_backup_latest": STATE_BACKUP_LATEST,
+            "state_backup_largest": STATE_BACKUP_LARGEST,
+        },
         "recommended_rules_for_next_session": [
             "Start with one new intraday entry per cycle maximum.",
             "Block entries farther than 2.5% above 5-minute MA20 unless full EOD allocation is active.",
@@ -487,6 +609,30 @@ def _next_session_risk_plan() -> Dict[str, Any]:
     }
 
 
+def _state_safety_status() -> Dict[str, Any]:
+    state = _load_json_file(STATE_FILE)
+    backup = _backup_state_if_valid(state)
+    runtime = _write_runtime_controls({"state_safety_check": {"checked_local": _now_text()}})
+    return {
+        "status": "ok",
+        "type": "state_safety_status",
+        "version": STATE_SAFETY_VERSION,
+        "generated_local": _now_text(),
+        "state_json_written_by_bootstrap": False,
+        "runtime_controls_file": RUNTIME_CONTROLS_FILE,
+        "runtime_controls_write_ok": runtime.get("runtime_controls_write_ok"),
+        "state_file": STATE_FILE,
+        "state_file_size_bytes": _file_size(STATE_FILE),
+        "state_quality": _state_quality(state),
+        "backup_latest_file": STATE_BACKUP_LATEST,
+        "backup_latest_size_bytes": _file_size(STATE_BACKUP_LATEST),
+        "backup_largest_file": STATE_BACKUP_LARGEST,
+        "backup_largest_size_bytes": _file_size(STATE_BACKUP_LARGEST),
+        "backup_action": backup,
+        "warning": "Bootstrap metadata is isolated to runtime_controls.json. Core app.py may still write state.json during normal trading.",
+    }
+
+
 def register_routes(flask_app: Any) -> None:
     from flask import jsonify
     try:
@@ -494,22 +640,29 @@ def register_routes(flask_app: Any) -> None:
     except Exception:
         existing = set()
 
-    # Do not return early. Route registration is idempotent by URL check, and
-    # avoiding early return ensures newly added endpoints appear after deploys.
     if "/paper/risk-improvement-status" not in existing:
         flask_app.add_url_rule("/paper/risk-improvement-status", "risk_improvement_status_bootstrap", lambda: jsonify({
             "status": "ok",
             "version": VERSION,
             "generated_local": _now_text(),
             "state_file": STATE_FILE,
+            "runtime_controls_file": RUNTIME_CONTROLS_FILE,
             "market_clock": _market_clock(),
             "applied_runtime_overrides": APPLIED,
             "applied_live_controls": LIVE_APPLIED,
+            "state_safety": {
+                "state_json_written_by_bootstrap": False,
+                "runtime_controls_file": RUNTIME_CONTROLS_FILE,
+                "state_backup_latest": STATE_BACKUP_LATEST,
+                "state_backup_largest": STATE_BACKUP_LARGEST,
+            },
             "mode": "intraday_churn_reduction_plus_eod_confirmation_bias",
             "live_ml_decider": False,
         }))
     if "/paper/live-volatility-status" not in existing:
         flask_app.add_url_rule("/paper/live-volatility-status", "live_volatility_status_bootstrap", lambda: jsonify(_live_volatility_status()))
+    if "/paper/state-safety-status" not in existing:
+        flask_app.add_url_rule("/paper/state-safety-status", "state_safety_status_bootstrap", lambda: jsonify(_state_safety_status()))
     if "/paper/next-session-risk-plan" not in existing:
         flask_app.add_url_rule("/paper/next-session-risk-plan", "next_session_risk_plan_bootstrap", lambda: jsonify(_next_session_risk_plan()))
     if "/paper/volatility-stop-plan" not in existing:
