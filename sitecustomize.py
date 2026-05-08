@@ -1,15 +1,21 @@
-"""Early ML shadow-route registration for the trading bot.
+"""Unified startup bootstrap for auxiliary trading-bot routes.
 
-This file is imported by Python automatically as sitecustomize when available.
-It patches Flask.__init__ so ML endpoints are registered immediately when
-app = Flask(__name__) is created. The route handlers resolve app.py functions
-lazily at request time, so they work even when the bot starts as python app.py
-and the live module is __main__.
+This file is imported automatically by Python as ``sitecustomize``. It patches
+Flask app creation and also runs a short watchdog so routes are registered even
+when Railway starts the bot as ``python app.py`` and the trading module is
+``__main__`` instead of ``app``.
 
-Shadow mode only: no live trade decisions are made here.
+Registered auxiliary layers:
+- ML shadow/status endpoints.
+- EOD hybrid allocator endpoints from eod_hybrid.py.
+- Hybrid risk-improvement endpoints from risk_bootstrap.py.
+
+All auxiliary logic is advisory/shadow unless app.py itself later chooses to
+make it authoritative. Live trade/risk authority remains in app.py.
 """
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import json
 import math
@@ -17,9 +23,10 @@ import os
 import sys
 import threading
 import time
-import datetime as dt
+from typing import Any, Dict, List, Tuple
 
-VERSION = "ml-shadow-early-routes-2026-05-07"
+VERSION = "unified-bootstrap-2026-05-08"
+ML_VERSION = "ml-shadow-early-routes-2026-05-08"
 ENABLED = os.environ.get("ML_SHADOW_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 MAX_ROWS = int(os.environ.get("ML_SHADOW_MAX_ROWS", "3000"))
 MIN_ROWS = int(os.environ.get("ML_SHADOW_MIN_ROWS_FOR_SIGNAL", "100"))
@@ -27,8 +34,12 @@ _REGISTERED_APP_IDS: set[int] = set()
 _PATCHED_SAVE_IDS: set[int] = set()
 _PATCHING_SAVE = False
 
+STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+STATE_FILENAME = os.environ.get("STATE_FILENAME", os.environ.get("STATE_FILE", "state.json"))
+STATE_FILE = os.path.join(STATE_DIR, os.path.basename(STATE_FILENAME)) if STATE_DIR else STATE_FILENAME
 
-def _fnum(x, d=0.0):
+
+def _fnum(x: Any, d: float = 0.0) -> float:
     try:
         x = float(x)
         return d if math.isnan(x) or math.isinf(x) else x
@@ -36,7 +47,7 @@ def _fnum(x, d=0.0):
         return d
 
 
-def _h(obj) -> str:
+def _h(obj: Any) -> str:
     try:
         raw = json.dumps(obj, sort_keys=True, default=str)
     except Exception:
@@ -45,31 +56,33 @@ def _h(obj) -> str:
 
 
 def _mod():
-    # When Railway starts with python app.py, the bot is usually __main__.
-    # When started by gunicorn/import, the bot is usually app.
+    # Railway may run python app.py, which makes the trading module __main__.
     for name in ("app", "__main__"):
         m = sys.modules.get(name)
         if m is not None and getattr(m, "app", None) is not None:
             return m
+    for m in list(sys.modules.values()):
+        if m is not None and getattr(m, "app", None) is not None and hasattr(m, "load_state"):
+            return m
     return None
 
 
-def _now_text(m=None):
+def _now_text(m=None) -> str:
     try:
         return m.local_ts_text()
     except Exception:
         return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _today(m=None):
+def _today(m=None) -> str:
     try:
         return m.today_key()
     except Exception:
         return dt.datetime.now().strftime("%Y-%m-%d")
 
 
-def _nested(d, keys, default=None):
-    cur = d
+def _nested(d: Dict[str, Any], keys: List[str], default=None):
+    cur: Any = d
     for k in keys:
         if not isinstance(cur, dict) or k not in cur:
             return default
@@ -77,11 +90,20 @@ def _nested(d, keys, default=None):
     return cur
 
 
-def _ensure_ml(state):
+def _direct_state_file() -> Dict[str, Any]:
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+            return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _ensure_ml(state: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(state, dict):
         state = {}
     ml = state.setdefault("ml_shadow", {})
-    ml["version"] = VERSION
+    ml["version"] = ML_VERSION
     ml["enabled"] = ENABLED
     ml["live_trade_decider"] = False
     ml.setdefault("feature_log", [])
@@ -89,8 +111,8 @@ def _ensure_ml(state):
     return ml
 
 
-def _candidate_items(state):
-    out = []
+def _candidate_items(state: Dict[str, Any]) -> List[Tuple[Dict[str, Any], str]]:
+    out: List[Tuple[Dict[str, Any], str]] = []
     scan = state.get("scanner_audit") or state.get("scanner_log") or {}
     if isinstance(scan, dict):
         for key, decision in (("accepted_entries", "accepted"), ("blocked_entries", "blocked"), ("rejected_signals", "rejected")):
@@ -106,6 +128,7 @@ def _candidate_items(state):
                 out.append(({"symbol": sym, "side": "short"}, "signal"))
     if out:
         return out
+
     lr = _nested(state, ["auto_runner", "last_result"], {}) or {}
     if isinstance(lr, dict):
         for key, decision in (("entries", "accepted"), ("blocked_entries", "blocked"), ("rejected_signals", "rejected")):
@@ -122,14 +145,14 @@ def _candidate_items(state):
     return out
 
 
-def _entry_floor(state):
+def _entry_floor(state: Dict[str, Any]) -> float:
     return _fnum(
         _nested(state, ["feedback_loop", "dynamic_min_long_score"], None),
         _fnum(_nested(state, ["explain", "current_permission", "active_min_entry_score"], None), 0.0),
     )
 
 
-def _feature_row(item, decision, state, m=None):
+def _feature_row(item: Dict[str, Any], decision: str, state: Dict[str, Any], m=None) -> Dict[str, Any]:
     sym = str(item.get("symbol") or item.get("ticker") or "").upper()
     market = state.get("last_market") or _nested(state, ["auto_runner", "last_result"], {}) or {}
     feedback = state.get("feedback_loop") or {}
@@ -142,7 +165,7 @@ def _feature_row(item, decision, state, m=None):
     bucket_map = getattr(m, "SYMBOL_BUCKET", {}) if m is not None else {}
     sector_map = getattr(m, "SYMBOL_SECTOR", {}) if m is not None else {}
     score = _fnum(item.get("score"), _fnum(_nested(item, ["quality_info", "score"], None), 0.0))
-    row = {
+    row: Dict[str, Any] = {
         "logged_local": _now_text(m),
         "date": _today(m),
         "symbol": sym,
@@ -183,15 +206,19 @@ def _feature_row(item, decision, state, m=None):
     return row
 
 
-def _batch_key(state):
+def _batch_key(state: Dict[str, Any]) -> str:
     items = _candidate_items(state)
     if not items:
         return ""
     scan = state.get("scanner_audit") or state.get("scanner_log") or {}
-    return _h({"updated": scan.get("last_updated_local") if isinstance(scan, dict) else None, "last_run": _nested(state, ["auto_runner", "last_run_local"], None), "items": items})
+    return _h({
+        "updated": scan.get("last_updated_local") if isinstance(scan, dict) else None,
+        "last_run": _nested(state, ["auto_runner", "last_run_local"], None),
+        "items": items,
+    })
 
 
-def _append_features(state, m=None):
+def _append_features(state: Dict[str, Any], m=None) -> Dict[str, Any]:
     if not ENABLED or not isinstance(state, dict):
         return state
     ml = _ensure_ml(state)
@@ -216,8 +243,8 @@ def _append_features(state, m=None):
     return state
 
 
-def _group(rows, field):
-    out = {}
+def _group(rows: List[Dict[str, Any]], field: str) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
     for r in rows:
         k = str(r.get(field) or "unknown")
         g = out.setdefault(k, {"total": 0, "accepted": 0, "blocked": 0, "rejected": 0, "signal": 0, "avg_score": 0.0})
@@ -231,7 +258,7 @@ def _group(rows, field):
     return out
 
 
-def _prob(row, total):
+def _prob(row: Dict[str, Any], total: int) -> Dict[str, Any]:
     p = 0.50 + max(min((_fnum(row.get("score")) - _fnum(row.get("entry_floor"), 0.012)) * 8, 0.12), -0.12)
     if row.get("tech_leadership_active") and row.get("sector") in {"XLK", "XLY"}:
         p += 0.035
@@ -261,12 +288,13 @@ def _prob(row, total):
     }
 
 
-def _review(state, m=None):
+def _review(state: Dict[str, Any], m=None) -> Dict[str, Any]:
     rows = [r for r in _ensure_ml(state).get("feature_log", []) if isinstance(r, dict)]
     total = len(rows)
     preds = sorted([_prob(r, total) for r in rows[-25:]], key=lambda x: x["ml_shadow_probability"], reverse=True)
     return {
-        "version": VERSION,
+        "version": ML_VERSION,
+        "bootstrap_version": VERSION,
         "enabled": ENABLED,
         "live_trade_decider": False,
         "rows_logged": total,
@@ -286,12 +314,12 @@ def _review(state, m=None):
     }
 
 
-def _load_state():
+def _load_state() -> Tuple[Dict[str, Any], Any]:
     m = _mod()
     try:
-        state = m.load_state() if m is not None and hasattr(m, "load_state") else {}
+        state = m.load_state() if m is not None and hasattr(m, "load_state") else _direct_state_file()
     except Exception:
-        state = {}
+        state = _direct_state_file()
     if not isinstance(state, dict):
         state = {}
     try:
@@ -301,7 +329,7 @@ def _load_state():
     return state, m
 
 
-def _patch_save_state(m):
+def _patch_save_state(m) -> bool:
     global _PATCHING_SAVE
     if m is None or not hasattr(m, "save_state") or id(m) in _PATCHED_SAVE_IDS:
         return False
@@ -324,45 +352,37 @@ def _patch_save_state(m):
     return True
 
 
-def _register_routes(flask_app):
-    if id(flask_app) in _REGISTERED_APP_IDS:
-        return
+def _register_ml_routes(flask_app) -> None:
+    from flask import jsonify, request
     try:
         existing = {getattr(r, "rule", "") for r in flask_app.url_map.iter_rules()}
     except Exception:
         existing = set()
 
-    from flask import jsonify, request
-
     if "/paper/ml-health" not in existing:
         def ml_health():
-            state, m = _load_state()
-            ml = _ensure_ml(state)
-            _patch_save_state(m)
+            state, m = _load_state(); ml = _ensure_ml(state); _patch_save_state(m)
             return jsonify({
                 "status": "ok",
-                "version": VERSION,
+                "version": ML_VERSION,
+                "bootstrap_version": VERSION,
                 "enabled": ENABLED,
-                "registered_by": "sitecustomize_flask_init_patch",
+                "registered_by": "unified_sitecustomize",
                 "live_trade_decider": False,
                 "rows_logged": len(ml.get("feature_log", [])),
-                "state_persistence_mode": getattr(m, "STATE_PERSISTENCE_MODE", None) if m else None,
-                "state_file": getattr(m, "STATE_FILE", None) if m else None,
+                "state_file": STATE_FILE,
             })
         flask_app.add_url_rule("/paper/ml-health", "ml_health_shadow", ml_health)
 
     if "/paper/ml-review" not in existing:
         def ml_review():
-            state, m = _load_state()
-            _patch_save_state(m)
+            state, m = _load_state(); _patch_save_state(m)
             return jsonify({"status": "ok", "ml_review": _review(state, m)})
         flask_app.add_url_rule("/paper/ml-review", "ml_review_shadow", ml_review)
 
     if "/paper/ml-shadow" not in existing:
         def ml_shadow():
-            state, m = _load_state()
-            _patch_save_state(m)
-            r = _review(state, m)
+            state, m = _load_state(); _patch_save_state(m); r = _review(state, m)
             return jsonify({
                 "status": "ok",
                 "mode": "shadow_only",
@@ -375,58 +395,85 @@ def _register_routes(flask_app):
 
     if "/paper/ml-dataset" not in existing:
         def ml_dataset():
-            state, m = _load_state()
-            _patch_save_state(m)
-            ml = _ensure_ml(state)
+            state, m = _load_state(); _patch_save_state(m); ml = _ensure_ml(state)
             try:
                 limit = int(request.args.get("limit", "250"))
             except Exception:
                 limit = 250
-            limit = max(1, min(limit, 1000))
-            rows = ml.get("feature_log", [])
-            return jsonify({"status": "ok", "version": VERSION, "rows_logged": len(rows), "rows_returned": min(limit, len(rows)), "feature_log_tail": rows[-limit:]})
+            limit = max(1, min(limit, 1000)); rows = ml.get("feature_log", [])
+            return jsonify({"status": "ok", "version": ML_VERSION, "rows_logged": len(rows), "rows_returned": min(limit, len(rows)), "feature_log_tail": rows[-limit:]})
         flask_app.add_url_rule("/paper/ml-dataset", "ml_dataset_shadow", ml_dataset)
 
     if "/paper/ml-feature-log" not in existing:
         def ml_feature_log():
-            state, m = _load_state()
-            _patch_save_state(m)
-            ml = _ensure_ml(state)
-            rows = ml.get("feature_log", [])
-            return jsonify({"status": "ok", "version": VERSION, "rows_logged": len(rows), "last_updated_local": ml.get("last_updated_local"), "last_added_rows": ml.get("last_added_rows", 0), "latest_rows": rows[-50:]})
+            state, m = _load_state(); _patch_save_state(m); ml = _ensure_ml(state); rows = ml.get("feature_log", [])
+            return jsonify({"status": "ok", "version": ML_VERSION, "rows_logged": len(rows), "last_updated_local": ml.get("last_updated_local"), "last_added_rows": ml.get("last_added_rows", 0), "latest_rows": rows[-50:]})
         flask_app.add_url_rule("/paper/ml-feature-log", "ml_feature_log_shadow", ml_feature_log)
 
     if "/paper/backtest-summary" not in existing:
         def backtest_summary():
-            state, m = _load_state()
-            _patch_save_state(m)
-            trades = state.get("trades", [])
-            realized = state.get("realized_pnl", {})
-            risk = state.get("risk_controls", {})
+            state, m = _load_state(); _patch_save_state(m)
+            trades = state.get("trades", []); realized = state.get("realized_pnl", {}); risk = state.get("risk_controls", {})
             return jsonify({
                 "status": "ok",
-                "version": VERSION,
+                "version": ML_VERSION,
                 "type": "paper_replay_backtest_readiness",
                 "note": "Full walk-forward simulation comes after enough ML feature rows are collected.",
                 "rule_system_snapshot": {
-                    "trades_logged": len(trades),
-                    "realized_pnl_today": _fnum(realized.get("today")),
-                    "realized_pnl_total": _fnum(realized.get("total")),
-                    "wins_total": int(_fnum(realized.get("wins_total"), 0)),
-                    "losses_total": int(_fnum(realized.get("losses_total"), 0)),
-                    "intraday_drawdown_pct": _fnum(risk.get("intraday_drawdown_pct")),
-                    "daily_loss_pct": _fnum(risk.get("daily_loss_pct")),
+                    "trades_logged": len(trades) if isinstance(trades, list) else 0,
+                    "realized_pnl_today": _fnum(realized.get("today") if isinstance(realized, dict) else 0),
+                    "realized_pnl_total": _fnum(realized.get("total") if isinstance(realized, dict) else 0),
+                    "wins_total": int(_fnum(realized.get("wins_total") if isinstance(realized, dict) else 0)),
+                    "losses_total": int(_fnum(realized.get("losses_total") if isinstance(realized, dict) else 0)),
+                    "intraday_drawdown_pct": _fnum(risk.get("intraday_drawdown_pct") if isinstance(risk, dict) else 0),
+                    "daily_loss_pct": _fnum(risk.get("daily_loss_pct") if isinstance(risk, dict) else 0),
                 },
                 "ml_shadow_snapshot": _review(state, m),
                 "recommended_next_step": "Collect scanner rows during regular sessions, then compare rules vs ML ranking on profit factor, stop-loss rate, and missed-winner rate.",
             })
         flask_app.add_url_rule("/paper/backtest-summary", "backtest_summary_shadow", backtest_summary)
 
+
+def _register_auxiliary_routes(flask_app, m=None) -> None:
+    # ML routes are defined here.
+    if ENABLED:
+        _register_ml_routes(flask_app)
+
+    # EOD allocator routes are in eod_hybrid.py.
+    try:
+        import eod_hybrid
+        if hasattr(eod_hybrid, "_register_routes"):
+            eod_hybrid._register_routes(flask_app)
+    except Exception:
+        pass
+
+    # Risk-improvement routes are in risk_bootstrap.py.
+    try:
+        import risk_bootstrap
+        if hasattr(risk_bootstrap, "apply_runtime_overrides"):
+            risk_bootstrap.apply_runtime_overrides(m)
+        if hasattr(risk_bootstrap, "register_routes"):
+            risk_bootstrap.register_routes(flask_app)
+    except Exception:
+        pass
+
+
+def _register_routes(flask_app) -> None:
+    if id(flask_app) in _REGISTERED_APP_IDS:
+        # Still keep trying risk overrides, because app.py constants may be defined after Flask() creation.
+        try:
+            import risk_bootstrap
+            risk_bootstrap.apply_runtime_overrides(_mod())
+        except Exception:
+            pass
+        return
+    m = _mod()
+    _register_auxiliary_routes(flask_app, m)
     _REGISTERED_APP_IDS.add(id(flask_app))
 
 
-def _watchdog():
-    for _ in range(300):
+def _watchdog() -> None:
+    for _ in range(600):
         try:
             m = _mod()
             if m is not None:
@@ -434,26 +481,31 @@ def _watchdog():
                 if flask_app is not None:
                     _register_routes(flask_app)
                 _patch_save_state(m)
+                try:
+                    import risk_bootstrap
+                    risk_bootstrap.apply_runtime_overrides(m)
+                except Exception:
+                    pass
         except Exception:
             pass
         time.sleep(0.1)
 
 
-if ENABLED:
-    try:
-        from flask import Flask
-        if not getattr(Flask.__init__, "_ml_shadow_init_patched", False):
-            _original_init = Flask.__init__
+try:
+    from flask import Flask
+    if not getattr(Flask.__init__, "_unified_bootstrap_init_patched", False):
+        _original_init = Flask.__init__
 
-            def _patched_init(self, *args, **kwargs):
-                _original_init(self, *args, **kwargs)
-                try:
-                    _register_routes(self)
-                except Exception:
-                    pass
+        def _patched_init(self, *args, **kwargs):
+            _original_init(self, *args, **kwargs)
+            try:
+                _register_routes(self)
+            except Exception:
+                pass
 
-            _patched_init._ml_shadow_init_patched = True
-            Flask.__init__ = _patched_init
-    except Exception:
-        pass
-    threading.Thread(target=_watchdog, daemon=True).start()
+        _patched_init._unified_bootstrap_init_patched = True
+        Flask.__init__ = _patched_init
+except Exception:
+    pass
+
+threading.Thread(target=_watchdog, daemon=True).start()
