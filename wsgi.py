@@ -1,12 +1,17 @@
 """WSGI entry point that directly registers all auxiliary endpoints.
 
-Railway previously executed app.py through an inline python -c command. That
-kept the core bot alive, but auxiliary routes could be missed depending on
-startup timing. This WSGI path imports app.py as a normal module, then registers
-ML, EOD hybrid, risk-improvement, and live-volatility routes deterministically
-before Gunicorn serves traffic.
+This startup path now runs the state recovery guard before importing app.py, so
+Railway deploy/startup cycles do not continue with a suspiciously small
+/data/state.json when a larger valid backup exists.
 """
 from __future__ import annotations
+
+try:
+    import state_guard
+    if hasattr(state_guard, "preflight_recover"):
+        state_guard.preflight_recover()
+except Exception:
+    pass
 
 import app as core
 from app import app
@@ -15,6 +20,13 @@ try:
     import sitecustomize as ml_shadow
     if hasattr(ml_shadow, "_register_routes"):
         ml_shadow._register_routes(app)
+except Exception:
+    pass
+
+try:
+    import state_guard
+    if hasattr(state_guard, "register_routes"):
+        state_guard.register_routes(app)
 except Exception:
     pass
 
