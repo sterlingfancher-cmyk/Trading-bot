@@ -4,7 +4,8 @@ This startup path now runs the state recovery guard before importing app.py, so
 Railway deploy/startup cycles do not continue with a suspiciously small
 /data/state.json when a larger valid backup exists. It also installs a persistent
 trade-journal mirror after app.py import so trade history is preserved outside
-state.json.
+state.json. The self-check module gives one link that tests all safe GET
+monitoring endpoints internally.
 """
 from __future__ import annotations
 
@@ -70,5 +71,12 @@ try:
     import risk_improvements
     if hasattr(risk_improvements, "_register_routes"):
         risk_improvements._register_routes(app)
+except Exception:
+    pass
+
+try:
+    import self_check
+    if hasattr(self_check, "register_routes"):
+        self_check.register_routes(app, core)
 except Exception:
     pass
