@@ -1,19 +1,16 @@
-"""ML shadow-mode add-on for the trading bot.
+"""Early ML shadow-route registration for the trading bot.
 
-This file is imported automatically by Python as ``sitecustomize``. The Railway
-Procfile currently starts the bot with ``python app.py``, which means the running
-module is usually ``__main__`` instead of ``app``. This version supports both:
-- imported module startup, e.g. gunicorn app:app
-- script startup, e.g. python app.py
+This file is imported by Python automatically as sitecustomize when available.
+It patches Flask.__init__ so ML endpoints are registered immediately when
+app = Flask(__name__) is created. The route handlers resolve app.py functions
+lazily at request time, so they work even when the bot starts as python app.py
+and the live module is __main__.
 
-The add-on is shadow-only. It logs scanner features and exposes review endpoints,
-but it never places trades or overrides risk controls.
+Shadow mode only: no live trade decisions are made here.
 """
 from __future__ import annotations
 
 import hashlib
-import importlib.abc
-import importlib.machinery
 import json
 import math
 import os
@@ -22,15 +19,16 @@ import threading
 import time
 import datetime as dt
 
-VERSION = "ml-shadow-2026-05-07b"
+VERSION = "ml-shadow-early-routes-2026-05-07"
 ENABLED = os.environ.get("ML_SHADOW_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 MAX_ROWS = int(os.environ.get("ML_SHADOW_MAX_ROWS", "3000"))
 MIN_ROWS = int(os.environ.get("ML_SHADOW_MIN_ROWS_FOR_SIGNAL", "100"))
-_PATCHING = False
-_INSTALLED_MODULE_IDS: set[int] = set()
+_REGISTERED_APP_IDS: set[int] = set()
+_PATCHED_SAVE_IDS: set[int] = set()
+_PATCHING_SAVE = False
 
 
-def fnum(x, d=0.0):
+def _fnum(x, d=0.0):
     try:
         x = float(x)
         return d if math.isnan(x) or math.isinf(x) else x
@@ -38,14 +36,7 @@ def fnum(x, d=0.0):
         return d
 
 
-def fint(x, d=0):
-    try:
-        return int(x)
-    except Exception:
-        return d
-
-
-def h(obj) -> str:
+def _h(obj) -> str:
     try:
         raw = json.dumps(obj, sort_keys=True, default=str)
     except Exception:
@@ -53,7 +44,31 @@ def h(obj) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def nested(d, keys, default=None):
+def _mod():
+    # When Railway starts with python app.py, the bot is usually __main__.
+    # When started by gunicorn/import, the bot is usually app.
+    for name in ("app", "__main__"):
+        m = sys.modules.get(name)
+        if m is not None and getattr(m, "app", None) is not None:
+            return m
+    return None
+
+
+def _now_text(m=None):
+    try:
+        return m.local_ts_text()
+    except Exception:
+        return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _today(m=None):
+    try:
+        return m.today_key()
+    except Exception:
+        return dt.datetime.now().strftime("%Y-%m-%d")
+
+
+def _nested(d, keys, default=None):
     cur = d
     for k in keys:
         if not isinstance(cur, dict) or k not in cur:
@@ -62,35 +77,19 @@ def nested(d, keys, default=None):
     return cur
 
 
-def now_text(appmod=None):
-    try:
-        return appmod.local_ts_text()
-    except Exception:
-        return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def _ensure_ml(state):
+    if not isinstance(state, dict):
+        state = {}
+    ml = state.setdefault("ml_shadow", {})
+    ml["version"] = VERSION
+    ml["enabled"] = ENABLED
+    ml["live_trade_decider"] = False
+    ml.setdefault("feature_log", [])
+    ml.setdefault("notes", ["ML is shadow-only; rules and risk controls remain live authority."])
+    return ml
 
 
-def today(appmod=None):
-    try:
-        return appmod.today_key()
-    except Exception:
-        return dt.datetime.now().strftime("%Y-%m-%d")
-
-
-def bucket(sym, appmod=None):
-    try:
-        return getattr(appmod, "SYMBOL_BUCKET", {}).get((sym or "").upper(), "unknown")
-    except Exception:
-        return "unknown"
-
-
-def sector(sym, appmod=None):
-    try:
-        return getattr(appmod, "SYMBOL_SECTOR", {}).get((sym or "").upper(), "unknown")
-    except Exception:
-        return "unknown"
-
-
-def candidate_items(state):
+def _candidate_items(state):
     out = []
     scan = state.get("scanner_audit") or state.get("scanner_log") or {}
     if isinstance(scan, dict):
@@ -107,8 +106,7 @@ def candidate_items(state):
                 out.append(({"symbol": sym, "side": "short"}, "signal"))
     if out:
         return out
-
-    lr = nested(state, ["auto_runner", "last_result"], {}) or {}
+    lr = _nested(state, ["auto_runner", "last_result"], {}) or {}
     if isinstance(lr, dict):
         for key, decision in (("entries", "accepted"), ("blocked_entries", "blocked"), ("rejected_signals", "rejected")):
             for item in lr.get(key) or []:
@@ -124,16 +122,16 @@ def candidate_items(state):
     return out
 
 
-def entry_floor(state):
-    return fnum(
-        nested(state, ["feedback_loop", "dynamic_min_long_score"], None),
-        fnum(nested(state, ["explain", "current_permission", "active_min_entry_score"], None), 0.0),
+def _entry_floor(state):
+    return _fnum(
+        _nested(state, ["feedback_loop", "dynamic_min_long_score"], None),
+        _fnum(_nested(state, ["explain", "current_permission", "active_min_entry_score"], None), 0.0),
     )
 
 
-def feature_row(item, decision, state, appmod=None):
+def _feature_row(item, decision, state, m=None):
     sym = str(item.get("symbol") or item.get("ticker") or "").upper()
-    market = state.get("last_market") or nested(state, ["auto_runner", "last_result"], {}) or {}
+    market = state.get("last_market") or _nested(state, ["auto_runner", "last_result"], {}) or {}
     feedback = state.get("feedback_loop") or {}
     risk = state.get("risk_controls") or {}
     perf = state.get("performance") or {}
@@ -141,24 +139,26 @@ def feature_row(item, decision, state, appmod=None):
     precious = market.get("precious_metals") or feedback.get("precious_metals") or state.get("precious_metals") or {}
     breadth = market.get("breadth") or feedback.get("breadth") or state.get("breadth") or {}
     futures = market.get("futures_bias") or feedback.get("futures_bias") or state.get("futures_bias") or {}
-    score = fnum(item.get("score"), fnum(nested(item, ["quality_info", "score"], None), 0.0))
+    bucket_map = getattr(m, "SYMBOL_BUCKET", {}) if m is not None else {}
+    sector_map = getattr(m, "SYMBOL_SECTOR", {}) if m is not None else {}
+    score = _fnum(item.get("score"), _fnum(_nested(item, ["quality_info", "score"], None), 0.0))
     row = {
-        "logged_local": now_text(appmod),
-        "date": today(appmod),
+        "logged_local": _now_text(m),
+        "date": _today(m),
         "symbol": sym,
         "side": item.get("side") or item.get("direction") or "long",
-        "bucket": item.get("bucket") or bucket(sym, appmod),
-        "sector": item.get("sector") or sector(sym, appmod),
+        "bucket": item.get("bucket") or bucket_map.get(sym, "unknown"),
+        "sector": item.get("sector") or sector_map.get(sym, "unknown"),
         "score": round(score, 6),
         "decision": decision,
-        "reason": item.get("reason") or item.get("entry_block_reason") or nested(item, ["quality_info", "reason"], ""),
+        "reason": item.get("reason") or item.get("entry_block_reason") or _nested(item, ["quality_info", "reason"], ""),
         "market_mode": market.get("market_mode") or state.get("market_mode"),
         "regime": market.get("regime") or state.get("regime"),
-        "risk_score": fnum(market.get("risk_score"), fnum(state.get("risk_score"), 0.0)),
-        "spy_5d_pct": fnum(market.get("spy_5d_pct"), 0.0),
-        "qqq_5d_pct": fnum(market.get("qqq_5d_pct"), 0.0),
-        "vix_5d_pct": fnum(market.get("vix_5d_pct"), 0.0),
-        "rates_5d_pct": fnum(market.get("rates_5d_pct"), 0.0),
+        "risk_score": _fnum(market.get("risk_score"), _fnum(state.get("risk_score"), 0.0)),
+        "spy_5d_pct": _fnum(market.get("spy_5d_pct"), 0.0),
+        "qqq_5d_pct": _fnum(market.get("qqq_5d_pct"), 0.0),
+        "vix_5d_pct": _fnum(market.get("vix_5d_pct"), 0.0),
+        "rates_5d_pct": _fnum(market.get("rates_5d_pct"), 0.0),
         "futures_action": futures.get("action") or "",
         "futures_bias": futures.get("bias") or futures.get("action") or "",
         "breadth_state": breadth.get("state") or "",
@@ -167,41 +167,56 @@ def feature_row(item, decision, state, appmod=None):
         "tech_leadership_state": tech.get("state") or "",
         "precious_metals_state": precious.get("state") or "",
         "precious_metals_action": precious.get("action") or "",
-        "entry_floor": round(entry_floor(state), 6),
-        "cash": round(fnum(state.get("cash"), 0.0), 2),
-        "equity": round(fnum(state.get("equity"), 0.0), 2),
-        "realized_pnl_today": round(fnum(perf.get("realized_pnl_today"), 0.0), 2),
-        "daily_loss_pct": round(fnum(risk.get("daily_loss_pct"), 0.0), 4),
-        "intraday_drawdown_pct": round(fnum(risk.get("intraday_drawdown_pct"), 0.0), 4),
+        "entry_floor": round(_entry_floor(state), 6),
+        "cash": round(_fnum(state.get("cash"), 0.0), 2),
+        "equity": round(_fnum(state.get("equity"), 0.0), 2),
+        "realized_pnl_today": round(_fnum(perf.get("realized_pnl_today"), 0.0), 2),
+        "daily_loss_pct": round(_fnum(risk.get("daily_loss_pct"), 0.0), 4),
+        "intraday_drawdown_pct": round(_fnum(risk.get("intraday_drawdown_pct"), 0.0), 4),
         "self_defense_active": bool(risk.get("self_defense_active") or feedback.get("self_defense_mode")),
         "future_outcome_pending": True,
         "future_return_close_pct": None,
         "future_return_next_day_pct": None,
-        "source_hash": h(item),
+        "source_hash": _h(item),
     }
-    row["row_id"] = h({"d": row["date"], "s": sym, "side": row["side"], "decision": decision, "score": row["score"], "reason": row["reason"], "src": row["source_hash"]})
+    row["row_id"] = _h({"d": row["date"], "s": sym, "side": row["side"], "decision": decision, "score": row["score"], "reason": row["reason"], "src": row["source_hash"]})
     return row
 
 
-def ensure_ml(state):
-    ml = state.setdefault("ml_shadow", {})
-    ml.setdefault("version", VERSION)
-    ml["enabled"] = ENABLED
-    ml["live_trade_decider"] = False
-    ml.setdefault("feature_log", [])
-    ml.setdefault("notes", ["ML is shadow-only; rules and risk controls remain live authority."])
-    return ml
-
-
-def batch_key(state):
-    items = candidate_items(state)
+def _batch_key(state):
+    items = _candidate_items(state)
     if not items:
         return ""
     scan = state.get("scanner_audit") or state.get("scanner_log") or {}
-    return h({"updated": scan.get("last_updated_local") if isinstance(scan, dict) else None, "last_run": nested(state, ["auto_runner", "last_run_local"], None), "items": items})
+    return _h({"updated": scan.get("last_updated_local") if isinstance(scan, dict) else None, "last_run": _nested(state, ["auto_runner", "last_run_local"], None), "items": items})
 
 
-def group(rows, field):
+def _append_features(state, m=None):
+    if not ENABLED or not isinstance(state, dict):
+        return state
+    ml = _ensure_ml(state)
+    key = _batch_key(state)
+    if not key or key == ml.get("last_candidate_batch_key"):
+        ml["last_review"] = _review(state, m)
+        return state
+    ids = {r.get("row_id") for r in ml.get("feature_log", []) if isinstance(r, dict)}
+    new_rows = []
+    for item, decision in _candidate_items(state):
+        row = _feature_row(item, decision, state, m)
+        if row["row_id"] not in ids:
+            ids.add(row["row_id"])
+            new_rows.append(row)
+    if new_rows:
+        ml["feature_log"] = (ml.get("feature_log", []) + new_rows)[-MAX_ROWS:]
+        ml["last_candidate_batch_key"] = key
+        ml["last_updated_local"] = _now_text(m)
+        ml["last_added_rows"] = len(new_rows)
+        ml["total_rows"] = len(ml["feature_log"])
+    ml["last_review"] = _review(state, m)
+    return state
+
+
+def _group(rows, field):
     out = {}
     for r in rows:
         k = str(r.get(field) or "unknown")
@@ -209,15 +224,15 @@ def group(rows, field):
         g["total"] += 1
         dec = r.get("decision", "unknown")
         g[dec] = g.get(dec, 0) + 1
-        g["avg_score"] += fnum(r.get("score"), 0.0)
+        g["avg_score"] += _fnum(r.get("score"), 0.0)
     for g in out.values():
         if g["total"]:
             g["avg_score"] = round(g["avg_score"] / g["total"], 6)
     return out
 
 
-def prob(row, total):
-    p = 0.50 + max(min((fnum(row.get("score")) - fnum(row.get("entry_floor"), 0.012)) * 8, 0.12), -0.12)
+def _prob(row, total):
+    p = 0.50 + max(min((_fnum(row.get("score")) - _fnum(row.get("entry_floor"), 0.012)) * 8, 0.12), -0.12)
     if row.get("tech_leadership_active") and row.get("sector") in {"XLK", "XLY"}:
         p += 0.035
     if row.get("bucket") == "precious_metals" and row.get("precious_metals_state") in {"safe_haven_bid", "trend_confirmed"}:
@@ -246,10 +261,10 @@ def prob(row, total):
     }
 
 
-def review(state, appmod=None):
-    rows = [r for r in ensure_ml(state).get("feature_log", []) if isinstance(r, dict)]
+def _review(state, m=None):
+    rows = [r for r in _ensure_ml(state).get("feature_log", []) if isinstance(r, dict)]
     total = len(rows)
-    preds = sorted([prob(r, total) for r in rows[-25:]], key=lambda x: x["ml_shadow_probability"], reverse=True)
+    preds = sorted([_prob(r, total) for r in rows[-25:]], key=lambda x: x["ml_shadow_probability"], reverse=True)
     return {
         "version": VERSION,
         "enabled": ENABLED,
@@ -259,128 +274,96 @@ def review(state, appmod=None):
         "blocked_rows": sum(r.get("decision") == "blocked" for r in rows),
         "rejected_rows": sum(r.get("decision") == "rejected" for r in rows),
         "pending_outcome_rows": sum(bool(r.get("future_outcome_pending")) for r in rows),
-        "bucket_summary": group(rows, "bucket"),
-        "sector_summary": group(rows, "sector"),
+        "bucket_summary": _group(rows, "bucket"),
+        "sector_summary": _group(rows, "sector"),
         "latest_shadow_rankings": preds[:15],
         "readiness": {
             "ml_ready_for_live_decisions": False,
             "reason": "shadow data capture active; live ML requires enough rows plus walk-forward/backtest evidence",
             "recommended_next_threshold": "100+ logged scanner opportunities and 2-4 weeks of paper data before ML affects entries",
         },
-        "last_updated_local": now_text(appmod),
+        "last_updated_local": _now_text(m),
     }
 
 
-def append_features(state, appmod=None):
-    if not ENABLED or not isinstance(state, dict):
-        return state
-    ml = ensure_ml(state)
-    key = batch_key(state)
-    if not key or key == ml.get("last_candidate_batch_key"):
-        ml["last_review"] = review(state, appmod)
-        return state
-    ids = {r.get("row_id") for r in ml.get("feature_log", []) if isinstance(r, dict)}
-    new_rows = []
-    for item, decision in candidate_items(state):
-        row = feature_row(item, decision, state, appmod)
-        if row["row_id"] not in ids:
-            ids.add(row["row_id"])
-            new_rows.append(row)
-    if new_rows:
-        ml["feature_log"] = (ml.get("feature_log", []) + new_rows)[-MAX_ROWS:]
-        ml["last_candidate_batch_key"] = key
-        ml["last_updated_local"] = now_text(appmod)
-        ml["last_added_rows"] = len(new_rows)
-        ml["total_rows"] = len(ml["feature_log"])
-    ml["last_review"] = review(state, appmod)
-    return state
-
-
-def load_state(appmod):
+def _load_state():
+    m = _mod()
     try:
-        state = appmod.load_state()
-        if isinstance(state, dict):
-            append_features(state, appmod)
-            return state
+        state = m.load_state() if m is not None and hasattr(m, "load_state") else {}
     except Exception:
-        pass
-    return {}
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    try:
+        _append_features(state, m)
+    except Exception as e:
+        state.setdefault("ml_shadow", {})["last_error"] = str(e)
+    return state, m
 
 
-def patch_save(appmod):
-    global _PATCHING
-    if not hasattr(appmod, "save_state") or getattr(appmod.save_state, "_ml_shadow_patched", False):
+def _patch_save_state(m):
+    global _PATCHING_SAVE
+    if m is None or not hasattr(m, "save_state") or id(m) in _PATCHED_SAVE_IDS:
         return False
-    original = appmod.save_state
+    original = m.save_state
 
-    def patched(state):
-        global _PATCHING
-        if _PATCHING:
+    def patched_save_state(state):
+        global _PATCHING_SAVE
+        if _PATCHING_SAVE:
             return original(state)
         try:
-            _PATCHING = True
-            append_features(state, appmod)
+            _PATCHING_SAVE = True
+            _append_features(state, m)
         finally:
-            _PATCHING = False
+            _PATCHING_SAVE = False
         return original(state)
 
-    patched._ml_shadow_patched = True
-    appmod.save_state = patched
+    patched_save_state._ml_shadow_patched = True
+    m.save_state = patched_save_state
+    _PATCHED_SAVE_IDS.add(id(m))
     return True
 
 
-def install_routes(appmod):
-    flask_app = getattr(appmod, "app", None)
-    if flask_app is None:
-        return False
-    rules = {getattr(r, "rule", "") for r in flask_app.url_map.iter_rules()}
+def _register_routes(flask_app):
+    if id(flask_app) in _REGISTERED_APP_IDS:
+        return
+    try:
+        existing = {getattr(r, "rule", "") for r in flask_app.url_map.iter_rules()}
+    except Exception:
+        existing = set()
 
-    def js(x):
-        try:
-            return appmod.jsonify(x)
-        except Exception:
-            from flask import jsonify
-            return jsonify(x)
+    from flask import jsonify, request
 
-    if "/paper/ml-health" not in rules:
-        @flask_app.route("/paper/ml-health")
+    if "/paper/ml-health" not in existing:
         def ml_health():
-            state = load_state(appmod)
-            ml = ensure_ml(state)
-            return js({
+            state, m = _load_state()
+            ml = _ensure_ml(state)
+            _patch_save_state(m)
+            return jsonify({
                 "status": "ok",
                 "version": VERSION,
                 "enabled": ENABLED,
-                "startup_mode_supported": ["python app.py", "gunicorn app:app"],
+                "registered_by": "sitecustomize_flask_init_patch",
                 "live_trade_decider": False,
                 "rows_logged": len(ml.get("feature_log", [])),
-                "state_persistence_mode": getattr(appmod, "STATE_PERSISTENCE_MODE", None),
-                "state_file": getattr(appmod, "STATE_FILE", None),
+                "state_persistence_mode": getattr(m, "STATE_PERSISTENCE_MODE", None) if m else None,
+                "state_file": getattr(m, "STATE_FILE", None) if m else None,
             })
+        flask_app.add_url_rule("/paper/ml-health", "ml_health_shadow", ml_health)
 
-    if "/paper/ml-dataset" not in rules:
-        @flask_app.route("/paper/ml-dataset")
-        def ml_dataset():
-            state = load_state(appmod)
-            ml = ensure_ml(state)
-            try:
-                limit = int(appmod.request.args.get("limit", "250"))
-            except Exception:
-                limit = 250
-            limit = max(1, min(limit, 1000))
-            rows = ml.get("feature_log", [])
-            return js({"status": "ok", "version": VERSION, "rows_logged": len(rows), "rows_returned": min(limit, len(rows)), "feature_log_tail": rows[-limit:]})
-
-    if "/paper/ml-review" not in rules:
-        @flask_app.route("/paper/ml-review")
+    if "/paper/ml-review" not in existing:
         def ml_review():
-            return js({"status": "ok", "ml_review": review(load_state(appmod), appmod)})
+            state, m = _load_state()
+            _patch_save_state(m)
+            return jsonify({"status": "ok", "ml_review": _review(state, m)})
+        flask_app.add_url_rule("/paper/ml-review", "ml_review_shadow", ml_review)
 
-    if "/paper/ml-shadow" not in rules:
-        @flask_app.route("/paper/ml-shadow")
+    if "/paper/ml-shadow" not in existing:
         def ml_shadow():
-            r = review(load_state(appmod), appmod)
-            return js({
+            state, m = _load_state()
+            _patch_save_state(m)
+            r = _review(state, m)
+            return jsonify({
                 "status": "ok",
                 "mode": "shadow_only",
                 "live_trade_decider": False,
@@ -388,105 +371,89 @@ def install_routes(appmod):
                 "readiness": r.get("readiness", {}),
                 "plain_english": ["ML shadow mode logs and ranks scanner patterns only.", "It cannot place trades or override risk controls."],
             })
+        flask_app.add_url_rule("/paper/ml-shadow", "ml_shadow_shadow", ml_shadow)
 
-    if "/paper/ml-feature-log" not in rules:
-        @flask_app.route("/paper/ml-feature-log")
-        def ml_feature_log():
-            state = load_state(appmod)
-            ml = ensure_ml(state)
+    if "/paper/ml-dataset" not in existing:
+        def ml_dataset():
+            state, m = _load_state()
+            _patch_save_state(m)
+            ml = _ensure_ml(state)
+            try:
+                limit = int(request.args.get("limit", "250"))
+            except Exception:
+                limit = 250
+            limit = max(1, min(limit, 1000))
             rows = ml.get("feature_log", [])
-            return js({"status": "ok", "version": VERSION, "rows_logged": len(rows), "last_updated_local": ml.get("last_updated_local"), "last_added_rows": ml.get("last_added_rows", 0), "latest_rows": rows[-50:]})
+            return jsonify({"status": "ok", "version": VERSION, "rows_logged": len(rows), "rows_returned": min(limit, len(rows)), "feature_log_tail": rows[-limit:]})
+        flask_app.add_url_rule("/paper/ml-dataset", "ml_dataset_shadow", ml_dataset)
 
-    if "/paper/backtest-summary" not in rules:
-        @flask_app.route("/paper/backtest-summary")
+    if "/paper/ml-feature-log" not in existing:
+        def ml_feature_log():
+            state, m = _load_state()
+            _patch_save_state(m)
+            ml = _ensure_ml(state)
+            rows = ml.get("feature_log", [])
+            return jsonify({"status": "ok", "version": VERSION, "rows_logged": len(rows), "last_updated_local": ml.get("last_updated_local"), "last_added_rows": ml.get("last_added_rows", 0), "latest_rows": rows[-50:]})
+        flask_app.add_url_rule("/paper/ml-feature-log", "ml_feature_log_shadow", ml_feature_log)
+
+    if "/paper/backtest-summary" not in existing:
         def backtest_summary():
-            state = load_state(appmod)
+            state, m = _load_state()
+            _patch_save_state(m)
             trades = state.get("trades", [])
             realized = state.get("realized_pnl", {})
             risk = state.get("risk_controls", {})
-            return js({
+            return jsonify({
                 "status": "ok",
                 "version": VERSION,
                 "type": "paper_replay_backtest_readiness",
                 "note": "Full walk-forward simulation comes after enough ML feature rows are collected.",
                 "rule_system_snapshot": {
                     "trades_logged": len(trades),
-                    "realized_pnl_today": fnum(realized.get("today")),
-                    "realized_pnl_total": fnum(realized.get("total")),
-                    "wins_total": fint(realized.get("wins_total")),
-                    "losses_total": fint(realized.get("losses_total")),
-                    "intraday_drawdown_pct": fnum(risk.get("intraday_drawdown_pct")),
-                    "daily_loss_pct": fnum(risk.get("daily_loss_pct")),
+                    "realized_pnl_today": _fnum(realized.get("today")),
+                    "realized_pnl_total": _fnum(realized.get("total")),
+                    "wins_total": int(_fnum(realized.get("wins_total"), 0)),
+                    "losses_total": int(_fnum(realized.get("losses_total"), 0)),
+                    "intraday_drawdown_pct": _fnum(risk.get("intraday_drawdown_pct")),
+                    "daily_loss_pct": _fnum(risk.get("daily_loss_pct")),
                 },
-                "ml_shadow_snapshot": review(state, appmod),
+                "ml_shadow_snapshot": _review(state, m),
                 "recommended_next_step": "Collect scanner rows during regular sessions, then compare rules vs ML ranking on profit factor, stop-loss rate, and missed-winner rate.",
             })
-    return True
+        flask_app.add_url_rule("/paper/backtest-summary", "backtest_summary_shadow", backtest_summary)
+
+    _REGISTERED_APP_IDS.add(id(flask_app))
 
 
-def module_ready(appmod) -> bool:
-    return bool(getattr(appmod, "app", None) is not None and hasattr(appmod, "load_state") and hasattr(appmod, "save_state"))
-
-
-def install(appmod):
-    if not ENABLED or appmod is None:
-        return False
-    if id(appmod) in _INSTALLED_MODULE_IDS:
-        return True
-    if not module_ready(appmod):
-        return False
-    if install_routes(appmod):
-        patch_save(appmod)
-        _INSTALLED_MODULE_IDS.add(id(appmod))
-        return True
-    return False
-
-
-class Loader(importlib.abc.Loader):
-    def __init__(self, wrapped):
-        self.wrapped = wrapped
-
-    def create_module(self, spec):
-        return self.wrapped.create_module(spec) if hasattr(self.wrapped, "create_module") else None
-
-    def exec_module(self, module):
-        self.wrapped.exec_module(module)
-        if getattr(module, "__name__", "") == "app":
-            install(module)
-
-
-class Finder(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname != "app":
-            return None
-        for finder in sys.meta_path:
-            if finder is self:
-                continue
-            try:
-                spec = finder.find_spec(fullname, path, target)
-            except Exception:
-                continue
-            if spec and spec.loader:
-                spec.loader = Loader(spec.loader)
-                return spec
-        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
-        if spec and spec.loader:
-            spec.loader = Loader(spec.loader)
-        return spec
-
-
-def watchdog():
-    # Supports ``python app.py`` where the live module is __main__.
-    # Wait for app.py to finish defining load_state/save_state before adding routes.
-    for _ in range(250):  # ~25 seconds
-        for name in ("app", "__main__"):
-            mod = sys.modules.get(name)
-            if install(mod):
-                return
+def _watchdog():
+    for _ in range(300):
+        try:
+            m = _mod()
+            if m is not None:
+                flask_app = getattr(m, "app", None)
+                if flask_app is not None:
+                    _register_routes(flask_app)
+                _patch_save_state(m)
+        except Exception:
+            pass
         time.sleep(0.1)
 
 
 if ENABLED:
-    if not any(isinstance(x, Finder) for x in sys.meta_path):
-        sys.meta_path.insert(0, Finder())
-    threading.Thread(target=watchdog, daemon=True).start()
+    try:
+        from flask import Flask
+        if not getattr(Flask.__init__, "_ml_shadow_init_patched", False):
+            _original_init = Flask.__init__
+
+            def _patched_init(self, *args, **kwargs):
+                _original_init(self, *args, **kwargs)
+                try:
+                    _register_routes(self)
+                except Exception:
+                    pass
+
+            _patched_init._ml_shadow_init_patched = True
+            Flask.__init__ = _patched_init
+    except Exception:
+        pass
+    threading.Thread(target=_watchdog, daemon=True).start()
