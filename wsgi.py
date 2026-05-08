@@ -2,7 +2,9 @@
 
 This startup path now runs the state recovery guard before importing app.py, so
 Railway deploy/startup cycles do not continue with a suspiciously small
-/data/state.json when a larger valid backup exists.
+/data/state.json when a larger valid backup exists. It also installs a persistent
+trade-journal mirror after app.py import so trade history is preserved outside
+state.json.
 """
 from __future__ import annotations
 
@@ -15,6 +17,15 @@ except Exception:
 
 import app as core
 from app import app
+
+try:
+    import trade_journal
+    if hasattr(trade_journal, "install"):
+        trade_journal.install(core)
+    if hasattr(trade_journal, "register_routes"):
+        trade_journal.register_routes(app, core)
+except Exception:
+    pass
 
 try:
     import sitecustomize as ml_shadow
