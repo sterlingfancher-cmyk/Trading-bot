@@ -3,7 +3,8 @@
 This startup path runs the state recovery guard before importing app.py, installs
 persistent trade journaling, applies execution-only journal truth reporting,
 applies runtime risk controls, patches slow price fetches with timeout/cache
-fallbacks, and registers one-link self-check routes.
+fallbacks, installs intraday timing/pullback guards, and registers one-link
+self-check routes.
 """
 from __future__ import annotations
 
@@ -81,6 +82,15 @@ try:
         live_volatility.apply(core)
     if hasattr(live_volatility, "register_routes"):
         live_volatility.register_routes(app, core)
+except Exception:
+    pass
+
+try:
+    import intraday_timing
+    if hasattr(intraday_timing, "apply"):
+        intraday_timing.apply(core)
+    if hasattr(intraday_timing, "register_routes"):
+        intraday_timing.register_routes(app, core)
 except Exception:
     pass
 
