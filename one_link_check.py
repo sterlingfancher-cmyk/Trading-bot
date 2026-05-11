@@ -1,12 +1,13 @@
 """One-link check patch.
 
 Keeps the user's daily testing flow to one URL: /paper/self-check.
-Adds journal truth and intraday timing status into the light self-check set
-without requiring Sterling to manually test more endpoints after each deploy.
+Adds journal truth, classic signal mode, and intraday timing status into the
+light self-check set without requiring Sterling to manually test more endpoints
+after each deploy.
 """
 from __future__ import annotations
 
-VERSION = "one-link-intraday-timing-check-2026-05-11"
+VERSION = "one-link-classic-signal-check-2026-05-11"
 
 
 def _add_endpoint(light, endpoint, after_path=None):
@@ -29,11 +30,13 @@ def apply(self_check_module=None):
             import self_check as self_check_module  # type: ignore[no-redef]
         light = getattr(self_check_module, "LIGHT_ENDPOINTS", None)
         _add_endpoint(light, {"path": "/paper/journal-truth-status", "category": "journal", "required": True}, after_path="/paper/trade-event-hook-status")
-        _add_endpoint(light, {"path": "/paper/intraday-timing-status", "category": "risk", "required": True}, after_path="/paper/risk-improvement-status")
+        _add_endpoint(light, {"path": "/paper/classic-signal-status", "category": "risk", "required": True}, after_path="/paper/risk-improvement-status")
+        _add_endpoint(light, {"path": "/paper/intraday-timing-status", "category": "risk", "required": True}, after_path="/paper/classic-signal-status")
         return {
             "status": "ok",
             "version": VERSION,
             "journal_truth_in_self_check": True,
+            "classic_signal_in_self_check": True,
             "intraday_timing_in_self_check": True,
         }
     except Exception as exc:
@@ -41,6 +44,7 @@ def apply(self_check_module=None):
             "status": "error",
             "version": VERSION,
             "journal_truth_in_self_check": False,
+            "classic_signal_in_self_check": False,
             "intraday_timing_in_self_check": False,
             "error": str(exc),
         }
