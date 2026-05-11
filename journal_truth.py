@@ -8,9 +8,11 @@ real trades. It does not delete journal rows. Instead, it classifies rows into:
 - review rows: rotation-review, weakest-position, scanner, blocked/rejected,
   and other non-execution diagnostics
 
-It then patches trade_journal._journal_summary so existing journal endpoints show
-execution-only realized statistics, while a new /paper/journal-truth-status route
-shows both execution and review counts for auditability.
+Important: some current deployments keep actual execution rows in state.json
+while trade_journal.json contains many mirrored diagnostic rows. To keep the
+reported realized stats honest, this module reconciles execution rows from both
+trade_journal.json and state.json, then deduplicates them before calculating
+execution-only performance.
 """
 from __future__ import annotations
 
@@ -19,10 +21,11 @@ import json
 import os
 from typing import Any, Dict, List, Tuple
 
-VERSION = "journal-truth-execution-only-2026-05-11"
+VERSION = "journal-truth-state-reconciled-2026-05-11"
 
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 TRADE_JOURNAL_FILE = os.path.join(STATE_DIR, "trade_journal.json")
+STATE_FILE = os.path.join(STATE_DIR, "state.json")
 
 REGISTERED_APP_IDS: set[int] = set()
 _ORIGINAL_SUMMARY = None
@@ -76,6 +79,36 @@ def _source(row: Dict[str, Any]) -> str:
     return str(row.get("journal_source", "") or row.get("source", "")).lower()
 
 
+def _time_value(row: Dict[str, Any]) -> Any:
+    return row.get("time") or row.get("timestamp") or row.get("entry_time") or row.get("exit_time") or row.get("journal_mirrored_local")
+
+
+def _fingerprint(row: Dict[str, Any]) -> str:
+    parts = [
+        str(_action(row)),
+        str(row.get("symbol", "")),
+        str(row.get("side", "")),
+        str(_time_value(row)),
+        str(row.get("price", "")),
+        str(row.get("shares", "")),
+        str(row.get("pnl_dollars", "")),
+        str(row.get("exit_reason", "")),
+    ]
+    return "|".join(parts)
+
+
+def _dedupe_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen = set()
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        fp = _fingerprint(row)
+        if fp in seen:
+            continue
+        seen.add(fp)
+        out.append(row)
+    return out
+
+
 def is_review_row(row: Any) -> bool:
     if not isinstance(row, dict):
         return True
@@ -126,8 +159,31 @@ def classify_rows(journal: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[D
     return execution, review, unknown
 
 
+def state_execution_rows(state: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+    state = state if isinstance(state, dict) else _load_json(STATE_FILE)
+    rows: List[Dict[str, Any]] = []
+    for key in ("trades", "recent_trades"):
+        value = state.get(key)
+        if isinstance(value, list):
+            for row in value:
+                if isinstance(row, dict) and is_execution_row(row):
+                    clean = dict(row)
+                    clean.setdefault("journal_source", f"state.{key}")
+                    rows.append(clean)
+    return _dedupe_rows(rows)
+
+
+def reconciled_execution_rows(journal: Dict[str, Any], state: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+    journal_execution, _, _ = classify_rows(journal)
+    combined = list(journal_execution) + state_execution_rows(state)
+    return _dedupe_rows(combined)
+
+
 def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
-    execution, review, unknown = classify_rows(journal)
+    state = _load_json(STATE_FILE)
+    journal_execution, review, unknown = classify_rows(journal)
+    state_execution = state_execution_rows(state)
+    execution = _dedupe_rows(list(journal_execution) + list(state_execution))
     entries = [t for t in execution if _action(t) in ENTRY_ACTIONS]
     exits = [t for t in execution if _action(t) in EXIT_ACTIONS]
     stop_exits = [t for t in exits if "stop" in str(t.get("exit_reason", "")).lower()]
@@ -137,11 +193,16 @@ def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
     gross_profit = sum(_float(t.get("pnl_dollars", 0.0)) for t in wins)
     gross_loss = abs(sum(_float(t.get("pnl_dollars", 0.0)) for t in losses))
     total_trades = len(journal.get("trades", [])) if isinstance(journal.get("trades"), list) else 0
+    perf = state.get("performance", {}) if isinstance(state.get("performance"), dict) else {}
+    state_realized_today = perf.get("realized_pnl_today")
+    state_realized_total = perf.get("realized_pnl_total")
     return {
-        "summary_type": "execution_only",
+        "summary_type": "execution_only_state_reconciled",
         "trades_count": len(execution),
         "total_raw_rows": total_trades,
         "execution_rows_count": len(execution),
+        "journal_execution_rows_count": len(journal_execution),
+        "state_execution_rows_count": len(state_execution),
         "review_rows_count": len(review),
         "unknown_rows_count": len(unknown),
         "entries_count": len(entries),
@@ -153,7 +214,10 @@ def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
         "flat_exits_count": len(flat),
         "gross_profit": round(gross_profit, 2),
         "gross_loss": round(gross_loss, 2),
-        "net_realized_from_journal": round(gross_profit - gross_loss, 2),
+        "net_realized_from_execution_rows": round(gross_profit - gross_loss, 2),
+        "state_realized_pnl_today": state_realized_today,
+        "state_realized_pnl_total": state_realized_total,
+        "realized_reconciliation_note": "Execution rows are reconciled from trade_journal.json plus state.json trades/recent_trades. State performance remains the authoritative live P/L display.",
         "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss > 0 else None,
         "win_rate_pct": round(len(wins) / len(exits) * 100, 2) if exits else None,
         "latest_execution_trade": execution[-1] if execution else None,
@@ -179,6 +243,7 @@ def patch_trade_journal(trade_journal_module: Any | None = None) -> Dict[str, An
 
 def status_payload() -> Dict[str, Any]:
     journal = _load_json(TRADE_JOURNAL_FILE)
+    state = _load_json(STATE_FILE)
     summary = execution_summary(journal)
     original_summary = None
     try:
@@ -186,7 +251,9 @@ def status_payload() -> Dict[str, Any]:
             original_summary = _ORIGINAL_SUMMARY(journal)
     except Exception as exc:
         original_summary = {"error": str(exc)}
-    execution, review, unknown = classify_rows(journal)
+    journal_execution, review, unknown = classify_rows(journal)
+    state_execution = state_execution_rows(state)
+    execution = reconciled_execution_rows(journal, state)
     return {
         "status": "ok",
         "type": "journal_truth_status",
@@ -194,11 +261,15 @@ def status_payload() -> Dict[str, Any]:
         "generated_local": _now_text(),
         "patched_trade_journal_summary": _PATCHED,
         "journal_file": TRADE_JOURNAL_FILE,
+        "state_file": STATE_FILE,
         "execution_summary": summary,
         "legacy_summary_before_patch": original_summary,
         "recent_execution_trades": execution[-20:],
+        "recent_state_execution_trades": state_execution[-20:],
+        "recent_journal_execution_trades": journal_execution[-20:],
         "recent_review_rows": review[-10:],
         "recent_unknown_rows": unknown[-10:],
+        "state_performance": state.get("performance") if isinstance(state.get("performance"), dict) else {},
         "rules": {
             "execution_actions": sorted(REAL_EXECUTION_ACTIONS),
             "review_actions": sorted(REVIEW_ACTIONS),
