@@ -1,11 +1,8 @@
 """WSGI entry point that directly registers all auxiliary endpoints.
 
-This startup path now runs the state recovery guard before importing app.py, so
-Railway deploy/startup cycles do not continue with a suspiciously small
-/data/state.json when a larger valid backup exists. It also installs a persistent
-trade-journal mirror after app.py import so trade history is preserved outside
-state.json. The self-check module gives one link that tests all safe GET
-monitoring endpoints internally.
+This startup path runs the state recovery guard before importing app.py, installs
+persistent trade journaling, applies runtime risk controls, patches slow price
+fetches with timeout/cache fallbacks, and registers one-link self-check routes.
 """
 from __future__ import annotations
 
@@ -18,6 +15,15 @@ except Exception:
 
 import app as core
 from app import app
+
+try:
+    import runner_safety
+    if hasattr(runner_safety, "install"):
+        runner_safety.install(core)
+    if hasattr(runner_safety, "register_routes"):
+        runner_safety.register_routes(app, core)
+except Exception:
+    pass
 
 try:
     import trade_journal
