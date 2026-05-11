@@ -93,6 +93,12 @@ except Exception:
 
 try:
     import self_check
+    try:
+        import one_link_check
+        if hasattr(one_link_check, "apply"):
+            one_link_check.apply(self_check)
+    except Exception:
+        pass
     if hasattr(self_check, "register_routes"):
         self_check.register_routes(app, core)
 except Exception:
