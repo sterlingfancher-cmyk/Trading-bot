@@ -20,7 +20,7 @@ import os
 import time
 from typing import Any, Dict, Iterable, List
 
-VERSION = "lightweight-self-check-2026-05-11"
+VERSION = "lightweight-self-check-runner-safety-2026-05-11"
 BASE_URL = os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "https://trading-bot-clean.up.railway.app"
 if BASE_URL and not BASE_URL.startswith("http"):
     BASE_URL = "https://" + BASE_URL
@@ -28,13 +28,13 @@ BASE_URL = BASE_URL.rstrip("/")
 
 REGISTERED_APP_IDS: set[int] = set()
 
-# Lightweight endpoints only. These should be fast, mostly read-only, and safe to
-# hit repeatedly while working. They should not generate EOD reports or heavy
-# allocation/watchlist calculations.
 LIGHT_ENDPOINTS = [
     {"path": "/health", "category": "core", "required": True},
     {"path": "/paper/status", "category": "core", "required": True},
     {"path": "/paper/feedback-loop", "category": "core", "required": False},
+    {"path": "/paper/runner-freshness", "category": "ops", "required": True},
+    {"path": "/paper/runner-safety-status", "category": "ops", "required": True},
+    {"path": "/paper/price-health", "category": "ops", "required": False},
     {"path": "/paper/state-safety-status", "category": "state", "required": True},
     {"path": "/paper/state-recovery-status", "category": "state", "required": True},
     {"path": "/paper/risk-improvement-status", "category": "risk", "required": True},
@@ -43,8 +43,6 @@ LIGHT_ENDPOINTS = [
     {"path": "/paper/trade-event-hook-status", "category": "journal", "required": True},
 ]
 
-# Full mode intentionally includes reports and advisory endpoints. Use this only
-# for troubleshooting or end-of-day review, not every few minutes.
 FULL_EXTRA_ENDPOINTS = [
     {"path": "/paper/risk-review", "category": "core", "required": False},
     {"path": "/paper/journal", "category": "core", "required": False},
@@ -136,10 +134,7 @@ def _compact_payload(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         compact["equity"] = payload.get("equity")
         compact["cash"] = payload.get("cash")
         positions_obj = payload.get("positions")
-        if isinstance(positions_obj, dict):
-            compact["positions"] = payload.get("position_symbols") or list(positions_obj.keys())
-        else:
-            compact["positions"] = payload.get("position_symbols") or positions_obj
+        compact["positions"] = payload.get("position_symbols") or (list(positions_obj.keys()) if isinstance(positions_obj, dict) else positions_obj)
         compact["performance"] = payload.get("performance")
         rc = _safe_dict(payload.get("risk_controls"))
         compact["risk_controls"] = {
@@ -154,6 +149,20 @@ def _compact_payload(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             "blocked_entries_count": len(_safe_list(audit.get("blocked_entries"))),
             "top_blocked_symbols": audit.get("top_blocked_symbols"),
         }
+    elif "runner-freshness" in path:
+        compact["stale_during_market"] = payload.get("stale_during_market")
+        compact["last_successful_run_local"] = payload.get("last_successful_run_local")
+        compact["last_skip_reason"] = payload.get("last_skip_reason")
+        compact["last_error"] = payload.get("last_error")
+        compact["notes"] = payload.get("notes")
+    elif "runner-safety" in path or "price-health" in path:
+        compact["installed"] = payload.get("installed")
+        compact["download_wrapper_active"] = payload.get("download_wrapper_active")
+        compact["latest_price_wrapper_active"] = payload.get("latest_price_wrapper_active")
+        compact["downloads_attempted"] = payload.get("downloads_attempted")
+        compact["downloads_failed"] = payload.get("downloads_failed")
+        compact["fallback_price_hits"] = payload.get("fallback_price_hits")
+        compact["last_error"] = payload.get("last_error")
     elif "trade-journal" in path or "trade-event" in path:
         compact["installed"] = payload.get("installed")
         compact["watcher_started"] = payload.get("watcher_started")
@@ -202,11 +211,6 @@ def _result_level(status_code: int | None, json_ok: bool, required: bool) -> str
 
 
 def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
-    """Run internal endpoint checks.
-
-    Light mode is intentionally short and avoids heavy report/EOD endpoints. It
-    is safe to call repeatedly. Full mode is for troubleshooting.
-    """
     start = time.time()
     normalized_mode = str(mode or "light").lower().strip()
     endpoints = endpoints_for_mode(normalized_mode)
@@ -216,56 +220,24 @@ def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
     try:
         client = flask_app.test_client()
     except BaseException as exc:
-        return {
-            "status": "error",
-            "overall": "fail",
-            "type": "self_check",
-            "mode": normalized_mode,
-            "version": VERSION,
-            "generated_local": _now_text(),
-            "error": f"could not create flask test client: {exc}",
-        }
+        return {"status": "error", "overall": "fail", "type": "self_check", "mode": normalized_mode, "version": VERSION, "generated_local": _now_text(), "error": f"could not create flask test client: {exc}"}
 
     for ep in endpoints:
         path = ep["path"]
         t0 = time.time()
-        row: Dict[str, Any] = {
-            "path": path,
-            "url": _full_url(path),
-            "category": ep.get("category"),
-            "required": bool(ep.get("required")),
-        }
+        row: Dict[str, Any] = {"path": path, "url": _full_url(path), "category": ep.get("category"), "required": bool(ep.get("required"))}
         try:
-            # buffered=True makes response iteration complete inside this block,
-            # so endpoint exceptions are captured as row-level failures/warnings
-            # instead of breaking the whole self-check response.
             resp = client.get(path, buffered=True)
             payload = _extract_json(resp)
             json_ok = bool(payload) and "_extract_error" not in payload
             status_code = int(getattr(resp, "status_code", 0) or 0)
             level = _result_level(status_code, json_ok, bool(ep.get("required")))
-            row.update({
-                "level": level,
-                "ok": level == "pass",
-                "status_code": status_code,
-                "json_ok": json_ok,
-                "content_type": getattr(resp, "content_type", None),
-                "elapsed_ms": round((time.time() - t0) * 1000, 2),
-                "compact": _compact_payload(path, payload),
-            })
+            row.update({"level": level, "ok": level == "pass", "status_code": status_code, "json_ok": json_ok, "content_type": getattr(resp, "content_type", None), "elapsed_ms": round((time.time() - t0) * 1000, 2), "compact": _compact_payload(path, payload)})
             if "_extract_error" in payload:
                 row["error"] = payload.get("_extract_error")
         except BaseException as exc:
             level = "fail" if ep.get("required") else "warn"
-            row.update({
-                "level": level,
-                "ok": False,
-                "status_code": None,
-                "json_ok": False,
-                "elapsed_ms": round((time.time() - t0) * 1000, 2),
-                "error": str(exc),
-                "error_type": type(exc).__name__,
-            })
+            row.update({"level": level, "ok": False, "status_code": None, "json_ok": False, "elapsed_ms": round((time.time() - t0) * 1000, 2), "error": str(exc), "error_type": type(exc).__name__})
         summary[row["level"]] = summary.get(row["level"], 0) + 1
         results.append(row)
 
@@ -278,6 +250,8 @@ def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
     status_payload = next((r.get("compact", {}) for r in results if r.get("path") == "/paper/status"), {})
     health_payload = next((r.get("compact", {}) for r in results if r.get("path") == "/health"), {})
     journal_payload = next((r.get("compact", {}) for r in results if r.get("path") == "/paper/trade-journal-status"), {})
+    freshness_payload = next((r.get("compact", {}) for r in results if r.get("path") == "/paper/runner-freshness"), {})
+    safety_payload = next((r.get("compact", {}) for r in results if r.get("path") == "/paper/runner-safety-status"), {})
 
     return {
         "status": "ok" if overall != "fail" else "fail",
@@ -290,34 +264,19 @@ def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
         "summary_counts": summary,
         "failed_required": [{"path": r.get("path"), "status_code": r.get("status_code"), "error": r.get("error")} for r in failed_required],
         "warnings": [{"path": r.get("path"), "status_code": r.get("status_code"), "error": r.get("error")} for r in warnings],
-        "dashboard": {
-            "health": health_payload,
-            "status": status_payload,
-            "trade_journal": journal_payload,
-        },
+        "dashboard": {"health": health_payload, "status": status_payload, "trade_journal": journal_payload, "runner_freshness": freshness_payload, "runner_safety": safety_payload},
         "results": results,
         "copy_paste_links_separate": [_full_url(ep["path"]) for ep in endpoints],
         "light_self_check": _full_url("/paper/self-check"),
         "full_self_check": _full_url("/paper/full-self-check"),
-        "note": "Light mode avoids report/EOD endpoints. Full mode is for troubleshooting. Neither mode calls /paper/run or journal seed/sync endpoints.",
+        "note": "Light mode checks runner freshness, price safety, state safety, and journal health. Full mode adds report/EOD endpoints. Neither mode calls /paper/run or journal seed/sync endpoints.",
     }
 
 
 def test_links_payload() -> Dict[str, Any]:
     light_links = [_full_url(ep["path"]) for ep in endpoints_for_mode("light")]
     full_links = [_full_url(ep["path"]) for ep in endpoints_for_mode("full")]
-    return {
-        "status": "ok",
-        "type": "test_links",
-        "version": VERSION,
-        "generated_local": _now_text(),
-        "base_url": BASE_URL,
-        "single_best_link": _full_url("/paper/self-check"),
-        "full_diagnostic_link": _full_url("/paper/full-self-check"),
-        "links_separate_light": light_links,
-        "links_separate_full": full_links,
-        "do_not_auto_test": [_full_url(path) for path in MUTATING_OR_ACTION_ENDPOINTS],
-    }
+    return {"status": "ok", "type": "test_links", "version": VERSION, "generated_local": _now_text(), "base_url": BASE_URL, "single_best_link": _full_url("/paper/self-check"), "full_diagnostic_link": _full_url("/paper/full-self-check"), "links_separate_light": light_links, "links_separate_full": full_links, "do_not_auto_test": [_full_url(path) for path in MUTATING_OR_ACTION_ENDPOINTS]}
 
 
 def register_routes(flask_app: Any, module: Any | None = None) -> None:
