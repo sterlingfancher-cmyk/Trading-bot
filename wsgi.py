@@ -4,7 +4,8 @@ This startup path runs the state recovery guard before importing app.py, install
 persistent trade journaling, applies execution-only journal truth reporting,
 applies runtime risk controls, patches slow price fetches with timeout/cache
 fallbacks, installs classic signal mode as the primary filter, keeps intraday
-timing/pullback guards, and registers one-link self-check routes.
+timing/pullback guards, installs position-quality controls, and registers
+one-link self-check routes.
 """
 from __future__ import annotations
 
@@ -100,6 +101,15 @@ try:
         intraday_timing.apply(core)
     if hasattr(intraday_timing, "register_routes"):
         intraday_timing.register_routes(app, core)
+except Exception:
+    pass
+
+try:
+    import position_quality_governor
+    if hasattr(position_quality_governor, "apply"):
+        position_quality_governor.apply(core)
+    if hasattr(position_quality_governor, "register_routes"):
+        position_quality_governor.register_routes(app, core)
 except Exception:
     pass
 
