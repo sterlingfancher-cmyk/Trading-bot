@@ -1,8 +1,9 @@
 """WSGI entry point that directly registers all auxiliary endpoints.
 
 This startup path runs the state recovery guard before importing app.py, installs
-persistent trade journaling, applies runtime risk controls, patches slow price
-fetches with timeout/cache fallbacks, and registers one-link self-check routes.
+persistent trade journaling, applies execution-only journal truth reporting,
+applies runtime risk controls, patches slow price fetches with timeout/cache
+fallbacks, and registers one-link self-check routes.
 """
 from __future__ import annotations
 
@@ -31,6 +32,16 @@ try:
         trade_journal.install(core)
     if hasattr(trade_journal, "register_routes"):
         trade_journal.register_routes(app, core)
+except Exception:
+    pass
+
+try:
+    import journal_truth
+    import trade_journal as _trade_journal_module
+    if hasattr(journal_truth, "patch_trade_journal"):
+        journal_truth.patch_trade_journal(_trade_journal_module)
+    if hasattr(journal_truth, "register_routes"):
+        journal_truth.register_routes(app, core)
 except Exception:
     pass
 
