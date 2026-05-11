@@ -2,15 +2,15 @@
 
 Purpose:
 - Reduce manual testing burden from many separate links.
-- Keep /paper/self-check lightweight enough to use throughout the day.
-- Put heavier/report-generating endpoints behind /paper/full-self-check only.
+- Keep /paper/self-check and /paper/full-self-check bounded enough to avoid
+  Railway/iPhone session timeouts.
 - Avoid mutating/trading endpoints such as /paper/run, /paper/trade-journal-sync,
   or /paper/trade-journal-seed.
 
 Routes:
-- /paper/self-check          lightweight daily check
-- /paper/smoke-test          alias for lightweight daily check
-- /paper/full-self-check     heavier troubleshooting check
+- /paper/self-check          fastest daily check
+- /paper/smoke-test          alias for fastest daily check
+- /paper/full-self-check     bounded diagnostic check, not a heavy route runner
 - /paper/test-links          separated copy/paste links
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ import os
 import time
 from typing import Any, Dict, Iterable, List
 
-VERSION = "lightweight-self-check-runner-safety-2026-05-11"
+VERSION = "bounded-self-check-2026-05-11"
 BASE_URL = os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "https://trading-bot-clean.up.railway.app"
 if BASE_URL and not BASE_URL.startswith("http"):
     BASE_URL = "https://" + BASE_URL
@@ -28,6 +28,7 @@ BASE_URL = BASE_URL.rstrip("/")
 
 REGISTERED_APP_IDS: set[int] = set()
 
+# Fast endpoints only. These are executed by /paper/self-check.
 LIGHT_ENDPOINTS = [
     {"path": "/health", "category": "core", "required": True},
     {"path": "/paper/status", "category": "core", "required": True},
@@ -38,29 +39,37 @@ LIGHT_ENDPOINTS = [
     {"path": "/paper/state-safety-status", "category": "state", "required": True},
     {"path": "/paper/state-recovery-status", "category": "state", "required": True},
     {"path": "/paper/risk-improvement-status", "category": "risk", "required": True},
-    {"path": "/paper/live-volatility-status", "category": "risk", "required": True},
     {"path": "/paper/trade-journal-status", "category": "journal", "required": True},
     {"path": "/paper/trade-event-hook-status", "category": "journal", "required": True},
 ]
 
-FULL_EXTRA_ENDPOINTS = [
-    {"path": "/paper/risk-review", "category": "core", "required": False},
+# Bounded extras. These are executed by /paper/full-self-check but intentionally
+# avoid expensive report/allocation endpoints that can stall a request.
+FULL_EXECUTED_EXTRA_ENDPOINTS = [
     {"path": "/paper/journal", "category": "core", "required": False},
     {"path": "/paper/explain", "category": "core", "required": False},
-    {"path": "/paper/intraday-report", "category": "reports", "required": False},
-    {"path": "/paper/end-of-day-report", "category": "reports", "required": False},
-    {"path": "/paper/report/today", "category": "reports", "required": False},
-    {"path": "/paper/trade-journal", "category": "journal", "required": False},
-    {"path": "/paper/eod-hybrid-status", "category": "eod", "required": False},
-    {"path": "/paper/eod-allocation-plan", "category": "eod", "required": False},
-    {"path": "/paper/strategy-comparison", "category": "eod", "required": False},
-    {"path": "/paper/next-session-watchlist", "category": "eod", "required": False},
-    {"path": "/paper/eod-backtest-readiness", "category": "eod", "required": False},
-    {"path": "/paper/next-session-readiness", "category": "ops", "required": False},
     {"path": "/paper/scanner-log", "category": "ops", "required": False},
+    {"path": "/paper/next-session-readiness", "category": "ops", "required": False},
     {"path": "/paper/next-session-risk-plan", "category": "risk", "required": False},
     {"path": "/paper/volatility-stop-plan", "category": "risk", "required": False},
     {"path": "/paper/follow-through-review", "category": "risk", "required": False},
+    {"path": "/paper/eod-hybrid-status", "category": "eod", "required": False},
+    {"path": "/paper/eod-backtest-readiness", "category": "eod", "required": False},
+]
+
+# Heavy links are returned but not internally executed by self-check. These can
+# generate reports, calculate allocation plans, or perform broad yfinance scans.
+# Running all of them inside one request is what causes session/worker timeouts.
+HEAVY_LINK_ONLY_ENDPOINTS = [
+    {"path": "/paper/live-volatility-status", "category": "risk", "reason": "can take 15+ seconds during active sessions"},
+    {"path": "/paper/risk-review", "category": "core", "reason": "can refresh broad risk data"},
+    {"path": "/paper/intraday-report", "category": "reports", "reason": "report generation"},
+    {"path": "/paper/end-of-day-report", "category": "reports", "reason": "report generation"},
+    {"path": "/paper/report/today", "category": "reports", "reason": "stored/report generation"},
+    {"path": "/paper/trade-journal", "category": "journal", "reason": "can be large"},
+    {"path": "/paper/eod-allocation-plan", "category": "eod", "reason": "heavy allocation scan"},
+    {"path": "/paper/strategy-comparison", "category": "eod", "reason": "strategy comparison scan"},
+    {"path": "/paper/next-session-watchlist", "category": "eod", "reason": "heavy watchlist scan"},
 ]
 
 MUTATING_OR_ACTION_ENDPOINTS = [
@@ -92,7 +101,7 @@ def _dedupe_endpoints(items: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def endpoints_for_mode(mode: str = "light") -> List[Dict[str, Any]]:
     normalized = str(mode or "light").lower().strip()
     if normalized in {"full", "diagnostic", "all"}:
-        return _dedupe_endpoints(LIGHT_ENDPOINTS + FULL_EXTRA_ENDPOINTS)
+        return _dedupe_endpoints(LIGHT_ENDPOINTS + FULL_EXECUTED_EXTRA_ENDPOINTS)
     return list(LIGHT_ENDPOINTS)
 
 
@@ -178,9 +187,6 @@ def _compact_payload(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         compact["restored"] = payload.get("restored")
         decision = _safe_dict(payload.get("decision"))
         compact["decision"] = {"should_restore": decision.get("should_restore"), "reason": decision.get("reason")}
-    elif "live-volatility" in path:
-        compact["enabled"] = payload.get("enabled")
-        compact["runtime_expectation"] = payload.get("runtime_expectation")
     elif "risk-improvement" in path:
         compact["mode"] = payload.get("mode")
         compact["state_safety"] = payload.get("state_safety")
@@ -189,13 +195,6 @@ def _compact_payload(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         compact["self_defense_mode"] = payload.get("self_defense_mode")
         compact["block_new_entries"] = payload.get("block_new_entries")
         compact["dynamic_min_long_score"] = payload.get("dynamic_min_long_score")
-    elif "risk-review" in path:
-        compact["equity"] = payload.get("equity")
-        compact["cash"] = payload.get("cash")
-        compact["market_mode"] = payload.get("market_mode")
-        compact["risk_score"] = payload.get("risk_score")
-        compact["performance"] = payload.get("performance")
-        compact["risk_controls"] = payload.get("risk_controls")
     elif path == "/paper/journal":
         compact["summary"] = payload.get("summary")
         compact["diagnosis"] = payload.get("diagnosis")
@@ -213,9 +212,10 @@ def _result_level(status_code: int | None, json_ok: bool, required: bool) -> str
 def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
     start = time.time()
     normalized_mode = str(mode or "light").lower().strip()
-    endpoints = endpoints_for_mode(normalized_mode)
+    is_full = normalized_mode in {"full", "diagnostic", "all"}
+    endpoints = endpoints_for_mode("full" if is_full else "light")
     results: List[Dict[str, Any]] = []
-    summary = {"pass": 0, "warn": 0, "fail": 0}
+    summary = {"pass": 0, "warn": 0, "fail": 0, "linked_only": 0}
 
     try:
         client = flask_app.test_client()
@@ -241,6 +241,12 @@ def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
         summary[row["level"]] = summary.get(row["level"], 0) + 1
         results.append(row)
 
+    linked_only = []
+    if is_full:
+        for item in HEAVY_LINK_ONLY_ENDPOINTS:
+            linked_only.append({"path": item["path"], "url": _full_url(item["path"]), "category": item.get("category"), "reason": item.get("reason"), "level": "linked_only", "executed": False})
+        summary["linked_only"] = len(linked_only)
+
     failed_required = [r for r in results if r.get("level") == "fail"]
     warnings = [r for r in results if r.get("level") == "warn"]
     overall = "pass" if not failed_required else "fail"
@@ -257,7 +263,7 @@ def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
         "status": "ok" if overall != "fail" else "fail",
         "overall": overall,
         "type": "self_check",
-        "mode": "full" if normalized_mode in {"full", "diagnostic", "all"} else "light",
+        "mode": "full_bounded" if is_full else "light",
         "version": VERSION,
         "generated_local": _now_text(),
         "elapsed_ms": round((time.time() - start) * 1000, 2),
@@ -266,17 +272,32 @@ def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
         "warnings": [{"path": r.get("path"), "status_code": r.get("status_code"), "error": r.get("error")} for r in warnings],
         "dashboard": {"health": health_payload, "status": status_payload, "trade_journal": journal_payload, "runner_freshness": freshness_payload, "runner_safety": safety_payload},
         "results": results,
+        "linked_only_heavy_routes": linked_only,
         "copy_paste_links_separate": [_full_url(ep["path"]) for ep in endpoints],
+        "heavy_links_separate_not_auto_run": [_full_url(ep["path"]) for ep in HEAVY_LINK_ONLY_ENDPOINTS],
         "light_self_check": _full_url("/paper/self-check"),
         "full_self_check": _full_url("/paper/full-self-check"),
-        "note": "Light mode checks runner freshness, price safety, state safety, and journal health. Full mode adds report/EOD endpoints. Neither mode calls /paper/run or journal seed/sync endpoints.",
+        "note": "Full self-check is now bounded. Heavy endpoints are listed as links but not internally executed to prevent Railway/iPhone session timeouts. No self-check route calls /paper/run or journal seed/sync endpoints.",
     }
 
 
 def test_links_payload() -> Dict[str, Any]:
     light_links = [_full_url(ep["path"]) for ep in endpoints_for_mode("light")]
     full_links = [_full_url(ep["path"]) for ep in endpoints_for_mode("full")]
-    return {"status": "ok", "type": "test_links", "version": VERSION, "generated_local": _now_text(), "base_url": BASE_URL, "single_best_link": _full_url("/paper/self-check"), "full_diagnostic_link": _full_url("/paper/full-self-check"), "links_separate_light": light_links, "links_separate_full": full_links, "do_not_auto_test": [_full_url(path) for path in MUTATING_OR_ACTION_ENDPOINTS]}
+    heavy_links = [_full_url(ep["path"]) for ep in HEAVY_LINK_ONLY_ENDPOINTS]
+    return {
+        "status": "ok",
+        "type": "test_links",
+        "version": VERSION,
+        "generated_local": _now_text(),
+        "base_url": BASE_URL,
+        "single_best_link": _full_url("/paper/self-check"),
+        "full_bounded_diagnostic_link": _full_url("/paper/full-self-check"),
+        "links_separate_light": light_links,
+        "links_separate_full_bounded": full_links,
+        "heavy_links_separate_not_auto_run": heavy_links,
+        "do_not_auto_test": [_full_url(path) for path in MUTATING_OR_ACTION_ENDPOINTS],
+    }
 
 
 def register_routes(flask_app: Any, module: Any | None = None) -> None:
