@@ -2,25 +2,25 @@
 
 Purpose:
 - Reduce manual testing burden from many separate links.
-- Let the service check its own safe GET endpoints internally using Flask's
-  test_client, so one URL summarizes what is working.
+- Keep /paper/self-check lightweight enough to use throughout the day.
+- Put heavier/report-generating endpoints behind /paper/full-self-check only.
 - Avoid mutating/trading endpoints such as /paper/run, /paper/trade-journal-sync,
   or /paper/trade-journal-seed.
 
 Routes:
-- /paper/self-check
-- /paper/smoke-test
-- /paper/test-links
+- /paper/self-check          lightweight daily check
+- /paper/smoke-test          alias for lightweight daily check
+- /paper/full-self-check     heavier troubleshooting check
+- /paper/test-links          separated copy/paste links
 """
 from __future__ import annotations
 
 import datetime as dt
-import json
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
-VERSION = "one-link-self-check-2026-05-08"
+VERSION = "lightweight-self-check-2026-05-11"
 BASE_URL = os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "https://trading-bot-clean.up.railway.app"
 if BASE_URL and not BASE_URL.startswith("http"):
     BASE_URL = "https://" + BASE_URL
@@ -28,29 +28,31 @@ BASE_URL = BASE_URL.rstrip("/")
 
 REGISTERED_APP_IDS: set[int] = set()
 
-CORE_ENDPOINTS = [
+# Lightweight endpoints only. These should be fast, mostly read-only, and safe to
+# hit repeatedly while working. They should not generate EOD reports or heavy
+# allocation/watchlist calculations.
+LIGHT_ENDPOINTS = [
     {"path": "/health", "category": "core", "required": True},
     {"path": "/paper/status", "category": "core", "required": True},
-    {"path": "/paper/feedback-loop", "category": "core", "required": True},
-    {"path": "/paper/risk-review", "category": "core", "required": True},
-    {"path": "/paper/journal", "category": "core", "required": True},
-    {"path": "/paper/explain", "category": "core", "required": True},
-    {"path": "/paper/intraday-report", "category": "reports", "required": False},
-    {"path": "/paper/end-of-day-report", "category": "reports", "required": False},
-    {"path": "/paper/report/today", "category": "reports", "required": False},
-]
-
-PROTECTION_ENDPOINTS = [
+    {"path": "/paper/feedback-loop", "category": "core", "required": False},
     {"path": "/paper/state-safety-status", "category": "state", "required": True},
     {"path": "/paper/state-recovery-status", "category": "state", "required": True},
     {"path": "/paper/risk-improvement-status", "category": "risk", "required": True},
     {"path": "/paper/live-volatility-status", "category": "risk", "required": True},
     {"path": "/paper/trade-journal-status", "category": "journal", "required": True},
     {"path": "/paper/trade-event-hook-status", "category": "journal", "required": True},
-    {"path": "/paper/trade-journal", "category": "journal", "required": False},
 ]
 
-EOD_AND_ADVISORY_ENDPOINTS = [
+# Full mode intentionally includes reports and advisory endpoints. Use this only
+# for troubleshooting or end-of-day review, not every few minutes.
+FULL_EXTRA_ENDPOINTS = [
+    {"path": "/paper/risk-review", "category": "core", "required": False},
+    {"path": "/paper/journal", "category": "core", "required": False},
+    {"path": "/paper/explain", "category": "core", "required": False},
+    {"path": "/paper/intraday-report", "category": "reports", "required": False},
+    {"path": "/paper/end-of-day-report", "category": "reports", "required": False},
+    {"path": "/paper/report/today", "category": "reports", "required": False},
+    {"path": "/paper/trade-journal", "category": "journal", "required": False},
     {"path": "/paper/eod-hybrid-status", "category": "eod", "required": False},
     {"path": "/paper/eod-allocation-plan", "category": "eod", "required": False},
     {"path": "/paper/strategy-comparison", "category": "eod", "required": False},
@@ -63,7 +65,11 @@ EOD_AND_ADVISORY_ENDPOINTS = [
     {"path": "/paper/follow-through-review", "category": "risk", "required": False},
 ]
 
-ALL_SAFE_ENDPOINTS = CORE_ENDPOINTS + PROTECTION_ENDPOINTS + EOD_AND_ADVISORY_ENDPOINTS
+MUTATING_OR_ACTION_ENDPOINTS = [
+    "/paper/run",
+    "/paper/trade-journal-sync",
+    "/paper/trade-journal-seed",
+]
 
 
 def _now_text() -> str:
@@ -74,12 +80,38 @@ def _full_url(path: str) -> str:
     return f"{BASE_URL}{path}"
 
 
+def _dedupe_endpoints(items: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen = set()
+    out: List[Dict[str, Any]] = []
+    for item in items:
+        path = item.get("path")
+        if path and path not in seen:
+            out.append(item)
+            seen.add(path)
+    return out
+
+
+def endpoints_for_mode(mode: str = "light") -> List[Dict[str, Any]]:
+    normalized = str(mode or "light").lower().strip()
+    if normalized in {"full", "diagnostic", "all"}:
+        return _dedupe_endpoints(LIGHT_ENDPOINTS + FULL_EXTRA_ENDPOINTS)
+    return list(LIGHT_ENDPOINTS)
+
+
 def _extract_json(resp: Any) -> Dict[str, Any]:
     try:
         obj = resp.get_json(silent=True)
         return obj if isinstance(obj, dict) else {}
-    except Exception:
-        return {}
+    except BaseException as exc:
+        return {"_extract_error": str(exc)}
+
+
+def _safe_dict(obj: Any) -> Dict[str, Any]:
+    return obj if isinstance(obj, dict) else {}
+
+
+def _safe_list(obj: Any) -> List[Any]:
+    return obj if isinstance(obj, list) else []
 
 
 def _compact_payload(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -89,8 +121,9 @@ def _compact_payload(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     for key in ["status", "type", "version", "generated_local", "time"]:
         if key in payload:
             compact[key] = payload.get(key)
+
     if path == "/health":
-        sd = payload.get("state_diagnostic", {}) if isinstance(payload.get("state_diagnostic"), dict) else {}
+        sd = _safe_dict(payload.get("state_diagnostic"))
         compact["state_diagnostic"] = {
             "persistent_storage_configured": sd.get("persistent_storage_configured"),
             "state_file": sd.get("state_file"),
@@ -102,19 +135,23 @@ def _compact_payload(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     elif path == "/paper/status":
         compact["equity"] = payload.get("equity")
         compact["cash"] = payload.get("cash")
-        compact["positions"] = payload.get("position_symbols") or list((payload.get("positions") or {}).keys()) if isinstance(payload.get("positions"), dict) else payload.get("positions")
+        positions_obj = payload.get("positions")
+        if isinstance(positions_obj, dict):
+            compact["positions"] = payload.get("position_symbols") or list(positions_obj.keys())
+        else:
+            compact["positions"] = payload.get("position_symbols") or positions_obj
         compact["performance"] = payload.get("performance")
-        rc = payload.get("risk_controls", {}) if isinstance(payload.get("risk_controls"), dict) else {}
+        rc = _safe_dict(payload.get("risk_controls"))
         compact["risk_controls"] = {
             "self_defense_active": rc.get("self_defense_active"),
             "self_defense_reason": rc.get("self_defense_reason"),
             "daily_loss_pct": rc.get("daily_loss_pct"),
             "intraday_drawdown_pct": rc.get("intraday_drawdown_pct"),
         }
-        audit = payload.get("scanner_audit", {}) if isinstance(payload.get("scanner_audit"), dict) else {}
+        audit = _safe_dict(payload.get("scanner_audit"))
         compact["scanner_audit"] = {
             "signals_found": audit.get("signals_found"),
-            "blocked_entries_count": len(audit.get("blocked_entries", [])) if isinstance(audit.get("blocked_entries"), list) else None,
+            "blocked_entries_count": len(_safe_list(audit.get("blocked_entries"))),
             "top_blocked_symbols": audit.get("top_blocked_symbols"),
         }
     elif "trade-journal" in path or "trade-event" in path:
@@ -130,7 +167,7 @@ def _compact_payload(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     elif "state-recovery" in path:
         compact["restore_enabled"] = payload.get("restore_enabled")
         compact["restored"] = payload.get("restored")
-        decision = payload.get("decision", {}) if isinstance(payload.get("decision"), dict) else {}
+        decision = _safe_dict(payload.get("decision"))
         compact["decision"] = {"should_restore": decision.get("should_restore"), "reason": decision.get("reason")}
     elif "live-volatility" in path:
         compact["enabled"] = payload.get("enabled")
@@ -150,13 +187,13 @@ def _compact_payload(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         compact["risk_score"] = payload.get("risk_score")
         compact["performance"] = payload.get("performance")
         compact["risk_controls"] = payload.get("risk_controls")
-    elif "journal" in path:
+    elif path == "/paper/journal":
         compact["summary"] = payload.get("summary")
         compact["diagnosis"] = payload.get("diagnosis")
     return compact
 
 
-def _result_level(status_code: int, json_ok: bool, required: bool) -> str:
+def _result_level(status_code: int | None, json_ok: bool, required: bool) -> str:
     if status_code == 200 and json_ok:
         return "pass"
     if required:
@@ -164,23 +201,32 @@ def _result_level(status_code: int, json_ok: bool, required: bool) -> str:
     return "warn"
 
 
-def run_self_check(flask_app: Any) -> Dict[str, Any]:
+def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
+    """Run internal endpoint checks.
+
+    Light mode is intentionally short and avoids heavy report/EOD endpoints. It
+    is safe to call repeatedly. Full mode is for troubleshooting.
+    """
     start = time.time()
+    normalized_mode = str(mode or "light").lower().strip()
+    endpoints = endpoints_for_mode(normalized_mode)
     results: List[Dict[str, Any]] = []
     summary = {"pass": 0, "warn": 0, "fail": 0}
 
     try:
         client = flask_app.test_client()
-    except Exception as exc:
+    except BaseException as exc:
         return {
             "status": "error",
+            "overall": "fail",
             "type": "self_check",
+            "mode": normalized_mode,
             "version": VERSION,
             "generated_local": _now_text(),
             "error": f"could not create flask test client: {exc}",
         }
 
-    for ep in ALL_SAFE_ENDPOINTS:
+    for ep in endpoints:
         path = ep["path"]
         t0 = time.time()
         row: Dict[str, Any] = {
@@ -190,20 +236,26 @@ def run_self_check(flask_app: Any) -> Dict[str, Any]:
             "required": bool(ep.get("required")),
         }
         try:
-            resp = client.get(path)
+            # buffered=True makes response iteration complete inside this block,
+            # so endpoint exceptions are captured as row-level failures/warnings
+            # instead of breaking the whole self-check response.
+            resp = client.get(path, buffered=True)
             payload = _extract_json(resp)
-            json_ok = bool(payload)
-            level = _result_level(int(resp.status_code), json_ok, bool(ep.get("required")))
+            json_ok = bool(payload) and "_extract_error" not in payload
+            status_code = int(getattr(resp, "status_code", 0) or 0)
+            level = _result_level(status_code, json_ok, bool(ep.get("required")))
             row.update({
                 "level": level,
                 "ok": level == "pass",
-                "status_code": int(resp.status_code),
+                "status_code": status_code,
                 "json_ok": json_ok,
-                "content_type": resp.content_type,
+                "content_type": getattr(resp, "content_type", None),
                 "elapsed_ms": round((time.time() - t0) * 1000, 2),
                 "compact": _compact_payload(path, payload),
             })
-        except Exception as exc:
+            if "_extract_error" in payload:
+                row["error"] = payload.get("_extract_error")
+        except BaseException as exc:
             level = "fail" if ep.get("required") else "warn"
             row.update({
                 "level": level,
@@ -212,6 +264,7 @@ def run_self_check(flask_app: Any) -> Dict[str, Any]:
                 "json_ok": False,
                 "elapsed_ms": round((time.time() - t0) * 1000, 2),
                 "error": str(exc),
+                "error_type": type(exc).__name__,
             })
         summary[row["level"]] = summary.get(row["level"], 0) + 1
         results.append(row)
@@ -230,6 +283,7 @@ def run_self_check(flask_app: Any) -> Dict[str, Any]:
         "status": "ok" if overall != "fail" else "fail",
         "overall": overall,
         "type": "self_check",
+        "mode": "full" if normalized_mode in {"full", "diagnostic", "all"} else "light",
         "version": VERSION,
         "generated_local": _now_text(),
         "elapsed_ms": round((time.time() - start) * 1000, 2),
@@ -242,25 +296,27 @@ def run_self_check(flask_app: Any) -> Dict[str, Any]:
             "trade_journal": journal_payload,
         },
         "results": results,
-        "copy_paste_links_separate": [_full_url(ep["path"]) for ep in ALL_SAFE_ENDPOINTS],
-        "note": "This endpoint checks safe GET routes internally. It intentionally does not call /paper/run or journal seed/sync endpoints.",
+        "copy_paste_links_separate": [_full_url(ep["path"]) for ep in endpoints],
+        "light_self_check": _full_url("/paper/self-check"),
+        "full_self_check": _full_url("/paper/full-self-check"),
+        "note": "Light mode avoids report/EOD endpoints. Full mode is for troubleshooting. Neither mode calls /paper/run or journal seed/sync endpoints.",
     }
 
 
 def test_links_payload() -> Dict[str, Any]:
+    light_links = [_full_url(ep["path"]) for ep in endpoints_for_mode("light")]
+    full_links = [_full_url(ep["path"]) for ep in endpoints_for_mode("full")]
     return {
         "status": "ok",
         "type": "test_links",
         "version": VERSION,
         "generated_local": _now_text(),
         "base_url": BASE_URL,
-        "links_separate": [_full_url(ep["path"]) for ep in ALL_SAFE_ENDPOINTS],
         "single_best_link": _full_url("/paper/self-check"),
-        "do_not_auto_test": [
-            _full_url("/paper/run"),
-            _full_url("/paper/trade-journal-sync"),
-            _full_url("/paper/trade-journal-seed"),
-        ],
+        "full_diagnostic_link": _full_url("/paper/full-self-check"),
+        "links_separate_light": light_links,
+        "links_separate_full": full_links,
+        "do_not_auto_test": [_full_url(path) for path in MUTATING_OR_ACTION_ENDPOINTS],
     }
 
 
@@ -270,13 +326,15 @@ def register_routes(flask_app: Any, module: Any | None = None) -> None:
     from flask import jsonify
     try:
         existing = {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
-    except Exception:
+    except BaseException:
         existing = set()
 
     if "/paper/self-check" not in existing:
-        flask_app.add_url_rule("/paper/self-check", "paper_self_check", lambda: jsonify(run_self_check(flask_app)))
+        flask_app.add_url_rule("/paper/self-check", "paper_self_check", lambda: jsonify(run_self_check(flask_app, mode="light")))
     if "/paper/smoke-test" not in existing:
-        flask_app.add_url_rule("/paper/smoke-test", "paper_smoke_test", lambda: jsonify(run_self_check(flask_app)))
+        flask_app.add_url_rule("/paper/smoke-test", "paper_smoke_test", lambda: jsonify(run_self_check(flask_app, mode="light")))
+    if "/paper/full-self-check" not in existing:
+        flask_app.add_url_rule("/paper/full-self-check", "paper_full_self_check", lambda: jsonify(run_self_check(flask_app, mode="full")))
     if "/paper/test-links" not in existing:
         flask_app.add_url_rule("/paper/test-links", "paper_test_links", lambda: jsonify(test_links_payload()))
     REGISTERED_APP_IDS.add(id(flask_app))
