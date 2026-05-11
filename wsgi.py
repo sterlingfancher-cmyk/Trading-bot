@@ -3,8 +3,8 @@
 This startup path runs the state recovery guard before importing app.py, installs
 persistent trade journaling, applies execution-only journal truth reporting,
 applies runtime risk controls, patches slow price fetches with timeout/cache
-fallbacks, installs intraday timing/pullback guards, and registers one-link
-self-check routes.
+fallbacks, installs classic signal mode as the primary filter, keeps intraday
+timing/pullback guards, and registers one-link self-check routes.
 """
 from __future__ import annotations
 
@@ -82,6 +82,15 @@ try:
         live_volatility.apply(core)
     if hasattr(live_volatility, "register_routes"):
         live_volatility.register_routes(app, core)
+except Exception:
+    pass
+
+try:
+    import classic_signal_mode
+    if hasattr(classic_signal_mode, "apply"):
+        classic_signal_mode.apply(core)
+    if hasattr(classic_signal_mode, "register_routes"):
+        classic_signal_mode.register_routes(app, core)
 except Exception:
     pass
 
