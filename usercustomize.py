@@ -9,6 +9,9 @@ Fallback routes covered:
 - /paper/self-check
 - /paper/smoke-test
 - /paper/test-links
+- /paper/runner-safety-status
+- /paper/runner-freshness
+- /paper/price-health
 """
 from __future__ import annotations
 
@@ -18,7 +21,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-self-check-fallback-2026-05-08"
+VERSION = "usercustomize-runner-safety-fallback-2026-05-11"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -42,6 +45,58 @@ def _existing_rules(flask_app: Any) -> set[str]:
         return {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
     except Exception:
         return set()
+
+
+def _register_runner_safety(flask_app: Any, m: Any | None = None) -> None:
+    if flask_app is None:
+        return
+    from flask import jsonify
+    existing = _existing_rules(flask_app)
+    module = _mod() or m
+
+    try:
+        import runner_safety
+        if hasattr(runner_safety, "install"):
+            runner_safety.install(module)
+        if hasattr(runner_safety, "register_routes"):
+            runner_safety.register_routes(flask_app, module)
+            existing = _existing_rules(flask_app)
+    except Exception:
+        pass
+
+    if "/paper/runner-safety-status" not in existing:
+        def runner_safety_status_fallback():
+            try:
+                import runner_safety
+                module2 = _mod() or module
+                if hasattr(runner_safety, "install"):
+                    runner_safety.install(module2)
+                return jsonify(runner_safety.status(module2))
+            except Exception as exc:
+                return jsonify({"status": "error", "type": "runner_safety_status", "version": VERSION, "error": str(exc)}), 500
+        flask_app.add_url_rule("/paper/runner-safety-status", "runner_safety_status_usercustomize", runner_safety_status_fallback)
+
+    existing = _existing_rules(flask_app)
+    if "/paper/runner-freshness" not in existing:
+        def runner_freshness_fallback():
+            try:
+                import runner_safety
+                module2 = _mod() or module
+                return jsonify(runner_safety.freshness(module2))
+            except Exception as exc:
+                return jsonify({"status": "error", "type": "runner_freshness", "version": VERSION, "error": str(exc)}), 500
+        flask_app.add_url_rule("/paper/runner-freshness", "runner_freshness_usercustomize", runner_freshness_fallback)
+
+    existing = _existing_rules(flask_app)
+    if "/paper/price-health" not in existing:
+        def price_health_fallback():
+            try:
+                import runner_safety
+                module2 = _mod() or module
+                return jsonify(runner_safety.price_health(module2))
+            except Exception as exc:
+                return jsonify({"status": "error", "type": "price_health", "version": VERSION, "error": str(exc)}), 500
+        flask_app.add_url_rule("/paper/price-health", "price_health_usercustomize", price_health_fallback)
 
 
 def _register_live_volatility(flask_app: Any, m: Any | None = None) -> None:
@@ -106,7 +161,6 @@ def _register_self_check(flask_app: Any, m: Any | None = None) -> None:
             self_check.register_routes(flask_app, m)
             existing = _existing_rules(flask_app)
     except Exception:
-        # Keep fallback routes below even if import/registration fails.
         pass
 
     if "/paper/self-check" not in existing:
@@ -132,7 +186,6 @@ def _register_self_check(flask_app: Any, m: Any | None = None) -> None:
                     "error": str(exc),
                     "expected_file": "self_check.py",
                 }), 500
-
         flask_app.add_url_rule("/paper/self-check", "paper_self_check_usercustomize", self_check_fallback)
 
     existing = _existing_rules(flask_app)
@@ -144,6 +197,16 @@ def _register_self_check(flask_app: Any, m: Any | None = None) -> None:
             except Exception as exc:
                 return jsonify({"status": "error", "type": "smoke_test", "version": VERSION, "error": str(exc)}), 500
         flask_app.add_url_rule("/paper/smoke-test", "paper_smoke_test_usercustomize", smoke_test_fallback)
+
+    existing = _existing_rules(flask_app)
+    if "/paper/full-self-check" not in existing:
+        def full_self_check_fallback():
+            try:
+                import self_check
+                return jsonify(self_check.run_self_check(flask_app, mode="full"))
+            except Exception as exc:
+                return jsonify({"status": "error", "type": "full_self_check", "version": VERSION, "error": str(exc)}), 500
+        flask_app.add_url_rule("/paper/full-self-check", "paper_full_self_check_usercustomize", full_self_check_fallback)
 
     existing = _existing_rules(flask_app)
     if "/paper/test-links" not in existing:
@@ -159,6 +222,7 @@ def _register_self_check(flask_app: Any, m: Any | None = None) -> None:
 def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
     if flask_app is None or id(flask_app) in _REGISTERED_APP_IDS:
         return
+    _register_runner_safety(flask_app, m)
     _register_live_volatility(flask_app, m)
     _register_self_check(flask_app, m)
     _REGISTERED_APP_IDS.add(id(flask_app))
