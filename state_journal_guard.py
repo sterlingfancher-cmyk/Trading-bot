@@ -1,9 +1,9 @@
 """State/journal reconciliation guard.
 
 Detects cases where state.json still shows an open position after the journal has
-recorded a newer full exit for that same symbol. This does not mutate state; it
-surfaces a hard operator guard so reporting and next-cycle diagnostics do not
-encourage add-ons into a stale position record.
+recorded a newer full exit for that same symbol. This module does not mutate
+state; it surfaces a hard operator guard so reporting and next-cycle diagnostics
+do not encourage add-ons into a stale position record.
 """
 from __future__ import annotations
 
@@ -18,9 +18,7 @@ VERSION = "state-journal-reconciliation-guard-2026-05-13"
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 TRADE_JOURNAL_FILE = os.path.join(STATE_DIR, "trade_journal.json")
-
-FULL_EXIT_ACTIONS = {"exit"}
-PARTIAL_EXIT_ACTIONS = {"partial_exit", "reduce", "reduce_position", "scale_out"}
+REGISTERED_APP_IDS: set[int] = set()
 
 
 def _now_text() -> str:
@@ -88,26 +86,18 @@ def _side(row: Dict[str, Any]) -> str:
 
 
 def _has_full_exit_fill(row: Dict[str, Any]) -> bool:
-    if not _symbol(row):
-        return False
-    if _action(row) not in FULL_EXIT_ACTIONS:
-        return False
-    return any(key in row for key in ("price", "shares", "pnl_dollars", "pnl_pct", "exit_reason"))
+    return bool(_symbol(row) and _action(row) == "exit" and any(key in row for key in ("price", "shares", "pnl_dollars", "pnl_pct", "exit_reason")))
 
 
 def _journal_full_exits(journal: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows = journal.get("trades", []) if isinstance(journal.get("trades"), list) else []
-    exits: List[Dict[str, Any]] = []
-    for row in rows:
-        if isinstance(row, dict) and _has_full_exit_fill(row):
-            exits.append(dict(row))
+    exits = [dict(row) for row in rows if isinstance(row, dict) and _has_full_exit_fill(row)]
     exits.sort(key=lambda row: _time_float(row) or 0.0)
     return exits
 
 
 def _state_open_positions(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
-
     positions = state.get("positions")
     if isinstance(positions, dict):
         for sym, pos in positions.items():
@@ -128,7 +118,6 @@ def _state_open_positions(state: Dict[str, Any]) -> List[Dict[str, Any]]:
             row.update(pos)
             row.setdefault("symbol", sym)
             out[str(sym).upper()] = row
-
     return [row for row in out.values() if _symbol(row)]
 
 
@@ -148,12 +137,10 @@ def _latest_full_exit_by_symbol(journal: Dict[str, Any]) -> Dict[str, Dict[str, 
 def build_guard(state: Dict[str, Any] | None = None, journal: Dict[str, Any] | None = None) -> Dict[str, Any]:
     state = state if isinstance(state, dict) else _load_json(STATE_FILE)
     journal = journal if isinstance(journal, dict) else _load_json(TRADE_JOURNAL_FILE)
-
-    open_positions = _state_open_positions(state)
     latest_exit = _latest_full_exit_by_symbol(journal)
     mismatches: List[Dict[str, Any]] = []
 
-    for pos in open_positions:
+    for pos in _state_open_positions(state):
         sym = _symbol(pos)
         exit_row = latest_exit.get(sym)
         if not exit_row:
@@ -162,15 +149,11 @@ def build_guard(state: Dict[str, Any] | None = None, journal: Dict[str, Any] | N
         exit_ts = _time_float(exit_row)
         if exit_ts is None:
             continue
-        # Avoid flagging old exits that predate a newer re-entry. If entry time is
-        # absent, be conservative and flag the symbol for operator review.
         if entry_ts is not None and exit_ts < entry_ts - 60:
             continue
         open_shares = _float_or_none(pos.get("shares"))
         exit_shares = _float_or_none(exit_row.get("shares"))
-        share_coverage = None
-        if open_shares and open_shares > 0 and exit_shares is not None:
-            share_coverage = round(exit_shares / open_shares, 4)
+        share_coverage = round(exit_shares / open_shares, 4) if open_shares and open_shares > 0 and exit_shares is not None else None
         mismatches.append({
             "symbol": sym,
             "side": _side(pos) or _side(exit_row) or "long",
@@ -201,18 +184,31 @@ def build_guard(state: Dict[str, Any] | None = None, journal: Dict[str, Any] | N
         "mismatches": mismatches,
         "operator_message": (
             "State still reports open position(s) after newer full journal exit(s); block add-ons for affected symbols until state and journal agree."
-            if active else
-            "No open-position/full-exit state-journal mismatch detected."
+            if active else "No open-position/full-exit state-journal mismatch detected."
         ),
-        "recommended_actions": (
-            [
-                "Block add-ons and new same-symbol entries for: " + ", ".join(blocked_symbols) + ".",
-                "Confirm whether state.json or trade_journal.json is authoritative for the affected symbol(s).",
-                "If the journal exit is correct, repair state open_positions before the next live/paper run cycle.",
-            ] if active else []
-        ),
+        "recommended_actions": ([
+            "Block add-ons and new same-symbol entries for: " + ", ".join(blocked_symbols) + ".",
+            "Confirm whether state.json or trade_journal.json is authoritative for the affected symbol(s).",
+            "If the journal exit is correct, repair state open_positions before the next live/paper run cycle.",
+        ] if active else []),
     }
 
 
 def status_payload() -> Dict[str, Any]:
     return build_guard()
+
+
+def register_routes(flask_app: Any, core: Any | None = None) -> Dict[str, Any]:
+    if flask_app is None:
+        return {"status": "error", "version": VERSION, "error": "flask_app_missing"}
+    if id(flask_app) in REGISTERED_APP_IDS:
+        return {"status": "ok", "version": VERSION, "already_registered": True}
+    from flask import jsonify
+    try:
+        existing = {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
+    except Exception:
+        existing = set()
+    if "/paper/state-journal-guard-status" not in existing:
+        flask_app.add_url_rule("/paper/state-journal-guard-status", "state_journal_guard_status", lambda: jsonify(status_payload()))
+    REGISTERED_APP_IDS.add(id(flask_app))
+    return {"status": "ok", "version": VERSION, "registered": True}
