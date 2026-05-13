@@ -8,26 +8,31 @@ real trades. It does not delete journal rows. Instead, it classifies rows into:
 - review rows: rotation-review, weakest-position, scanner, blocked/rejected,
   and other non-execution diagnostics
 
-Important: some current deployments keep actual execution rows in state.json
-while trade_journal.json contains many mirrored diagnostic rows. To keep the
-reported realized stats honest, this module reconciles execution rows from both
-trade_journal.json and state.json, then deduplicates them before calculating
-execution-only performance.
+State-first rule:
+The live app's state.json is the authoritative execution/P&L source. When
+state.json contains execution rows, this module uses those rows as the primary
+truth for realized P/L, win/loss counts, and latest execution. trade_journal.json
+is then used only for supplemental fill-like rows that are newer than the latest
+state execution and are not fuzzy duplicates. This prevents mirrored
+trades_for_date:return rows from overcounting old fills.
 
-2026-05-13 fix:
-Rows such as partial_exit/reduce/scale_out may come from a diagnostic-looking
-source like trades_for_date:return, but if they contain real fill data they are
-execution rows. Execution classification now takes precedence over review-source
-hints and execution rows are sorted by trade time before latest_trade is chosen.
+2026-05-13 fixes:
+- partial_exit/reduce/scale_out rows with fill data count as executions
+- state.trades / state.recent_trades are primary execution truth
+- journal rows older than the latest state execution are review/diagnostic only
+  for performance math
+- fuzzy duplicate protection prevents replayed mirror rows from inflating stats
+- reconciliation warnings are surfaced if computed net and state net diverge
 """
 from __future__ import annotations
 
 import datetime as dt
 import json
 import os
+import time
 from typing import Any, Dict, List, Tuple
 
-VERSION = "journal-truth-partial-exit-fix-2026-05-13"
+VERSION = "journal-truth-state-primary-2026-05-13"
 
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 TRADE_JOURNAL_FILE = os.path.join(STATE_DIR, "trade_journal.json")
@@ -60,12 +65,18 @@ def _now_text() -> str:
 
 
 def _load_json(path: str) -> Dict[str, Any]:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            obj = json.load(f)
-            return obj if isinstance(obj, dict) else {}
-    except Exception:
-        return {}
+    # State files can be written while routes are reading them. Retry briefly
+    # before falling back to an empty dict so a partial JSON write does not kill
+    # the request worker.
+    for attempt in range(3):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                obj = json.load(f)
+                return obj if isinstance(obj, dict) else {}
+        except Exception:
+            if attempt < 2:
+                time.sleep(0.05)
+    return {}
 
 
 def _float(x: Any, default: float = 0.0) -> float:
@@ -77,8 +88,25 @@ def _float(x: Any, default: float = 0.0) -> float:
         return default
 
 
+def _float_or_none(x: Any) -> float | None:
+    try:
+        if x is None or x == "":
+            return None
+        return float(x)
+    except Exception:
+        return None
+
+
 def _action(row: Dict[str, Any]) -> str:
     return str(row.get("action", "")).strip().lower()
+
+
+def _symbol(row: Dict[str, Any]) -> str:
+    return str(row.get("symbol", "") or "").strip().upper()
+
+
+def _side(row: Dict[str, Any]) -> str:
+    return str(row.get("side", "") or "").strip().lower()
 
 
 def _source(row: Dict[str, Any]) -> str:
@@ -89,18 +117,26 @@ def _time_value(row: Dict[str, Any]) -> Any:
     return row.get("time") or row.get("timestamp") or row.get("entry_time") or row.get("exit_time") or row.get("journal_mirrored_local")
 
 
-def _time_sort_value(row: Dict[str, Any], fallback_index: int = 0) -> Tuple[int, float, int]:
+def _time_float(row: Dict[str, Any]) -> float | None:
     value = _time_value(row)
     try:
-        return (0, float(value), fallback_index)
+        return float(value)
     except Exception:
         pass
     if isinstance(value, str):
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S %Z", "%Y-%m-%dT%H:%M:%S"):
+        normalized = value.replace(" CDT", "").replace(" UTC", "").replace("Z", "")
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
             try:
-                return (0, dt.datetime.strptime(value.replace(" CDT", "").replace(" UTC", ""), "%Y-%m-%d %H:%M:%S").timestamp(), fallback_index)
+                return dt.datetime.strptime(normalized[:19], fmt).timestamp()
             except Exception:
                 continue
+    return None
+
+
+def _time_sort_value(row: Dict[str, Any], fallback_index: int = 0) -> Tuple[int, float, int]:
+    value = _time_float(row)
+    if value is not None:
+        return (0, value, fallback_index)
     return (1, 0.0, fallback_index)
 
 
@@ -110,35 +146,61 @@ def _sort_execution_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [row for _, row in indexed]
 
 
+def _rounded_value(row: Dict[str, Any], key: str, digits: int) -> str:
+    value = _float_or_none(row.get(key))
+    if value is None:
+        return ""
+    return str(round(value, digits))
+
+
 def _fingerprint(row: Dict[str, Any]) -> str:
     parts = [
-        str(_action(row)),
-        str(row.get("symbol", "")),
-        str(row.get("side", "")),
-        str(_time_value(row)),
-        str(row.get("price", "")),
-        str(row.get("shares", "")),
-        str(row.get("pnl_dollars", "")),
-        str(row.get("exit_reason", "")),
+        _action(row),
+        _symbol(row),
+        _side(row),
+        str(_time_value(row) or ""),
+        _rounded_value(row, "price", 4),
+        _rounded_value(row, "shares", 6),
+        _rounded_value(row, "pnl_dollars", 2),
+        str(row.get("exit_reason", "") or "").strip().lower(),
+    ]
+    return "|".join(parts)
+
+
+def _fuzzy_execution_key(row: Dict[str, Any]) -> str:
+    # This deliberately omits source and journal_key. Those fields change when
+    # the same fill is mirrored by multiple wrappers.
+    parts = [
+        _action(row),
+        _symbol(row),
+        _side(row),
+        str(row.get("exit_reason", "") or "").strip().lower(),
+        _rounded_value(row, "price", 3),
+        _rounded_value(row, "shares", 5),
+        _rounded_value(row, "pnl_dollars", 2),
+        _rounded_value(row, "pnl_pct", 2),
     ]
     return "|".join(parts)
 
 
 def _dedupe_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    seen = set()
+    seen_exact = set()
+    seen_fuzzy = set()
     out: List[Dict[str, Any]] = []
-    for row in rows:
-        fp = _fingerprint(row)
-        if fp in seen:
+    for row in _sort_execution_rows(rows):
+        exact = _fingerprint(row)
+        fuzzy = _fuzzy_execution_key(row)
+        if exact in seen_exact or fuzzy in seen_fuzzy:
             continue
-        seen.add(fp)
+        seen_exact.add(exact)
+        seen_fuzzy.add(fuzzy)
         out.append(row)
     return out
 
 
 def _has_execution_fill_data(row: Dict[str, Any], action: str | None = None) -> bool:
     action = action or _action(row)
-    if not row.get("symbol"):
+    if not _symbol(row):
         return False
     if action in ENTRY_ACTIONS:
         return any(k in row for k in ("price", "shares", "alloc"))
@@ -211,17 +273,95 @@ def state_execution_rows(state: Dict[str, Any] | None = None) -> List[Dict[str, 
     return _sort_execution_rows(_dedupe_rows(rows))
 
 
+def _state_last_execution_ts(state_rows: List[Dict[str, Any]]) -> float | None:
+    times = [_time_float(row) for row in state_rows]
+    times = [t for t in times if t is not None]
+    return max(times) if times else None
+
+
+def supplemental_journal_execution_rows(
+    journal_execution: List[Dict[str, Any]],
+    state_rows: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return journal fills that are safe to add to state execution rows.
+
+    When state has executions, old journal rows are treated as replay/mirror
+    diagnostics and excluded from performance math. Only journal rows newer
+    than the latest state row, and not fuzzy duplicates, are eligible.
+    """
+    if not state_rows:
+        return _sort_execution_rows(_dedupe_rows(journal_execution))
+
+    latest_state_ts = _state_last_execution_ts(state_rows)
+    state_keys = {_fuzzy_execution_key(row) for row in state_rows}
+    supplemental: List[Dict[str, Any]] = []
+
+    for row in journal_execution:
+        if _fuzzy_execution_key(row) in state_keys:
+            continue
+        row_ts = _time_float(row)
+        if latest_state_ts is not None:
+            if row_ts is None or row_ts <= latest_state_ts:
+                continue
+        supplemental.append(row)
+
+    return _sort_execution_rows(_dedupe_rows(supplemental))
+
+
 def reconciled_execution_rows(journal: Dict[str, Any], state: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+    state = state if isinstance(state, dict) else _load_json(STATE_FILE)
     journal_execution, _, _ = classify_rows(journal)
-    combined = list(journal_execution) + state_execution_rows(state)
-    return _sort_execution_rows(_dedupe_rows(combined))
+    primary_state_rows = state_execution_rows(state)
+    supplemental = supplemental_journal_execution_rows(journal_execution, primary_state_rows)
+
+    if primary_state_rows:
+        return _sort_execution_rows(_dedupe_rows(list(primary_state_rows) + list(supplemental)))
+    return _sort_execution_rows(_dedupe_rows(journal_execution))
+
+
+def _pnl_sum(rows: List[Dict[str, Any]]) -> float:
+    return sum(_float(row.get("pnl_dollars", 0.0)) for row in rows)
+
+
+def _reconciliation_fields(exits: List[Dict[str, Any]], state: Dict[str, Any]) -> Dict[str, Any]:
+    perf = state.get("performance", {}) if isinstance(state.get("performance"), dict) else {}
+    state_realized_today = perf.get("realized_pnl_today")
+    state_realized_total = perf.get("realized_pnl_total")
+    computed_net = round(_pnl_sum(exits), 2)
+    state_total_num = _float_or_none(state_realized_total)
+    delta = None
+    warning = None
+
+    if state_total_num is not None:
+        delta = round(computed_net - state_total_num, 2)
+        if abs(delta) > 0.01:
+            warning = (
+                "computed execution net differs from state performance; "
+                "state.performance.realized_pnl_total remains authoritative"
+            )
+
+    return {
+        "net_realized_from_execution_rows": computed_net,
+        "state_realized_pnl_today": state_realized_today,
+        "state_realized_pnl_total": state_realized_total,
+        "realized_reconciliation_delta": delta,
+        "realized_reconciliation_warning": warning,
+    }
 
 
 def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
     state = _load_json(STATE_FILE)
     journal_execution, review, unknown = classify_rows(journal)
     state_execution = state_execution_rows(state)
-    execution = _sort_execution_rows(_dedupe_rows(list(journal_execution) + list(state_execution)))
+    supplemental = supplemental_journal_execution_rows(journal_execution, state_execution)
+
+    if state_execution:
+        execution = _sort_execution_rows(_dedupe_rows(list(state_execution) + list(supplemental)))
+        source_of_truth = "state_primary"
+    else:
+        execution = _sort_execution_rows(_dedupe_rows(journal_execution))
+        source_of_truth = "journal_primary_state_missing"
+
     entries = [t for t in execution if _action(t) in ENTRY_ACTIONS]
     exits = [t for t in execution if _action(t) in EXIT_ACTIONS]
     stop_exits = [t for t in exits if "stop" in str(t.get("exit_reason", "")).lower()]
@@ -232,17 +372,18 @@ def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
     gross_profit = sum(_float(t.get("pnl_dollars", 0.0)) for t in wins)
     gross_loss = abs(sum(_float(t.get("pnl_dollars", 0.0)) for t in losses))
     total_trades = len(journal.get("trades", [])) if isinstance(journal.get("trades"), list) else 0
-    perf = state.get("performance", {}) if isinstance(state.get("performance"), dict) else {}
-    state_realized_today = perf.get("realized_pnl_today")
-    state_realized_total = perf.get("realized_pnl_total")
     latest_execution = execution[-1] if execution else None
+    reconciliation = _reconciliation_fields(exits, state)
+
     return {
-        "summary_type": "execution_only_state_reconciled_partial_exit_fixed",
+        "summary_type": "execution_only_state_primary_with_supplemental_journal",
+        "source_of_truth": source_of_truth,
         "trades_count": len(execution),
         "total_raw_rows": total_trades,
         "execution_rows_count": len(execution),
         "journal_execution_rows_count": len(journal_execution),
         "state_execution_rows_count": len(state_execution),
+        "journal_supplemental_execution_rows_count": len(supplemental),
         "review_rows_count": len(review),
         "unknown_rows_count": len(unknown),
         "entries_count": len(entries),
@@ -255,16 +396,14 @@ def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
         "flat_exits_count": len(flat),
         "gross_profit": round(gross_profit, 2),
         "gross_loss": round(gross_loss, 2),
-        "net_realized_from_execution_rows": round(gross_profit - gross_loss, 2),
-        "state_realized_pnl_today": state_realized_today,
-        "state_realized_pnl_total": state_realized_total,
-        "realized_reconciliation_note": "Execution rows are reconciled from trade_journal.json plus state.json trades/recent_trades. Partial exits with fill data count as execution rows even when they come from trades_for_date:return.",
+        **reconciliation,
+        "realized_reconciliation_note": "State trades/recent_trades are the primary source. Journal rows are supplemental only when newer than the latest state execution and not fuzzy duplicates.",
         "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss > 0 else None,
         "win_rate_pct": round(len(wins) / len(exits) * 100, 2) if exits else None,
         "latest_execution_trade": latest_execution,
         "latest_trade": latest_execution,
         "latest_review_row": review[-1] if review else None,
-        "note": "Realized stats exclude rotation-review/scanner/blocked rows and count only actual execution actions.",
+        "note": "Realized stats exclude rotation-review/scanner/blocked rows and count only actual execution actions. State performance remains authoritative.",
     }
 
 
@@ -294,6 +433,7 @@ def status_payload() -> Dict[str, Any]:
         original_summary = {"error": str(exc)}
     journal_execution, review, unknown = classify_rows(journal)
     state_execution = state_execution_rows(state)
+    supplemental = supplemental_journal_execution_rows(journal_execution, state_execution)
     execution = reconciled_execution_rows(journal, state)
     return {
         "status": "ok",
@@ -308,6 +448,7 @@ def status_payload() -> Dict[str, Any]:
         "recent_execution_trades": execution[-20:],
         "recent_state_execution_trades": state_execution[-20:],
         "recent_journal_execution_trades": journal_execution[-20:],
+        "recent_journal_supplemental_execution_trades": supplemental[-20:],
         "recent_review_rows": review[-10:],
         "recent_unknown_rows": unknown[-10:],
         "state_performance": state.get("performance") if isinstance(state.get("performance"), dict) else {},
@@ -316,6 +457,8 @@ def status_payload() -> Dict[str, Any]:
             "review_actions": sorted(REVIEW_ACTIONS),
             "review_source_hints": list(REVIEW_SOURCE_HINTS),
             "execution_precedence": "fill-like entry/exit/partial_exit/reduce rows are execution rows before review-source hints are applied",
+            "state_primary_rule": "state.trades and state.recent_trades are primary; journal rows older than latest state execution are not counted in performance math",
+            "supplemental_journal_rule": "journal execution rows are counted only if newer than the latest state execution and not fuzzy duplicates",
         },
     }
 
