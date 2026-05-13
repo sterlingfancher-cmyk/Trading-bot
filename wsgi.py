@@ -61,6 +61,15 @@ except Exception:
     pass
 
 try:
+    import state_journal_guard
+    if 'state_io_hardening' in globals() and state_io_hardening is not None and hasattr(state_io_hardening, "patch_json_modules"):
+        state_io_hardening.patch_json_modules(state_journal_guard)
+    if hasattr(state_journal_guard, "register_routes"):
+        state_journal_guard.register_routes(app, core)
+except Exception:
+    pass
+
+try:
     import reporting_cleanup
     if hasattr(reporting_cleanup, "apply"):
         reporting_cleanup.apply(app, core)
