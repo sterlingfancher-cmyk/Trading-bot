@@ -1,11 +1,10 @@
 """WSGI entry point that directly registers all auxiliary endpoints.
 
 This startup path runs the state recovery guard before importing app.py, installs
-persistent trade journaling, applies execution-only journal truth reporting,
-applies runtime risk controls, patches slow price fetches with timeout/cache
-fallbacks, installs classic signal mode as the primary filter, keeps intraday
-timing/pullback guards, installs position-quality controls, and registers
-one-link self-check routes.
+state I/O hardening, persistent trade journaling, execution-only journal truth
+reporting, runtime risk controls, slow price-fetch timeout/cache fallbacks,
+classic signal mode, intraday timing/pullback guards, position-quality controls,
+and one-link self-check routes.
 """
 from __future__ import annotations
 
@@ -20,6 +19,15 @@ import app as core
 from app import app
 
 try:
+    import state_io_hardening
+    if hasattr(state_io_hardening, "install"):
+        state_io_hardening.install(core)
+    if hasattr(state_io_hardening, "register_routes"):
+        state_io_hardening.register_routes(app, core)
+except Exception:
+    state_io_hardening = None  # type: ignore
+
+try:
     import runner_safety
     if hasattr(runner_safety, "install"):
         runner_safety.install(core)
@@ -30,6 +38,8 @@ except Exception:
 
 try:
     import trade_journal
+    if 'state_io_hardening' in globals() and state_io_hardening is not None and hasattr(state_io_hardening, "patch_json_modules"):
+        state_io_hardening.patch_json_modules(trade_journal)
     if hasattr(trade_journal, "install"):
         trade_journal.install(core)
     if hasattr(trade_journal, "register_routes"):
@@ -40,6 +50,8 @@ except Exception:
 try:
     import journal_truth
     import trade_journal as _trade_journal_module
+    if 'state_io_hardening' in globals() and state_io_hardening is not None and hasattr(state_io_hardening, "patch_json_modules"):
+        state_io_hardening.patch_json_modules(journal_truth, _trade_journal_module)
     if hasattr(journal_truth, "patch_trade_journal"):
         journal_truth.patch_trade_journal(_trade_journal_module)
     if hasattr(journal_truth, "register_routes"):
@@ -70,6 +82,8 @@ except Exception:
 
 try:
     import risk_bootstrap
+    if 'state_io_hardening' in globals() and state_io_hardening is not None and hasattr(state_io_hardening, "patch_json_modules"):
+        state_io_hardening.patch_json_modules(risk_bootstrap)
     if hasattr(risk_bootstrap, "apply_runtime_overrides"):
         risk_bootstrap.apply_runtime_overrides(core)
     if hasattr(risk_bootstrap, "register_routes"):
