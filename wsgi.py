@@ -4,7 +4,7 @@ This startup path runs the state recovery guard before importing app.py, install
 state I/O hardening, persistent trade journaling, execution-only journal truth
 reporting, runtime risk controls, slow price-fetch timeout/cache fallbacks,
 classic signal mode, intraday timing/pullback guards, position-quality controls,
-and one-link self-check routes.
+reporting cleanup, and one-link self-check routes.
 """
 from __future__ import annotations
 
@@ -56,6 +56,13 @@ try:
         journal_truth.patch_trade_journal(_trade_journal_module)
     if hasattr(journal_truth, "register_routes"):
         journal_truth.register_routes(app, core)
+except Exception:
+    pass
+
+try:
+    import reporting_cleanup
+    if hasattr(reporting_cleanup, "apply"):
+        reporting_cleanup.apply(app, core)
 except Exception:
     pass
 
@@ -140,6 +147,12 @@ try:
         import one_link_check
         if hasattr(one_link_check, "apply"):
             one_link_check.apply(self_check)
+    except Exception:
+        pass
+    try:
+        import reporting_cleanup
+        if hasattr(reporting_cleanup, "apply"):
+            reporting_cleanup.apply(app, core)
     except Exception:
         pass
     if hasattr(self_check, "register_routes"):
