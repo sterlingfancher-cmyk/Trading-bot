@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 from typing import Any, Dict, List
 
-VERSION = "risk-on-recommendation-cleanup-2026-05-13"
+VERSION = "risk-on-wording-cleanup-2026-05-13"
 _APPLIED = False
 
 
@@ -36,11 +36,24 @@ def _held_symbols(snapshot: Dict[str, Any]) -> set[str]:
     return {_symbol(row) for row in rows if _symbol(row)}
 
 
+def _clean_recommendation_text(text: str) -> str:
+    text = str(text or "").strip()
+    if text.startswith("Best distinct candidates are extended and should wait for pullback/reclaim confirmation:"):
+        names = text.split(":", 1)[1].strip() if ":" in text else ""
+        return f"Best distinct watch candidates are extended; wait for pullback/reclaim before allowing entry: {names}"
+    if text.startswith("Best distinct candidates are extended; wait for pullback/reclaim confirmation:"):
+        names = text.split(":", 1)[1].strip() if ":" in text else ""
+        return f"Best distinct watch candidates are extended; wait for pullback/reclaim before allowing entry: {names}"
+    if "prioritize distinct confirmed setup" in text.lower():
+        return text.replace("prioritize distinct confirmed setup(s)", "prioritize distinct entry-ready setup(s)")
+    return text
+
+
 def _dedupe_recommendations(items: List[Any]) -> List[str]:
     seen = set()
     out: List[str] = []
     for item in items:
-        text = str(item or "").strip()
+        text = _clean_recommendation_text(str(item or ""))
         if not text:
             continue
         key = text.lower().replace("-", " ").replace("–", " ").replace("—", " ")
@@ -73,8 +86,6 @@ def _priority_lists(diag: Dict[str, Any], snapshot: Dict[str, Any]) -> tuple[Lis
         priority = _symbols(eligible, held, 8)
     if not watch:
         watch = _symbols(timing, held, 8)
-    if not priority and watch:
-        priority = watch[:5]
     return priority, watch
 
 
@@ -94,10 +105,10 @@ def _top_line(diag: Dict[str, Any], snapshot: Dict[str, Any], priority: List[str
     if slots <= 0:
         return "Risk-on active, but target long count is already filled; manage current winners."
     if priority:
-        return f"Risk-on active, {slots} slot(s) open; prioritize distinct confirmed setup(s): {', '.join(priority[:5])}."
+        return f"Risk-on active, {slots} slot(s) open; prioritize distinct entry-ready setup(s): {', '.join(priority[:5])}."
     if watch:
-        return f"Risk-on active, {slots} slot(s) open; wait for distinct pullback/reclaim: {', '.join(watch[:6])}."
-    return f"Risk-on active, {slots} slot(s) open; wait for the next clean distinct confirmation."
+        return f"Risk-on active, {slots} slot(s) open; no distinct entry is confirmed yet. Watch {', '.join(watch[:6])} for pullback/reclaim confirmation."
+    return f"Risk-on active, {slots} slot(s) open; no distinct entry is confirmed yet. Wait for the next clean setup confirmation."
 
 
 def cleanup_diagnostic(diag: Dict[str, Any], snapshot: Dict[str, Any] | None = None) -> Dict[str, Any]:
