@@ -3,15 +3,13 @@
 Adds an operator-facing diagnostic that explains why the bot did or did not add
 positions while risk-on participation mode is active.
 
-The diagnostic is intentionally read-only. It does not place trades, change
-positions, or alter state. It summarizes recent blocked/rejected candidates from
-state.json and trade_journal.json, classifies the blocking reasons, and patches
-the benchmark/market-participation reports so the one-link check gives a clear
-answer instead of only saying the bot is under-participating.
+This version also produces action-oriented recommendations for the specific
+bottleneck Sterling is watching: when SPY/QQQ are risk-on and the current book is
+profitable, prefer distinct add-on longs before adding more to an existing winner,
+do not chase extended names, and keep hard risk gates intact.
 """
 from __future__ import annotations
 
-import copy
 import datetime as dt
 import functools
 import json
@@ -21,7 +19,7 @@ import sys
 from collections import Counter
 from typing import Any, Dict, List, Tuple
 
-VERSION = "risk-on-entry-diagnostic-2026-05-13"
+VERSION = "risk-on-entry-recommendations-2026-05-13"
 
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
@@ -36,53 +34,21 @@ RECENT_REVIEW_LIMIT = int(os.environ.get("RISK_ON_DIAGNOSTIC_REVIEW_LIMIT", "80"
 WATCHLIST_LIMIT = int(os.environ.get("RISK_ON_DIAGNOSTIC_WATCHLIST_LIMIT", "10"))
 
 HARD_REASON_HINTS = (
-    "self_defense",
-    "halt",
-    "cooldown",
-    "late_day",
-    "after_hours",
-    "stop_loss",
-    "max_loss",
-    "max_daily_loss",
-    "sector_exposure",
-    "bucket_exposure",
-    "not_regular_session",
+    "self_defense", "halt", "cooldown", "late_day", "after_hours", "stop_loss",
+    "max_loss", "max_daily_loss", "sector_exposure", "bucket_exposure", "not_regular_session",
 )
 TIMING_REASON_HINTS = (
-    "extended_above",
-    "extended_below",
-    "waiting_for_pullback_reclaim",
-    "pullback_reclaim",
-    "above_5m_ma20",
-    "below_5m_ma20",
-    "max_from_day_open",
+    "extended_above", "extended_below", "waiting_for_pullback_reclaim", "pullback_reclaim",
+    "above_5m_ma20", "below_5m_ma20", "max_from_day_open",
 )
 SOFT_SCORE_HINTS = (
-    "entry_score_below_minimum",
-    "score_below",
-    "below_minimum",
-    "required_score",
+    "entry_score_below_minimum", "score_below", "below_minimum", "required_score",
 )
-POSITION_LIMIT_HINTS = (
-    "position_limit",
-    "max_positions",
-    "target_positions_met",
-)
-CATALYST_HINTS = (
-    "no_catalyst_threshold",
-    "catalyst",
-    "volume_surge",
-)
+POSITION_LIMIT_HINTS = ("position_limit", "max_positions", "target_positions_met")
+CATALYST_HINTS = ("no_catalyst_threshold", "catalyst", "volume_surge")
 REVIEW_SOURCE_HINTS = (
-    "blocked_entries",
-    "rejected_signals",
-    "scanner_audit",
-    "entry_quality",
-    "run_cycle:return",
-    "weakest_position_for_rotation",
-    "accepted_entries",
-    "long_signals",
-    "short_signals",
+    "blocked_entries", "rejected_signals", "scanner_audit", "entry_quality", "run_cycle:return",
+    "weakest_position_for_rotation", "accepted_entries", "long_signals", "short_signals",
 )
 EXECUTION_ACTIONS = {"entry", "exit", "partial_exit", "reduce", "reduce_position", "scale_out"}
 
@@ -154,15 +120,10 @@ def _stringify_reason(obj: Any) -> str:
         for key in ("reason", "entry_block_reason", "pullback_reclaim_status", "status", "note"):
             if obj.get(key) not in (None, ""):
                 parts.append(str(obj.get(key)))
-        q = obj.get("quality_info")
-        if isinstance(q, dict):
-            parts.append(_stringify_reason(q))
-        cpi = obj.get("controlled_pullback_info")
-        if isinstance(cpi, dict):
-            parts.append(_stringify_reason(cpi))
-        catalyst = obj.get("catalyst")
-        if isinstance(catalyst, dict):
-            parts.append(_stringify_reason(catalyst))
+        for nested_key in ("quality_info", "controlled_pullback_info", "catalyst"):
+            nested = obj.get(nested_key)
+            if isinstance(nested, dict):
+                parts.append(_stringify_reason(nested))
         return " ".join(p for p in parts if p).strip()
     return str(obj or "").strip()
 
@@ -247,7 +208,7 @@ def _compact_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "score": round(_score(row), 6),
         "required_score": round(_required_score(row), 6),
         "category": _category(row),
-        "reason": (_reason(row) or "unknown")[:160],
+        "reason": (_reason(row) or "unknown")[:180],
         "bucket": row.get("bucket") or q.get("bucket"),
         "source": _source(row)[:90],
         "pullback_reclaim_status": row.get("pullback_reclaim_status") or q.get("pullback_reclaim_status"),
@@ -307,6 +268,103 @@ def _snapshot_from_benchmark(core: Any | None = None) -> Dict[str, Any]:
         return {"status": "error", "error": str(exc), "risk_on_participation": {"active": False}}
 
 
+def _open_symbols(snapshot: Dict[str, Any]) -> set[str]:
+    positions = snapshot.get("positions") if isinstance(snapshot.get("positions"), dict) else {}
+    rows = positions.get("positions") if isinstance(positions.get("positions"), list) else []
+    return {str(row.get("symbol", "")).upper() for row in rows if isinstance(row, dict) and row.get("symbol")}
+
+
+def _symbols(rows: List[Dict[str, Any]], exclude: set[str] | None = None, limit: int = 5) -> List[str]:
+    exclude = exclude or set()
+    out: List[str] = []
+    for row in rows:
+        sym = str(row.get("symbol") or "").upper()
+        if not sym or sym in exclude or sym in out:
+            continue
+        out.append(sym)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _recommendations(
+    *,
+    active: bool,
+    open_slots: int,
+    checks: Dict[str, Any],
+    participation: Dict[str, Any],
+    snapshot: Dict[str, Any],
+    eligible: List[Dict[str, Any]],
+    timing_wait: List[Dict[str, Any]],
+    score_floor: List[Dict[str, Any]],
+    hard_gate: List[Dict[str, Any]],
+) -> List[str]:
+    """Create operator recommendations that distinguish diagnostics from execution rules."""
+    recs: List[str] = []
+    held = _open_symbols(snapshot)
+    distinct_eligible = [r for r in eligible if str(r.get("symbol", "")).upper() not in held]
+    held_eligible = [r for r in eligible if str(r.get("symbol", "")).upper() in held]
+    distinct_wait = [r for r in timing_wait if str(r.get("symbol", "")).upper() not in held]
+    failed = [k for k, v in checks.items() if not bool(v)]
+    target = int(_f(participation.get("target_long_positions"), 1))
+    new_entries = participation.get("new_entries_per_cycle")
+
+    if not active:
+        recs.append("Keep standard controls active; risk-on expansion is off until all participation checks pass.")
+        if failed:
+            recs.append("Failed participation checks: " + ", ".join(failed) + ".")
+        if timing_wait:
+            recs.append("Build the next watchlist from pullback/reclaim candidates, but do not override timing while risk-on is inactive.")
+        return recs
+
+    if open_slots <= 0:
+        recs.append("Risk-on is active, but the target long-position count is already filled; manage winners with partial exits and profit-locks.")
+        return recs
+
+    recs.append(
+        f"Risk-on is active with {open_slots} open long slot(s); target up to {target} active longs and allow up to {new_entries or open_slots} new entry attempt(s) per cycle."
+    )
+
+    if distinct_eligible:
+        syms = ", ".join(_symbols(distinct_eligible, limit=5))
+        recs.append(f"Prioritize distinct new symbols first before adding to existing winners: {syms}.")
+    elif held_eligible:
+        syms = ", ".join(_symbols(held_eligible, limit=5))
+        recs.append(f"Only eligible setup currently overlaps an existing holding ({syms}); add to the winner only if no distinct symbol confirms and concentration rules still pass.")
+    else:
+        recs.append("No clean distinct add-on is eligible yet; keep scanning rather than forcing a trade.")
+
+    if distinct_wait:
+        syms = ", ".join(_symbols(distinct_wait, exclude=held, limit=6))
+        recs.append(f"Best distinct candidates are extended and should wait for pullback/reclaim confirmation: {syms}.")
+    elif timing_wait:
+        syms = ", ".join(_symbols(timing_wait, limit=6))
+        recs.append(f"Timing remains the main bottleneck; do not chase these extended names: {syms}.")
+
+    if score_floor:
+        syms = ", ".join(_symbols(score_floor, limit=6))
+        recs.append(f"Do not lower the {DEFAULT_ENTRY_FLOOR:.3f} risk-on score floor yet; these candidates are still below threshold: {syms}.")
+
+    if hard_gate:
+        syms = ", ".join(_symbols(hard_gate, limit=6))
+        recs.append(f"Do not override hard risk gates for: {syms}.")
+
+    recs.append("Keep per-position exposure in the 3%-5% target band only for confirmed setups; keep stop discipline and use partial exits/profit-locks rather than blocking follow-up entries.")
+    return recs
+
+
+def _merge_recommendations(primary: List[Any], secondary: List[Any]) -> List[str]:
+    seen = set()
+    out: List[str] = []
+    for item in list(primary or []) + list(secondary or []):
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
 def build_diagnostic(core: Any | None = None, snapshot: Dict[str, Any] | None = None, cycle_result: Dict[str, Any] | None = None) -> Dict[str, Any]:
     state = _load_state(core)
     snapshot = snapshot if isinstance(snapshot, dict) else _snapshot_from_benchmark(core)
@@ -336,7 +394,6 @@ def build_diagnostic(core: Any | None = None, snapshot: Dict[str, Any] | None = 
         else:
             blocked.append(c)
 
-    # Sort actionable candidates first: higher score, then closest to the entry floor.
     eligible.sort(key=lambda x: _f(x.get("score"), 0.0), reverse=True)
     blocked.sort(key=lambda x: (_f(x.get("score"), 0.0), x.get("symbol") or ""), reverse=True)
     timing_wait = [r for r in blocked if r.get("category") == "timing_pullback_reclaim_wait"]
@@ -371,6 +428,18 @@ def build_diagnostic(core: Any | None = None, snapshot: Dict[str, Any] | None = 
         headline = "Risk-on participation is active, but no recent candidate diagnostics were found."
         next_action = "Verify run_cycle is logging blocked_entries/rejected_signals so the next no-entry decision is explainable."
 
+    recs = _recommendations(
+        active=active,
+        open_slots=open_slots,
+        checks=checks,
+        participation=participation,
+        snapshot=snapshot,
+        eligible=eligible,
+        timing_wait=timing_wait,
+        score_floor=score_floor,
+        hard_gate=hard_gate,
+    )
+
     return {
         "status": "ok",
         "type": "risk_on_entry_diagnostic",
@@ -378,6 +447,9 @@ def build_diagnostic(core: Any | None = None, snapshot: Dict[str, Any] | None = 
         "generated_local": _now_text(),
         "headline": headline,
         "next_action": next_action,
+        "recommended_actions": recs,
+        "priority_distinct_symbols": _symbols([r for r in eligible if r.get("symbol") not in _open_symbols(snapshot)], limit=5),
+        "watch_distinct_pullback_reclaim": _symbols([r for r in timing_wait if r.get("symbol") not in _open_symbols(snapshot)], limit=8),
         "participation_state": {
             "risk_on_active": active,
             "target_long_positions": target_long_positions,
@@ -398,6 +470,7 @@ def build_diagnostic(core: Any | None = None, snapshot: Dict[str, Any] | None = 
         "hard_gate_blocks": hard_gate[:WATCHLIST_LIMIT],
         "diagnostic_rules": {
             "risk_on_entry_floor": DEFAULT_ENTRY_FLOOR,
+            "distinct_symbol_preference": "Prefer new symbols before adding to an existing winner when risk-on slots are open.",
             "hard_reason_hints": list(HARD_REASON_HINTS),
             "timing_reason_hints": list(TIMING_REASON_HINTS),
             "score_reason_hints": list(SOFT_SCORE_HINTS),
@@ -423,7 +496,9 @@ def _patch_benchmark_build(core: Any | None = None) -> Dict[str, Any]:
             if isinstance(snap, dict):
                 try:
                     core_arg = args[0] if args else core
-                    snap["entry_participation_diagnostic"] = build_diagnostic(core_arg, snapshot=snap)
+                    diag = build_diagnostic(core_arg, snapshot=snap)
+                    snap["entry_participation_diagnostic"] = diag
+                    snap["recommended_actions"] = _merge_recommendations(snap.get("recommended_actions") or [], diag.get("recommended_actions") or [])
                 except Exception as exc:
                     snap["entry_participation_diagnostic"] = {"status": "error", "type": "risk_on_entry_diagnostic", "version": VERSION, "error": str(exc)}
             return snap
@@ -465,13 +540,14 @@ def register_routes(flask_app: Any, core: Any | None = None) -> Dict[str, Any]:
     if "/paper/risk-on-entry-diagnostic" not in existing:
         flask_app.add_url_rule("/paper/risk-on-entry-diagnostic", "risk_on_entry_diagnostic", lambda: jsonify(status_payload(core)))
 
-    # Replace the existing market-participation view so this diagnostic appears
-    # in the same endpoint Sterling already checks.
+    # Replace the existing market-participation view so diagnostic recommendations
+    # appear in the same endpoint Sterling already checks.
     try:
         import benchmark_participation as bp
 
         def market_participation_status_with_diagnostic():
             s = bp.build_snapshot(core, force=True)
+            diag = s.get("entry_participation_diagnostic") if isinstance(s.get("entry_participation_diagnostic"), dict) else {}
             return jsonify({
                 "status": "ok",
                 "type": "market_participation_status",
@@ -485,8 +561,10 @@ def register_routes(flask_app: Any, core: Any | None = None) -> Dict[str, Any]:
                 "bot_alpha": s.get("alpha"),
                 "risk_on_participation": s.get("risk_on_participation"),
                 "positions": s.get("positions"),
-                "entry_participation_diagnostic": s.get("entry_participation_diagnostic"),
-                "recommended_actions": s.get("recommended_actions"),
+                "entry_participation_diagnostic": diag,
+                "priority_distinct_symbols": diag.get("priority_distinct_symbols"),
+                "watch_distinct_pullback_reclaim": diag.get("watch_distinct_pullback_reclaim"),
+                "recommended_actions": _merge_recommendations(s.get("recommended_actions") or [], diag.get("recommended_actions") or []),
             })
 
         flask_app.view_functions["market_participation_status"] = market_participation_status_with_diagnostic
