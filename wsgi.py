@@ -4,8 +4,8 @@ This startup path runs the state recovery guard before importing app.py, install
 state I/O hardening, persistent trade journaling, execution-only journal truth
 reporting, runtime risk controls, slow price-fetch timeout/cache fallbacks,
 classic signal mode, intraday timing/pullback guards, position-quality controls,
-benchmark participation controls, risk-on entry diagnostics, reporting cleanup,
-and one-link self-check routes.
+benchmark participation controls, risk-on entry diagnostics, risk-on recommendation
+cleanup, reporting cleanup, and one-link self-check routes.
 """
 from __future__ import annotations
 
@@ -154,6 +154,17 @@ try:
         risk_on_entry_diagnostic.apply(core)
     if hasattr(risk_on_entry_diagnostic, "register_routes"):
         risk_on_entry_diagnostic.register_routes(app, core)
+except Exception:
+    pass
+
+try:
+    import risk_on_recommendation_cleanup
+    if 'state_io_hardening' in globals() and state_io_hardening is not None and hasattr(state_io_hardening, "patch_json_modules"):
+        state_io_hardening.patch_json_modules(risk_on_recommendation_cleanup)
+    if hasattr(risk_on_recommendation_cleanup, "apply"):
+        risk_on_recommendation_cleanup.apply(core)
+    if hasattr(risk_on_recommendation_cleanup, "register_routes"):
+        risk_on_recommendation_cleanup.register_routes(app, core)
 except Exception:
     pass
 
