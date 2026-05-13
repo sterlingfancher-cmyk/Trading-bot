@@ -66,6 +66,12 @@ try:
         state_io_hardening.patch_json_modules(state_journal_guard)
     if hasattr(state_journal_guard, "register_routes"):
         state_journal_guard.register_routes(app, core)
+    try:
+        import state_journal_persistence_patch
+        if hasattr(state_journal_persistence_patch, "apply"):
+            state_journal_persistence_patch.apply(state_journal_guard, core)
+    except Exception:
+        pass
 except Exception:
     pass
 
