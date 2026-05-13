@@ -72,6 +72,12 @@ try:
             state_journal_persistence_patch.apply(state_journal_guard, core)
     except Exception:
         pass
+    try:
+        import state_journal_apply_guardrail
+        if hasattr(state_journal_apply_guardrail, "apply"):
+            state_journal_apply_guardrail.apply(state_journal_guard, core)
+    except Exception:
+        pass
 except Exception:
     pass
 
