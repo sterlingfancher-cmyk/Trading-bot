@@ -5,7 +5,7 @@ import datetime as dt
 import json
 from typing import Any, Dict
 
-VERSION = "state-journal-apply-jsonsafe-2026-05-13"
+VERSION = "state-journal-apply-jsonsafe-2026-05-13-callfix"
 _PATCHED: set[int] = set()
 
 
@@ -47,9 +47,28 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
     if not callable(original_repair):
         return {"status": "error", "version": VERSION, "error": "repair_function_missing"}
 
+    def call_original_repair(apply_flag: bool, active_core: Any | None) -> Any:
+        try:
+            return original_repair(apply=apply_flag, core=active_core)
+        except TypeError as exc:
+            if "unexpected keyword argument 'core'" in str(exc):
+                return original_repair(apply_flag, active_core)
+            raise
+
+    def call_original_status(active_core: Any | None) -> Any:
+        if callable(original_status):
+            try:
+                return original_status(active_core)
+            except TypeError:
+                return original_status()
+        try:
+            return guard_module.build_guard(core=active_core)
+        except TypeError:
+            return guard_module.build_guard()
+
     def wrapped_repair_state_from_journal(apply: bool = False, core: Any | None = None) -> Dict[str, Any]:
         try:
-            result = original_repair(apply=apply, core=core)
+            result = call_original_repair(bool(apply), core)
             if isinstance(result, dict):
                 result["jsonsafe_patch_version"] = VERSION
             return _json_safe(result)
@@ -67,7 +86,7 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
 
     def wrapped_status_payload(core: Any | None = None) -> Dict[str, Any]:
         try:
-            payload = original_status(core=core) if callable(original_status) else guard_module.build_guard(core=core)
+            payload = call_original_status(core)
             if isinstance(payload, dict):
                 payload["jsonsafe_patch_version"] = VERSION
             return _json_safe(payload)
