@@ -1,14 +1,14 @@
 """One-link check patch.
 
 Keeps the user's daily testing flow to one URL: /paper/self-check.
-Adds journal truth, classic signal mode, intraday timing, position-quality,
-benchmark comparison, market participation status, and risk-on entry diagnostics
-into the light self-check set without requiring Sterling to manually test more
-endpoints after each deploy.
+Adds journal truth, state/journal reconciliation guard, classic signal mode,
+intraday timing, position-quality, benchmark comparison, market participation
+status, and risk-on entry diagnostics into the light self-check set without
+requiring Sterling to manually test more endpoints after each deploy.
 """
 from __future__ import annotations
 
-VERSION = "one-link-risk-on-diagnostic-check-2026-05-13"
+VERSION = "one-link-state-journal-guard-check-2026-05-13"
 
 
 def _add_endpoint(light, endpoint, after_path=None):
@@ -31,6 +31,7 @@ def apply(self_check_module=None):
             import self_check as self_check_module  # type: ignore[no-redef]
         light = getattr(self_check_module, "LIGHT_ENDPOINTS", None)
         _add_endpoint(light, {"path": "/paper/journal-truth-status", "category": "journal", "required": True}, after_path="/paper/trade-event-hook-status")
+        _add_endpoint(light, {"path": "/paper/state-journal-guard-status", "category": "journal", "required": True}, after_path="/paper/journal-truth-status")
         _add_endpoint(light, {"path": "/paper/classic-signal-status", "category": "risk", "required": True}, after_path="/paper/risk-improvement-status")
         _add_endpoint(light, {"path": "/paper/intraday-timing-status", "category": "risk", "required": True}, after_path="/paper/classic-signal-status")
         _add_endpoint(light, {"path": "/paper/position-quality-status", "category": "risk", "required": True}, after_path="/paper/intraday-timing-status")
@@ -41,6 +42,7 @@ def apply(self_check_module=None):
             "status": "ok",
             "version": VERSION,
             "journal_truth_in_self_check": True,
+            "state_journal_guard_in_self_check": True,
             "classic_signal_in_self_check": True,
             "intraday_timing_in_self_check": True,
             "position_quality_in_self_check": True,
@@ -54,6 +56,7 @@ def apply(self_check_module=None):
             "status": "error",
             "version": VERSION,
             "journal_truth_in_self_check": False,
+            "state_journal_guard_in_self_check": False,
             "classic_signal_in_self_check": False,
             "intraday_timing_in_self_check": False,
             "position_quality_in_self_check": False,
