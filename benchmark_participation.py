@@ -1,4 +1,9 @@
-"""Benchmark comparison + guarded risk-on participation mode."""
+"""Benchmark comparison + guarded risk-on participation mode.
+
+This module is intentionally advisory/runtime-only. It compares the bot against
+SPY/QQQ and temporarily relaxes participation controls only when broad-market
+conditions confirm a strong risk-on tape.
+"""
 from __future__ import annotations
 
 import copy
@@ -15,7 +20,7 @@ try:
 except Exception:  # pragma: no cover
     yf = None
 
-VERSION = "benchmark-participation-2026-05-13"
+VERSION = "benchmark-participation-feed-fallback-2026-05-13"
 _REGISTERED: set[int] = set()
 _APPLIED: set[int] = set()
 _CACHE: Dict[str, Any] = {"ts": 0.0, "snapshot": None}
@@ -25,7 +30,9 @@ STATE_FILE = os.path.join(STATE_DIR, os.path.basename(os.environ.get("STATE_FILE
 
 ENABLED = os.environ.get("RISK_ON_PARTICIPATION_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 NEAR_HIGH_PCT = float(os.environ.get("RISK_ON_NEAR_HIGH_PCT", "0.0035"))
-MAX_DRAWDOWN = float(os.environ.get("RISK_ON_MAX_DRAWDOWN_PCT", "0.0015"))
+# Relaxed from 0.15% to 0.30% so a tiny open-position giveback does not suppress
+# participation on otherwise confirmed risk-on days.
+MAX_DRAWDOWN = float(os.environ.get("RISK_ON_MAX_DRAWDOWN_PCT", "0.0030"))
 MAX_DAILY_LOSS = float(os.environ.get("RISK_ON_MAX_DAILY_LOSS_PCT", "0.0015"))
 TARGET_POSITIONS = int(os.environ.get("RISK_ON_TARGET_LONG_POSITIONS", "3"))
 MIN_TARGET_POSITIONS = int(os.environ.get("RISK_ON_MIN_TARGET_LONG_POSITIONS", "2"))
@@ -35,6 +42,7 @@ CORE_ALLOC_FACTOR = float(os.environ.get("RISK_ON_CORE_ALLOC_FACTOR", "1.35"))
 HIGH_BETA_ALLOC_FACTOR = float(os.environ.get("RISK_ON_HIGH_BETA_ALLOC_FACTOR", "0.80"))
 BENCHMARK_ALLOC_FACTOR = float(os.environ.get("RISK_ON_BENCHMARK_ALLOC_FACTOR", "1.00"))
 CACHE_TTL = int(os.environ.get("RISK_ON_CACHE_TTL_SECONDS", "75"))
+BENCHMARK_STALE_SECONDS = int(os.environ.get("BENCHMARK_STALE_SECONDS", "900"))
 
 CORE_BUCKETS = {"mega_cap_ai", "semi_leaders", "cloud_cyber_software", "data_center_infra"}
 HIGH_BETA_BUCKETS = {"small_cap_momentum", "bitcoin_ai_compute"}
@@ -75,48 +83,210 @@ def _load_state(core: Any | None = None) -> Dict[str, Any]:
         return {}
 
 
+def _column_matches(col: Any, name: str) -> bool:
+    target = str(name).lower()
+    try:
+        if isinstance(col, tuple):
+            return any(str(part).lower() == target for part in col)
+        return str(col).lower() == target
+    except Exception:
+        return False
+
+
 def _series(df: Any, name: str) -> List[float]:
+    """Return a numeric list from normal, yfinance multi-index, or odd shaped frames."""
     if df is None:
         return []
     try:
-        if name in df:
-            return [float(x) for x in df[name].dropna().tolist()]
+        if hasattr(df, "empty") and bool(df.empty):
+            return []
     except Exception:
         pass
+
+    # Normal single-symbol yfinance shape: columns include "Close", "High", "Open".
     try:
-        for col in getattr(df, "columns", []):
-            if (isinstance(col, tuple) and str(col[-1]).lower() == name.lower()) or str(col).lower() == name.lower():
-                return [float(x) for x in df[col].dropna().tolist()]
+        if name in df:
+            vals = df[name]
+            if hasattr(vals, "dropna"):
+                return [_f(x) for x in vals.dropna().tolist() if _f(x, None) is not None]
+    except Exception:
+        pass
+
+    # Multi-index yfinance shape can be ("Close", "SPY") or ("SPY", "Close").
+    try:
+        for col in list(getattr(df, "columns", [])):
+            if _column_matches(col, name):
+                vals = df[col]
+                if hasattr(vals, "dropna"):
+                    return [_f(x) for x in vals.dropna().tolist() if _f(x, None) is not None]
+    except Exception:
+        pass
+
+    # Last-resort: if this is a one-column object-like response, try close-ish access.
+    try:
+        vals = getattr(df, name.lower(), None)
+        if vals is not None and hasattr(vals, "dropna"):
+            return [_f(x) for x in vals.dropna().tolist() if _f(x, None) is not None]
     except Exception:
         pass
     return []
 
 
-def _intraday(core: Any | None, symbol: str):
+def _download(core: Any | None, symbol: str, period: str, interval: str):
     try:
         if core is not None and hasattr(core, "download_prices"):
-            return core.download_prices(symbol, period="1d", interval="5m")
+            return core.download_prices(symbol, period=period, interval=interval)
     except Exception:
         pass
     if yf is None:
         return None
     try:
-        return yf.download(symbol, period="1d", interval="5m", progress=False, auto_adjust=True, threads=False)
+        return yf.download(symbol, period=period, interval=interval, progress=False, auto_adjust=True, threads=False)
     except Exception:
         return None
 
 
-def _bench(core: Any | None, symbol: str) -> Dict[str, Any]:
-    df = _intraday(core, symbol)
+def _latest_price(core: Any | None, symbol: str) -> Tuple[float | None, str, float | None]:
+    """Use the trading engine's safe latest-price wrapper or its cache before giving up."""
+    try:
+        if core is not None and hasattr(core, "latest_price"):
+            px = core.latest_price(symbol)
+            if _f(px, 0.0) > 0:
+                return _f(px), "core.latest_price", None
+    except Exception:
+        pass
+
+    for attr in ("_price_cache", "PRICE_CACHE", "price_cache"):
+        try:
+            cache = getattr(core, attr, None) if core is not None else None
+            if not isinstance(cache, dict):
+                continue
+            data = cache.get("data") if isinstance(cache.get("data"), dict) else cache
+            row = data.get(symbol) if isinstance(data, dict) else None
+            if isinstance(row, dict):
+                px = row.get("price") or row.get("last") or row.get("last_price") or row.get("close")
+                age = row.get("age_seconds")
+                ts = row.get("ts") or row.get("time") or row.get("timestamp")
+                if age is None and ts:
+                    age = max(0.0, time.time() - _f(ts, time.time()))
+                if _f(px, 0.0) > 0:
+                    return _f(px), f"{attr}.data", _f(age, None)
+            elif _f(row, 0.0) > 0:
+                return _f(row), attr, None
+        except Exception:
+            pass
+    return None, "unavailable", None
+
+
+def _bench_from_intraday(df: Any, symbol: str, source: str) -> Dict[str, Any] | None:
     closes, highs, opens = _series(df, "Close"), _series(df, "High"), _series(df, "Open")
     if not closes:
-        return {"symbol": symbol, "status": "missing", "positive": False, "near_day_high": False, "day_return_pct": 0.0, "distance_from_high_pct": None}
+        return None
     last = closes[-1]
     first = opens[0] if opens else closes[0]
     high = max(highs) if highs else max(closes)
     ret = (last / first - 1.0) if first > 0 else 0.0
     dist = (high - last) / high if high > 0 else 1.0
-    return {"symbol": symbol, "status": "ok", "positive": ret > 0, "near_day_high": dist <= NEAR_HIGH_PCT, "day_return_pct": round(ret * 100, 3), "distance_from_high_pct": round(dist * 100, 3), "last_price": round(last, 4), "day_high": round(high, 4), "near_high_threshold_pct": round(NEAR_HIGH_PCT * 100, 3)}
+    return {
+        "symbol": symbol,
+        "status": "ok",
+        "source": source,
+        "positive": ret > 0,
+        "near_day_high": dist <= NEAR_HIGH_PCT,
+        "day_return_pct": round(ret * 100, 3),
+        "distance_from_high_pct": round(dist * 100, 3),
+        "last_price": round(last, 4),
+        "day_open": round(first, 4),
+        "day_high": round(high, 4),
+        "near_high_threshold_pct": round(NEAR_HIGH_PCT * 100, 3),
+        "data_stale": False,
+    }
+
+
+def _bench_from_daily(df: Any, symbol: str, latest: float | None = None) -> Dict[str, Any] | None:
+    closes, highs, opens = _series(df, "Close"), _series(df, "High"), _series(df, "Open")
+    if not closes:
+        return None
+    last = latest if latest and latest > 0 else closes[-1]
+    first = opens[-1] if opens else (closes[-2] if len(closes) >= 2 else closes[-1])
+    high = highs[-1] if highs else max(closes[-1], last)
+    ret = (last / first - 1.0) if first > 0 else 0.0
+    dist = (high - last) / high if high > 0 else 1.0
+    return {
+        "symbol": symbol,
+        "status": "ok_daily_fallback",
+        "source": "daily_fallback",
+        "positive": ret > 0,
+        "near_day_high": dist <= NEAR_HIGH_PCT,
+        "day_return_pct": round(ret * 100, 3),
+        "distance_from_high_pct": round(dist * 100, 3),
+        "last_price": round(last, 4),
+        "day_open": round(first, 4),
+        "day_high": round(high, 4),
+        "near_high_threshold_pct": round(NEAR_HIGH_PCT * 100, 3),
+        "data_stale": False,
+    }
+
+
+def _bench(core: Any | None, symbol: str) -> Dict[str, Any]:
+    """Build a benchmark snapshot with layered fallback.
+
+    Priority:
+    1. Same safe 1d/5m bars used by the trading engine.
+    2. 5d/1d bars plus latest safe price.
+    3. Latest safe cached price, marked stale/partial so it cannot silently imply risk-on.
+    """
+    errors: List[str] = []
+
+    try:
+        snap = _bench_from_intraday(_download(core, symbol, period="1d", interval="5m"), symbol, "intraday_5m")
+        if snap:
+            return snap
+    except Exception as exc:
+        errors.append(f"intraday:{exc}")
+
+    latest, latest_source, latest_age = _latest_price(core, symbol)
+
+    try:
+        snap = _bench_from_daily(_download(core, symbol, period="5d", interval="1d"), symbol, latest)
+        if snap:
+            snap["latest_price_source"] = latest_source
+            if latest_age is not None:
+                snap["latest_price_age_seconds"] = round(latest_age, 1)
+                snap["data_stale"] = latest_age > BENCHMARK_STALE_SECONDS
+            return snap
+    except Exception as exc:
+        errors.append(f"daily:{exc}")
+
+    if latest and latest > 0:
+        stale = latest_age is None or latest_age > BENCHMARK_STALE_SECONDS
+        return {
+            "symbol": symbol,
+            "status": "price_only_fallback",
+            "source": latest_source,
+            "positive": False,
+            "near_day_high": False,
+            "day_return_pct": 0.0,
+            "distance_from_high_pct": None,
+            "last_price": round(latest, 4),
+            "latest_price_age_seconds": round(latest_age, 1) if latest_age is not None else None,
+            "data_stale": stale,
+            "note": "Only latest price was available; participation gate remains off until intraday or daily benchmark context is available.",
+            "errors": errors[-3:],
+        }
+
+    return {
+        "symbol": symbol,
+        "status": "missing",
+        "source": "unavailable",
+        "positive": False,
+        "near_day_high": False,
+        "day_return_pct": 0.0,
+        "distance_from_high_pct": None,
+        "data_stale": True,
+        "benchmark_data_missing": True,
+        "errors": errors[-3:],
+    }
 
 
 def _positions(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -147,9 +317,15 @@ def build_snapshot(core: Any | None = None, force: bool = False) -> Dict[str, An
     equity = _f(state.get("equity"), 0.0)
     start = _f(risk.get("day_start_equity"), 0.0)
     bot_ret = (equity / start - 1.0) * 100.0 if equity > 0 and start > 0 else 0.0
+
+    benchmark_data_missing = any(x.get("status") == "missing" for x in (spy, qqq))
+    benchmark_data_stale = any(bool(x.get("data_stale")) for x in (spy, qqq))
+    benchmark_ready = not benchmark_data_missing and not benchmark_data_stale
+
     checks = {
         "spy_positive_near_high": bool(spy.get("positive") and spy.get("near_day_high")),
         "qqq_positive_near_high": bool(qqq.get("positive") and qqq.get("near_day_high")),
+        "benchmark_data_ready": bool(benchmark_ready),
         "self_defense_clear": not bool(risk.get("self_defense_active")),
         "drawdown_near_zero": _f(risk.get("intraday_drawdown_pct"), 0.0) <= MAX_DRAWDOWN,
         "daily_loss_near_zero": _f(risk.get("daily_loss_pct"), 0.0) <= MAX_DAILY_LOSS,
@@ -161,21 +337,81 @@ def build_snapshot(core: Any | None = None, force: bool = False) -> Dict[str, An
     alpha_qqq = round(bot_ret - _f(qqq.get("day_return_pct"), 0.0), 3)
     cash = _f(state.get("cash"), 0.0)
     cash_pct = cash / equity if equity > 0 else 0.0
+
     score = "good"
-    if active and pos["long_count"] < MIN_TARGET_POSITIONS:
+    if benchmark_data_missing:
+        score = "benchmark_missing"
+    elif benchmark_data_stale:
+        score = "benchmark_stale"
+    elif active and pos["long_count"] < MIN_TARGET_POSITIONS:
         score = "too_low"
     elif active and pos["long_count"] < target:
         score = "moderate_underexposure"
     elif cash_pct > 0.4 and (spy.get("positive") or qqq.get("positive")):
         score = "cash_drag"
-    recs = []
+
+    recs: List[str] = []
+    if benchmark_data_missing:
+        recs.append("Benchmark data missing: verify SPY/QQQ downloads or cached latest prices before allowing risk-on participation.")
+    elif benchmark_data_stale:
+        recs.append("Benchmark data stale: keep standard controls until SPY/QQQ refresh.")
     if active:
-        recs += ["Risk-on participation mode active: allow 2-3 active long positions.", "Modestly raise confirmed setup exposure toward the 3%-5% target band.", "Keep stops, but prefer profit-locks and partial exits over blocking all follow-up entries."]
+        recs += [
+            "Risk-on participation mode active: allow 2-3 active long positions.",
+            "Modestly raise confirmed setup exposure toward the 3%-5% target band.",
+            "Keep stops, but prefer profit-locks and partial exits over blocking all follow-up entries.",
+        ]
     else:
         recs.append("Keep standard controls until SPY/QQQ are both positive and near highs with self-defense clear and minimal drawdown.")
-    if score != "good":
+    if score not in {"good", "benchmark_missing", "benchmark_stale"}:
         recs.append("Bot is under-participating versus SPY/QQQ; look for the next qualified long setup instead of staying at one position.")
-    snap = {"status": "ok", "type": "benchmark_comparison", "version": VERSION, "generated_local": _now_text(), "benchmarks": {"SPY": spy, "QQQ": qqq}, "bot": {"equity": round(equity, 2), "cash": round(cash, 2), "bot_day_return_pct": round(bot_ret, 3), "realized_pnl_today": round(_f(perf.get("realized_pnl_today"), 0), 2), "realized_pnl_total": round(_f(perf.get("realized_pnl_total"), 0), 2), "unrealized_pnl": round(_f(perf.get("unrealized_pnl"), 0), 2), "daily_loss_pct": _f(risk.get("daily_loss_pct"), 0), "intraday_drawdown_pct": _f(risk.get("intraday_drawdown_pct"), 0), "self_defense_active": bool(risk.get("self_defense_active")), "self_defense_reason": risk.get("self_defense_reason", "")}, "positions": pos, "alpha": {"bot_vs_spy_alpha_pct": alpha_spy, "bot_vs_qqq_alpha_pct": alpha_qqq, "cash_pct": round(cash_pct * 100, 2), "cash_drag_detected": cash_pct > 0.4 and (spy.get("positive") or qqq.get("positive")), "participation_score": score}, "risk_on_participation": {"enabled": ENABLED, "active": active, "target_long_positions": target, "new_entries_per_cycle": NEW_ENTRIES_PER_CYCLE if active else None, "per_position_exposure_target_pct": "3-5% on confirmed setups while active", "checks": checks, "thresholds": {"near_high_pct": round(NEAR_HIGH_PCT * 100, 3), "max_intraday_drawdown_pct": round(MAX_DRAWDOWN * 100, 3), "max_daily_loss_pct": round(MAX_DAILY_LOSS * 100, 3), "entry_override_score_floor": ENTRY_SCORE_FLOOR}}, "recommended_actions": recs}
+
+    snap = {
+        "status": "ok",
+        "type": "benchmark_comparison",
+        "version": VERSION,
+        "generated_local": _now_text(),
+        "benchmarks": {"SPY": spy, "QQQ": qqq},
+        "benchmark_data_missing": benchmark_data_missing,
+        "benchmark_data_stale": benchmark_data_stale,
+        "benchmark_data_ready": benchmark_ready,
+        "bot": {
+            "equity": round(equity, 2),
+            "cash": round(cash, 2),
+            "bot_day_return_pct": round(bot_ret, 3),
+            "realized_pnl_today": round(_f(perf.get("realized_pnl_today"), 0), 2),
+            "realized_pnl_total": round(_f(perf.get("realized_pnl_total"), 0), 2),
+            "unrealized_pnl": round(_f(perf.get("unrealized_pnl"), 0), 2),
+            "daily_loss_pct": _f(risk.get("daily_loss_pct"), 0),
+            "intraday_drawdown_pct": _f(risk.get("intraday_drawdown_pct"), 0),
+            "self_defense_active": bool(risk.get("self_defense_active")),
+            "self_defense_reason": risk.get("self_defense_reason", ""),
+        },
+        "positions": pos,
+        "alpha": {
+            "bot_vs_spy_alpha_pct": alpha_spy,
+            "bot_vs_qqq_alpha_pct": alpha_qqq,
+            "cash_pct": round(cash_pct * 100, 2),
+            "cash_drag_detected": cash_pct > 0.4 and (spy.get("positive") or qqq.get("positive")),
+            "participation_score": score,
+        },
+        "risk_on_participation": {
+            "enabled": ENABLED,
+            "active": active,
+            "target_long_positions": target,
+            "new_entries_per_cycle": NEW_ENTRIES_PER_CYCLE if active else None,
+            "per_position_exposure_target_pct": "3-5% on confirmed setups while active",
+            "checks": checks,
+            "thresholds": {
+                "near_high_pct": round(NEAR_HIGH_PCT * 100, 3),
+                "max_intraday_drawdown_pct": round(MAX_DRAWDOWN * 100, 3),
+                "max_daily_loss_pct": round(MAX_DAILY_LOSS * 100, 3),
+                "entry_override_score_floor": ENTRY_SCORE_FLOOR,
+                "benchmark_stale_seconds": BENCHMARK_STALE_SECONDS,
+            },
+        },
+        "recommended_actions": recs,
+    }
     _CACHE.update({"ts": time.time(), "snapshot": copy.deepcopy(snap)})
     return snap
 
@@ -201,8 +437,9 @@ def _restore_runtime(core: Any, saved: Dict[str, Any]) -> None:
 
 def _apply_runtime(core: Any, snap: Dict[str, Any]) -> Dict[str, Any]:
     if not (snap.get("risk_on_participation") or {}).get("active"):
-        return {"applied": False, "reason": "risk_on_participation_not_active"}
+        return {"applied": False, "reason": "risk_on_participation_not_active", "benchmark_data_missing": snap.get("benchmark_data_missing"), "benchmark_data_stale": snap.get("benchmark_data_stale")}
     changes: Dict[str, Any] = {}
+
     def setmax(name: str, value: Any):
         old = getattr(core, name, None)
         try:
@@ -211,6 +448,7 @@ def _apply_runtime(core: Any, snap: Dict[str, Any]) -> Dict[str, Any]:
             changes[name] = {"old": old, "new": new}
         except Exception as exc:
             changes[name] = {"old": old, "new": value, "error": str(exc)}
+
     def setmin(name: str, value: Any):
         old = getattr(core, name, None)
         try:
@@ -219,6 +457,7 @@ def _apply_runtime(core: Any, snap: Dict[str, Any]) -> Dict[str, Any]:
             changes[name] = {"old": old, "new": new}
         except Exception as exc:
             changes[name] = {"old": old, "new": value, "error": str(exc)}
+
     setmax("MAX_NEW_ENTRIES_PER_CYCLE", NEW_ENTRIES_PER_CYCLE)
     setmax("MAX_POSITIONS_PER_SECTOR", 3)
     setmax("TECH_LEADERSHIP_MAX_POSITIONS_PER_SECTOR", 4)
@@ -294,6 +533,7 @@ def apply(core: Any | None = None) -> Dict[str, Any]:
     patched = []
     if hasattr(core, "run_cycle") and not getattr(core.run_cycle, "_benchmark_participation_wrapped", False):
         original = core.run_cycle
+
         @functools.wraps(original)
         def run_cycle_wrapper(*args, **kwargs):
             snap = build_snapshot(core, force=True)
@@ -307,11 +547,13 @@ def apply(core: Any | None = None) -> Dict[str, Any]:
                 return result
             finally:
                 _restore_runtime(core, saved)
+
         run_cycle_wrapper._benchmark_participation_wrapped = True  # type: ignore[attr-defined]
         core.run_cycle = run_cycle_wrapper
         patched.append("run_cycle")
     if hasattr(core, "entry_quality_check") and not getattr(core.entry_quality_check, "_benchmark_participation_wrapped", False):
         original_q = core.entry_quality_check
+
         @functools.wraps(original_q)
         def entry_quality_check_wrapper(signal, params=None, market=None, *args, **kwargs):
             result = original_q(signal, params, market, *args, **kwargs)
@@ -330,6 +572,7 @@ def apply(core: Any | None = None) -> Dict[str, Any]:
                 return True, info
             except Exception:
                 return result
+
         entry_quality_check_wrapper._benchmark_participation_wrapped = True  # type: ignore[attr-defined]
         core.entry_quality_check = entry_quality_check_wrapper
         patched.append("entry_quality_check")
@@ -356,7 +599,20 @@ def register_routes(flask_app: Any, core: Any | None = None) -> Dict[str, Any]:
     if "/paper/market-participation-status" not in existing:
         def market_participation_status():
             s = build_snapshot(core, force=True)
-            return jsonify({"status": "ok", "type": "market_participation_status", "version": VERSION, "generated_local": s.get("generated_local"), "benchmark_summary": s.get("benchmarks"), "bot_alpha": s.get("alpha"), "risk_on_participation": s.get("risk_on_participation"), "positions": s.get("positions"), "recommended_actions": s.get("recommended_actions")})
+            return jsonify({
+                "status": "ok",
+                "type": "market_participation_status",
+                "version": VERSION,
+                "generated_local": s.get("generated_local"),
+                "benchmark_summary": s.get("benchmarks"),
+                "benchmark_data_missing": s.get("benchmark_data_missing"),
+                "benchmark_data_stale": s.get("benchmark_data_stale"),
+                "benchmark_data_ready": s.get("benchmark_data_ready"),
+                "bot_alpha": s.get("alpha"),
+                "risk_on_participation": s.get("risk_on_participation"),
+                "positions": s.get("positions"),
+                "recommended_actions": s.get("recommended_actions"),
+            })
         flask_app.add_url_rule("/paper/market-participation-status", "market_participation_status", market_participation_status)
     _REGISTERED.add(id(flask_app))
     return {"status": "ok", "version": VERSION, "registered": True, "apply": applied}
