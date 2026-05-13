@@ -13,6 +13,12 @@ while trade_journal.json contains many mirrored diagnostic rows. To keep the
 reported realized stats honest, this module reconciles execution rows from both
 trade_journal.json and state.json, then deduplicates them before calculating
 execution-only performance.
+
+2026-05-13 fix:
+Rows such as partial_exit/reduce/scale_out may come from a diagnostic-looking
+source like trades_for_date:return, but if they contain real fill data they are
+execution rows. Execution classification now takes precedence over review-source
+hints and execution rows are sorted by trade time before latest_trade is chosen.
 """
 from __future__ import annotations
 
@@ -21,7 +27,7 @@ import json
 import os
 from typing import Any, Dict, List, Tuple
 
-VERSION = "journal-truth-state-reconciled-2026-05-11"
+VERSION = "journal-truth-partial-exit-fix-2026-05-13"
 
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 TRADE_JOURNAL_FILE = os.path.join(STATE_DIR, "trade_journal.json")
@@ -83,6 +89,27 @@ def _time_value(row: Dict[str, Any]) -> Any:
     return row.get("time") or row.get("timestamp") or row.get("entry_time") or row.get("exit_time") or row.get("journal_mirrored_local")
 
 
+def _time_sort_value(row: Dict[str, Any], fallback_index: int = 0) -> Tuple[int, float, int]:
+    value = _time_value(row)
+    try:
+        return (0, float(value), fallback_index)
+    except Exception:
+        pass
+    if isinstance(value, str):
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S %Z", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return (0, dt.datetime.strptime(value.replace(" CDT", "").replace(" UTC", ""), "%Y-%m-%d %H:%M:%S").timestamp(), fallback_index)
+            except Exception:
+                continue
+    return (1, 0.0, fallback_index)
+
+
+def _sort_execution_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    indexed = list(enumerate(rows))
+    indexed.sort(key=lambda pair: _time_sort_value(pair[1], pair[0]))
+    return [row for _, row in indexed]
+
+
 def _fingerprint(row: Dict[str, Any]) -> str:
     parts = [
         str(_action(row)),
@@ -109,11 +136,39 @@ def _dedupe_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _has_execution_fill_data(row: Dict[str, Any], action: str | None = None) -> bool:
+    action = action or _action(row)
+    if not row.get("symbol"):
+        return False
+    if action in ENTRY_ACTIONS:
+        return any(k in row for k in ("price", "shares", "alloc"))
+    if action in EXIT_ACTIONS:
+        return any(k in row for k in ("price", "shares", "pnl_dollars", "pnl_pct", "exit_reason", "fraction_closed", "remaining_shares"))
+    return False
+
+
+def is_execution_row(row: Any) -> bool:
+    if not isinstance(row, dict):
+        return False
+    action = _action(row)
+    if action not in REAL_EXECUTION_ACTIONS:
+        return False
+    if not _has_execution_fill_data(row, action):
+        return False
+    return True
+
+
 def is_review_row(row: Any) -> bool:
     if not isinstance(row, dict):
         return True
     action = _action(row)
     source = _source(row)
+
+    # Critical precedence rule: real fill rows are execution rows even when they
+    # come from diagnostic-looking wrappers such as trades_for_date:return.
+    if action in REAL_EXECUTION_ACTIONS and _has_execution_fill_data(row, action):
+        return False
+
     if action in REVIEW_ACTIONS:
         return True
     if any(hint in source for hint in REVIEW_SOURCE_HINTS):
@@ -122,23 +177,6 @@ def is_review_row(row: Any) -> bool:
     # price/shares/exit_reason/action. They are useful diagnostics, not fills.
     if row.get("same_side") is not None and action not in REAL_EXECUTION_ACTIONS:
         return True
-    return False
-
-
-def is_execution_row(row: Any) -> bool:
-    if not isinstance(row, dict) or is_review_row(row):
-        return False
-    action = _action(row)
-    if action not in REAL_EXECUTION_ACTIONS:
-        return False
-    if not row.get("symbol"):
-        return False
-    # Actual executions should have fill-like data. Exits can have pnl even when
-    # price is absent, but entries/reductions should have either price/shares or alloc.
-    if action in ENTRY_ACTIONS:
-        return any(k in row for k in ("price", "shares", "alloc"))
-    if action in EXIT_ACTIONS:
-        return any(k in row for k in ("price", "shares", "pnl_dollars", "pnl_pct", "exit_reason"))
     return False
 
 
@@ -156,7 +194,7 @@ def classify_rows(journal: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[D
             review.append(row)
         else:
             unknown.append(row)
-    return execution, review, unknown
+    return _sort_execution_rows(_dedupe_rows(execution)), review, unknown
 
 
 def state_execution_rows(state: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
@@ -170,23 +208,24 @@ def state_execution_rows(state: Dict[str, Any] | None = None) -> List[Dict[str, 
                     clean = dict(row)
                     clean.setdefault("journal_source", f"state.{key}")
                     rows.append(clean)
-    return _dedupe_rows(rows)
+    return _sort_execution_rows(_dedupe_rows(rows))
 
 
 def reconciled_execution_rows(journal: Dict[str, Any], state: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
     journal_execution, _, _ = classify_rows(journal)
     combined = list(journal_execution) + state_execution_rows(state)
-    return _dedupe_rows(combined)
+    return _sort_execution_rows(_dedupe_rows(combined))
 
 
 def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
     state = _load_json(STATE_FILE)
     journal_execution, review, unknown = classify_rows(journal)
     state_execution = state_execution_rows(state)
-    execution = _dedupe_rows(list(journal_execution) + list(state_execution))
+    execution = _sort_execution_rows(_dedupe_rows(list(journal_execution) + list(state_execution)))
     entries = [t for t in execution if _action(t) in ENTRY_ACTIONS]
     exits = [t for t in execution if _action(t) in EXIT_ACTIONS]
     stop_exits = [t for t in exits if "stop" in str(t.get("exit_reason", "")).lower()]
+    partial_exits = [t for t in exits if _action(t) == "partial_exit"]
     wins = [t for t in exits if _float(t.get("pnl_dollars", 0.0)) > 0]
     losses = [t for t in exits if _float(t.get("pnl_dollars", 0.0)) < 0]
     flat = [t for t in exits if _float(t.get("pnl_dollars", 0.0)) == 0]
@@ -196,8 +235,9 @@ def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
     perf = state.get("performance", {}) if isinstance(state.get("performance"), dict) else {}
     state_realized_today = perf.get("realized_pnl_today")
     state_realized_total = perf.get("realized_pnl_total")
+    latest_execution = execution[-1] if execution else None
     return {
-        "summary_type": "execution_only_state_reconciled",
+        "summary_type": "execution_only_state_reconciled_partial_exit_fixed",
         "trades_count": len(execution),
         "total_raw_rows": total_trades,
         "execution_rows_count": len(execution),
@@ -207,6 +247,7 @@ def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
         "unknown_rows_count": len(unknown),
         "entries_count": len(entries),
         "exits_count": len(exits),
+        "partial_exit_count": len(partial_exits),
         "blocked_or_rejected_count": len([r for r in review if _action(r) in {"blocked", "rejected"} or "blocked" in _source(r) or "rejected" in _source(r)]),
         "stop_loss_exits_count": len(stop_exits),
         "wins_count": len(wins),
@@ -217,11 +258,11 @@ def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
         "net_realized_from_execution_rows": round(gross_profit - gross_loss, 2),
         "state_realized_pnl_today": state_realized_today,
         "state_realized_pnl_total": state_realized_total,
-        "realized_reconciliation_note": "Execution rows are reconciled from trade_journal.json plus state.json trades/recent_trades. State performance remains the authoritative live P/L display.",
+        "realized_reconciliation_note": "Execution rows are reconciled from trade_journal.json plus state.json trades/recent_trades. Partial exits with fill data count as execution rows even when they come from trades_for_date:return.",
         "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss > 0 else None,
         "win_rate_pct": round(len(wins) / len(exits) * 100, 2) if exits else None,
-        "latest_execution_trade": execution[-1] if execution else None,
-        "latest_trade": execution[-1] if execution else None,
+        "latest_execution_trade": latest_execution,
+        "latest_trade": latest_execution,
         "latest_review_row": review[-1] if review else None,
         "note": "Realized stats exclude rotation-review/scanner/blocked rows and count only actual execution actions.",
     }
@@ -274,6 +315,7 @@ def status_payload() -> Dict[str, Any]:
             "execution_actions": sorted(REAL_EXECUTION_ACTIONS),
             "review_actions": sorted(REVIEW_ACTIONS),
             "review_source_hints": list(REVIEW_SOURCE_HINTS),
+            "execution_precedence": "fill-like entry/exit/partial_exit/reduce rows are execution rows before review-source hints are applied",
         },
     }
 
