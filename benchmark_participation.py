@@ -20,7 +20,7 @@ try:
 except Exception:  # pragma: no cover
     yf = None
 
-VERSION = "benchmark-participation-feed-fallback-2026-05-13"
+VERSION = "benchmark-participation-drawdown-units-2026-05-13"
 _REGISTERED: set[int] = set()
 _APPLIED: set[int] = set()
 _CACHE: Dict[str, Any] = {"ts": 0.0, "snapshot": None}
@@ -30,8 +30,10 @@ STATE_FILE = os.path.join(STATE_DIR, os.path.basename(os.environ.get("STATE_FILE
 
 ENABLED = os.environ.get("RISK_ON_PARTICIPATION_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 NEAR_HIGH_PCT = float(os.environ.get("RISK_ON_NEAR_HIGH_PCT", "0.0035"))
-# Relaxed from 0.15% to 0.30% so a tiny open-position giveback does not suppress
-# participation on otherwise confirmed risk-on days.
+# Stored risk-control values in state.json are percentage points, e.g. 0.005 means 0.005%.
+# Config thresholds are decimals, e.g. 0.003 means 0.30%. The participation check below
+# normalizes thresholds to percentage points so tiny open-position givebacks do not falsely
+# suppress risk-on expansion.
 MAX_DRAWDOWN = float(os.environ.get("RISK_ON_MAX_DRAWDOWN_PCT", "0.0030"))
 MAX_DAILY_LOSS = float(os.environ.get("RISK_ON_MAX_DAILY_LOSS_PCT", "0.0015"))
 TARGET_POSITIONS = int(os.environ.get("RISK_ON_TARGET_LONG_POSITIONS", "3"))
@@ -56,6 +58,22 @@ def _f(x: Any, default: float = 0.0) -> float:
         return default if math.isnan(v) or math.isinf(v) else v
     except Exception:
         return default
+
+
+def _pct_threshold(decimal_value: float) -> float:
+    """Convert a decimal threshold such as 0.003 into percentage points: 0.30."""
+    return _f(decimal_value, 0.0) * 100.0
+
+
+def _risk_pct_value(value: Any) -> float:
+    """Return state risk-control percentage values as percentage points.
+
+    The bot's status payload names these fields `*_pct`, but the persisted state reports
+    them as display-style percentage points. For example, an intraday drawdown of
+    0.005 means 0.005%, not 0.5%. Keeping this as a single helper prevents the
+    participation gate from comparing percentage points against decimal thresholds.
+    """
+    return _f(value, 0.0)
 
 
 def _now_text() -> str:
@@ -307,6 +325,10 @@ def _positions(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"count": len(rows), "long_count": long_count, "flat_book": len(rows) == 0, "any_profitable_long": any_profit, "positions": rows}
 
 
+def _failed_checks(checks: Dict[str, Any]) -> List[str]:
+    return [name for name, passed in checks.items() if not bool(passed)]
+
+
 def build_snapshot(core: Any | None = None, force: bool = False) -> Dict[str, Any]:
     if not force and _CACHE["snapshot"] and time.time() - _CACHE["ts"] <= CACHE_TTL:
         return copy.deepcopy(_CACHE["snapshot"])
@@ -322,15 +344,21 @@ def build_snapshot(core: Any | None = None, force: bool = False) -> Dict[str, An
     benchmark_data_stale = any(bool(x.get("data_stale")) for x in (spy, qqq))
     benchmark_ready = not benchmark_data_missing and not benchmark_data_stale
 
+    intraday_drawdown_pct = _risk_pct_value(risk.get("intraday_drawdown_pct"))
+    daily_loss_pct = _risk_pct_value(risk.get("daily_loss_pct"))
+    max_drawdown_pct = _pct_threshold(MAX_DRAWDOWN)
+    max_daily_loss_pct = _pct_threshold(MAX_DAILY_LOSS)
+
     checks = {
         "spy_positive_near_high": bool(spy.get("positive") and spy.get("near_day_high")),
         "qqq_positive_near_high": bool(qqq.get("positive") and qqq.get("near_day_high")),
         "benchmark_data_ready": bool(benchmark_ready),
         "self_defense_clear": not bool(risk.get("self_defense_active")),
-        "drawdown_near_zero": _f(risk.get("intraday_drawdown_pct"), 0.0) <= MAX_DRAWDOWN,
-        "daily_loss_near_zero": _f(risk.get("daily_loss_pct"), 0.0) <= MAX_DAILY_LOSS,
+        "drawdown_near_zero": intraday_drawdown_pct <= max_drawdown_pct,
+        "daily_loss_near_zero": daily_loss_pct <= max_daily_loss_pct,
         "book_flat_or_profitable": bool(pos["flat_book"] or pos["any_profitable_long"]),
     }
+    failed = _failed_checks(checks)
     active = bool(ENABLED and all(checks.values()))
     target = max(MIN_TARGET_POSITIONS, min(TARGET_POSITIONS, 3)) if active else pos["long_count"]
     alpha_spy = round(bot_ret - _f(spy.get("day_return_pct"), 0.0), 3)
@@ -360,9 +388,16 @@ def build_snapshot(core: Any | None = None, force: bool = False) -> Dict[str, An
             "Risk-on participation mode active: allow 2-3 active long positions.",
             "Modestly raise confirmed setup exposure toward the 3%-5% target band.",
             "Keep stops, but prefer profit-locks and partial exits over blocking all follow-up entries.",
+            "Do not chase extended names; let pullback/reclaim timing decide which add-on gets filled.",
         ]
     else:
         recs.append("Keep standard controls until SPY/QQQ are both positive and near highs with self-defense clear and minimal drawdown.")
+        if failed:
+            recs.append("Inactive participation checks: " + ", ".join(failed) + ".")
+        if "drawdown_near_zero" in failed:
+            recs.append(
+                f"Drawdown gate uses percent-point normalization: current intraday drawdown {round(intraday_drawdown_pct, 4)}% must be <= {round(max_drawdown_pct, 4)}%."
+            )
     if score not in {"good", "benchmark_missing", "benchmark_stale"}:
         recs.append("Bot is under-participating versus SPY/QQQ; look for the next qualified long setup instead of staying at one position.")
 
@@ -382,8 +417,8 @@ def build_snapshot(core: Any | None = None, force: bool = False) -> Dict[str, An
             "realized_pnl_today": round(_f(perf.get("realized_pnl_today"), 0), 2),
             "realized_pnl_total": round(_f(perf.get("realized_pnl_total"), 0), 2),
             "unrealized_pnl": round(_f(perf.get("unrealized_pnl"), 0), 2),
-            "daily_loss_pct": _f(risk.get("daily_loss_pct"), 0),
-            "intraday_drawdown_pct": _f(risk.get("intraday_drawdown_pct"), 0),
+            "daily_loss_pct": daily_loss_pct,
+            "intraday_drawdown_pct": intraday_drawdown_pct,
             "self_defense_active": bool(risk.get("self_defense_active")),
             "self_defense_reason": risk.get("self_defense_reason", ""),
         },
@@ -402,13 +437,21 @@ def build_snapshot(core: Any | None = None, force: bool = False) -> Dict[str, An
             "new_entries_per_cycle": NEW_ENTRIES_PER_CYCLE if active else None,
             "per_position_exposure_target_pct": "3-5% on confirmed setups while active",
             "checks": checks,
+            "failed_checks": failed,
+            "current_values": {
+                "intraday_drawdown_pct": round(intraday_drawdown_pct, 4),
+                "daily_loss_pct": round(daily_loss_pct, 4),
+                "long_count": pos["long_count"],
+                "any_profitable_long": pos["any_profitable_long"],
+            },
             "thresholds": {
                 "near_high_pct": round(NEAR_HIGH_PCT * 100, 3),
-                "max_intraday_drawdown_pct": round(MAX_DRAWDOWN * 100, 3),
-                "max_daily_loss_pct": round(MAX_DAILY_LOSS * 100, 3),
+                "max_intraday_drawdown_pct": round(max_drawdown_pct, 3),
+                "max_daily_loss_pct": round(max_daily_loss_pct, 3),
                 "entry_override_score_floor": ENTRY_SCORE_FLOOR,
                 "benchmark_stale_seconds": BENCHMARK_STALE_SECONDS,
             },
+            "unit_note": "Risk-control pct values are compared as percentage points; 0.005 means 0.005%, not 0.5%.",
         },
         "recommended_actions": recs,
     }
@@ -437,7 +480,7 @@ def _restore_runtime(core: Any, saved: Dict[str, Any]) -> None:
 
 def _apply_runtime(core: Any, snap: Dict[str, Any]) -> Dict[str, Any]:
     if not (snap.get("risk_on_participation") or {}).get("active"):
-        return {"applied": False, "reason": "risk_on_participation_not_active", "benchmark_data_missing": snap.get("benchmark_data_missing"), "benchmark_data_stale": snap.get("benchmark_data_stale")}
+        return {"applied": False, "reason": "risk_on_participation_not_active", "failed_checks": (snap.get("risk_on_participation") or {}).get("failed_checks"), "benchmark_data_missing": snap.get("benchmark_data_missing"), "benchmark_data_stale": snap.get("benchmark_data_stale")}
     changes: Dict[str, Any] = {}
 
     def setmax(name: str, value: Any):
