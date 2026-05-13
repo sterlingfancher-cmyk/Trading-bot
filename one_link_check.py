@@ -1,13 +1,13 @@
 """One-link check patch.
 
 Keeps the user's daily testing flow to one URL: /paper/self-check.
-Adds journal truth, classic signal mode, intraday timing, and position-quality
-status into the light self-check set without requiring Sterling to manually test
-more endpoints after each deploy.
+Adds journal truth, classic signal mode, intraday timing, position-quality,
+benchmark comparison, and market participation status into the light self-check
+set without requiring Sterling to manually test more endpoints after each deploy.
 """
 from __future__ import annotations
 
-VERSION = "one-link-position-quality-check-2026-05-11"
+VERSION = "one-link-benchmark-participation-check-2026-05-13"
 
 
 def _add_endpoint(light, endpoint, after_path=None):
@@ -33,6 +33,8 @@ def apply(self_check_module=None):
         _add_endpoint(light, {"path": "/paper/classic-signal-status", "category": "risk", "required": True}, after_path="/paper/risk-improvement-status")
         _add_endpoint(light, {"path": "/paper/intraday-timing-status", "category": "risk", "required": True}, after_path="/paper/classic-signal-status")
         _add_endpoint(light, {"path": "/paper/position-quality-status", "category": "risk", "required": True}, after_path="/paper/intraday-timing-status")
+        _add_endpoint(light, {"path": "/paper/benchmark-comparison", "category": "benchmark", "required": True}, after_path="/paper/position-quality-status")
+        _add_endpoint(light, {"path": "/paper/market-participation-status", "category": "benchmark", "required": True}, after_path="/paper/benchmark-comparison")
         return {
             "status": "ok",
             "version": VERSION,
@@ -40,6 +42,9 @@ def apply(self_check_module=None):
             "classic_signal_in_self_check": True,
             "intraday_timing_in_self_check": True,
             "position_quality_in_self_check": True,
+            "benchmark_comparison_in_self_check": True,
+            "market_participation_in_self_check": True,
+            "single_best_link": "/paper/self-check",
         }
     except Exception as exc:
         return {
@@ -49,6 +54,8 @@ def apply(self_check_module=None):
             "classic_signal_in_self_check": False,
             "intraday_timing_in_self_check": False,
             "position_quality_in_self_check": False,
+            "benchmark_comparison_in_self_check": False,
+            "market_participation_in_self_check": False,
             "error": str(exc),
         }
 
