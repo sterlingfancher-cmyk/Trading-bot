@@ -1,10 +1,11 @@
-"""Intraday timing guard.
+"""Intraday adaptive timing guard.
 
 Purpose:
 - Keep the account available for intraday trading.
 - Stop the bot from chasing extended 5-minute momentum.
-- Require pullback/reclaim + 15-minute trend confirmation before new longs.
-- Keep tech-heavy exposure allowed; this module does not impose a tech cap.
+- Keep the 5-minute MA20 as a chase-prevention / pullback-reclaim guard.
+- Add adaptive confirmation using VWAP reclaim, 9 EMA momentum hold, 15-minute trend,
+  and ATR-based extension checks.
 - Preserve EOD allocation as the larger/full-size decision layer.
 
 This is implemented as a startup patch so it can be layered onto the existing
@@ -17,15 +18,27 @@ import os
 import time
 from typing import Any, Dict, List, Tuple
 
-VERSION = "intraday-timing-pullback-guard-2026-05-11"
+VERSION = "intraday-adaptive-timing-2026-05-13"
 
 CACHE_TTL_SECONDS = float(os.environ.get("INTRADAY_TIMING_CACHE_TTL_SECONDS", "75"))
+
+# Legacy 5-minute MA20 chase guard. This remains the primary no-chase reference.
 MAX_ABOVE_5M_MA20 = float(os.environ.get("INTRADAY_TIMING_MAX_ABOVE_5M_MA20", "0.006"))
 MAX_ABOVE_15M_MA20 = float(os.environ.get("INTRADAY_TIMING_MAX_ABOVE_15M_MA20", "0.014"))
 MAX_FROM_DAY_OPEN = float(os.environ.get("INTRADAY_TIMING_MAX_FROM_DAY_OPEN", "0.035"))
 RECLAIM_LOOKBACK_BARS = int(os.environ.get("INTRADAY_TIMING_RECLAIM_LOOKBACK_BARS", "8"))
 MIN_15M_SLOPE_PCT = float(os.environ.get("INTRADAY_TIMING_MIN_15M_SLOPE_PCT", "0.0005"))
 EOD_WINDOW_MINUTES = int(os.environ.get("EOD_ALLOCATION_WINDOW_MINUTES", os.environ.get("INTRADAY_TIMING_EOD_WINDOW_MINUTES", "45")))
+
+# Adaptive timing additions. These allow the bot to compare entry timing paths instead of
+# using 5m MA20 as the only trigger. The rules still block obvious chase entries.
+VWAP_RECLAIM_MAX_ABOVE = float(os.environ.get("INTRADAY_TIMING_VWAP_RECLAIM_MAX_ABOVE", "0.008"))
+EMA9_HOLD_MAX_BELOW = float(os.environ.get("INTRADAY_TIMING_EMA9_HOLD_MAX_BELOW", "0.0025"))
+EMA9_HOLD_MAX_ABOVE_5M_MA20 = float(os.environ.get("INTRADAY_TIMING_EMA9_HOLD_MAX_ABOVE_5M_MA20", "0.010"))
+ATR_PERIOD = int(os.environ.get("INTRADAY_TIMING_ATR_PERIOD", "14"))
+MAX_ATR_EXTENSION = float(os.environ.get("INTRADAY_TIMING_MAX_ATR_EXTENSION", "1.25"))
+CATALYST_MAX_ATR_EXTENSION = float(os.environ.get("INTRADAY_TIMING_CATALYST_MAX_ATR_EXTENSION", "1.65"))
+MIN_METHODS_FOR_FULL_CONFIRMATION = int(os.environ.get("INTRADAY_TIMING_MIN_METHODS_FOR_FULL_CONFIRMATION", "1"))
 
 # Runtime overrides. These are intentionally conservative for intraday starters.
 OVERRIDES = {
@@ -97,11 +110,74 @@ def _col(df: Any, name: str) -> Any:
     return None
 
 
+def _session_df(df: Any) -> Any:
+    """Return only the latest regular/intraday session when the index supports dates."""
+    if df is None:
+        return df
+    try:
+        if len(df) == 0:
+            return df
+        idx = df.index
+        last_date = idx[-1].date()
+        mask = [getattr(x, "date", lambda: None)() == last_date for x in idx]
+        session = df.loc[mask]
+        return session if len(session) else df
+    except Exception:
+        return df
+
+
 def _sma(series: Any, n: int) -> float:
     try:
         if series is None or len(series) < n:
             return 0.0
         return _float(series.tail(n).mean(), 0.0)
+    except Exception:
+        return 0.0
+
+
+def _ema(series: Any, n: int) -> float:
+    try:
+        if series is None or len(series) < n:
+            return 0.0
+        return _float(series.ewm(span=n, adjust=False).mean().iloc[-1], 0.0)
+    except Exception:
+        return 0.0
+
+
+def _vwap(df: Any) -> float:
+    try:
+        if df is None or len(df) == 0:
+            return 0.0
+        high = _col(df, "High")
+        low = _col(df, "Low")
+        close = _col(df, "Close")
+        volume = _col(df, "Volume")
+        if high is None or low is None or close is None or volume is None:
+            return 0.0
+        typical = (high + low + close) / 3.0
+        denom = volume.cumsum().iloc[-1]
+        if _float(denom, 0.0) <= 0:
+            return 0.0
+        return _float((typical * volume).cumsum().iloc[-1] / denom, 0.0)
+    except Exception:
+        return 0.0
+
+
+def _atr(df: Any, n: int = ATR_PERIOD) -> float:
+    try:
+        if df is None or len(df) < n + 1:
+            return 0.0
+        high = _col(df, "High")
+        low = _col(df, "Low")
+        close = _col(df, "Close")
+        if high is None or low is None or close is None:
+            return 0.0
+        prev_close = close.shift(1)
+        tr = (high - low).abs()
+        tr2 = (high - prev_close).abs()
+        tr3 = (low - prev_close).abs()
+        true_range = tr.combine(tr2, max).combine(tr3, max)
+        return _float(true_range.tail(n).mean(), 0.0)
     except Exception:
         return 0.0
 
@@ -156,14 +232,30 @@ def _append_decision(decision: Dict[str, Any]) -> None:
     del _LAST_DECISIONS[:-50]
 
 
+def _safe_pct(numerator: float, denominator: float) -> float | None:
+    if not numerator or not denominator:
+        return None
+    try:
+        return numerator / denominator - 1.0
+    except Exception:
+        return None
+
+
+def _pct_text(x: float | None) -> float | None:
+    return round(x * 100, 3) if x is not None else None
+
+
 def _pullback_reclaim_profile(module: Any, symbol: str) -> Dict[str, Any]:
     cache_key = f"{symbol.upper()}:{int(time.time() // CACHE_TTL_SECONDS)}"
     cached = _TIMING_CACHE.get(cache_key)
     if cached:
         return dict(cached[1])
 
-    df5 = _download(module, symbol, "2d", "5m")
-    df15 = _download(module, symbol, "5d", "15m")
+    raw5 = _download(module, symbol, "2d", "5m")
+    raw15 = _download(module, symbol, "5d", "15m")
+    df5 = _session_df(raw5)
+    df15 = raw15
+
     close5 = _col(df5, "Close")
     high5 = _col(df5, "High")
     low5 = _col(df5, "Low")
@@ -172,8 +264,13 @@ def _pullback_reclaim_profile(module: Any, symbol: str) -> Dict[str, Any]:
     price = _last(close5)
     ma5_20 = _sma(close5, 20)
     ma5_8 = _sma(close5, 8)
+    ema5_9 = _ema(close5, 9)
+    session_vwap = _vwap(df5)
+    atr5 = _atr(df5, ATR_PERIOD)
+
     ma15_20 = _sma(close15, 20)
     ma15_8 = _sma(close15, 8)
+
     first_open = 0.0
     try:
         open5 = _col(df5, "Open")
@@ -189,44 +286,94 @@ def _pullback_reclaim_profile(module: Any, symbol: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    above_5m_ma20_pct = (price / ma5_20 - 1.0) if price and ma5_20 else None
-    above_15m_ma20_pct = (price / ma15_20 - 1.0) if price and ma15_20 else None
-    from_day_open_pct = (price / first_open - 1.0) if price and first_open else None
-    ma15_slope_pct = (ma15_8 / ma15_20 - 1.0) if ma15_8 and ma15_20 else None
+    above_5m_ma20_pct = _safe_pct(price, ma5_20)
+    above_15m_ma20_pct = _safe_pct(price, ma15_20)
+    above_vwap_pct = _safe_pct(price, session_vwap)
+    above_ema9_pct = _safe_pct(price, ema5_9)
+    from_day_open_pct = _safe_pct(price, first_open)
+    ma15_slope_pct = _safe_pct(ma15_8, ma15_20)
+    atr_extension = ((price - ma5_20) / atr5) if price and ma5_20 and atr5 else None
 
-    touched_or_undercut_ma20 = bool(ma5_20 and recent_low and recent_low <= ma5_20 * (1.0 + MAX_ABOVE_5M_MA20))
-    reclaimed_5m_ma20 = bool(price and ma5_20 and price >= ma5_20 and (above_5m_ma20_pct is None or above_5m_ma20_pct <= MAX_ABOVE_5M_MA20))
+    # Confirmation layer: the larger trend must agree. 5m MA20 is no longer the
+    # only acceptable trigger, but the 15m trend keeps the starter from fighting tape.
     confirmed_15m = bool(price and ma15_8 and ma15_20 and price >= ma15_8 and ma15_8 >= ma15_20 * (1.0 + MIN_15M_SLOPE_PCT))
     not_too_extended_15m = bool(above_15m_ma20_pct is None or above_15m_ma20_pct <= MAX_ABOVE_15M_MA20)
     not_chasing_day_move = bool(from_day_open_pct is None or from_day_open_pct <= MAX_FROM_DAY_OPEN)
 
-    allowed = bool(touched_or_undercut_ma20 and reclaimed_5m_ma20 and confirmed_15m and not_too_extended_15m and not_chasing_day_move)
+    # ATR extension control. Catalyst names can get slightly more room, but no rule
+    # gets unlimited chase authority.
+    atr_ok_standard = bool(atr_extension is None or atr_extension <= MAX_ATR_EXTENSION)
+    atr_ok_catalyst_room = bool(atr_extension is None or atr_extension <= CATALYST_MAX_ATR_EXTENSION)
+
+    # Method 1: classic 5m MA20 pullback/reclaim.
+    touched_ma20 = bool(ma5_20 and recent_low and recent_low <= ma5_20 * (1.0 + MAX_ABOVE_5M_MA20))
+    reclaimed_ma20 = bool(price and ma5_20 and price >= ma5_20 and (above_5m_ma20_pct is None or above_5m_ma20_pct <= MAX_ABOVE_5M_MA20))
+    ma20_reclaim = bool(touched_ma20 and reclaimed_ma20 and atr_ok_standard)
+
+    # Method 2: VWAP pullback/reclaim. Useful when price respects VWAP better than MA20.
+    touched_vwap = bool(session_vwap and recent_low and recent_low <= session_vwap * (1.0 + VWAP_RECLAIM_MAX_ABOVE))
+    reclaimed_vwap = bool(price and session_vwap and price >= session_vwap and (above_vwap_pct is None or above_vwap_pct <= VWAP_RECLAIM_MAX_ABOVE))
+    vwap_reclaim = bool(touched_vwap and reclaimed_vwap and atr_ok_standard)
+
+    # Method 3: 9 EMA momentum hold. This is the risk-on starter valve for strong trends.
+    # It still requires 15m trend confirmation and ATR control, so it should not become
+    # a blind breakout chase.
+    recent_held_ema9 = bool(ema5_9 and recent_low and recent_low >= ema5_9 * (1.0 - EMA9_HOLD_MAX_BELOW))
+    price_holds_ema9 = bool(price and ema5_9 and price >= ema5_9)
+    not_far_above_ma20_for_ema = bool(above_5m_ma20_pct is None or above_5m_ma20_pct <= EMA9_HOLD_MAX_ABOVE_5M_MA20)
+    ema9_momentum_hold = bool(recent_held_ema9 and price_holds_ema9 and not_far_above_ma20_for_ema and atr_ok_catalyst_room)
+
+    methods = {
+        "5m_ma20_pullback_reclaim": ma20_reclaim,
+        "vwap_reclaim": vwap_reclaim,
+        "ema9_momentum_hold": ema9_momentum_hold,
+    }
+    confirmed_methods = [name for name, ok in methods.items() if ok]
+    enough_methods = len(confirmed_methods) >= max(1, MIN_METHODS_FOR_FULL_CONFIRMATION)
+
+    allowed = bool(confirmed_15m and not_too_extended_15m and not_chasing_day_move and enough_methods)
+
     reasons: List[str] = []
-    if not touched_or_undercut_ma20:
-        reasons.append("no_recent_pullback_to_5m_ma20")
-    if not reclaimed_5m_ma20:
-        reasons.append("not_reclaimed_5m_ma20_or_still_extended")
     if not confirmed_15m:
         reasons.append("15m_trend_not_confirmed")
     if not not_too_extended_15m:
         reasons.append("too_far_above_15m_ma20")
     if not not_chasing_day_move:
         reasons.append("too_extended_from_day_open")
+    if not enough_methods:
+        reasons.append("waiting_for_pullback_reclaim_or_ema9_hold")
+    if not ma20_reclaim and above_5m_ma20_pct is not None and above_5m_ma20_pct > MAX_ABOVE_5M_MA20:
+        reasons.append("above_5m_ma20_without_reclaim")
+    if not vwap_reclaim and above_vwap_pct is not None and above_vwap_pct > VWAP_RECLAIM_MAX_ABOVE:
+        reasons.append("above_vwap_without_reclaim")
+    if atr_extension is not None and atr_extension > CATALYST_MAX_ATR_EXTENSION:
+        reasons.append("atr_extension_too_high")
 
     profile = {
         "symbol": symbol.upper(),
         "allowed": allowed,
-        "reasons": reasons or ["pullback_reclaim_and_15m_confirmed"],
+        "reasons": reasons or ["adaptive_timing_confirmed"],
+        "selected_methods": confirmed_methods,
+        "method_checks": methods,
         "price": round(price, 4) if price else None,
         "ma5_20": round(ma5_20, 4) if ma5_20 else None,
+        "ma5_8": round(ma5_8, 4) if ma5_8 else None,
+        "ema5_9": round(ema5_9, 4) if ema5_9 else None,
+        "vwap": round(session_vwap, 4) if session_vwap else None,
+        "atr5": round(atr5, 4) if atr5 else None,
         "ma15_20": round(ma15_20, 4) if ma15_20 else None,
-        "above_5m_ma20_pct": round(above_5m_ma20_pct * 100, 3) if above_5m_ma20_pct is not None else None,
-        "above_15m_ma20_pct": round(above_15m_ma20_pct * 100, 3) if above_15m_ma20_pct is not None else None,
-        "from_day_open_pct": round(from_day_open_pct * 100, 3) if from_day_open_pct is not None else None,
-        "ma15_slope_pct": round(ma15_slope_pct * 100, 3) if ma15_slope_pct is not None else None,
+        "ma15_8": round(ma15_8, 4) if ma15_8 else None,
+        "above_5m_ma20_pct": _pct_text(above_5m_ma20_pct),
+        "above_15m_ma20_pct": _pct_text(above_15m_ma20_pct),
+        "above_vwap_pct": _pct_text(above_vwap_pct),
+        "above_ema9_pct": _pct_text(above_ema9_pct),
+        "from_day_open_pct": _pct_text(from_day_open_pct),
+        "ma15_slope_pct": _pct_text(ma15_slope_pct),
+        "atr_extension": round(atr_extension, 3) if atr_extension is not None else None,
         "recent_low": round(recent_low, 4) if recent_low else None,
         "recent_high": round(recent_high, 4) if recent_high else None,
-        "rule": "wait_for_pullback_reclaim_5m_plus_15m_confirmation",
+        "rule": "adaptive_5m_ma20_vwap_ema9_15m_atr",
+        "interpretation": "5m MA20 remains the chase guard; VWAP/EMA9 can confirm safer risk-on starters when 15m trend and ATR extension agree.",
     }
     _TIMING_CACHE[cache_key] = (time.time(), profile)
     return dict(profile)
@@ -292,6 +439,7 @@ def _block_like(result: Any, reason: str) -> Any:
         prior = str(out.get("reason") or out.get("block_reason") or "").strip()
         out["reason"] = f"{prior},{reason}".strip(",") if prior else reason
         out["block_reason"] = out["reason"]
+        out["adaptive_timing"] = out.get("adaptive_timing") or {}
         return out
     return result
 
@@ -350,7 +498,10 @@ def _wrap_entry_quality(module: Any) -> None:
                         decision["hook"] = __name
                         _append_decision(decision)
                         if not decision.get("allowed", True):
-                            return _block_like(result, "intraday_timing_guard:" + str(decision.get("reason", "blocked")))
+                            blocked = _block_like(result, "intraday_adaptive_timing_guard:" + str(decision.get("reason", "blocked")))
+                            if isinstance(blocked, dict):
+                                blocked["adaptive_timing"] = decision
+                            return blocked
                     except Exception as exc:
                         _append_decision({"hook": __name, "allowed": True, "error": str(exc), "reason": "guard_error_allowed"})
                     return result
@@ -393,7 +544,7 @@ def apply(module: Any) -> Dict[str, Any]:
         "generated_local": _now_text(),
         "wrapped": _WRAPPED,
         "applied_runtime_overrides": applied,
-        "strategy": "pullback_reclaim_5m_plus_15m_confirmation; tech-heavy exposure still allowed",
+        "strategy": "adaptive_5m_ma20_vwap_ema9_15m_atr; 5m MA20 remains chase guard, not standalone signal",
     }
 
 
@@ -407,9 +558,23 @@ def status_payload(module: Any | None = None) -> Dict[str, Any]:
         "cache_size": len(_TIMING_CACHE),
         "applied_runtime_overrides": _APPLIED_OVERRIDES,
         "settings": {
+            "primary_role": "5m MA20 is used as a chase-prevention / pullback-reclaim guard, not as a standalone buy signal.",
+            "adaptive_methods": [
+                "5m_ma20_pullback_reclaim",
+                "vwap_reclaim",
+                "ema9_momentum_hold",
+                "15m_trend_confirmation",
+                "atr_extension_guard",
+            ],
             "max_above_5m_ma20_pct": MAX_ABOVE_5M_MA20 * 100,
             "max_above_15m_ma20_pct": MAX_ABOVE_15M_MA20 * 100,
             "max_from_day_open_pct": MAX_FROM_DAY_OPEN * 100,
+            "vwap_reclaim_max_above_pct": VWAP_RECLAIM_MAX_ABOVE * 100,
+            "ema9_hold_max_below_pct": EMA9_HOLD_MAX_BELOW * 100,
+            "ema9_hold_max_above_5m_ma20_pct": EMA9_HOLD_MAX_ABOVE_5M_MA20 * 100,
+            "atr_period": ATR_PERIOD,
+            "max_atr_extension": MAX_ATR_EXTENSION,
+            "catalyst_max_atr_extension": CATALYST_MAX_ATR_EXTENSION,
             "reclaim_lookback_bars": RECLAIM_LOOKBACK_BARS,
             "min_15m_slope_pct": MIN_15M_SLOPE_PCT * 100,
             "eod_window_minutes": EOD_WINDOW_MINUTES,
