@@ -5,17 +5,27 @@ The prior apply path could report success while the persisted state file still s
 AAOI as open, because the repair was interacting with a stale or wrapped core state
 object. This wrapper forces repair reads/writes to the mounted state.json file and
 returns JSON-safe diagnostics instead of allowing a Flask 500.
+
+2026-05-13 follow-up:
+The repair can write the correct state.json, but a still-running/stale in-memory
+app state can immediately save the old open-position view back over the repaired
+file. This module now also wraps core.save_state. If an outgoing save would
+reintroduce a state/journal full-exit mismatch while the persisted file is already
+clean, the stale write is blocked and the core module is resynced from disk.
 """
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import json
 import os
 import tempfile
 from typing import Any, Dict
 
-VERSION = "state-journal-apply-direct-persist-2026-05-13"
+VERSION = "state-journal-apply-direct-persist-2026-05-13-memory-sync"
 _PATCHED: set[int] = set()
+_CORE_SAVE_PATCHED: set[int] = set()
+_LAST_STALE_WRITE_BLOCK: Dict[str, Any] = {}
 
 
 def _now_text() -> str:
@@ -61,7 +71,20 @@ def _atomic_write_json_direct(path: str, obj: Dict[str, Any]) -> Dict[str, Any]:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=2, sort_keys=True, default=str, allow_nan=False)
             f.write("\n")
+            try:
+                f.flush()
+                os.fsync(f.fileno())
+            except Exception:
+                pass
         os.replace(tmp, path)
+        try:
+            folder_fd = os.open(directory, os.O_DIRECTORY)
+            try:
+                os.fsync(folder_fd)
+            finally:
+                os.close(folder_fd)
+        except Exception:
+            pass
         return {
             "saved_by": "direct_atomic_write_jsonsafe",
             "state_file": path,
@@ -74,6 +97,106 @@ def _atomic_write_json_direct(path: str, obj: Dict[str, Any]) -> Dict[str, Any]:
                 os.remove(tmp)
         except Exception:
             pass
+
+
+def _sync_core_state(core: Any | None, state: Dict[str, Any]) -> Dict[str, Any]:
+    """Best-effort sync of app-level in-memory state after direct disk repair.
+
+    app.py has historically kept runtime state in memory while also persisting to
+    state.json. A direct file repair must update both surfaces or the next
+    save_state/run_cycle can resurrect the stale position.
+    """
+    if core is None or not isinstance(state, dict):
+        return {"synced": False, "reason": "core_or_state_missing"}
+    synced_attrs = []
+    candidate_attrs = (
+        "STATE",
+        "state",
+        "PAPER_STATE",
+        "paper_state",
+        "ACCOUNT_STATE",
+        "account_state",
+        "BOT_STATE",
+        "bot_state",
+    )
+    for attr in candidate_attrs:
+        try:
+            current = getattr(core, attr, None)
+            if isinstance(current, dict):
+                current.clear()
+                current.update(copy.deepcopy(state))
+                synced_attrs.append(attr)
+        except Exception:
+            continue
+    # Some code paths may not expose a single named global. Keep a canonical
+    # repaired copy available for diagnostics and future patches without forcing
+    # app.py itself to know this module exists.
+    try:
+        setattr(core, "STATE_JOURNAL_REPAIRED_STATE", copy.deepcopy(state))
+        setattr(core, "STATE_JOURNAL_REPAIRED_STATE_LOCAL", _now_text())
+    except Exception:
+        pass
+    return {"synced": bool(synced_attrs), "synced_attrs": synced_attrs}
+
+
+def _guard_for_state(guard_module: Any, state: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        journal_file = getattr(guard_module, "TRADE_JOURNAL_FILE", "trade_journal.json")
+        journal = _load_json_direct(str(journal_file))
+        return guard_module.build_guard(state=state, journal=journal, core=None)
+    except Exception as exc:
+        return {"status": "error", "active": None, "error": repr(exc)}
+
+
+def _install_core_stale_write_guard(core: Any | None, guard_module: Any, state_file: str) -> Dict[str, Any]:
+    """Protect repaired state from stale in-memory overwrites.
+
+    If the app tries to save a state that has an open-position/full-exit mismatch
+    while the persisted state file is already clean, the save is stale. We block
+    it and resync the core module from the clean file.
+    """
+    if core is None or not hasattr(core, "save_state"):
+        return {"status": "not_applied", "reason": "core_save_state_missing", "version": VERSION}
+    if id(core) in _CORE_SAVE_PATCHED:
+        return {"status": "ok", "already_patched": True, "version": VERSION}
+
+    original_save_state = getattr(core, "save_state")
+    if not callable(original_save_state):
+        return {"status": "not_applied", "reason": "core_save_state_not_callable", "version": VERSION}
+
+    def protected_save_state(state: Dict[str, Any], *args: Any, **kwargs: Any) -> Any:
+        global _LAST_STALE_WRITE_BLOCK
+        if isinstance(state, dict):
+            candidate_guard = _guard_for_state(guard_module, state)
+            disk_state = _load_json_direct(str(state_file))
+            disk_guard = _guard_for_state(guard_module, disk_state)
+            if bool(candidate_guard.get("active")) and not bool(disk_guard.get("active")):
+                _LAST_STALE_WRITE_BLOCK = {
+                    "status": "blocked",
+                    "type": "state_journal_stale_write_guard",
+                    "version": VERSION,
+                    "generated_local": _now_text(),
+                    "reason": "blocked_stale_in_memory_state_from_reintroducing_repaired_journal_mismatch",
+                    "candidate_blocked_symbols": candidate_guard.get("blocked_symbols", []),
+                    "disk_reconciliation_status": disk_guard.get("reconciliation_status"),
+                    "state_file": str(state_file),
+                    "core_sync": _sync_core_state(core, disk_state),
+                }
+                try:
+                    setattr(core, "STATE_JOURNAL_LAST_STALE_WRITE_BLOCK", dict(_LAST_STALE_WRITE_BLOCK))
+                except Exception:
+                    pass
+                return None
+        return original_save_state(state, *args, **kwargs)
+
+    try:
+        protected_save_state._state_journal_stale_write_guard = True  # type: ignore[attr-defined]
+        setattr(core, "save_state", protected_save_state)
+        setattr(core, "STATE_JOURNAL_STALE_WRITE_GUARD_VERSION", VERSION)
+        _CORE_SAVE_PATCHED.add(id(core))
+        return {"status": "ok", "version": VERSION, "patched": True, "state_file": str(state_file)}
+    except Exception as exc:
+        return {"status": "error", "version": VERSION, "error": repr(exc)}
 
 
 def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
@@ -92,6 +215,8 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
     if not state_file:
         return {"status": "error", "version": VERSION, "error": "state_file_missing"}
 
+    stale_write_guard_status = _install_core_stale_write_guard(core, guard_module, str(state_file))
+
     # Force the repair module to persist directly to /data/state.json instead of
     # going through app/core wrappers that may hold a stale in-memory state object.
     def direct_load_state(active_core: Any | None = None) -> Dict[str, Any]:
@@ -99,12 +224,15 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
 
     def direct_save_state(state: Dict[str, Any], active_core: Any | None = None) -> Dict[str, Any]:
         safe_state = _json_safe(state)
-        return _atomic_write_json_direct(str(state_file), safe_state)
+        save_info = _atomic_write_json_direct(str(state_file), safe_state)
+        save_info["core_sync"] = _sync_core_state(core, safe_state)
+        return save_info
 
     try:
         guard_module._load_state = direct_load_state
         guard_module._save_state = direct_save_state
         guard_module.STATE_JOURNAL_DIRECT_PERSIST_PATCH_VERSION = VERSION
+        guard_module.STATE_JOURNAL_STALE_WRITE_GUARD_STATUS = stale_write_guard_status
     except Exception:
         pass
 
@@ -143,6 +271,8 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
             if isinstance(result, dict):
                 result["jsonsafe_patch_version"] = VERSION
                 result["direct_persist_patch_active"] = True
+                result["stale_write_guard_status"] = stale_write_guard_status
+                result["last_stale_write_block"] = dict(_LAST_STALE_WRITE_BLOCK)
                 result["state_file"] = str(state_file)
             return _json_safe(result)
         except Exception as exc:
@@ -152,6 +282,7 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
                 "version": getattr(guard_module, "REPAIR_VERSION", "unknown"),
                 "jsonsafe_patch_version": VERSION,
                 "direct_persist_patch_active": True,
+                "stale_write_guard_status": stale_write_guard_status,
                 "generated_local": _now_text(),
                 "apply": bool(apply),
                 "error": repr(exc),
@@ -164,6 +295,8 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
             if isinstance(payload, dict):
                 payload["jsonsafe_patch_version"] = VERSION
                 payload["direct_persist_patch_active"] = True
+                payload["stale_write_guard_status"] = stale_write_guard_status
+                payload["last_stale_write_block"] = dict(_LAST_STALE_WRITE_BLOCK)
                 payload["state_file"] = str(state_file)
             return _json_safe(payload)
         except Exception as exc:
@@ -173,6 +306,7 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
                 "version": getattr(guard_module, "VERSION", "unknown"),
                 "jsonsafe_patch_version": VERSION,
                 "direct_persist_patch_active": True,
+                "stale_write_guard_status": stale_write_guard_status,
                 "generated_local": _now_text(),
                 "error": repr(exc),
             }
@@ -181,4 +315,10 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
     guard_module.status_payload = wrapped_status_payload
     guard_module.STATE_JOURNAL_JSONSAFE_PATCH_VERSION = VERSION
     _PATCHED.add(id(guard_module))
-    return {"status": "ok", "version": VERSION, "patched": True, "state_file": str(state_file)}
+    return {
+        "status": "ok",
+        "version": VERSION,
+        "patched": True,
+        "state_file": str(state_file),
+        "stale_write_guard_status": stale_write_guard_status,
+    }
