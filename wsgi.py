@@ -132,6 +132,12 @@ try:
     except Exception:
         pass
     try:
+        light = getattr(self_check, "LIGHT_ENDPOINTS", None)
+        if isinstance(light, list) and not any(isinstance(row, dict) and row.get("path") == "/paper/ml2-status" for row in light):
+            light.append({"path": "/paper/ml2-status", "category": "ml", "required": False})
+    except Exception:
+        pass
+    try:
         import reporting_cleanup
         _call(reporting_cleanup, "apply", app, core)
     except Exception:
