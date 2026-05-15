@@ -99,6 +99,14 @@ except Exception:
     pass
 
 try:
+    import market_extension_guard
+    _patch_json_modules(market_extension_guard)
+    _call(market_extension_guard, "apply", core)
+    _call(market_extension_guard, "register_routes", app, core)
+except Exception:
+    pass
+
+try:
     import state_guard
     _call(state_guard, "register_routes", app)
 except Exception:
@@ -133,8 +141,14 @@ try:
         pass
     try:
         light = getattr(self_check, "LIGHT_ENDPOINTS", None)
-        if isinstance(light, list) and not any(isinstance(row, dict) and row.get("path") == "/paper/ml2-status" for row in light):
-            light.append({"path": "/paper/ml2-status", "category": "ml", "required": False})
+        if isinstance(light, list):
+            for _path, _category, _required in (
+                ("/paper/ml2-status", "ml", False),
+                ("/paper/market-extension-status", "risk", False),
+                ("/paper/fibonacci-status", "risk", False),
+            ):
+                if not any(isinstance(row, dict) and row.get("path") == _path for row in light):
+                    light.append({"path": _path, "category": _category, "required": _required})
     except Exception:
         pass
     try:
