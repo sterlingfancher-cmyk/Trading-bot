@@ -88,6 +88,9 @@ for _name, _functions in (
     ("mae_mfe_integration", (("apply", (core,)), ("register_routes", (app, core)))),
     ("adaptive_ml_research", (("apply", (core,)), ("register_routes", (app, core)))),
     ("adaptive_portfolio_intelligence", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("state_size_watchdog", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("advisory_authority_guard", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("strategy_label_schema", (("apply", (core,)), ("register_routes", (app, core)))),
     ("market_extension_guard", (("apply", (core,)), ("register_routes", (app, core)))),
     ("risk_reward_structure", (("apply", (core,)), ("register_routes", (app, core)))),
     ("state_guard", (("register_routes", (app,)),)),
@@ -119,6 +122,11 @@ try:
     except Exception:
         pass
     try:
+        import self_check_enrichment
+        _call(self_check_enrichment, "apply", self_check)
+    except Exception:
+        pass
+    try:
         light = getattr(self_check, "LIGHT_ENDPOINTS", None)
         if isinstance(light, list):
             for _path, _category, _required in (
@@ -144,6 +152,12 @@ try:
                 ("/paper/ml-ensemble-status", "ml", False),
                 ("/paper/reward-decay-status", "ml", False),
                 ("/paper/strategy-rotation-status", "ml", False),
+                ("/paper/state-size-watchdog", "governance", False),
+                ("/paper/telemetry-retention-status", "governance", False),
+                ("/paper/advisory-authority-status", "governance", False),
+                ("/paper/live-authority-guard-status", "governance", False),
+                ("/paper/strategy-label-schema-status", "governance", False),
+                ("/paper/setup-label-quality-status", "governance", False),
                 ("/paper/market-extension-status", "risk", False),
                 ("/paper/fibonacci-status", "risk", False),
                 ("/paper/risk-reward-status", "risk", False),
