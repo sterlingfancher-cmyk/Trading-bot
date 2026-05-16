@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "self-check-enrichment-2026-05-16"
+VERSION = "self-check-enrichment-2026-05-16-strategy-label-propagation"
 PATCHED_MODULE_IDS: set[int] = set()
 
 
@@ -159,6 +159,16 @@ def enrich(path: str, payload: Dict[str, Any], original=None) -> Dict[str, Any]:
             "missing_rows": coverage.get("missing_rows"),
             "complete_coverage_pct": coverage.get("complete_coverage_pct"),
             "required_fields": payload.get("required_fields"),
+        })
+    elif path in {"/paper/strategy-label-propagation-status", "/paper/canonical-strategy-label-status"}:
+        compact.update({
+            "targets_checked": payload.get("targets_checked"),
+            "rows_changed": payload.get("rows_changed"),
+            "complete_rows": payload.get("complete_rows"),
+            "partial_rows": payload.get("partial_rows"),
+            "missing_rows": payload.get("missing_rows"),
+            "complete_coverage_pct": payload.get("complete_coverage_pct"),
+            "recommendation": payload.get("recommendation"),
         })
     return compact
 
