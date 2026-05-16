@@ -124,6 +124,27 @@ def cleanup_diagnostic(diag: Dict[str, Any], snapshot: Dict[str, Any] | None = N
     return diag
 
 
+def _add_runtime_controls_self_check_endpoint() -> Dict[str, Any]:
+    """Add the runtime-controls repair route to the one-link self-check list."""
+    try:
+        import self_check
+        light = getattr(self_check, "LIGHT_ENDPOINTS", None)
+        if not isinstance(light, list):
+            return {"status": "warn", "reason": "LIGHT_ENDPOINTS_missing"}
+        path = "/paper/runtime-controls-repair-status"
+        if any(isinstance(row, dict) and row.get("path") == path for row in light):
+            return {"status": "ok", "already_present": True, "path": path, "count": len(light)}
+        insert_at = len(light)
+        for idx, row in enumerate(light):
+            if isinstance(row, dict) and row.get("path") == "/paper/state-safety-status":
+                insert_at = idx + 1
+                break
+        light.insert(insert_at, {"path": path, "category": "governance", "required": False})
+        return {"status": "ok", "added": True, "path": path, "count": len(light)}
+    except Exception as exc:
+        return {"status": "warn", "error": str(exc)}
+
+
 def _wire_runtime_controls_repair(flask_app: Any | None = None, core: Any | None = None) -> Dict[str, Any]:
     """Install runtime-controls diagnostics without changing trade authority."""
     try:
@@ -132,12 +153,14 @@ def _wire_runtime_controls_repair(flask_app: Any | None = None, core: Any | None
         route_result = None
         if flask_app is not None:
             route_result = rcr.register_routes(flask_app, core)
+        self_check_result = _add_runtime_controls_self_check_endpoint()
         return {
             "status": "ok",
             "version": RUNTIME_CONTROLS_REPAIR_WIRING_VERSION,
             "apply_result": apply_result,
             "routes_registered": flask_app is not None,
             "route_result": route_result,
+            "self_check_result": self_check_result,
         }
     except Exception as exc:
         return {
