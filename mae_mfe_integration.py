@@ -18,7 +18,7 @@ import os
 import sys
 from typing import Any, Dict, List, Tuple
 
-VERSION = "mae-mfe-integration-bridge-2026-05-16"
+VERSION = "mae-mfe-integration-bridge-2026-05-16-route-fix"
 ENABLED = os.environ.get("MAE_MFE_INTEGRATION_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 LIVE_AUTHORITY = False
 REGISTERED_APP_IDS: set[int] = set()
@@ -148,7 +148,6 @@ def integrate(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
     closed_features = [_feature_row(_risk_recommendation(path)) for path in _closed_paths(state)[-100:]]
     active_features = [_feature_row(rec) for rec in active_recs]
 
-    # Feed feature snapshots into ML2 rows when symbols match. This is feature enrichment only.
     ml2 = _dict(state.get("ml_phase2"))
     dataset = _list(ml2.get("dataset"))
     by_symbol = {str(row.get("symbol") or "").upper(): row for row in active_features + closed_features if isinstance(row, dict)}
@@ -162,7 +161,6 @@ def integrate(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
             row["mae_mfe_feature_enriched"] = True
             enriched += 1
 
-    # Feed summary into trade-quality section without recalculating trade outcomes here.
     tq = state.setdefault("trade_quality_telemetry", {})
     tq["mae_mfe_integration"] = {
         "version": VERSION,
@@ -266,7 +264,9 @@ def register_routes(flask_app: Any, module: Any = None) -> Dict[str, Any]:
     if "/paper/mae-mfe-integration-status" not in existing:
         flask_app.add_url_rule("/paper/mae-mfe-integration-status", "paper_mae_mfe_integration_status", status_route)
     if "/paper/adaptive-exit-recommendations" not in existing:
-        flask_app.add_url_rule("/paper/adaptive_exit_recommendations", "paper_adaptive_exit_recommendations", status_route)
+        flask_app.add_url_rule("/paper/adaptive-exit-recommendations", "paper_adaptive_exit_recommendations", status_route)
+    if "/paper/adaptive_exit_recommendations" not in existing:
+        flask_app.add_url_rule("/paper/adaptive_exit_recommendations", "paper_adaptive_exit_recommendations_legacy", status_route)
 
     REGISTERED_APP_IDS.add(id(flask_app))
     return {"status": "ok", "version": VERSION, "routes": ["/paper/mae-mfe-integration-status", "/paper/adaptive-exit-recommendations"], "live_authority": False}
