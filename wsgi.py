@@ -99,6 +99,14 @@ except Exception:
     pass
 
 try:
+    import ml_phase25_readiness
+    _patch_json_modules(ml_phase25_readiness)
+    _call(ml_phase25_readiness, "apply", core)
+    _call(ml_phase25_readiness, "register_routes", app, core)
+except Exception:
+    pass
+
+try:
     import market_extension_guard
     _patch_json_modules(market_extension_guard)
     _call(market_extension_guard, "apply", core)
@@ -124,6 +132,7 @@ for _name, _functions in (
     ("eod_hybrid", (("_register_routes", (app,)),)),
     ("risk_bootstrap", (("apply_runtime_overrides", (core,)), ("register_routes", (app,)))),
     ("fvg_runtime", (("apply_runtime_wiring", (core,)),)),
+    ("ml_phase25_readiness", (("apply", (core,)), ("register_routes", (app, core)))),
     ("live_volatility", (("apply", (core,)), ("register_routes", (app, core)))),
     ("classic_signal_mode", (("apply", (core,)), ("register_routes", (app, core)))),
     ("intraday_timing", (("apply", (core,)), ("register_routes", (app, core)))),
@@ -153,6 +162,8 @@ try:
         if isinstance(light, list):
             for _path, _category, _required in (
                 ("/paper/ml2-status", "ml", False),
+                ("/paper/ml-readiness-status", "ml", False),
+                ("/paper/ml-phase25-status", "ml", False),
                 ("/paper/market-extension-status", "risk", False),
                 ("/paper/fibonacci-status", "risk", False),
                 ("/paper/risk-reward-status", "risk", False),
