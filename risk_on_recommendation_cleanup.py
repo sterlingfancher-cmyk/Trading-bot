@@ -4,6 +4,7 @@ import functools
 from typing import Any, Dict, List
 
 VERSION = "risk-on-wording-cleanup-2026-05-13"
+RUNTIME_CONTROLS_REPAIR_WIRING_VERSION = "runtime-controls-repair-wiring-2026-05-16"
 _APPLIED = False
 
 
@@ -123,10 +124,34 @@ def cleanup_diagnostic(diag: Dict[str, Any], snapshot: Dict[str, Any] | None = N
     return diag
 
 
+def _wire_runtime_controls_repair(flask_app: Any | None = None, core: Any | None = None) -> Dict[str, Any]:
+    """Install runtime-controls diagnostics without changing trade authority."""
+    try:
+        import runtime_controls_repair as rcr
+        apply_result = rcr.apply(core)
+        route_result = None
+        if flask_app is not None:
+            route_result = rcr.register_routes(flask_app, core)
+        return {
+            "status": "ok",
+            "version": RUNTIME_CONTROLS_REPAIR_WIRING_VERSION,
+            "apply_result": apply_result,
+            "routes_registered": flask_app is not None,
+            "route_result": route_result,
+        }
+    except Exception as exc:
+        return {
+            "status": "warn",
+            "version": RUNTIME_CONTROLS_REPAIR_WIRING_VERSION,
+            "error": str(exc),
+        }
+
+
 def apply(*args, **kwargs) -> Dict[str, Any]:
     global _APPLIED
+    runtime_repair = _wire_runtime_controls_repair(None, args[0] if args else None)
     if _APPLIED:
-        return {"status": "ok", "version": VERSION, "already_applied": True}
+        return {"status": "ok", "version": VERSION, "already_applied": True, "runtime_controls_repair": runtime_repair}
     patched: List[str] = []
     try:
         import risk_on_entry_diagnostic as red
@@ -136,7 +161,7 @@ def apply(*args, **kwargs) -> Dict[str, Any]:
         red._merge_recommendations = merge
         patched.append("risk_on_entry_diagnostic._merge_recommendations")
     except Exception as exc:
-        return {"status": "error", "version": VERSION, "error": str(exc)}
+        return {"status": "error", "version": VERSION, "error": str(exc), "runtime_controls_repair": runtime_repair}
     try:
         import benchmark_participation as bp
         original = getattr(bp, "build_snapshot", None)
@@ -161,12 +186,13 @@ def apply(*args, **kwargs) -> Dict[str, Any]:
     except Exception:
         pass
     _APPLIED = True
-    return {"status": "ok", "version": VERSION, "patched": patched}
+    return {"status": "ok", "version": VERSION, "patched": patched, "runtime_controls_repair": runtime_repair}
 
 
 def register_routes(flask_app: Any, core: Any | None = None) -> Dict[str, Any]:
     from flask import jsonify
-    patch = apply()
+    patch = apply(core)
+    runtime_repair = _wire_runtime_controls_repair(flask_app, core)
     try:
         import benchmark_participation as bp
         import risk_on_entry_diagnostic as red
@@ -182,6 +208,7 @@ def register_routes(flask_app: Any, core: Any | None = None) -> Dict[str, Any]:
                 "type": "market_participation_status",
                 "version": getattr(bp, "VERSION", VERSION),
                 "recommendation_cleanup_version": VERSION,
+                "runtime_controls_repair_wiring_version": RUNTIME_CONTROLS_REPAIR_WIRING_VERSION,
                 "diagnostic_version": diag.get("version"),
                 "generated_local": snap.get("generated_local"),
                 "top_line": diag.get("top_line"),
@@ -199,6 +226,6 @@ def register_routes(flask_app: Any, core: Any | None = None) -> Dict[str, Any]:
             })
         flask_app.view_functions["risk_on_entry_diagnostic"] = clean_diagnostic
         flask_app.view_functions["market_participation_status"] = clean_participation
-        return {"status": "ok", "version": VERSION, "registered": True, "patch": patch}
+        return {"status": "ok", "version": VERSION, "registered": True, "patch": patch, "runtime_controls_repair": runtime_repair}
     except Exception as exc:
-        return {"status": "error", "version": VERSION, "error": str(exc), "patch": patch}
+        return {"status": "error", "version": VERSION, "error": str(exc), "patch": patch, "runtime_controls_repair": runtime_repair}
