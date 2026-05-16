@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "self-check-enrichment-2026-05-16-strategy-scorecard"
+VERSION = "self-check-enrichment-2026-05-16-promotion-readiness"
 PATCHED_MODULE_IDS: set[int] = set()
 
 
@@ -178,6 +178,22 @@ def enrich(path: str, payload: Dict[str, Any], original=None) -> Dict[str, Any]:
             "demotion_candidates_count": payload.get("demotion_candidates_count"),
             "collect_more_data_count": payload.get("collect_more_data_count"),
             "top_scorecards": top,
+            "recommendation": payload.get("recommendation"),
+        })
+    elif path in {"/paper/strategy-promotion-readiness-status", "/paper/phase3a-promotion-gate-status", "/paper/strategy-promotion-gate-status"}:
+        validation = _safe_dict(payload.get("validation"))
+        path_status = _safe_dict(payload.get("path_status"))
+        compact.update({
+            "gate_open": payload.get("gate_open"),
+            "phase3a_promotion_ready": payload.get("phase3a_promotion_ready"),
+            "strategy_count": payload.get("strategy_count"),
+            "ready_strategy_count": payload.get("ready_strategy_count"),
+            "blocked_strategy_count": payload.get("blocked_strategy_count"),
+            "validation_status": validation.get("status"),
+            "validation_ready": validation.get("ready"),
+            "path_rows_with_mae_mfe": path_status.get("path_rows_with_mae_mfe"),
+            "path_ready": path_status.get("ready"),
+            "top_ranked": _safe_list(payload.get("top_ranked"))[:3],
             "recommendation": payload.get("recommendation"),
         })
     return compact
