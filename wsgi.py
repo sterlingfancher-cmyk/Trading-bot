@@ -123,6 +123,7 @@ except Exception:
 for _name, _functions in (
     ("eod_hybrid", (("_register_routes", (app,)),)),
     ("risk_bootstrap", (("apply_runtime_overrides", (core,)), ("register_routes", (app,)))),
+    ("fvg_runtime", (("apply_runtime_wiring", (core,)),)),
     ("live_volatility", (("apply", (core,)), ("register_routes", (app, core)))),
     ("classic_signal_mode", (("apply", (core,)), ("register_routes", (app, core)))),
     ("intraday_timing", (("apply", (core,)), ("register_routes", (app, core)))),
@@ -155,6 +156,7 @@ try:
                 ("/paper/market-extension-status", "risk", False),
                 ("/paper/fibonacci-status", "risk", False),
                 ("/paper/risk-reward-status", "risk", False),
+                ("/paper/opening-range-fvg-status", "risk", False),
             ):
                 if not any(isinstance(row, dict) and row.get("path") == _path for row in light):
                     light.append({"path": _path, "category": _category, "required": _required})
