@@ -107,6 +107,14 @@ except Exception:
     pass
 
 try:
+    import risk_reward_structure
+    _patch_json_modules(risk_reward_structure)
+    _call(risk_reward_structure, "apply", core)
+    _call(risk_reward_structure, "register_routes", app, core)
+except Exception:
+    pass
+
+try:
     import state_guard
     _call(state_guard, "register_routes", app)
 except Exception:
@@ -146,6 +154,7 @@ try:
                 ("/paper/ml2-status", "ml", False),
                 ("/paper/market-extension-status", "risk", False),
                 ("/paper/fibonacci-status", "risk", False),
+                ("/paper/risk-reward-status", "risk", False),
             ):
                 if not any(isinstance(row, dict) and row.get("path") == _path for row in light):
                     light.append({"path": _path, "category": _category, "required": _required})
