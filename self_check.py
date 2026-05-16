@@ -20,7 +20,7 @@ import os
 import time
 from typing import Any, Dict, Iterable, List
 
-VERSION = "bounded-self-check-2026-05-11"
+VERSION = "bounded-self-check-fvg-telemetry-2026-05-16"
 BASE_URL = os.environ.get("PUBLIC_BASE_URL") or os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "https://trading-bot-clean.up.railway.app"
 if BASE_URL and not BASE_URL.startswith("http"):
     BASE_URL = "https://" + BASE_URL
@@ -190,6 +190,19 @@ def _compact_payload(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     elif "risk-improvement" in path:
         compact["mode"] = payload.get("mode")
         compact["state_safety"] = payload.get("state_safety")
+    elif "opening-range-fvg" in path:
+        tier = _safe_dict(payload.get("position_tier"))
+        compact["guard_enabled"] = payload.get("guard_enabled")
+        compact["pilot"] = payload.get("pilot")
+        compact["hard_enforcement_active"] = payload.get("hard_enforcement_active")
+        compact["position_tier"] = {
+            "tier": tier.get("tier"),
+            "max_positions": tier.get("max_positions"),
+            "reason": tier.get("reason"),
+        }
+        compact["recent_decisions_count"] = payload.get("recent_decisions_count")
+        compact["recent_would_block_count"] = payload.get("recent_would_block_count")
+        compact["recent_tail_count"] = len(_safe_list(payload.get("recent_tail")))
     elif "feedback-loop" in path:
         compact["actions"] = payload.get("actions")
         compact["self_defense_mode"] = payload.get("self_defense_mode")
@@ -258,6 +271,7 @@ def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
     journal_payload = next((r.get("compact", {}) for r in results if r.get("path") == "/paper/trade-journal-status"), {})
     freshness_payload = next((r.get("compact", {}) for r in results if r.get("path") == "/paper/runner-freshness"), {})
     safety_payload = next((r.get("compact", {}) for r in results if r.get("path") == "/paper/runner-safety-status"), {})
+    fvg_payload = next((r.get("compact", {}) for r in results if r.get("path") == "/paper/opening-range-fvg-status"), {})
 
     return {
         "status": "ok" if overall != "fail" else "fail",
@@ -270,7 +284,7 @@ def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
         "summary_counts": summary,
         "failed_required": [{"path": r.get("path"), "status_code": r.get("status_code"), "error": r.get("error")} for r in failed_required],
         "warnings": [{"path": r.get("path"), "status_code": r.get("status_code"), "error": r.get("error")} for r in warnings],
-        "dashboard": {"health": health_payload, "status": status_payload, "trade_journal": journal_payload, "runner_freshness": freshness_payload, "runner_safety": safety_payload},
+        "dashboard": {"health": health_payload, "status": status_payload, "trade_journal": journal_payload, "runner_freshness": freshness_payload, "runner_safety": safety_payload, "opening_range_fvg": fvg_payload},
         "results": results,
         "linked_only_heavy_routes": linked_only,
         "copy_paste_links_separate": [_full_url(ep["path"]) for ep in endpoints],
