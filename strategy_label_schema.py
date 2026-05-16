@@ -13,7 +13,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, List, Tuple
 
-VERSION = "strategy-label-schema-2026-05-16"
+VERSION = "strategy-label-schema-2026-05-16-route-fix"
 REGISTERED_APP_IDS: set[int] = set()
 REQUIRED_FIELDS = ["strategy_id", "setup_family", "entry_model", "exit_model", "risk_model"]
 
@@ -138,6 +138,8 @@ def register_routes(flask_app: Any, module: Any = None) -> Dict[str, Any]:
     if "/paper/strategy-label-schema-status" not in existing:
         flask_app.add_url_rule("/paper/strategy-label-schema-status", "paper_strategy_label_schema_status", status_route)
     if "/paper/setup-label-quality-status" not in existing:
-        flask_app.add_url_rule("/paper/setup_label_quality_status", "paper_setup_label_quality_status", status_route)
+        flask_app.add_url_rule("/paper/setup-label-quality-status", "paper_setup_label_quality_status", status_route)
+    if "/paper/setup_label_quality_status" not in existing:
+        flask_app.add_url_rule("/paper/setup_label_quality_status", "paper_setup_label_quality_status_legacy", status_route)
     REGISTERED_APP_IDS.add(id(flask_app))
     return {"status": "ok", "version": VERSION, "routes": ["/paper/strategy-label-schema-status", "/paper/setup-label-quality-status"], "live_authority": False}
