@@ -78,70 +78,22 @@ try:
 except Exception:
     pass
 
-try:
-    import reporting_cleanup
-    _call(reporting_cleanup, "apply", app, core)
-except Exception:
-    pass
-
-try:
-    import sitecustomize as ml_shadow
-    _call(ml_shadow, "_register_routes", app)
-except Exception:
-    pass
-
-try:
-    import ml_phase2_shadow
-    _patch_json_modules(ml_phase2_shadow)
-    _call(ml_phase2_shadow, "apply", core)
-    _call(ml_phase2_shadow, "register_routes", app, core)
-except Exception:
-    pass
-
-try:
-    import ml_phase25_readiness
-    _patch_json_modules(ml_phase25_readiness)
-    _call(ml_phase25_readiness, "apply", core)
-    _call(ml_phase25_readiness, "register_routes", app, core)
-except Exception:
-    pass
-
-try:
-    import trade_quality_telemetry
-    _patch_json_modules(trade_quality_telemetry)
-    _call(trade_quality_telemetry, "apply", core)
-    _call(trade_quality_telemetry, "register_routes", app, core)
-except Exception:
-    pass
-
-try:
-    import market_extension_guard
-    _patch_json_modules(market_extension_guard)
-    _call(market_extension_guard, "apply", core)
-    _call(market_extension_guard, "register_routes", app, core)
-except Exception:
-    pass
-
-try:
-    import risk_reward_structure
-    _patch_json_modules(risk_reward_structure)
-    _call(risk_reward_structure, "apply", core)
-    _call(risk_reward_structure, "register_routes", app, core)
-except Exception:
-    pass
-
-try:
-    import state_guard
-    _call(state_guard, "register_routes", app)
-except Exception:
-    pass
-
 for _name, _functions in (
+    ("reporting_cleanup", (("apply", (app, core)),)),
+    ("sitecustomize", (("_register_routes", (app,)),)),
+    ("ml_phase2_shadow", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("ml_phase25_readiness", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("trade_quality_telemetry", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("intratrade_path_capture", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("mae_mfe_integration", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("adaptive_ml_research", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("adaptive_portfolio_intelligence", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("market_extension_guard", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("risk_reward_structure", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("state_guard", (("register_routes", (app,)),)),
     ("eod_hybrid", (("_register_routes", (app,)),)),
     ("risk_bootstrap", (("apply_runtime_overrides", (core,)), ("register_routes", (app,)))),
     ("fvg_runtime", (("apply_runtime_wiring", (core,)),)),
-    ("ml_phase25_readiness", (("apply", (core,)), ("register_routes", (app, core)))),
-    ("trade_quality_telemetry", (("apply", (core,)), ("register_routes", (app, core)))),
     ("live_volatility", (("apply", (core,)), ("register_routes", (app, core)))),
     ("classic_signal_mode", (("apply", (core,)), ("register_routes", (app, core)))),
     ("intraday_timing", (("apply", (core,)), ("register_routes", (app, core)))),
@@ -175,6 +127,23 @@ try:
                 ("/paper/ml-phase25-status", "ml", False),
                 ("/paper/trade-quality-status", "ml", False),
                 ("/paper/mae-mfe-status", "ml", False),
+                ("/paper/intratrade-path-status", "ml", False),
+                ("/paper/position-path-status", "ml", False),
+                ("/paper/mae-mfe-integration-status", "ml", False),
+                ("/paper/adaptive-exit-recommendations", "ml", False),
+                ("/paper/adaptive-ml-status", "ml", False),
+                ("/paper/walk-forward-ml-status", "ml", False),
+                ("/paper/symbol-personality-status", "ml", False),
+                ("/paper/exit-reward-status", "ml", False),
+                ("/paper/adaptive-portfolio-status", "ml", False),
+                ("/paper/bayesian-confidence-status", "ml", False),
+                ("/paper/regime-cluster-status", "ml", False),
+                ("/paper/volatility-state-status", "ml", False),
+                ("/paper/correlation-governor-status", "ml", False),
+                ("/paper/capital-allocator-status", "ml", False),
+                ("/paper/ml-ensemble-status", "ml", False),
+                ("/paper/reward-decay-status", "ml", False),
+                ("/paper/strategy-rotation-status", "ml", False),
                 ("/paper/market-extension-status", "risk", False),
                 ("/paper/fibonacci-status", "risk", False),
                 ("/paper/risk-reward-status", "risk", False),
