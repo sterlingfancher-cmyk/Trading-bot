@@ -1,8 +1,8 @@
 """Entry decision visibility and no-entry diagnostics.
 
-This module is advisory-only. It does not place trades, size positions, promote ML,
-or override any live risk/entry authority in app.py. Its purpose is to explain why
-the system stayed flat or did not open new entries during the latest cycle.
+Advisory-only: this module explains why entries did or did not happen. It does
+not place trades, resize positions, enable live shorts, or override app.py trade
+authority.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import math
 from collections import Counter
 from typing import Any, Dict, List, Tuple
 
-VERSION = "entry-decision-visibility-2026-05-18"
+VERSION = "entry-decision-visibility-2026-05-18-risk-on-weak"
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -54,20 +54,22 @@ def _json_response(core: Any, payload: Dict[str, Any], endpoint: str):
         return jsonify(payload)
 
 
+def _symbol(item: Any) -> str:
+    if isinstance(item, str):
+        return item.upper()
+    if isinstance(item, dict):
+        value = item.get("symbol") or item.get("ticker")
+        return str(value).upper() if value else ""
+    return ""
+
+
 def _unique_symbols(rows: Any) -> List[str]:
-    out: List[str] = []
-    seen = set()
+    out, seen = [], set()
     for item in _safe_list(rows):
-        symbol = None
-        if isinstance(item, str):
-            symbol = item
-        elif isinstance(item, dict):
-            symbol = item.get("symbol") or item.get("ticker")
-        if symbol:
-            symbol = str(symbol).upper()
-            if symbol not in seen:
-                seen.add(symbol)
-                out.append(symbol)
+        symbol = _symbol(item)
+        if symbol and symbol not in seen:
+            seen.add(symbol)
+            out.append(symbol)
     return out
 
 
@@ -75,20 +77,22 @@ def _reason_from_item(item: Any) -> str:
     if not isinstance(item, dict):
         return "unknown"
     for key in ("reason", "entry_block_reason", "block_reason", "reject_reason", "exit_reason"):
-        value = item.get(key)
-        if value:
-            return str(value)
-    quality = item.get("quality_info")
-    if isinstance(quality, dict):
-        value = quality.get("reason") or quality.get("block_reason")
-        if value:
-            return str(value)
-    rotation = item.get("rotation_info")
-    if isinstance(rotation, dict):
-        value = rotation.get("reason")
-        if value:
-            return str(value)
+        if item.get(key):
+            return str(item.get(key))
+    for nested_key in ("quality_info", "rotation_info"):
+        nested = item.get(nested_key)
+        if isinstance(nested, dict):
+            value = nested.get("reason") or nested.get("block_reason")
+            if value:
+                return str(value)
     return "unknown"
+
+
+def _side(item: Any) -> str:
+    if isinstance(item, dict):
+        value = item.get("side") or item.get("direction")
+        return str(value).lower() if value else ""
+    return ""
 
 
 def _reason_counts(*collections: Any) -> Dict[str, int]:
@@ -99,7 +103,7 @@ def _reason_counts(*collections: Any) -> Dict[str, int]:
     return dict(counts.most_common(12))
 
 
-def _top_rows(rows: Any, limit: int = 10) -> List[Dict[str, Any]]:
+def _top_rows(rows: Any, limit: int = 10, floor: float | None = None) -> List[Dict[str, Any]]:
     compact: List[Dict[str, Any]] = []
     for item in _safe_list(rows)[:limit]:
         if isinstance(item, str):
@@ -107,15 +111,23 @@ def _top_rows(rows: Any, limit: int = 10) -> List[Dict[str, Any]]:
             continue
         if not isinstance(item, dict):
             continue
-        symbol = item.get("symbol") or item.get("ticker")
-        compact.append({
-            "symbol": symbol,
+        row = {
+            "symbol": _symbol(item),
             "side": item.get("side") or item.get("direction"),
             "score": item.get("score"),
             "reason": _reason_from_item(item),
             "sector": item.get("sector"),
             "bucket": item.get("bucket"),
-        })
+        }
+        if floor is not None:
+            score = _safe_float(item.get("score"), default=float("nan"))
+            if math.isnan(score) or floor <= 0:
+                row["score_gap_to_required"] = None
+                row["score_pct_of_required"] = None
+            else:
+                row["score_gap_to_required"] = round(score - floor, 6)
+                row["score_pct_of_required"] = round(score / floor, 4)
+        compact.append(row)
     return compact
 
 
@@ -146,9 +158,9 @@ def _risk_controls(core: Any) -> Dict[str, Any]:
         return _safe_dict(_safe_dict(getattr(core, "portfolio", {})).get("risk_controls"))
 
 
-def _feedback(core: Any, market: Dict[str, Any], risk_controls: Dict[str, Any], clock: Dict[str, Any]) -> Dict[str, Any]:
+def _feedback(core: Any, market: Dict[str, Any], risk: Dict[str, Any], clock: Dict[str, Any]) -> Dict[str, Any]:
     try:
-        return _safe_dict(core.feedback_loop_status(market=market, risk_controls=risk_controls, clock=clock, persist=False))
+        return _safe_dict(core.feedback_loop_status(market=market, risk_controls=risk, clock=clock, persist=False))
     except Exception:
         return _safe_dict(_safe_dict(getattr(core, "portfolio", {})).get("feedback_loop"))
 
@@ -180,18 +192,216 @@ def _scanner_log(core: Any) -> Dict[str, Any]:
 def _last_cycle(core: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     state = _safe_dict(getattr(core, "portfolio", {}))
     auto = _safe_dict(state.setdefault("auto_runner", {}))
-    last = _safe_dict(auto.get("last_result"))
-    return auto, last
+    return auto, _safe_dict(auto.get("last_result"))
 
 
 def _entry_floor(core: Any, market: Dict[str, Any], feedback: Dict[str, Any]) -> float:
-    floor = feedback.get("dynamic_min_long_score")
-    if floor is not None:
-        return _safe_float(floor, 0.0)
+    if feedback.get("dynamic_min_long_score") is not None:
+        return _safe_float(feedback.get("dynamic_min_long_score"), 0.0)
     try:
         return _safe_float(core.min_entry_score_for_market(market, "long"), 0.0)
     except Exception:
         return 0.0
+
+
+def _split_rows(blocked: Any, rejected: Any) -> Dict[str, List[Dict[str, Any]]]:
+    out = {"blocked_long": [], "blocked_short": [], "rejected_long": [], "rejected_short": [], "blocked_unknown": [], "rejected_unknown": []}
+    for source, rows in (("blocked", blocked), ("rejected", rejected)):
+        for item in _safe_list(rows):
+            if not isinstance(item, dict):
+                continue
+            side = _side(item)
+            key = f"{source}_{side}" if side in {"long", "short"} else f"{source}_unknown"
+            out.setdefault(key, []).append(item)
+    return out
+
+
+def _weak_breadth(market: Dict[str, Any]) -> bool:
+    breadth = _safe_dict(market.get("breadth"))
+    state = str(breadth.get("state") or "").lower()
+    action = str(breadth.get("action") or "").lower()
+    reason = str(breadth.get("reason") or "").lower()
+    positive_count = _safe_float(breadth.get("positive_breadth_count"), 999)
+    return state in {"weak", "risk_off", "negative", "poor"} or "risk_off" in action or "weak" in reason or positive_count <= 1
+
+
+def _bearish_futures(market: Dict[str, Any]) -> bool:
+    futures = _safe_dict(market.get("futures_bias"))
+    bias = str(futures.get("bias") or "").lower()
+    action = str(futures.get("action") or "").lower()
+    reason = str(futures.get("reason") or "").lower()
+    nq_pct = _safe_float(futures.get("nq_pct"), 0.0)
+    es_pct = _safe_float(futures.get("es_pct"), 0.0)
+    return bias == "bearish" or "block_opening_longs" in action or "weak" in reason or (nq_pct < 0 and es_pct < 0)
+
+
+def _market_sub_mode(market: Dict[str, Any], feedback: Dict[str, Any]) -> Dict[str, Any]:
+    mode = str(market.get("market_mode") or "").lower()
+    regime = str(market.get("regime") or "").lower()
+    actions = [str(x) for x in _safe_list(feedback.get("actions"))]
+    weak = _weak_breadth(market)
+    bearish = _bearish_futures(market)
+    caution_actions = [a for a in actions if any(t in a for t in ("risk_off", "rising_vix", "rising_rates", "market_extension", "futures_bias"))]
+    if mode == "risk_on" and (weak or bearish or caution_actions):
+        sub_mode = "risk_on_but_weak"
+        summary = "Risk-on regime remains active, but current breadth/futures/feedback are weak enough to require stricter longs and advisory-only short observation."
+    elif mode == "risk_on":
+        sub_mode = "clean_risk_on"
+        summary = "Risk-on regime is active without major intraday caution flags in this diagnostic."
+    elif regime in {"bull", "constructive"} and (weak or bearish):
+        sub_mode = "constructive_but_weak"
+        summary = "Broader regime is constructive, but current breadth/futures are weak."
+    else:
+        sub_mode = mode or regime or "unknown"
+        summary = "No special risk-on weakness sub-mode was detected."
+    return {"sub_mode": sub_mode, "weak_breadth": weak, "bearish_futures": bearish, "caution_actions": caution_actions, "summary": summary}
+
+
+def _long_analysis(long_signals: List[str], long_rows: List[Dict[str, Any]], floor: float) -> Dict[str, Any]:
+    best_score = None
+    best_symbol = None
+    for item in long_rows:
+        score = _safe_float(item.get("score"), default=float("nan"))
+        if math.isnan(score):
+            continue
+        if best_score is None or score > best_score:
+            best_score = score
+            best_symbol = _symbol(item)
+    gap = round(best_score - floor, 6) if best_score is not None and floor > 0 else None
+    pct = round(best_score / floor, 4) if best_score is not None and floor > 0 else None
+    failed = best_score is not None and floor > 0 and best_score < floor
+    return {
+        "long_signals_count": len(long_signals),
+        "blocked_or_rejected_long_count": len(long_rows),
+        "required_score": floor,
+        "best_long_symbol": best_symbol,
+        "best_long_score": best_score,
+        "best_long_score_gap_to_required": gap,
+        "best_long_score_pct_of_required": pct,
+        "long_quality_failed": failed,
+        "top_failed_longs": _top_rows(long_rows, 12, floor=floor),
+        "plain_english": (
+            f"Longs are allowed, but the best visible long score ({best_score:.6f}) is below the active floor ({floor:.6f})."
+            if failed else "No clear long-quality failure was visible in the stored cycle."
+        ),
+    }
+
+
+def _short_waitlist(short_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out, seen = [], set()
+    for item in short_rows:
+        symbol = _symbol(item)
+        reason = _reason_from_item(item)
+        if not symbol or symbol in seen:
+            continue
+        if "extended_below" not in reason and reason not in {"extended_downside", "extension_guard"}:
+            continue
+        seen.add(symbol)
+        out.append({
+            "symbol": symbol,
+            "score": item.get("score"),
+            "bucket": item.get("bucket"),
+            "reason": reason,
+            "status": "wait_for_bounce_then_failure",
+            "required_confirmation": [
+                "bounce or reclaim toward 5m MA20/VWAP",
+                "renewed failure without being extended below 5m MA20",
+                "short score remains above tactical threshold",
+            ],
+        })
+    return out[:20]
+
+
+def _tactical_short_advisory(sub_mode: Dict[str, Any], params: Dict[str, Any], long_analysis: Dict[str, Any], short_signals: List[str], short_rows: List[Dict[str, Any]], entries: List[Any], global_blockers: List[Dict[str, Any]]) -> Dict[str, Any]:
+    waitlist = _short_waitlist(short_rows)
+    waitlisted = {row["symbol"] for row in waitlist}
+    paper_candidates = [s for s in short_signals if s not in waitlisted][:12]
+    non_short_blockers = [b for b in global_blockers if b.get("code") != "shorts_disabled_by_regime"]
+    ready = (
+        sub_mode.get("sub_mode") == "risk_on_but_weak"
+        and len(entries) == 0
+        and bool(long_analysis.get("long_quality_failed"))
+        and bool(short_signals)
+        and not non_short_blockers
+    )
+    allow_shorts = bool(params.get("allow_shorts", False))
+    gate_reason = []
+    if sub_mode.get("sub_mode") != "risk_on_but_weak":
+        gate_reason.append("market_sub_mode_not_risk_on_but_weak")
+    if entries:
+        gate_reason.append("entries_already_taken")
+    if not long_analysis.get("long_quality_failed"):
+        gate_reason.append("long_quality_failure_not_confirmed")
+    if not short_signals:
+        gate_reason.append("no_short_signals")
+    if non_short_blockers:
+        gate_reason.append("higher_level_non_short_blocker_active")
+    if not allow_shorts:
+        gate_reason.append("live_shorts_disabled_by_regime")
+    return {
+        "advisory_only": True,
+        "live_trade_authority_changed": False,
+        "risk_on_but_weak_detected": sub_mode.get("sub_mode") == "risk_on_but_weak",
+        "advisory_ready_if_paper_short_pilot_enabled": ready,
+        "allow_shorts_currently": allow_shorts,
+        "live_short_authority_allowed_now": False,
+        "gate_open": False,
+        "gate_reason": gate_reason,
+        "paper_only_candidate_symbols": paper_candidates,
+        "reclaim_waitlist": waitlist,
+        "pilot_rules": {
+            "max_tactical_short_positions": 2,
+            "allocation_mode": "reduced_size_only",
+            "requires_no_qualified_longs": True,
+            "requires_weak_breadth": True,
+            "requires_bearish_futures": True,
+            "requires_not_extended_below_5m_ma20": True,
+            "requires_reclaim_then_failure_for_extended_names": True,
+        },
+        "plain_english": "Weak risk-on conditions support tracking tactical shorts, but this remains advisory-only and does not enable live shorting.",
+    }
+
+
+def _primary_driver(entries: List[Any], clock: Dict[str, Any], blockers: List[Dict[str, Any]], long_analysis: Dict[str, Any], tactical: Dict[str, Any], blocked_count: int, rejected_count: int) -> Dict[str, Any]:
+    if entries:
+        return {"code": "entries_taken", "detail": f"{len(entries)} entry/entries opened last cycle"}
+    if not clock.get("is_open"):
+        return {"code": "market_closed", "detail": clock.get("reason") or "market_not_open"}
+    non_short = [b for b in blockers if b.get("code") != "shorts_disabled_by_regime"]
+    if non_short:
+        return non_short[0]
+    if long_analysis.get("long_quality_failed"):
+        return {
+            "code": "long_quality_below_floor",
+            "detail": f"best visible long score {long_analysis.get('best_long_score'):.6f} is below required {long_analysis.get('required_score'):.6f}",
+        }
+    if tactical.get("allow_shorts_currently") is False and tactical.get("paper_only_candidate_symbols"):
+        return {"code": "shorts_disabled_by_regime", "detail": "short signals exist, but live shorts remain disabled; tactical short list is advisory-only"}
+    if blocked_count or rejected_count:
+        return {"code": "entry_guards_blocked_signals", "detail": f"{blocked_count} blocked and {rejected_count} rejected by timing/quality/extension guards"}
+    return {"code": "no_qualified_candidates", "detail": "scanner found no candidate that cleared entry controls"}
+
+
+def _plain_summary(verdict: str, primary: Dict[str, Any], signal_count: int, scanner_signals_found: int, blocked_count: int, rejected_count: int, entries_count: int, blockers: List[Dict[str, Any]]) -> str:
+    if entries_count:
+        return f"The latest cycle did open {entries_count} entry/entries; the system is not stuck flat."
+    code, detail = primary.get("code"), primary.get("detail")
+    if code == "long_quality_below_floor":
+        return f"No entries because long candidates failed quality: {detail}. Short signals remain advisory-only while live shorts are disabled."
+    if code == "shorts_disabled_by_regime":
+        return f"No entries because shorts are advisory-only right now: {detail}."
+    if code in {"market_closed", "risk_halted", "profit_guard", "self_defense", "feedback_blocks_entries", "max_positions_full", "opening_warmup"}:
+        return f"No entries because a higher-level gate is active: {code} ({detail})."
+    if blockers:
+        first = ([b for b in blockers if b.get("code") != "shorts_disabled_by_regime"] or blockers)[0]
+        return f"No entries because a higher-level gate is active: {first.get('code')} ({first.get('detail')})."
+    if blocked_count or rejected_count:
+        return f"Signals were present, but entry guards blocked or rejected them: {blocked_count} blocked and {rejected_count} rejected."
+    if signal_count or scanner_signals_found:
+        return f"The scanner found {scanner_signals_found or signal_count} opportunity/opportunities, but no entry was selected by timing/allocation controls."
+    if verdict == "market_closed_or_pre_session":
+        return "No entries because the market is closed or the cycle is outside regular-session trade authority."
+    return "No qualified entry candidates were visible in the latest stored cycle."
 
 
 def build_no_entry_diagnostic(core: Any, force_market: bool = False) -> Dict[str, Any]:
@@ -222,7 +432,6 @@ def build_no_entry_diagnostic(core: Any, force_market: bool = False) -> Dict[str
     rotations = _safe_list(last.get("rotations"))
     blocked = _safe_list(last.get("blocked_entries")) or _safe_list(scanner.get("blocked_entries"))
     rejected = _safe_list(last.get("rejected_signals")) or _safe_list(scanner.get("rejected_signals"))
-
     signal_count = len(long_signals) + len(short_signals)
     scanner_signals_found = int(_safe_float(scanner.get("signals_found"), signal_count))
 
@@ -248,10 +457,21 @@ def build_no_entry_diagnostic(core: Any, force_market: bool = False) -> Dict[str
     if short_signals and not bool(params.get("allow_shorts", False)):
         global_blockers.append({"code": "shorts_disabled_by_regime", "detail": "short signals present but allow_shorts is false"})
 
+    split = _split_rows(blocked, rejected)
+    long_rows = split.get("blocked_long", []) + split.get("rejected_long", [])
+    short_rows = split.get("blocked_short", []) + split.get("rejected_short", [])
+    floor = _entry_floor(core, market, feedback)
+    long_info = _long_analysis(long_signals, long_rows, floor)
+    sub_mode = _market_sub_mode(market, feedback)
+    tactical = _tactical_short_advisory(sub_mode, params, long_info, short_signals, short_rows, entries, global_blockers)
+    primary = _primary_driver(entries, clock, global_blockers, long_info, tactical, len(blocked), len(rejected))
+
     if entries:
         verdict = "entries_taken_last_cycle"
     elif not clock.get("is_open"):
         verdict = "market_closed_or_pre_session"
+    elif primary.get("code") == "long_quality_below_floor":
+        verdict = "long_quality_failed_and_shorts_advisory_only"
     elif global_blockers:
         verdict = "globally_blocked_or_paused"
     elif blocked or rejected:
@@ -262,6 +482,12 @@ def build_no_entry_diagnostic(core: Any, force_market: bool = False) -> Dict[str
         verdict = "scanner_found_no_qualified_entries"
 
     recommendations: List[str] = []
+    if primary.get("code") == "long_quality_below_floor":
+        recommendations.append("Keep the long floor intact; do not lower quality just to force a trade.")
+    if tactical.get("advisory_ready_if_paper_short_pilot_enabled"):
+        recommendations.append("Track tactical short candidates in paper/advisory mode only; require reclaim-then-failure before any future short pilot.")
+    if tactical.get("reclaim_waitlist"):
+        recommendations.append("Keep extended short candidates on a reclaim watchlist instead of chasing downside extension.")
     if not clock.get("is_open"):
         recommendations.append("No action needed; wait for regular-session cycles before judging entries.")
     if verdict == "signals_present_but_entry_guards_blocked":
@@ -282,13 +508,15 @@ def build_no_entry_diagnostic(core: Any, force_market: bool = False) -> Dict[str
         "advisory_only": True,
         "live_trade_authority_changed": False,
         "verdict": verdict,
+        "primary_no_entry_driver": primary,
         "plain_english": {
-            "summary": _plain_summary(verdict, signal_count, scanner_signals_found, len(blocked), len(rejected), len(entries), global_blockers),
-            "next_best_action": recommendations[0] if recommendations else "Keep collecting data.",
+            "summary": _plain_summary(verdict, primary, signal_count, scanner_signals_found, len(blocked), len(rejected), len(entries), global_blockers),
+            "next_best_action": recommendations[0],
         },
         "market_clock": clock,
         "market_context": {
             "market_mode": market.get("market_mode"),
+            "market_sub_mode": sub_mode,
             "regime": market.get("regime"),
             "risk_score": market.get("risk_score"),
             "futures_bias": market.get("futures_bias", {}),
@@ -302,9 +530,17 @@ def build_no_entry_diagnostic(core: Any, force_market: bool = False) -> Dict[str
             "open_positions": open_positions,
             "new_entries_allowed_last_cycle": last.get("new_entries_allowed"),
             "entry_block_reason_last_cycle": last.get("entry_block_reason"),
-            "active_min_long_score": _entry_floor(core, market, feedback),
+            "active_min_long_score": floor,
             "opening_warmup": warmup,
         },
+        "long_entry_analysis": long_info,
+        "short_entry_analysis": {
+            "short_signals_count": len(short_signals),
+            "blocked_or_rejected_short_count": len(short_rows),
+            "top_failed_shorts": _top_rows(short_rows, 12),
+            "live_shorts_disabled_by_regime": bool(short_signals and not bool(params.get("allow_shorts", False))),
+        },
+        "tactical_short_advisory": tactical,
         "global_blockers": global_blockers,
         "last_cycle_summary": {
             "last_run_local": auto.get("last_run_local"),
@@ -345,19 +581,21 @@ def build_no_entry_diagnostic(core: Any, force_market: bool = False) -> Dict[str
     }
 
 
-def _plain_summary(verdict: str, signal_count: int, scanner_signals_found: int, blocked_count: int, rejected_count: int, entries_count: int, blockers: List[Dict[str, Any]]) -> str:
-    if entries_count:
-        return f"The latest cycle did open {entries_count} entry/entries; the system is not stuck flat."
-    if blockers:
-        first = blockers[0]
-        return f"No entries because a higher-level gate is active: {first.get('code')} ({first.get('detail')})."
-    if blocked_count or rejected_count:
-        return f"Signals were present, but entry guards blocked or rejected them: {blocked_count} blocked and {rejected_count} rejected."
-    if signal_count or scanner_signals_found:
-        return f"The scanner found {scanner_signals_found or signal_count} opportunity/opportunities, but no entry was selected by timing/allocation controls."
-    if verdict == "market_closed_or_pre_session":
-        return "No entries because the market is closed or the cycle is outside regular-session trade authority."
-    return "No qualified entry candidates were visible in the latest stored cycle."
+def build_tactical_short_advisory_status(core: Any) -> Dict[str, Any]:
+    diagnostic = build_no_entry_diagnostic(core, force_market=False)
+    return {
+        "status": "ok",
+        "type": "tactical_short_advisory_status",
+        "version": VERSION,
+        "generated_local": _now_text(core),
+        "advisory_only": True,
+        "live_trade_authority_changed": False,
+        "market_sub_mode": _safe_dict(_safe_dict(diagnostic.get("market_context")).get("market_sub_mode")).get("sub_mode"),
+        "long_entry_analysis": diagnostic.get("long_entry_analysis"),
+        "short_entry_analysis": diagnostic.get("short_entry_analysis"),
+        "tactical_short_advisory": diagnostic.get("tactical_short_advisory"),
+        "recommended_actions": diagnostic.get("recommended_actions", []),
+    }
 
 
 def build_decision_visibility_status(core: Any) -> Dict[str, Any]:
@@ -373,9 +611,14 @@ def build_decision_visibility_status(core: Any) -> Dict[str, Any]:
             "/paper/no-entry-diagnostic",
             "/paper/why-no-entries",
             "/paper/decision-visibility-status",
+            "/paper/tactical-short-advisory-status",
         ],
         "latest_verdict": diagnostic.get("verdict"),
+        "primary_no_entry_driver": diagnostic.get("primary_no_entry_driver"),
+        "market_sub_mode": _safe_dict(_safe_dict(diagnostic.get("market_context")).get("market_sub_mode")).get("sub_mode"),
         "latest_plain_english": diagnostic.get("plain_english"),
+        "long_entry_analysis": diagnostic.get("long_entry_analysis"),
+        "tactical_short_advisory": diagnostic.get("tactical_short_advisory"),
         "last_cycle_counts": diagnostic.get("last_cycle_summary", {}),
         "recommended_actions": diagnostic.get("recommended_actions", []),
     }
@@ -426,6 +669,11 @@ def register_routes(flask_app: Any = None, core: Any = None) -> Dict[str, Any]:
         def decision_visibility_status():
             return _json_response(core, build_decision_visibility_status(core), endpoint="paper_decision_visibility_status")
         flask_app.add_url_rule("/paper/decision-visibility-status", "paper_decision_visibility_status", decision_visibility_status)
+
+    if "/paper/tactical-short-advisory-status" not in existing:
+        def tactical_short_advisory_status():
+            return _json_response(core, build_tactical_short_advisory_status(core), endpoint="paper_tactical_short_advisory_status")
+        flask_app.add_url_rule("/paper/tactical-short-advisory-status", "paper_tactical_short_advisory_status", tactical_short_advisory_status)
 
     return {
         "status": "ok",
