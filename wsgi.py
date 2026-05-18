@@ -80,6 +80,7 @@ except Exception:
 
 for _name, _functions in (
     ("reporting_cleanup", (("apply", (app, core)),)),
+    ("entry_decision_visibility", (("apply", (core,)), ("register_routes", (app, core)))),
     ("sitecustomize", (("_register_routes", (app,)),)),
     ("ml_phase2_shadow", (("apply", (core,)), ("register_routes", (app, core)))),
     ("ml_phase25_readiness", (("apply", (core,)), ("register_routes", (app, core)))),
@@ -169,6 +170,8 @@ try:
                 ("/paper/strategy-promotion-readiness-status", "governance", False),
                 ("/paper/phase3a-promotion-gate-status", "governance", False),
                 ("/paper/strategy-promotion-gate-status", "governance", False),
+                ("/paper/decision-visibility-status", "governance", False),
+                ("/paper/no-entry-diagnostic", "governance", False),
                 ("/paper/market-extension-status", "risk", False),
                 ("/paper/fibonacci-status", "risk", False),
                 ("/paper/risk-reward-status", "risk", False),
