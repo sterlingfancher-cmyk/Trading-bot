@@ -81,6 +81,7 @@ except Exception:
 for _name, _functions in (
     ("reporting_cleanup", (("apply", (app, core)),)),
     ("entry_decision_visibility", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("news_sentiment_engine", (("apply", (core,)), ("register_routes", (app, core)))),
     ("sitecustomize", (("_register_routes", (app,)),)),
     ("ml_phase2_shadow", (("apply", (core,)), ("register_routes", (app, core)))),
     ("ml_phase25_readiness", (("apply", (core,)), ("register_routes", (app, core)))),
@@ -173,6 +174,9 @@ try:
                 ("/paper/decision-visibility-status", "governance", False),
                 ("/paper/no-entry-diagnostic", "governance", False),
                 ("/paper/tactical-short-advisory-status", "governance", False),
+                ("/paper/news-sentiment-status", "governance", False),
+                ("/paper/catalyst-watchlist", "governance", False),
+                ("/paper/news-risk-status", "governance", False),
                 ("/paper/market-extension-status", "risk", False),
                 ("/paper/fibonacci-status", "risk", False),
                 ("/paper/risk-reward-status", "risk", False),
