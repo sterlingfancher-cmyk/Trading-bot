@@ -172,6 +172,7 @@ try:
                 ("/paper/strategy-promotion-gate-status", "governance", False),
                 ("/paper/decision-visibility-status", "governance", False),
                 ("/paper/no-entry-diagnostic", "governance", False),
+                ("/paper/tactical-short-advisory-status", "governance", False),
                 ("/paper/market-extension-status", "risk", False),
                 ("/paper/fibonacci-status", "risk", False),
                 ("/paper/risk-reward-status", "risk", False),
