@@ -78,7 +78,7 @@ try:
 except Exception:
     pass
 
-for _name, _functions in (
+AUX_MODULES = (
     ("reporting_cleanup", (("apply", (app, core)),)),
     ("entry_decision_visibility", (("apply", (core,)), ("register_routes", (app, core)))),
     ("news_sentiment_engine", (("apply", (core,)), ("register_routes", (app, core)))),
@@ -108,9 +108,12 @@ for _name, _functions in (
     ("position_quality_governor", (("apply", (core,)), ("register_routes", (app, core)))),
     ("benchmark_participation", (("apply", (core,)), ("register_routes", (app, core)))),
     ("risk_on_entry_diagnostic", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("relative_strength_leader_exception", (("apply", (core,)), ("register_routes", (app, core)))),
     ("risk_on_recommendation_cleanup", (("apply", (core,)), ("register_routes", (app, core)))),
     ("risk_improvements", (("_register_routes", (app,)),)),
-):
+)
+
+for _name, _functions in AUX_MODULES:
     try:
         _m = __import__(_name)
         _patch_json_modules(_m)
@@ -174,6 +177,9 @@ try:
                 ("/paper/decision-visibility-status", "governance", False),
                 ("/paper/no-entry-diagnostic", "governance", False),
                 ("/paper/tactical-short-advisory-status", "governance", False),
+                ("/paper/relative-strength-leaders", "governance", False),
+                ("/paper/leadership-exception-status", "governance", False),
+                ("/paper/down-market-long-diagnostic", "governance", False),
                 ("/paper/news-sentiment-status", "governance", False),
                 ("/paper/catalyst-watchlist", "governance", False),
                 ("/paper/news-risk-status", "governance", False),
