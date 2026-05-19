@@ -20,7 +20,7 @@ import os
 import sys
 from typing import Any, Dict, List, Tuple
 
-VERSION = "intratrade-path-capture-2026-05-16"
+VERSION = "intratrade-path-capture-2026-05-19-phase25-persistence"
 ENABLED = os.environ.get("INTRATRADE_PATH_CAPTURE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 LIVE_AUTHORITY = False
 REGISTERED_APP_IDS: set[int] = set()
@@ -87,7 +87,13 @@ def _positions(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 def _entry_price(pos: Dict[str, Any]) -> float:
-    return _f(pos.get("entry_price"), _f(pos.get("avg_entry_price"), _f(pos.get("price"), _f(pos.get("cost_basis"), 0.0))))
+    # Core app positions use "entry". The older Phase 2.5 helper only looked
+    # for entry_price/avg_entry_price/price/cost_basis, which left valid open
+    # positions untracked. Keep every legacy alias and add the canonical key.
+    return _f(
+        pos.get("entry"),
+        _f(pos.get("entry_price"), _f(pos.get("avg_entry_price"), _f(pos.get("price"), _f(pos.get("cost_basis"), 0.0))))
+    )
 
 
 def _side(pos: Dict[str, Any]) -> str:
@@ -116,7 +122,7 @@ def _safe_latest_price(mod: Any, symbol: str, pos: Dict[str, Any]) -> float:
                     return price
         except Exception:
             pass
-    for key in ("last_price", "current_price", "market_price", "price"):
+    for key in ("last_price", "current_price", "market_price", "price", "entry"):
         price = _f(pos.get(key), 0.0)
         if price > 0:
             return price
@@ -131,6 +137,21 @@ def _pct_for_side(current: float, entry: float, side: str) -> float:
     return (current / entry - 1.0) * 100.0
 
 
+def _strategy_metadata(pos: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "strategy_id": pos.get("strategy_id"),
+        "setup_family": pos.get("setup_family"),
+        "entry_model": pos.get("entry_model"),
+        "exit_model": pos.get("exit_model"),
+        "risk_model": pos.get("risk_model"),
+        "strategy_label_source": pos.get("strategy_label_source"),
+        "strategy_label_version": pos.get("strategy_label_version"),
+        "entry_score": pos.get("score"),
+        "sector": pos.get("sector"),
+        "bucket": pos.get("bucket"),
+    }
+
+
 def update_paths(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
     mod = mod or _module()
     section = state.setdefault("intratrade_path_capture", {})
@@ -143,10 +164,12 @@ def update_paths(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
     positions = _positions(state)
     active_symbols = set(positions.keys())
     updated = 0
+    skipped = []
 
     for symbol, pos in positions.items():
         entry = _entry_price(pos)
         if entry <= 0:
+            skipped.append({"symbol": symbol, "reason": "missing_entry_price"})
             continue
         side = _side(pos)
         price = _safe_latest_price(mod, symbol, pos) if mod is not None else _f(pos.get("price"), entry)
@@ -193,6 +216,11 @@ def update_paths(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
             if abs(mae) >= abs(_f(path.get("mae_pct"), 0.0)):
                 path["time_to_mae_seconds"] = duration
 
+        meta = _strategy_metadata(pos)
+        for key, value in meta.items():
+            if value is not None:
+                path[key] = value
+
         path.update({
             "symbol": symbol,
             "side": side,
@@ -213,10 +241,22 @@ def update_paths(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
 
     closed = [sym for sym in list(paths.keys()) if sym not in active_symbols]
     archive = section.setdefault("closed_path_archive", [])
+    seen_keys = set()
+    compact_archive = []
+    for item in _list(archive):
+        if not isinstance(item, dict):
+            continue
+        key = (item.get("symbol"), item.get("side"), item.get("entry_time"), item.get("entry_price"), item.get("closed_local"))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        compact_archive.append(item)
+    archive = compact_archive
     for sym in closed:
         item = paths.pop(sym)
         if isinstance(item, dict):
             item["closed_local"] = now_text
+            item["archived_by"] = VERSION
             archive.append(item)
     section["closed_path_archive"] = archive[-500:]
 
@@ -228,6 +268,7 @@ def update_paths(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
         "active_positions_tracked": len(paths),
         "closed_paths_archived": len(section.get("closed_path_archive", [])),
         "updated_count": updated,
+        "skipped_positions": skipped[-25:],
         "recommended_actions": [
             "Use intratrade path data to convert MAE/MFE telemetry from placeholder to real outcome labels.",
             "Keep this advisory only until enough path observations exist across multiple regimes.",
@@ -250,6 +291,8 @@ def payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
         "live_authority": False,
         "active_positions_tracked": len(paths),
         "closed_paths_archived": len(archive),
+        "updated_count": section.get("updated_count", 0),
+        "skipped_positions": section.get("skipped_positions", []),
         "active_paths": list(paths.values())[-25:],
         "closed_path_tail": archive[-25:],
         "recommended_actions": section.get("recommended_actions") or [],
