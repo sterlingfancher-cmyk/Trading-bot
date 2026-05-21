@@ -17,7 +17,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "unified-startup-loader-2026-05-21-breakout-direct"
+VERSION = "unified-startup-loader-2026-05-21-paper-exposure-rotation"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -45,7 +45,7 @@ def _existing_rules(flask_app: Any) -> set[str]:
 
 
 def _patch_one_link_check() -> None:
-    """Make the one-link self-check include breakout diagnostics."""
+    """Make the one-link self-check include breakout and paper-exposure diagnostics."""
     try:
         import one_link_check
 
@@ -64,6 +64,18 @@ def _patch_one_link_check() -> None:
                 "category": "governance",
                 "required": False,
                 "after": "/paper/breakout-participation-status",
+            },
+            {
+                "path": "/paper/paper-exposure-status",
+                "category": "governance",
+                "required": False,
+                "after": "/paper/breakout-leaders",
+            },
+            {
+                "path": "/paper/breakout-rotation-status",
+                "category": "governance",
+                "required": False,
+                "after": "/paper/paper-exposure-status",
             },
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
@@ -127,6 +139,17 @@ def _register_breakout_participation(flask_app: Any, m: Any | None) -> None:
         pass
 
 
+def _register_paper_exposure_rotation(flask_app: Any, m: Any | None) -> None:
+    try:
+        import paper_exposure_rotation
+        if hasattr(paper_exposure_rotation, "apply_runtime_overrides"):
+            paper_exposure_rotation.apply_runtime_overrides(m)
+        if flask_app is not None and hasattr(paper_exposure_rotation, "register_routes"):
+            paper_exposure_rotation.register_routes(flask_app)
+    except Exception:
+        pass
+
+
 def _status_payload() -> dict[str, Any]:
     m = _mod()
     flask_app = getattr(m, "app", None) if m is not None else None
@@ -140,6 +163,8 @@ def _status_payload() -> dict[str, Any]:
         "flask_app_found": bool(flask_app is not None),
         "breakout_status_route_registered": "/paper/breakout-participation-status" in rules,
         "breakout_leaders_route_registered": "/paper/breakout-leaders" in rules,
+        "paper_exposure_route_registered": "/paper/paper-exposure-status" in rules,
+        "breakout_rotation_route_registered": "/paper/breakout-rotation-status" in rules,
         "routes_count": len(rules),
     }
 
@@ -174,6 +199,7 @@ def _register_all(flask_app: Any | None = None, m: Any | None = None) -> None:
     _register_risk_bootstrap(flask_app, m)
     _register_eod_hybrid(flask_app)
     _register_breakout_participation(flask_app, m)
+    _register_paper_exposure_rotation(flask_app, m)
 
     if flask_app is not None:
         _REGISTERED_APP_IDS.add(id(flask_app))
