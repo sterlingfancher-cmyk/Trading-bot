@@ -13,6 +13,8 @@ Fallback routes covered:
 - /paper/runner-freshness
 - /paper/price-health
 - /paper/journal-truth-status
+- /paper/breakout-participation-status
+- /paper/breakout-leaders
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-journal-truth-fallback-2026-05-11"
+VERSION = "usercustomize-breakout-loader-2026-05-21-v1"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -46,6 +48,54 @@ def _existing_rules(flask_app: Any) -> set[str]:
         return {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
     except Exception:
         return set()
+
+
+def _patch_self_check_endpoints() -> None:
+    """Add breakout diagnostics to the existing one-link self-check policy."""
+    try:
+        import one_link_check
+
+        endpoints = getattr(one_link_check, "ONE_TEST_ENDPOINTS", None)
+        if not isinstance(endpoints, list):
+            return
+
+        wanted = [
+            {
+                "path": "/paper/breakout-participation-status",
+                "category": "governance",
+                "required": False,
+                "after": "/paper/market-participation-accelerator-status",
+            },
+            {
+                "path": "/paper/breakout-leaders",
+                "category": "governance",
+                "required": False,
+                "after": "/paper/breakout-participation-status",
+            },
+        ]
+        existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
+        for endpoint in wanted:
+            if endpoint["path"] not in existing:
+                endpoints.append(endpoint)
+                existing.add(endpoint["path"])
+    except Exception:
+        pass
+
+
+def _register_breakout_participation(flask_app: Any, m: Any | None = None) -> None:
+    """Load the breakout scanner patch and expose its diagnostics."""
+    if flask_app is None:
+        return
+    try:
+        import breakout_participation_layer
+
+        module = _mod() or m
+        if hasattr(breakout_participation_layer, "apply_runtime_overrides"):
+            breakout_participation_layer.apply_runtime_overrides(module)
+        if hasattr(breakout_participation_layer, "register_routes"):
+            breakout_participation_layer.register_routes(flask_app)
+    except Exception:
+        pass
 
 
 def _register_runner_safety(flask_app: Any, m: Any | None = None) -> None:
@@ -207,20 +257,24 @@ def _register_self_check(flask_app: Any, m: Any | None = None) -> None:
 def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
     if flask_app is None or id(flask_app) in _REGISTERED_APP_IDS:
         return
+    _patch_self_check_endpoints()
     _register_runner_safety(flask_app, m)
     _register_journal_truth(flask_app, m)
     _register_live_volatility(flask_app, m)
     _register_self_check(flask_app, m)
+    _register_breakout_participation(flask_app, m)
     _REGISTERED_APP_IDS.add(id(flask_app))
 
 
 def _watchdog() -> None:
     for _ in range(1200):
         try:
+            _patch_self_check_endpoints()
             m = _mod()
             flask_app = getattr(m, "app", None) if m is not None else None
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, m)
+                _register_breakout_participation(flask_app, m)
         except Exception:
             pass
         time.sleep(0.1)
@@ -241,4 +295,5 @@ try:
 except Exception:
     pass
 
+_patch_self_check_endpoints()
 threading.Thread(target=_watchdog, daemon=True).start()
