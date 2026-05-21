@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Iterable, List
 
-VERSION = "one-test-policy-2026-05-14"
+VERSION = "one-test-policy-2026-05-21-mobile-summary-fix"
 
 ONE_TEST_ROUTE = "/paper/self-check"
 REPAIR_ROUTE = "/paper/state-journal-repair"
@@ -43,6 +43,13 @@ def _safe_list(obj: Any) -> List[Any]:
 
 def _truthy_env(name: str) -> bool:
     return str(os.environ.get(name, "")).lower() in {"1", "true", "yes", "on"}
+
+
+def _first_not_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
 
 
 def _full_url(self_check_module: Any, path: str) -> str:
@@ -195,10 +202,70 @@ def _promote_state_journal_guard(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _truth_from_dashboard(payload: Dict[str, Any]) -> Dict[str, Any]:
+    dashboard = _safe_dict(payload.get("dashboard"))
+    trade_journal = _safe_dict(dashboard.get("trade_journal"))
+    journal_summary = _safe_dict(trade_journal.get("journal_summary"))
+    if journal_summary:
+        return journal_summary
+
+    status = _safe_dict(dashboard.get("status"))
+    performance = _safe_dict(status.get("performance"))
+    open_positions = _safe_dict(performance.get("open_positions"))
+    if performance:
+        return {
+            "status": "ok",
+            "source_of_truth": "status_performance_snapshot",
+            "realized_today": performance.get("realized_pnl_today"),
+            "realized_total": performance.get("realized_pnl_total"),
+            "unrealized_pnl": performance.get("unrealized_pnl"),
+            "wins_total": performance.get("wins_total"),
+            "losses_total": performance.get("losses_total"),
+            "open_positions_count": len(open_positions) if open_positions else len(_safe_list(status.get("positions"))),
+        }
+    return {}
+
+
+def _repair_mobile_safe_summary_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Preserve direct-state mobile-safe truth fields after older wrappers run.
+
+    The mobile-safe /paper/self-check deliberately avoids /paper/journal-truth-status,
+    so older reporting wrappers can accidentally replace truth_summary with {} and
+    operator P&L fields with null. Rebuild those fields from the dashboard snapshot.
+    """
+    dashboard = _safe_dict(payload.get("dashboard"))
+    status = _safe_dict(dashboard.get("status")) or _extract_compact(_safe_list(payload.get("results")), "/paper/status")
+    risk_controls = _safe_dict(status.get("risk_controls"))
+
+    truth_existing = _safe_dict(payload.get("truth_summary"))
+    truth_rebuilt = _truth_from_dashboard(payload)
+    truth = dict(truth_existing)
+    for key, value in truth_rebuilt.items():
+        if truth.get(key) is None:
+            truth[key] = value
+    if truth:
+        payload["truth_summary"] = truth
+
+    operator = _safe_dict(payload.get("operator_summary"))
+    operator["overall"] = operator.get("overall") or payload.get("overall")
+    operator["positions"] = operator.get("positions") or status.get("positions")
+    operator["self_defense_active"] = _first_not_none(operator.get("self_defense_active"), risk_controls.get("self_defense_active"))
+    operator["self_defense_reason"] = _first_not_none(operator.get("self_defense_reason"), risk_controls.get("self_defense_reason"))
+    operator["realized_today"] = _first_not_none(operator.get("realized_today"), truth.get("realized_today"))
+    operator["realized_total"] = _first_not_none(operator.get("realized_total"), truth.get("realized_total"))
+    operator["unrealized_pnl"] = _first_not_none(operator.get("unrealized_pnl"), truth.get("unrealized_pnl"))
+    operator["open_positions_count"] = _first_not_none(operator.get("open_positions_count"), truth.get("open_positions_count"))
+    operator["reconciliation_delta"] = _first_not_none(operator.get("reconciliation_delta"), truth.get("realized_reconciliation_delta"))
+    payload["operator_summary"] = operator
+    return payload
+
+
 def _promote_position_truth_mismatch(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Warn if /paper/status still shows open positions while journal truth says flat."""
     results = _safe_list(payload.get("results"))
     status = _extract_compact(results, "/paper/status")
+    if not status:
+        status = _safe_dict(_safe_dict(payload.get("dashboard")).get("status"))
     truth = payload.get("truth_summary") or _extract_compact(results, "/paper/journal-truth-status")
     if not isinstance(truth, dict):
         truth = {}
@@ -257,6 +324,7 @@ def _enforce_one_test_output(payload: Dict[str, Any], self_check_module: Any) ->
 
 def _postprocess_one_test_payload(payload: Dict[str, Any], self_check_module: Any) -> Dict[str, Any]:
     payload = _enforce_one_test_output(payload, self_check_module)
+    payload = _repair_mobile_safe_summary_fields(payload)
     payload = _promote_state_journal_guard(payload)
     payload = _promote_position_truth_mismatch(payload)
     _promote_hidden_status_errors(payload)
@@ -331,6 +399,7 @@ def apply(self_check_module: Any = None) -> Dict[str, Any]:
             "state_journal_guard_truth_in_operator_summary": True,
             "hidden_status_errors_promoted_to_warning": True,
             "status_vs_truth_position_mismatch_warning": True,
+            "mobile_safe_summary_repair": True,
         }
     except Exception as exc:
         return {
