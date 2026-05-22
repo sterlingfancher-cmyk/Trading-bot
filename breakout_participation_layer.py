@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
-VERSION = "breakout-participation-layer-2026-05-21-v1"
+VERSION = "breakout-participation-layer-2026-05-22-runtime-stability-v2"
 
 PATCHED_MODULE_IDS: set[int] = set()
 REGISTERED_APP_IDS: set[int] = set()
@@ -175,6 +175,20 @@ def _add_unique(seq: List[str], values: List[str]) -> List[str]:
             seq.append(v)
             seen.add(v)
     return seq
+
+
+def _apply_runtime_stability_hotfix(m=None, flask_app=None) -> Dict[str, Any]:
+    try:
+        import runtime_stability_hotfix
+        module = m or _mod()
+        payload = {}
+        if hasattr(runtime_stability_hotfix, "apply_runtime_overrides"):
+            payload = runtime_stability_hotfix.apply_runtime_overrides(module)
+        if flask_app is not None and hasattr(runtime_stability_hotfix, "register_routes"):
+            runtime_stability_hotfix.register_routes(flask_app, module)
+        return payload if isinstance(payload, dict) else {"status": "ok", "reason": "runtime_stability_loaded"}
+    except Exception as exc:
+        return {"status": "error", "reason": "runtime_stability_hotfix_failed", "error": str(exc), "version": VERSION}
 
 
 def _patch_universe(m) -> None:
@@ -473,6 +487,7 @@ def apply_runtime_overrides(m=None) -> Dict[str, Any]:
         return {"status": "pending", "version": VERSION, "reason": "app_module_not_ready"}
     _patch_universe(m)
     patched_scan = _patch_scan_signals(m)
+    runtime_stability = _apply_runtime_stability_hotfix(m)
     PATCHED_MODULE_IDS.add(id(m))
     return {
         "status": "ok",
@@ -482,6 +497,7 @@ def apply_runtime_overrides(m=None) -> Dict[str, Any]:
         "universe_count": len(getattr(m, "UNIVERSE", []) or []),
         "added_symbols": ADDITIONAL_BREAKOUT_UNIVERSE,
         "settings": settings_payload(),
+        "runtime_stability_hotfix": runtime_stability,
         "generated_local": _now_text(m),
     }
 
@@ -567,6 +583,7 @@ def register_routes(flask_app) -> None:
     if "/paper/breakout-leaders" not in existing:
         flask_app.add_url_rule("/paper/breakout-leaders", "breakout_participation_leaders", breakout_participation_leaders)
 
+    _apply_runtime_stability_hotfix(_mod(), flask_app=flask_app)
     REGISTERED_APP_IDS.add(id(flask_app))
     apply_runtime_overrides(_mod())
 
