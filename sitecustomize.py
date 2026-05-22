@@ -17,7 +17,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "unified-startup-loader-2026-05-21-paper-participation-allocator"
+VERSION = "unified-startup-loader-2026-05-21-research-advisory"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -45,7 +45,7 @@ def _existing_rules(flask_app: Any) -> set[str]:
 
 
 def _patch_one_link_check() -> None:
-    """Make the one-link self-check include breakout, exposure, and participation diagnostics."""
+    """Make the one-link self-check include breakout, exposure, participation, and research diagnostics."""
     try:
         import one_link_check
 
@@ -82,6 +82,24 @@ def _patch_one_link_check() -> None:
                 "category": "governance",
                 "required": False,
                 "after": "/paper/paper-participation-status",
+            },
+            {
+                "path": "/paper/research-advisory-status",
+                "category": "governance",
+                "required": False,
+                "after": "/paper/news-risk-status",
+            },
+            {
+                "path": "/paper/scanner-research-ranking",
+                "category": "governance",
+                "required": False,
+                "after": "/paper/research-advisory-status",
+            },
+            {
+                "path": "/paper/fundamental-score-status",
+                "category": "governance",
+                "required": False,
+                "after": "/paper/scanner-research-ranking",
             },
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
@@ -167,6 +185,17 @@ def _register_paper_participation_allocator(flask_app: Any, m: Any | None) -> No
         pass
 
 
+def _register_research_advisory(flask_app: Any, m: Any | None) -> None:
+    try:
+        import research_advisory_engine
+        if hasattr(research_advisory_engine, "apply"):
+            research_advisory_engine.apply(m)
+        if flask_app is not None and hasattr(research_advisory_engine, "register_routes"):
+            research_advisory_engine.register_routes(flask_app, m)
+    except Exception:
+        pass
+
+
 def _status_payload() -> dict[str, Any]:
     m = _mod()
     flask_app = getattr(m, "app", None) if m is not None else None
@@ -183,6 +212,9 @@ def _status_payload() -> dict[str, Any]:
         "paper_exposure_route_registered": "/paper/paper-exposure-status" in rules,
         "paper_participation_route_registered": "/paper/paper-participation-status" in rules,
         "breakout_rotation_route_registered": "/paper/breakout-rotation-status" in rules,
+        "research_advisory_route_registered": "/paper/research-advisory-status" in rules,
+        "scanner_research_ranking_route_registered": "/paper/scanner-research-ranking" in rules,
+        "fundamental_score_route_registered": "/paper/fundamental-score-status" in rules,
         "routes_count": len(rules),
     }
 
@@ -219,6 +251,7 @@ def _register_all(flask_app: Any | None = None, m: Any | None = None) -> None:
     _register_breakout_participation(flask_app, m)
     _register_paper_exposure_rotation(flask_app, m)
     _register_paper_participation_allocator(flask_app, m)
+    _register_research_advisory(flask_app, m)
 
     if flask_app is not None:
         _REGISTERED_APP_IDS.add(id(flask_app))
