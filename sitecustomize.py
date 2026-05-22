@@ -1,28 +1,21 @@
 """Unified startup bootstrap for trading-bot runtime route patches.
 
-This file is imported automatically by Python before app.py is loaded. It keeps
-Railway startup deterministic by importing the fallback usercustomize loader and
-then repeatedly applying state-safe route/scan patches while the Flask app and
-trading module finish initializing.
-
-Live trade/risk authority remains in app.py. Imported modules may register
-advisory/status routes or patch scanner logic only when their own guards allow it.
+Imported automatically before app.py loads. Keeps Railway startup deterministic by
+loading route/scanner/risk patches repeatedly while the Flask app initializes.
 """
 from __future__ import annotations
 
 import datetime as dt
-import os
-import sys
 import threading
 import time
+import sys
 from typing import Any
 
-VERSION = "unified-startup-loader-2026-05-21-research-advisory"
+VERSION = "unified-startup-loader-2026-05-22-risk-on-concentration"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
 def _mod() -> Any | None:
-    """Find the trading module whether Railway started it as app or __main__."""
     for name in ("app", "__main__"):
         m = sys.modules.get(name)
         if m is not None and getattr(m, "app", None) is not None:
@@ -45,7 +38,7 @@ def _existing_rules(flask_app: Any) -> set[str]:
 
 
 def _patch_one_link_check() -> None:
-    """Make the one-link self-check include breakout, exposure, participation, and research diagnostics."""
+    """Keep the mobile-safe self-check light, but expose diagnostics as linked optional routes."""
     try:
         import one_link_check
 
@@ -53,54 +46,15 @@ def _patch_one_link_check() -> None:
         if not isinstance(endpoints, list):
             return
         wanted = [
-            {
-                "path": "/paper/breakout-participation-status",
-                "category": "governance",
-                "required": False,
-                "after": "/paper/market-participation-accelerator-status",
-            },
-            {
-                "path": "/paper/breakout-leaders",
-                "category": "governance",
-                "required": False,
-                "after": "/paper/breakout-participation-status",
-            },
-            {
-                "path": "/paper/paper-exposure-status",
-                "category": "governance",
-                "required": False,
-                "after": "/paper/breakout-leaders",
-            },
-            {
-                "path": "/paper/paper-participation-status",
-                "category": "governance",
-                "required": False,
-                "after": "/paper/paper-exposure-status",
-            },
-            {
-                "path": "/paper/breakout-rotation-status",
-                "category": "governance",
-                "required": False,
-                "after": "/paper/paper-participation-status",
-            },
-            {
-                "path": "/paper/research-advisory-status",
-                "category": "governance",
-                "required": False,
-                "after": "/paper/news-risk-status",
-            },
-            {
-                "path": "/paper/scanner-research-ranking",
-                "category": "governance",
-                "required": False,
-                "after": "/paper/research-advisory-status",
-            },
-            {
-                "path": "/paper/fundamental-score-status",
-                "category": "governance",
-                "required": False,
-                "after": "/paper/scanner-research-ranking",
-            },
+            {"path": "/paper/breakout-participation-status", "category": "governance", "required": False, "after": "/paper/market-participation-accelerator-status"},
+            {"path": "/paper/breakout-leaders", "category": "governance", "required": False, "after": "/paper/breakout-participation-status"},
+            {"path": "/paper/paper-exposure-status", "category": "governance", "required": False, "after": "/paper/breakout-leaders"},
+            {"path": "/paper/paper-participation-status", "category": "governance", "required": False, "after": "/paper/paper-exposure-status"},
+            {"path": "/paper/risk-on-concentration-policy", "category": "governance", "required": False, "after": "/paper/paper-participation-status"},
+            {"path": "/paper/breakout-rotation-status", "category": "governance", "required": False, "after": "/paper/risk-on-concentration-policy"},
+            {"path": "/paper/research-advisory-status", "category": "governance", "required": False, "after": "/paper/news-risk-status"},
+            {"path": "/paper/scanner-research-ranking", "category": "governance", "required": False, "after": "/paper/research-advisory-status"},
+            {"path": "/paper/fundamental-score-status", "category": "governance", "required": False, "after": "/paper/scanner-research-ranking"},
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
         for endpoint in wanted:
@@ -112,7 +66,6 @@ def _patch_one_link_check() -> None:
 
 
 def _import_usercustomize() -> None:
-    """Force-load the secondary fallback loader even on platforms that skip it."""
     try:
         import usercustomize
         if hasattr(usercustomize, "_patch_self_check_endpoints"):
@@ -128,6 +81,29 @@ def _register_usercustomize_routes(flask_app: Any, m: Any | None) -> None:
             usercustomize._register_auxiliary_routes(flask_app, m)
         if hasattr(usercustomize, "_register_breakout_participation"):
             usercustomize._register_breakout_participation(flask_app, m)
+    except Exception:
+        pass
+
+
+def _register_module(flask_app: Any, m: Any | None, module_name: str, apply_names: tuple[str, ...] = ("apply_runtime_overrides",), route_args: str = "app_only") -> None:
+    try:
+        module = __import__(module_name)
+        for name in apply_names:
+            fn = getattr(module, name, None)
+            if callable(fn):
+                try:
+                    fn(m)
+                except TypeError:
+                    fn()
+                break
+        if flask_app is not None and hasattr(module, "register_routes"):
+            try:
+                if route_args == "app_and_module":
+                    module.register_routes(flask_app, m)
+                else:
+                    module.register_routes(flask_app)
+            except TypeError:
+                module.register_routes(flask_app, m)
     except Exception:
         pass
 
@@ -148,39 +124,6 @@ def _register_eod_hybrid(flask_app: Any) -> None:
         import eod_hybrid
         if flask_app is not None and hasattr(eod_hybrid, "_register_routes"):
             eod_hybrid._register_routes(flask_app)
-    except Exception:
-        pass
-
-
-def _register_breakout_participation(flask_app: Any, m: Any | None) -> None:
-    try:
-        import breakout_participation_layer
-        if hasattr(breakout_participation_layer, "apply_runtime_overrides"):
-            breakout_participation_layer.apply_runtime_overrides(m)
-        if flask_app is not None and hasattr(breakout_participation_layer, "register_routes"):
-            breakout_participation_layer.register_routes(flask_app)
-    except Exception:
-        pass
-
-
-def _register_paper_exposure_rotation(flask_app: Any, m: Any | None) -> None:
-    try:
-        import paper_exposure_rotation
-        if hasattr(paper_exposure_rotation, "apply_runtime_overrides"):
-            paper_exposure_rotation.apply_runtime_overrides(m)
-        if flask_app is not None and hasattr(paper_exposure_rotation, "register_routes"):
-            paper_exposure_rotation.register_routes(flask_app)
-    except Exception:
-        pass
-
-
-def _register_paper_participation_allocator(flask_app: Any, m: Any | None) -> None:
-    try:
-        import paper_participation_allocator
-        if hasattr(paper_participation_allocator, "apply_runtime_overrides"):
-            paper_participation_allocator.apply_runtime_overrides(m)
-        if flask_app is not None and hasattr(paper_participation_allocator, "register_routes"):
-            paper_participation_allocator.register_routes(flask_app)
     except Exception:
         pass
 
@@ -211,6 +154,7 @@ def _status_payload() -> dict[str, Any]:
         "breakout_leaders_route_registered": "/paper/breakout-leaders" in rules,
         "paper_exposure_route_registered": "/paper/paper-exposure-status" in rules,
         "paper_participation_route_registered": "/paper/paper-participation-status" in rules,
+        "risk_on_concentration_policy_route_registered": "/paper/risk-on-concentration-policy" in rules,
         "breakout_rotation_route_registered": "/paper/breakout-rotation-status" in rules,
         "research_advisory_route_registered": "/paper/research-advisory-status" in rules,
         "scanner_research_ranking_route_registered": "/paper/scanner-research-ranking" in rules,
@@ -220,10 +164,7 @@ def _status_payload() -> dict[str, Any]:
 
 
 def _register_startup_status(flask_app: Any) -> None:
-    if flask_app is None:
-        return
-    existing = _existing_rules(flask_app)
-    if "/paper/startup-loader-status" in existing:
+    if flask_app is None or "/paper/startup-loader-status" in _existing_rules(flask_app):
         return
     try:
         from flask import jsonify
@@ -248,9 +189,10 @@ def _register_all(flask_app: Any | None = None, m: Any | None = None) -> None:
 
     _register_risk_bootstrap(flask_app, m)
     _register_eod_hybrid(flask_app)
-    _register_breakout_participation(flask_app, m)
-    _register_paper_exposure_rotation(flask_app, m)
-    _register_paper_participation_allocator(flask_app, m)
+    _register_module(flask_app, m, "breakout_participation_layer")
+    _register_module(flask_app, m, "paper_exposure_rotation")
+    _register_module(flask_app, m, "paper_participation_allocator")
+    _register_module(flask_app, m, "paper_risk_on_concentration_policy", route_args="app_and_module")
     _register_research_advisory(flask_app, m)
 
     if flask_app is not None:
@@ -283,6 +225,7 @@ try:
         Flask.__init__ = _patched_init
 except Exception:
     pass
+
 
 _register_all()
 threading.Thread(target=_watchdog, daemon=True).start()
