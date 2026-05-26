@@ -11,7 +11,7 @@ import time
 import sys
 from typing import Any
 
-VERSION = "unified-startup-loader-2026-05-22-risk-on-concentration"
+VERSION = "unified-startup-loader-2026-05-26-patch-stack-guard"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -52,6 +52,7 @@ def _patch_one_link_check() -> None:
             {"path": "/paper/paper-participation-status", "category": "governance", "required": False, "after": "/paper/paper-exposure-status"},
             {"path": "/paper/risk-on-concentration-policy", "category": "governance", "required": False, "after": "/paper/paper-participation-status"},
             {"path": "/paper/breakout-rotation-status", "category": "governance", "required": False, "after": "/paper/risk-on-concentration-policy"},
+            {"path": "/paper/patch-stack-guard-status", "category": "governance", "required": False, "after": "/paper/breakout-rotation-status"},
             {"path": "/paper/research-advisory-status", "category": "governance", "required": False, "after": "/paper/news-risk-status"},
             {"path": "/paper/scanner-research-ranking", "category": "governance", "required": False, "after": "/paper/research-advisory-status"},
             {"path": "/paper/fundamental-score-status", "category": "governance", "required": False, "after": "/paper/scanner-research-ranking"},
@@ -108,6 +109,17 @@ def _register_module(flask_app: Any, m: Any | None, module_name: str, apply_name
         pass
 
 
+def _register_patch_stack_guard(flask_app: Any, m: Any | None) -> None:
+    try:
+        import runtime_patch_stack_guard
+        if hasattr(runtime_patch_stack_guard, "apply_runtime_overrides"):
+            runtime_patch_stack_guard.apply_runtime_overrides(m)
+        if flask_app is not None and hasattr(runtime_patch_stack_guard, "register_routes"):
+            runtime_patch_stack_guard.register_routes(flask_app, m)
+    except Exception:
+        pass
+
+
 def _register_risk_bootstrap(flask_app: Any, m: Any | None) -> None:
     try:
         import risk_bootstrap
@@ -156,6 +168,7 @@ def _status_payload() -> dict[str, Any]:
         "paper_participation_route_registered": "/paper/paper-participation-status" in rules,
         "risk_on_concentration_policy_route_registered": "/paper/risk-on-concentration-policy" in rules,
         "breakout_rotation_route_registered": "/paper/breakout-rotation-status" in rules,
+        "patch_stack_guard_route_registered": "/paper/patch-stack-guard-status" in rules,
         "research_advisory_route_registered": "/paper/research-advisory-status" in rules,
         "scanner_research_ranking_route_registered": "/paper/scanner-research-ranking" in rules,
         "fundamental_score_route_registered": "/paper/fundamental-score-status" in rules,
@@ -189,10 +202,12 @@ def _register_all(flask_app: Any | None = None, m: Any | None = None) -> None:
 
     _register_risk_bootstrap(flask_app, m)
     _register_eod_hybrid(flask_app)
+    _register_patch_stack_guard(flask_app, m)
     _register_module(flask_app, m, "breakout_participation_layer")
     _register_module(flask_app, m, "paper_exposure_rotation")
     _register_module(flask_app, m, "paper_participation_allocator")
     _register_module(flask_app, m, "paper_risk_on_concentration_policy", route_args="app_and_module")
+    _register_patch_stack_guard(flask_app, m)
     _register_research_advisory(flask_app, m)
 
     if flask_app is not None:
