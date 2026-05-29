@@ -7,7 +7,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-fmp-limited-access-2026-05-29-v1"
+VERSION = "usercustomize-fmp-cached-profile-labels-2026-05-29-v2"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -44,6 +44,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/breakout-participation-status", "category": "governance", "required": False, "after": "/paper/market-participation-accelerator-status"},
             {"path": "/paper/breakout-leaders", "category": "governance", "required": False, "after": "/paper/breakout-participation-status"},
             {"path": "/paper/fmp-limited-access-guard-status", "category": "governance", "required": False, "after": "/paper/analyst-valuation-risk-status"},
+            {"path": "/paper/fmp-cached-profile-label-guard-status", "category": "governance", "required": False, "after": "/paper/fmp-limited-access-guard-status"},
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
         for endpoint in wanted:
@@ -215,6 +216,31 @@ def _register_fmp_limited_access_guard(flask_app: Any, m: Any | None = None) -> 
         pass
 
 
+def _register_fmp_cached_profile_label_guard(flask_app: Any, m: Any | None = None) -> None:
+    try:
+        import fmp_cached_profile_label_guard
+
+        if hasattr(fmp_cached_profile_label_guard, "apply_runtime_overrides"):
+            fmp_cached_profile_label_guard.apply_runtime_overrides(_mod() or m)
+        if flask_app is None or "/paper/fmp-cached-profile-label-guard-status" in _existing_rules(flask_app):
+            return
+        from flask import jsonify
+
+        def fmp_cached_profile_label_guard_status():
+            try:
+                return jsonify(fmp_cached_profile_label_guard.status_payload())
+            except Exception as exc:
+                return jsonify({"status": "error", "type": "fmp_cached_profile_label_guard_status", "version": VERSION, "error": str(exc)}), 500
+
+        flask_app.add_url_rule(
+            "/paper/fmp-cached-profile-label-guard-status",
+            "fmp_cached_profile_label_guard_status",
+            fmp_cached_profile_label_guard_status,
+        )
+    except Exception:
+        pass
+
+
 def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
     if flask_app is None or id(flask_app) in _REGISTERED_APP_IDS:
         return
@@ -225,6 +251,7 @@ def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
     _register_self_check(flask_app, m)
     _register_breakout_participation(flask_app, m)
     _register_fmp_limited_access_guard(flask_app, m)
+    _register_fmp_cached_profile_label_guard(flask_app, m)
     _REGISTERED_APP_IDS.add(id(flask_app))
 
 
@@ -238,6 +265,7 @@ def _watchdog() -> None:
                 _register_auxiliary_routes(flask_app, m)
                 _register_breakout_participation(flask_app, m)
                 _register_fmp_limited_access_guard(flask_app, m)
+                _register_fmp_cached_profile_label_guard(flask_app, m)
         except Exception:
             pass
         time.sleep(0.1)
@@ -258,6 +286,7 @@ try:
 except Exception:
     pass
 
-_patch_self_check_endpoints()
-_register_fmp_limited_access_guard(None, _mod())
-threading.Thread(target=_watchdog, daemon=True).start()
+try:
+    threading.Thread(target=_watchdog, daemon=True).start()
+except Exception:
+    pass
