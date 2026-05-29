@@ -11,7 +11,7 @@ import time
 import sys
 from typing import Any
 
-VERSION = "unified-startup-loader-2026-05-26-patch-stack-guard"
+VERSION = "unified-startup-loader-2026-05-28-fundamental-valuation-risk"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -56,6 +56,8 @@ def _patch_one_link_check() -> None:
             {"path": "/paper/research-advisory-status", "category": "governance", "required": False, "after": "/paper/news-risk-status"},
             {"path": "/paper/scanner-research-ranking", "category": "governance", "required": False, "after": "/paper/research-advisory-status"},
             {"path": "/paper/fundamental-score-status", "category": "governance", "required": False, "after": "/paper/scanner-research-ranking"},
+            {"path": "/paper/fundamental-valuation-risk-status", "category": "governance", "required": False, "after": "/paper/fundamental-score-status"},
+            {"path": "/paper/analyst-valuation-risk-status", "category": "governance", "required": False, "after": "/paper/fundamental-valuation-risk-status"},
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
         for endpoint in wanted:
@@ -151,6 +153,17 @@ def _register_research_advisory(flask_app: Any, m: Any | None) -> None:
         pass
 
 
+def _register_fundamental_valuation_risk(flask_app: Any, m: Any | None) -> None:
+    try:
+        import fundamental_valuation_risk_layer
+        if hasattr(fundamental_valuation_risk_layer, "apply"):
+            fundamental_valuation_risk_layer.apply(m)
+        if flask_app is not None and hasattr(fundamental_valuation_risk_layer, "register_routes"):
+            fundamental_valuation_risk_layer.register_routes(flask_app, m)
+    except Exception:
+        pass
+
+
 def _status_payload() -> dict[str, Any]:
     m = _mod()
     flask_app = getattr(m, "app", None) if m is not None else None
@@ -172,6 +185,8 @@ def _status_payload() -> dict[str, Any]:
         "research_advisory_route_registered": "/paper/research-advisory-status" in rules,
         "scanner_research_ranking_route_registered": "/paper/scanner-research-ranking" in rules,
         "fundamental_score_route_registered": "/paper/fundamental-score-status" in rules,
+        "fundamental_valuation_risk_route_registered": "/paper/fundamental-valuation-risk-status" in rules,
+        "analyst_valuation_risk_route_registered": "/paper/analyst-valuation-risk-status" in rules,
         "routes_count": len(rules),
     }
 
@@ -209,6 +224,7 @@ def _register_all(flask_app: Any | None = None, m: Any | None = None) -> None:
     _register_module(flask_app, m, "paper_risk_on_concentration_policy", route_args="app_and_module")
     _register_patch_stack_guard(flask_app, m)
     _register_research_advisory(flask_app, m)
+    _register_fundamental_valuation_risk(flask_app, m)
 
     if flask_app is not None:
         _REGISTERED_APP_IDS.add(id(flask_app))
