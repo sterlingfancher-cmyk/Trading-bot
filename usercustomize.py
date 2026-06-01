@@ -7,7 +7,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-fmp-cached-profile-labels-2026-05-29-v2"
+VERSION = "usercustomize-profit-maturity-rotation-2026-06-01-v1"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -45,6 +45,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/breakout-leaders", "category": "governance", "required": False, "after": "/paper/breakout-participation-status"},
             {"path": "/paper/fmp-limited-access-guard-status", "category": "governance", "required": False, "after": "/paper/analyst-valuation-risk-status"},
             {"path": "/paper/fmp-cached-profile-label-guard-status", "category": "governance", "required": False, "after": "/paper/fmp-limited-access-guard-status"},
+            {"path": "/paper/profit-maturity-rotation-status", "category": "governance", "required": False, "after": "/paper/fmp-cached-profile-label-guard-status"},
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
         for endpoint in wanted:
@@ -241,6 +242,19 @@ def _register_fmp_cached_profile_label_guard(flask_app: Any, m: Any | None = Non
         pass
 
 
+def _register_profit_maturity_rotation(flask_app: Any, m: Any | None = None) -> None:
+    try:
+        import profit_maturity_rotation_layer
+
+        module = _mod() or m
+        if hasattr(profit_maturity_rotation_layer, "apply_runtime_overrides"):
+            profit_maturity_rotation_layer.apply_runtime_overrides(module)
+        if flask_app is not None and hasattr(profit_maturity_rotation_layer, "register_routes"):
+            profit_maturity_rotation_layer.register_routes(flask_app, module)
+    except Exception:
+        pass
+
+
 def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
     if flask_app is None or id(flask_app) in _REGISTERED_APP_IDS:
         return
@@ -252,6 +266,7 @@ def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
     _register_breakout_participation(flask_app, m)
     _register_fmp_limited_access_guard(flask_app, m)
     _register_fmp_cached_profile_label_guard(flask_app, m)
+    _register_profit_maturity_rotation(flask_app, m)
     _REGISTERED_APP_IDS.add(id(flask_app))
 
 
@@ -266,6 +281,7 @@ def _watchdog() -> None:
                 _register_breakout_participation(flask_app, m)
                 _register_fmp_limited_access_guard(flask_app, m)
                 _register_fmp_cached_profile_label_guard(flask_app, m)
+                _register_profit_maturity_rotation(flask_app, m)
         except Exception:
             pass
         time.sleep(0.1)
