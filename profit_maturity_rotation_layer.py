@@ -4,6 +4,12 @@ Conservative paper-mode layer: it does not raise max positions, force entries,
 bypass halts, bypass stop losses, or bypass entry-quality checks. It only lets a
 full book recycle a mature/fading winner into a materially stronger candidate,
 and records a status payload for review.
+
+v2 adds a narrow profit-guard redeployment exception: when profit guard blocks
+new entries but the book is materially under max positions, one exceptional
+breakout starter can be re-submitted through the normal entry pipeline. This
+does not bypass technical entry quality checks, halts, stop losses, or
+self-defense controls.
 """
 from __future__ import annotations
 
@@ -13,9 +19,10 @@ import os
 import sys
 from typing import Any, Dict, Iterable, Tuple
 
-VERSION = "profit-maturity-rotation-2026-06-01-v1"
+VERSION = "profit-maturity-rotation-2026-06-02-v2"
 REGISTERED_APP_IDS: set[int] = set()
 _CYCLE_ROTATIONS_USED = 0
+_CYCLE_REDEPLOY_ENTRIES_USED = 0
 
 ENABLED = os.environ.get("PROFIT_MATURITY_ROTATION_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 PAPER_ONLY = os.environ.get("PROFIT_MATURITY_PAPER_ONLY", "true").lower() not in {"0", "false", "no", "off"}
@@ -28,6 +35,10 @@ MIN_SCORE_EDGE = float(os.environ.get("PROFIT_MATURITY_MIN_SCORE_EDGE", "0.012")
 EXCEPTIONAL_SCORE = float(os.environ.get("PROFIT_MATURITY_EXCEPTIONAL_NEW_SCORE", "0.045"))
 STALE_WINNER_MAX_SCORE = float(os.environ.get("PROFIT_MATURITY_STALE_WINNER_MAX_SCORE", "0.028"))
 MAX_ROTATIONS_PER_CYCLE = int(os.environ.get("PROFIT_MATURITY_MAX_ROTATIONS_PER_CYCLE", "2"))
+
+PROFIT_GUARD_REDEPLOY_ENABLED = os.environ.get("PROFIT_GUARD_EXCEPTIONAL_REDEPLOY_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
+PROFIT_GUARD_REDEPLOY_SCORE = float(os.environ.get("PROFIT_GUARD_EXCEPTIONAL_REDEPLOY_SCORE", str(EXCEPTIONAL_SCORE)))
+PROFIT_GUARD_REDEPLOY_MAX_PER_CYCLE = int(os.environ.get("PROFIT_GUARD_EXCEPTIONAL_REDEPLOY_MAX_PER_CYCLE", "1"))
 
 
 def _mod() -> Any | None:
@@ -152,6 +163,152 @@ def _market_ok(market: Dict[str, Any] | None) -> Tuple[bool, str]:
     return True, "ok"
 
 
+def _market_ok_for_redeploy(market: Dict[str, Any] | None) -> Tuple[bool, str]:
+    market = market or {}
+    mode = str(market.get("market_mode", "neutral") or "neutral").lower()
+    if bool(market.get("bear_confirmed")) or bool(market.get("broad_market_soft")):
+        return False, "market_not_clean_for_profit_guard_redeploy"
+    if mode != "risk_on":
+        return False, "profit_guard_redeploy_requires_risk_on"
+    return True, "ok"
+
+
+def _self_defense_active(m: Any | None) -> Tuple[bool, str]:
+    try:
+        fn = getattr(m, "get_risk_controls", None)
+        rc = fn() if callable(fn) else {}
+        if isinstance(rc, dict) and bool(rc.get("self_defense_active")):
+            return True, str(rc.get("self_defense_reason") or "self_defense_active")
+    except Exception:
+        pass
+    try:
+        rc = ((getattr(m, "portfolio", {}) or {}).get("risk_controls") or {})
+        if isinstance(rc, dict) and bool(rc.get("self_defense_active")):
+            return True, str(rc.get("self_defense_reason") or "self_defense_active")
+    except Exception:
+        pass
+    return False, ""
+
+
+def _is_profit_guard_block(new_entries_allowed: bool, entry_block_reason: Any) -> bool:
+    reason = str(entry_block_reason or "").lower()
+    return (not bool(new_entries_allowed)) and ("profit_guard" in reason or "profit guard" in reason)
+
+
+def _is_breakout_signal(signal: Dict[str, Any] | None) -> bool:
+    if not isinstance(signal, dict):
+        return False
+    ctx = signal.get("breakout_participation") or {}
+    catalyst = signal.get("catalyst") or {}
+    return bool(
+        ctx.get("active")
+        or signal.get("entry_context") == "breakout_participation_starter"
+        or signal.get("trade_class") == "breakout_starter"
+        or catalyst.get("reason") == "breakout_participation_layer"
+    )
+
+
+def _signal_summary(m: Any | None, signal: Dict[str, Any]) -> Dict[str, Any]:
+    symbol = str(signal.get("symbol", "")).upper()
+    ctx = signal.get("breakout_participation") or {}
+    return {
+        "symbol": symbol,
+        "side": signal.get("side"),
+        "score": round(_f(signal.get("score"), 0.0), 6),
+        "sector": signal.get("sector") or _sector(m, symbol),
+        "bucket": _bucket(m, symbol),
+        "entry_context": signal.get("entry_context"),
+        "trade_class": signal.get("trade_class"),
+        "breakout": bool(_is_breakout_signal(signal)),
+        "breakout_reason": ctx.get("reason"),
+        "risk_tier": ctx.get("risk_tier"),
+    }
+
+
+def _best_exceptional_redeploy_signal(
+    m: Any | None,
+    long_signals: Iterable[Dict[str, Any]] | None,
+    short_signals: Iterable[Dict[str, Any]] | None,
+    params: Dict[str, Any] | None,
+    market: Dict[str, Any] | None,
+    new_entries_allowed: bool,
+    entry_block_reason: Any,
+) -> Tuple[Dict[str, Any] | None, Dict[str, Any]]:
+    if not PROFIT_GUARD_REDEPLOY_ENABLED:
+        return None, {"allowed": False, "reason": "profit_guard_redeploy_disabled", "version": VERSION}
+    if not _paper_context():
+        return None, {"allowed": False, "reason": "not_paper_context", "version": VERSION}
+    if _CYCLE_REDEPLOY_ENTRIES_USED >= PROFIT_GUARD_REDEPLOY_MAX_PER_CYCLE:
+        return None, {"allowed": False, "reason": "profit_guard_redeploy_cycle_limit_reached", "max_per_cycle": PROFIT_GUARD_REDEPLOY_MAX_PER_CYCLE, "version": VERSION}
+    if not _is_profit_guard_block(new_entries_allowed, entry_block_reason):
+        return None, {"allowed": False, "reason": "entry_block_not_profit_guard", "entry_block_reason": str(entry_block_reason or ""), "version": VERSION}
+
+    active, defense_reason = _self_defense_active(m)
+    if active:
+        return None, {"allowed": False, "reason": "self_defense_active", "self_defense_reason": defense_reason, "version": VERSION}
+
+    ok, reason = _market_ok_for_redeploy(market or {})
+    if not ok:
+        return None, {"allowed": False, "reason": reason, "version": VERSION}
+
+    positions = _positions(m)
+    max_positions = _i((params or {}).get("max_positions"), 0)
+    if max_positions <= 0:
+        return None, {"allowed": False, "reason": "missing_effective_max_positions", "version": VERSION}
+    if len(positions) >= max_positions:
+        return None, {"allowed": False, "reason": "book_not_underdeployed", "open_positions_count": len(positions), "max_positions": max_positions, "version": VERSION}
+
+    held = {str(s).upper() for s in positions}
+    candidates = []
+    for sig in list(long_signals or []) + list(short_signals or []):
+        if not isinstance(sig, dict):
+            continue
+        symbol = str(sig.get("symbol", "")).upper()
+        if not symbol or symbol in held:
+            continue
+        score = _f(sig.get("score"), 0.0)
+        if score < PROFIT_GUARD_REDEPLOY_SCORE:
+            continue
+        if not _is_breakout_signal(sig):
+            continue
+        candidates.append(sig)
+
+    if not candidates:
+        return None, {
+            "allowed": False,
+            "reason": "no_exceptional_breakout_redeploy_candidate",
+            "required_score": PROFIT_GUARD_REDEPLOY_SCORE,
+            "open_positions_count": len(positions),
+            "max_positions": max_positions,
+            "version": VERSION,
+        }
+
+    best = sorted(candidates, key=lambda s: _f(s.get("score"), 0.0), reverse=True)[0]
+    return best, {
+        "allowed": True,
+        "reason": "profit_guard_exceptional_redeploy_candidate",
+        "version": VERSION,
+        "candidate": _signal_summary(m, best),
+        "required_score": PROFIT_GUARD_REDEPLOY_SCORE,
+        "open_positions_count": len(positions),
+        "max_positions": max_positions,
+        "does_not_raise_max_positions": True,
+        "does_not_bypass_halts": True,
+        "does_not_bypass_stop_losses": True,
+        "does_not_force_entries": False,
+        "entry_quality_check_still_required": True,
+        "max_redeploy_entries_per_cycle": PROFIT_GUARD_REDEPLOY_MAX_PER_CYCLE,
+    }
+
+
+def _single_signal_lists(signal: Dict[str, Any] | None) -> Tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+    if not isinstance(signal, dict):
+        return [], []
+    if str(signal.get("side", "long")).lower() == "short":
+        return [], [signal]
+    return [signal], []
+
+
 def profit_maturity_allowed(m: Any | None, new_signal: Dict[str, Any], weakest: Dict[str, Any], market: Dict[str, Any] | None) -> Tuple[bool, Dict[str, Any]]:
     if not ENABLED:
         return False, {"reason": "profit_maturity_rotation_disabled", "version": VERSION}
@@ -257,11 +414,6 @@ def _patch_rotation_allowed(m: Any) -> bool:
     return True
 
 
-def _signal_summary(m: Any | None, signal: Dict[str, Any]) -> Dict[str, Any]:
-    symbol = str(signal.get("symbol", "")).upper()
-    return {"symbol": symbol, "side": signal.get("side"), "score": round(_f(signal.get("score"), 0.0), 6), "sector": signal.get("sector") or _sector(m, symbol), "bucket": _bucket(m, symbol)}
-
-
 def _review(m: Any, long_signals: Iterable[Dict[str, Any]] | None, short_signals: Iterable[Dict[str, Any]] | None, blocked_entries: Iterable[Dict[str, Any]] | None, params: Dict[str, Any] | None, market: Dict[str, Any] | None, rotations: Iterable[Dict[str, Any]] | None) -> Dict[str, Any]:
     positions = _positions(m)
     snaps = [_position_snapshot(m, s, p) for s, p in positions.items() if isinstance(p, dict)]
@@ -272,6 +424,11 @@ def _review(m: Any, long_signals: Iterable[Dict[str, Any]] | None, short_signals
     signals = sorted(signals, key=lambda x: _f(x.get("score"), 0.0), reverse=True)[:12]
     rotations_from_layer = [r for r in (rotations or []) if isinstance(r, dict) and str((r.get("info") or {}).get("reason", "")).startswith("profit_maturity_rotation")]
     blocked = [b for b in (blocked_entries or []) if isinstance(b, dict)]
+    exceptional_redeploy_candidates = [
+        _signal_summary(m, s)
+        for s in signals
+        if _is_breakout_signal(s) and _f(s.get("score"), 0.0) >= PROFIT_GUARD_REDEPLOY_SCORE
+    ][:10]
     return {
         "status": "ok",
         "type": "profit_maturity_rotation_review",
@@ -290,10 +447,24 @@ def _review(m: Any, long_signals: Iterable[Dict[str, Any]] | None, short_signals
         "mature_winners": sorted(mature, key=lambda x: x["pnl_pct"], reverse=True)[:10],
         "fading_mature_winners": sorted(fading, key=lambda x: x["giveback_pct"], reverse=True)[:10],
         "top_unheld_signals": [_signal_summary(m, s) for s in signals],
+        "exceptional_redeploy_candidates": exceptional_redeploy_candidates,
         "blocked_entries_count": len(blocked),
         "blocked_rotation_candidates": [b for b in blocked if "rotation" in str(b.get("reason", "")) or str(b.get("reason", "")).startswith("max_positions_full")][:12],
         "rotations_from_profit_maturity": rotations_from_layer[:10],
-        "policy": {"min_pnl_pct": round(MIN_PNL * 100, 2), "min_peak_profit_pct": round(MIN_PEAK * 100, 2), "min_giveback_pct": round(MIN_GIVEBACK * 100, 2), "min_hold_hours": round(MIN_HOLD / 3600.0, 2), "min_new_score": MIN_NEW_SCORE, "min_score_edge": MIN_SCORE_EDGE, "exceptional_new_score": EXCEPTIONAL_SCORE, "max_rotations_per_cycle": MAX_ROTATIONS_PER_CYCLE},
+        "profit_guard_redeployment": (getattr(m, "portfolio", {}) or {}).get("profit_guard_redeployment") or {},
+        "policy": {
+            "min_pnl_pct": round(MIN_PNL * 100, 2),
+            "min_peak_profit_pct": round(MIN_PEAK * 100, 2),
+            "min_giveback_pct": round(MIN_GIVEBACK * 100, 2),
+            "min_hold_hours": round(MIN_HOLD / 3600.0, 2),
+            "min_new_score": MIN_NEW_SCORE,
+            "min_score_edge": MIN_SCORE_EDGE,
+            "exceptional_new_score": EXCEPTIONAL_SCORE,
+            "max_rotations_per_cycle": MAX_ROTATIONS_PER_CYCLE,
+            "profit_guard_redeploy_enabled": PROFIT_GUARD_REDEPLOY_ENABLED,
+            "profit_guard_redeploy_score": PROFIT_GUARD_REDEPLOY_SCORE,
+            "profit_guard_redeploy_max_per_cycle": PROFIT_GUARD_REDEPLOY_MAX_PER_CYCLE,
+        },
     }
 
 
@@ -304,9 +475,52 @@ def _patch_try_entries(m: Any) -> bool:
     original = current
 
     def patched_try_entries_and_rotations(long_signals, short_signals, params, market, new_entries_allowed=True, entry_block_reason=None):
-        global _CYCLE_ROTATIONS_USED
+        global _CYCLE_ROTATIONS_USED, _CYCLE_REDEPLOY_ENTRIES_USED
         _CYCLE_ROTATIONS_USED = 0
-        entries, rotations, blocked_entries = original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
+        _CYCLE_REDEPLOY_ENTRIES_USED = 0
+
+        redeploy_signal, redeploy_info = _best_exceptional_redeploy_signal(
+            m,
+            long_signals,
+            short_signals,
+            params or {},
+            market or {},
+            bool(new_entries_allowed),
+            entry_block_reason,
+        )
+        call_long_signals = long_signals
+        call_short_signals = short_signals
+        call_new_entries_allowed = new_entries_allowed
+        call_entry_block_reason = entry_block_reason
+
+        if redeploy_signal is not None:
+            call_long_signals, call_short_signals = _single_signal_lists(redeploy_signal)
+            call_new_entries_allowed = True
+            call_entry_block_reason = None
+            _CYCLE_REDEPLOY_ENTRIES_USED += 1
+            redeploy_info["entry_scope"] = "single_exceptional_breakout_candidate_only"
+
+        entries, rotations, blocked_entries = original(
+            call_long_signals,
+            call_short_signals,
+            params,
+            market,
+            new_entries_allowed=call_new_entries_allowed,
+            entry_block_reason=call_entry_block_reason,
+        )
+
+        try:
+            if redeploy_signal is not None:
+                sym = str(redeploy_signal.get("symbol", "")).upper()
+                redeploy_info["entries_from_redeploy"] = [e for e in (entries or []) if str(e.get("symbol", "")).upper() == sym][:5]
+                redeploy_info["blocked_redeploy_entries"] = [b for b in (blocked_entries or []) if str(b.get("symbol", "")).upper() == sym][:5]
+                redeploy_info["status"] = "entered" if redeploy_info["entries_from_redeploy"] else "passed_to_entry_pipeline"
+            else:
+                redeploy_info["status"] = "not_applicable"
+            m.portfolio["profit_guard_redeployment"] = redeploy_info
+        except Exception:
+            pass
+
         try:
             m.portfolio["profit_maturity_rotation_review"] = _review(m, long_signals, short_signals, blocked_entries, params or {}, market or {}, rotations)
         except Exception as exc:
@@ -330,7 +544,21 @@ def status_payload(m: Any | None = None) -> Dict[str, Any]:
         latest = dict((m.portfolio or {}).get("profit_maturity_rotation_review") or {})
     except Exception:
         latest = {}
-    return {"status": "ok", "type": "profit_maturity_rotation_status", "version": VERSION, "generated_local": _now(m), "enabled": bool(ENABLED and _paper_context()), "patched_rotation_allowed": _chain_has_marker(getattr(m, "rotation_allowed", None), "_profit_maturity_rotation_patched"), "patched_try_entries": _chain_has_marker(getattr(m, "try_entries_and_rotations", None), "_profit_maturity_try_entries_patched"), "latest_review": latest}
+    try:
+        redeployment = dict((m.portfolio or {}).get("profit_guard_redeployment") or {})
+    except Exception:
+        redeployment = {}
+    return {
+        "status": "ok",
+        "type": "profit_maturity_rotation_status",
+        "version": VERSION,
+        "generated_local": _now(m),
+        "enabled": bool(ENABLED and _paper_context()),
+        "patched_rotation_allowed": _chain_has_marker(getattr(m, "rotation_allowed", None), "_profit_maturity_rotation_patched"),
+        "patched_try_entries": _chain_has_marker(getattr(m, "try_entries_and_rotations", None), "_profit_maturity_try_entries_patched"),
+        "latest_review": latest,
+        "profit_guard_redeployment": redeployment,
+    }
 
 
 def apply_runtime_overrides(m: Any | None = None) -> Dict[str, Any]:
