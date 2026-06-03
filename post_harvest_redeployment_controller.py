@@ -5,6 +5,11 @@ harvested profit and is sitting underdeployed with clean risk controls. It may
 submit 1-2 high-quality unheld long candidates back through the normal entry
 pipeline. It does not raise max positions, bypass halts, bypass stop losses,
 bypass self-defense, bypass account risk controls, or force fills.
+
+v3 fixes the post-profit bridge: if the normal run parameters temporarily set
+allow_longs=False after harvesting, selected redeployment starter longs are
+allowed to reach the normal quality/entry engine while all other discipline
+remains intact.
 """
 from __future__ import annotations
 
@@ -14,7 +19,7 @@ import os
 import sys
 from typing import Any, Dict, Iterable, Tuple
 
-VERSION = "post-harvest-redeployment-2026-06-03-v2"
+VERSION = "post-harvest-redeployment-2026-06-03-v3"
 REGISTERED_APP_IDS: set[int] = set()
 _CYCLE_ENTRIES_USED = 0
 
@@ -32,6 +37,7 @@ MIN_REALIZED_TODAY = float(os.environ.get("POST_HARVEST_MIN_REALIZED_TODAY", "25
 MAX_LOSSES_TODAY = int(os.environ.get("POST_HARVEST_MAX_LOSSES_TODAY", "0"))
 MAX_DAILY_DRAWDOWN_PCT = float(os.environ.get("POST_HARVEST_MAX_DAILY_DRAWDOWN_PCT", "1.25"))
 NO_TIMESTAMP_EXIT_LOOKBACK = int(os.environ.get("POST_HARVEST_NO_TS_EXIT_LOOKBACK", "40"))
+STARTER_ALLOC_FACTOR = float(os.environ.get("POST_HARVEST_STARTER_ALLOC_FACTOR", "0.50"))
 
 PREFERRED_CONTEXTS = {
     "breakout_participation_starter",
@@ -264,10 +270,12 @@ def _summary(m: Any | None, signal: Dict[str, Any]) -> Dict[str, Any]:
         "symbol": symbol,
         "side": signal.get("side"),
         "score": round(_f(signal.get("score"), 0.0), 6),
+        "price": round(_f(signal.get("price"), 0.0), 4) if signal.get("price") is not None else None,
         "sector": signal.get("sector") or _sector(m, symbol),
-        "bucket": _bucket(m, symbol),
+        "bucket": signal.get("bucket") or _bucket(m, symbol),
         "entry_context": signal.get("entry_context"),
         "trade_class": signal.get("trade_class"),
+        "alloc_factor": round(_f(signal.get("alloc_factor"), 1.0), 4) if signal.get("alloc_factor") is not None else None,
         "breakout": bool(_is_breakout_signal(signal)),
         "relative_strength": bool(_is_relative_strength_signal(signal)),
         "breakout_reason": ctx.get("reason"),
@@ -403,13 +411,24 @@ def _signal_lists(signals: list[Dict[str, Any]]) -> Tuple[list[Dict[str, Any]], 
 def _starter_signal(signal: Dict[str, Any]) -> Dict[str, Any]:
     copied = dict(signal)
     copied.setdefault("entry_context", "post_harvest_redeployment_starter")
+    copied["alloc_factor"] = min(_f(copied.get("alloc_factor"), 1.0), STARTER_ALLOC_FACTOR)
     copied["post_harvest_redeployment"] = {
         "enabled": True,
         "scope": "starter_position_only",
         "max_entries_per_cycle": MAX_ENTRIES_PER_CYCLE,
+        "starter_alloc_factor": STARTER_ALLOC_FACTOR,
         "version": VERSION,
     }
     return copied
+
+
+def _redeployment_params(params: Dict[str, Any], selected: list[Dict[str, Any]]) -> Dict[str, Any]:
+    call_params = dict(params or {})
+    if any(str(s.get("side", "long")).lower() == "long" for s in selected):
+        call_params["allow_longs"] = True
+    if any(str(s.get("side", "")).lower() == "short" for s in selected):
+        call_params["allow_shorts"] = True
+    return call_params
 
 
 def select_redeployment_candidates(
@@ -530,6 +549,7 @@ def select_redeployment_candidates(
         "profit_harvest": profit_info,
         "risk_controls": risk_info,
         "max_entries_per_cycle": MAX_ENTRIES_PER_CYCLE,
+        "starter_alloc_factor": STARTER_ALLOC_FACTOR,
         "does_not_raise_max_positions": True,
         "does_not_bypass_halts": True,
         "does_not_bypass_stop_losses": True,
@@ -585,25 +605,50 @@ def _patch_try_entries(m: Any) -> bool:
             entry_block_reason,
         )
         call_long_signals, call_short_signals = long_signals, short_signals
+        call_params = params
         call_new_entries_allowed, call_entry_block_reason = new_entries_allowed, entry_block_reason
+
         if selected:
             call_long_signals, call_short_signals = _signal_lists(selected)
+            call_params = _redeployment_params(params or {}, selected)
             call_new_entries_allowed, call_entry_block_reason = True, None
             _CYCLE_ENTRIES_USED += len(selected)
+            try:
+                info["params_bridge"] = {
+                    "original_allow_longs": bool((params or {}).get("allow_longs", False)),
+                    "bridged_allow_longs": bool(call_params.get("allow_longs", False)),
+                    "original_allow_shorts": bool((params or {}).get("allow_shorts", False)),
+                    "bridged_allow_shorts": bool(call_params.get("allow_shorts", False)),
+                    "max_positions_preserved": (params or {}).get("max_positions") == call_params.get("max_positions"),
+                }
+            except Exception:
+                pass
+
         entries, rotations, blocked_entries = original(
             call_long_signals,
             call_short_signals,
-            params,
+            call_params,
             market,
             new_entries_allowed=call_new_entries_allowed,
             entry_block_reason=call_entry_block_reason,
         )
+
         try:
             if selected:
                 syms = {str(s.get("symbol", "")).upper() for s in selected}
-                info["entries_from_post_harvest"] = [e for e in (entries or []) if str(e.get("symbol", "")).upper() in syms][:10]
-                info["blocked_post_harvest_entries"] = [b for b in (blocked_entries or []) if str(b.get("symbol", "")).upper() in syms][:10]
-                info["status"] = "entered" if info["entries_from_post_harvest"] else "passed_to_entry_pipeline"
+                info["entries_from_post_harvest"] = [e for e in (entries or []) if isinstance(e, dict) and str(e.get("symbol", "")).upper() in syms][:10]
+                info["blocked_post_harvest_entries"] = [b for b in (blocked_entries or []) if isinstance(b, dict) and str(b.get("symbol", "")).upper() in syms][:10]
+                info["rotations_from_post_harvest"] = [r for r in (rotations or []) if isinstance(r, dict) and str(r.get("in", "")).upper() in syms][:10]
+                if info["entries_from_post_harvest"] or info["rotations_from_post_harvest"]:
+                    info["status"] = "entered"
+                elif info["blocked_post_harvest_entries"]:
+                    info["status"] = "blocked_by_entry_pipeline"
+                else:
+                    info["status"] = "passed_to_entry_pipeline_no_decision"
+                    info["downstream_no_decision_hint"] = (
+                        "Selected candidate reached the normal entry function but no entry or block was returned. "
+                        "Check allow_longs bridge, candidate price, and entry_quality_check instrumentation."
+                    )
             else:
                 info["status"] = "not_applicable"
             m.portfolio["post_harvest_redeployment"] = info
@@ -661,6 +706,7 @@ def status_payload(m: Any | None = None) -> Dict[str, Any]:
             "min_score": MIN_SCORE,
             "exceptional_score": EXCEPTIONAL_SCORE,
             "max_entries_per_cycle": MAX_ENTRIES_PER_CYCLE,
+            "starter_alloc_factor": STARTER_ALLOC_FACTOR,
             "min_signal_count": MIN_SIGNAL_COUNT,
             "min_realized_today": MIN_REALIZED_TODAY,
             "max_losses_today": MAX_LOSSES_TODAY,
