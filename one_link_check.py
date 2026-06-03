@@ -4,16 +4,16 @@ Routine testing should use one URL only:
     /paper/self-check
 
 This module keeps the important diagnostic endpoints inside that one check while
-making the output one-link-first. It also promotes state/journal guard failures
-and hidden endpoint status errors into the operator summary so a successful HTTP
-200 cannot hide a bad internal diagnostic.
+making the output one-link-first. It also promotes state/journal guard failures,
+decision-audit warnings, and hidden endpoint status errors into the operator
+summary so a successful HTTP 200 cannot hide a bad internal diagnostic.
 """
 from __future__ import annotations
 
 import os
 from typing import Any, Dict, Iterable, List
 
-VERSION = "one-test-policy-2026-05-21-mobile-summary-fix"
+VERSION = "one-test-policy-2026-06-03-decision-audit-summary"
 
 ONE_TEST_ROUTE = "/paper/self-check"
 REPAIR_ROUTE = "/paper/state-journal-repair"
@@ -30,6 +30,7 @@ ONE_TEST_ENDPOINTS = [
     {"path": "/paper/risk-on-entry-diagnostic", "category": "benchmark", "required": True, "after": "/paper/market-participation-status"},
     {"path": "/paper/journal-truth-status", "category": "journal", "required": True, "after": "/paper/trade-event-hook-status"},
     {"path": "/paper/state-journal-guard-status", "category": "journal", "required": True, "after": "/paper/journal-truth-status"},
+    {"path": "/paper/decision-audit-status", "category": "governance", "required": False, "after": "/paper/state-journal-guard-status"},
 ]
 
 
@@ -109,6 +110,36 @@ def _compact_state_journal_guard(payload: Dict[str, Any]) -> Dict[str, Any]:
         "direct_persist_patch_active": payload.get("direct_persist_patch_active"),
         "jsonsafe_patch_version": payload.get("jsonsafe_patch_version"),
         "stale_write_guard_status": payload.get("stale_write_guard_status"),
+    }
+
+
+def _compact_decision_audit(payload: Dict[str, Any]) -> Dict[str, Any]:
+    post = _safe_dict(payload.get("post_harvest"))
+    cycle = _safe_dict(payload.get("latest_cycle"))
+    risk = _safe_dict(payload.get("risk_book"))
+    news = _safe_dict(payload.get("news_catalyst"))
+    return {
+        "status": payload.get("status"),
+        "overall": payload.get("overall"),
+        "type": payload.get("type"),
+        "version": payload.get("version"),
+        "generated_local": payload.get("generated_local"),
+        "advisory_only": payload.get("advisory_only"),
+        "authority_changed": payload.get("authority_changed"),
+        "signals_found": cycle.get("signals_found"),
+        "entries_count": cycle.get("entries_count"),
+        "blocked_entries_count": cycle.get("blocked_entries_count"),
+        "rejected_signals_count": cycle.get("rejected_signals_count"),
+        "post_harvest_outcome": post.get("outcome"),
+        "post_harvest_reason": post.get("reason"),
+        "candidate_symbols": post.get("candidate_symbols"),
+        "fallback_status": post.get("fallback_status"),
+        "open_positions_count": risk.get("open_positions_count"),
+        "self_defense_active": risk.get("self_defense_active"),
+        "news_available": news.get("available"),
+        "warnings": payload.get("warnings") or [],
+        "next_actions": payload.get("next_actions") or [],
+        "single_test_policy": payload.get("single_test_policy"),
     }
 
 
@@ -198,6 +229,54 @@ def _promote_state_journal_guard(payload: Dict[str, Any]) -> Dict[str, Any]:
             "status_code": 200,
             "error": "state/journal guard is not clear" if guard.get("status") == "error" else "state/journal mismatch guard active; same-symbol trading is blocked until repaired",
             "blocked_symbols": guard.get("blocked_symbols") or [],
+        })
+    return payload
+
+
+def _build_decision_audit_direct() -> Dict[str, Any]:
+    try:
+        import decision_audit_consolidation
+        fn = getattr(decision_audit_consolidation, "build_payload", None)
+        if callable(fn):
+            payload = fn()
+            return _compact_decision_audit(_safe_dict(payload))
+    except Exception:
+        pass
+    return {}
+
+
+def _promote_decision_audit(payload: Dict[str, Any]) -> Dict[str, Any]:
+    results = _safe_list(payload.get("results"))
+    audit = _extract_compact(results, "/paper/decision-audit-status") or _build_decision_audit_direct()
+    if not audit:
+        return payload
+
+    dashboard = _safe_dict(payload.get("dashboard"))
+    dashboard["decision_audit"] = audit
+    payload["dashboard"] = dashboard
+    payload["decision_audit_summary"] = audit
+
+    operator = _safe_dict(payload.get("operator_summary"))
+    operator.update({
+        "decision_audit_overall": audit.get("overall"),
+        "decision_audit_status": audit.get("status"),
+        "decision_audit_post_harvest_outcome": audit.get("post_harvest_outcome"),
+        "decision_audit_post_harvest_reason": audit.get("post_harvest_reason"),
+        "decision_audit_signals_found": audit.get("signals_found"),
+        "decision_audit_entries_count": audit.get("entries_count"),
+        "decision_audit_next_actions": audit.get("next_actions") or [],
+    })
+    payload["operator_summary"] = operator
+
+    if audit.get("overall") == "warn" or audit.get("status") == "warn":
+        payload["overall"] = "warn" if payload.get("overall") != "fail" else payload.get("overall")
+        if payload.get("status") == "ok":
+            payload["status"] = "warn"
+        _append_warning(payload, {
+            "path": "/paper/decision-audit-status",
+            "status_code": 200,
+            "error": "decision audit warning",
+            "details": audit.get("warnings") or [],
         })
     return payload
 
@@ -326,6 +405,7 @@ def _postprocess_one_test_payload(payload: Dict[str, Any], self_check_module: An
     payload = _enforce_one_test_output(payload, self_check_module)
     payload = _repair_mobile_safe_summary_fields(payload)
     payload = _promote_state_journal_guard(payload)
+    payload = _promote_decision_audit(payload)
     payload = _promote_position_truth_mismatch(payload)
     _promote_hidden_status_errors(payload)
     return payload
@@ -345,6 +425,8 @@ def _patch_self_check(self_check_module: Any) -> None:
         compact = original_compact(path, payload)
         if str(path) == "/paper/state-journal-guard-status":
             compact.update(_compact_state_journal_guard(_safe_dict(payload)))
+        if str(path) == "/paper/decision-audit-status":
+            compact.update(_compact_decision_audit(_safe_dict(payload)))
         return compact
 
     def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
@@ -397,6 +479,8 @@ def apply(self_check_module: Any = None) -> Dict[str, Any]:
             "journal_truth_in_self_check": True,
             "state_journal_guard_in_self_check": True,
             "state_journal_guard_truth_in_operator_summary": True,
+            "decision_audit_in_self_check": True,
+            "decision_audit_in_operator_summary": True,
             "hidden_status_errors_promoted_to_warning": True,
             "status_vs_truth_position_mismatch_warning": True,
             "mobile_safe_summary_repair": True,
