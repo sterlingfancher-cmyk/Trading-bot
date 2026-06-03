@@ -81,6 +81,7 @@ except Exception:
 AUX_MODULES = (
     ("reporting_cleanup", (("apply", (app, core)),)),
     ("entry_decision_visibility", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("decision_audit_consolidation", (("apply", (core,)), ("register_routes", (app, core)))),
     ("news_sentiment_engine", (("apply", (core,)), ("register_routes", (app, core)))),
     ("sitecustomize", (("_register_routes", (app,)),)),
     ("ml_phase2_shadow", (("apply", (core,)), ("register_routes", (app, core)))),
@@ -179,6 +180,7 @@ try:
                 ("/paper/strategy-promotion-gate-status", "governance", False),
                 ("/paper/decision-visibility-status", "governance", False),
                 ("/paper/no-entry-diagnostic", "governance", False),
+                ("/paper/decision-audit-status", "governance", False),
                 ("/paper/tactical-short-advisory-status", "governance", False),
                 ("/paper/relative-strength-leaders", "governance", False),
                 ("/paper/leadership-exception-status", "governance", False),
