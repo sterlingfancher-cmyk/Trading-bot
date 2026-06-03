@@ -1,8 +1,8 @@
 """Compact decision audit consolidation.
 
 Read-only advisory layer. Summarizes the latest scanner/result flow,
-post-harvest redeployment, fallback state, and news/catalyst availability so the
-operator can keep using one routine self-check link.
+post-harvest redeployment, fallback state, news/catalyst availability, and ML
+shadow counts so the operator can keep using one routine self-check link.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, List
 
-VERSION = "decision-audit-consolidation-2026-06-03-v2-final-lock-aware"
+VERSION = "decision-audit-consolidation-2026-06-03-v3-ml-counts"
 REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -35,7 +35,7 @@ def _l(value: Any) -> List[Any]:
 
 def _i(value: Any, default: int = 0) -> int:
     try:
-        return int(value)
+        return int(float(value))
     except Exception:
         return default
 
@@ -244,6 +244,28 @@ def _risk_book(core: Any) -> Dict[str, Any]:
     }
 
 
+def _ml_shadow(core: Any) -> Dict[str, Any]:
+    state = _state(core)
+    ml2 = _d(state.get("ml_phase2"))
+    model = _d(ml2.get("model"))
+    phase25 = _d(state.get("ml_phase25"))
+    dataset = _l(ml2.get("dataset"))
+    return {
+        "available": bool(ml2),
+        "enabled": ml2.get("enabled"),
+        "mode": "shadow",
+        "rows_total": ml2.get("rows_total", len(dataset)),
+        "labeled_outcome_rows": ml2.get("labeled_outcome_rows", model.get("labeled_outcome_rows")),
+        "observed_outcomes": ml2.get("trade_outcomes", model.get("trade_outcomes")),
+        "latest_predictions_count": len(_l(ml2.get("last_predictions"))),
+        "readiness": ml2.get("readiness", model.get("readiness")),
+        "baseline_win_rate": model.get("baseline_win_rate"),
+        "phase3a_ready": bool(phase25.get("phase3a_ready")),
+        "gates_passed": phase25.get("gates_passed"),
+        "gates_failed": phase25.get("gates_failed"),
+    }
+
+
 def build_payload(core: Any | None = None) -> Dict[str, Any]:
     core = core or _mod()
     if core is None:
@@ -252,6 +274,7 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
     cycle = _cycle(core)
     post = _post_harvest(core)
     risk = _risk_book(core)
+    ml = _ml_shadow(core)
     warnings: List[Dict[str, Any]] = []
     next_actions: List[str] = []
 
@@ -277,6 +300,9 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
         else:
             next_actions.append("Post-harvest controller is standing down because no candidate cleared quality thresholds.")
 
+    if ml.get("available") and not ml.get("phase3a_ready"):
+        next_actions.append("ML remains shadow-only while rows and observed outcomes continue accumulating.")
+
     if not next_actions:
         next_actions.append("No decision-audit issue detected; continue using the one-link self-check workflow.")
 
@@ -292,6 +318,7 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
         "latest_cycle": cycle,
         "post_harvest": post,
         "news_catalyst": _news(core),
+        "ml_shadow": ml,
         "risk_book": risk,
         "warnings": warnings,
         "next_actions": next_actions[:6],
@@ -311,6 +338,7 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
             "signals_found": cycle.get("signals_found"),
             "entries_count": cycle.get("entries_count"),
             "expected_final_close_lock": final_lock,
+            "ml_shadow": ml,
         }
     except Exception:
         pass
