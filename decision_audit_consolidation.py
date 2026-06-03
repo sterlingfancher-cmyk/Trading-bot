@@ -10,7 +10,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, List
 
-VERSION = "decision-audit-consolidation-2026-06-03-v1"
+VERSION = "decision-audit-consolidation-2026-06-03-v2-final-lock-aware"
 REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -227,6 +227,8 @@ def _risk_book(core: Any) -> Dict[str, Any]:
     positions = _d(state.get("positions"))
     cash = _f(state.get("cash"), 0.0)
     equity = _f(state.get("equity"), 0.0)
+    reason = str(risk.get("self_defense_reason") or risk.get("halt_reason") or "")
+    final_lock = "final 30" in reason.lower() or "before close" in reason.lower()
     return {
         "cash": round(cash, 2),
         "equity": round(equity, 2),
@@ -235,7 +237,8 @@ def _risk_book(core: Any) -> Dict[str, Any]:
         "positions": sorted(list(positions.keys()))[:20],
         "halted": bool(risk.get("halted")),
         "self_defense_active": bool(risk.get("self_defense_active")),
-        "self_defense_reason": risk.get("self_defense_reason") or risk.get("halt_reason"),
+        "self_defense_reason": reason,
+        "expected_final_close_lock": bool(final_lock),
         "daily_drawdown_pct": risk.get("daily_drawdown_pct") or risk.get("intraday_drawdown_pct") or risk.get("daily_loss_pct"),
         "losses_today": risk.get("losses_today"),
     }
@@ -245,24 +248,38 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
     core = core or _mod()
     if core is None:
         return {"status": "pending", "type": "decision_audit_status", "version": VERSION, "reason": "app_module_not_ready"}
+
     cycle = _cycle(core)
     post = _post_harvest(core)
     risk = _risk_book(core)
     warnings: List[Dict[str, Any]] = []
     next_actions: List[str] = []
-    if risk.get("halted") or risk.get("self_defense_active"):
+
+    final_lock = bool(risk.get("expected_final_close_lock"))
+    risk_issue = bool(risk.get("halted") or risk.get("self_defense_active"))
+    if risk_issue and not final_lock:
         warnings.append({"code": "risk_controls_not_clean", "message": "Risk halt or self-defense is active."})
         next_actions.append("Respect risk controls; do not override entry blocks.")
+    elif final_lock:
+        next_actions.append("Expected final-30-minute entry lock is active; no new-entry override is needed.")
+
     if post.get("outcome") == "selected_without_final_decision":
         warnings.append({"code": "post_harvest_no_final_decision", "message": "A post-harvest candidate lacks a final visible entry/block result."})
         next_actions.append("Review fallback and entry-quality details before changing thresholds.")
+
     if cycle.get("signals_found", 0) > 0 and cycle.get("entries_count", 0) == 0 and cycle.get("blocked_entries_count", 0) == 0 and cycle.get("rejected_signals_count", 0) == 0:
         warnings.append({"code": "scanner_no_visible_decisions", "message": "Signals existed but no entry/block/rejection was recorded."})
         next_actions.append("Improve instrumentation before loosening risk settings.")
+
     if post.get("outcome") == "no_candidate_qualified":
-        next_actions.append("Post-harvest controller is standing down because no candidate cleared quality thresholds.")
+        if final_lock or post.get("reason") == "self_defense_active":
+            next_actions.append("Post-harvest redeployment is correctly standing down during the protective close lock.")
+        else:
+            next_actions.append("Post-harvest controller is standing down because no candidate cleared quality thresholds.")
+
     if not next_actions:
         next_actions.append("No decision-audit issue detected; continue using the one-link self-check workflow.")
+
     overall = "warn" if warnings else "pass"
     payload = {
         "status": "ok" if overall == "pass" else "warn",
@@ -293,6 +310,7 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
             "post_harvest_outcome": post.get("outcome"),
             "signals_found": cycle.get("signals_found"),
             "entries_count": cycle.get("entries_count"),
+            "expected_final_close_lock": final_lock,
         }
     except Exception:
         pass
