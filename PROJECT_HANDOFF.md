@@ -23,6 +23,117 @@ This file is the project continuity source of truth for future ChatGPT sessions.
 - Do not loosen risk controls without explicit approval.
 - Do not give ML live trade authority without explicit approval and promotion-gate evidence.
 - Keep manual `/paper/run` protected by `RUN_KEY`.
+- Keep this handoff updated after meaningful code changes, test results, or strategy-direction changes.
+
+## Handoff maintenance protocol
+
+Every future assistant should treat this file as a living project ledger. After any meaningful update, append or refresh the relevant sections below.
+
+### Required handoff updates after each meaningful push
+
+Update this file when any of the following happens:
+
+1. A code change is pushed.
+2. A self-check result changes the known bot state.
+3. A new module, route, endpoint, risk rule, or advisory layer is added.
+4. A bug is found or resolved.
+5. A new next-step priority is chosen.
+6. ML readiness gates change.
+7. The one-test workflow changes.
+
+### Minimum update fields to preserve
+
+For each future update, record:
+
+- Date/time.
+- Commit SHA.
+- Files changed.
+- Reason for the change.
+- Whether trading authority changed.
+- Whether ML authority changed.
+- Whether risk controls changed.
+- Whether the one-test workflow changed.
+- Latest `/paper/self-check` result summary.
+- Next planned update.
+
+### Permanent rule
+
+If a future chat changes GitHub but does not update this file, the next chat should consider the project handoff stale and should inspect recent commits before making assumptions.
+
+## Recommendation and advisory sources to review
+
+There are several code layers that generate recommendations or advisory feedback. Some of them are intentionally hidden from the mobile-safe one-test output unless they are promoted into `decision_audit_next_actions` or another compact summary. Future chats should review these before deciding the next upgrade.
+
+### Primary routine source
+
+Use this first:
+
+```text
+https://trading-bot-clean.up.railway.app/paper/self-check
+```
+
+Look for:
+
+- `decision_audit_next_actions`
+- `decision_audit_summary`
+- `ml_shadow_counts`
+- `warnings`
+- `operator_summary`
+- `truth_summary`
+
+### Recommendation/advisory code modules
+
+Known advisory/recommendation modules include:
+
+- `decision_audit_consolidation.py` — current compact decision audit, post-harvest status, news availability, and ML shadow counts.
+- `risk_on_recommendation_cleanup.py` — cleans and deduplicates risk-on recommendation text, including entry-ready/watch candidate wording and market participation accelerator wiring.
+- `risk_on_entry_diagnostic.py` — risk-on entry diagnostics and candidate reasoning.
+- `entry_decision_visibility.py` — explains entered/blocked/skipped/no-decision behavior.
+- `ml_phase2_shadow.py` — ML shadow predictions and recommendation text; never live-authoritative.
+- `ml_phase25_readiness.py` — Phase 2.5/Phase 3A readiness gates and recommended actions.
+- `mae_mfe_integration.py` — MAE/MFE telemetry readiness and recommended actions.
+- `news_sentiment_engine.py` — news/catalyst advisory context and recommended actions.
+- `market_extension_guard.py` — market extension/overextension advisories.
+- `benchmark_participation.py` — benchmark/risk-on participation diagnostics.
+- `adaptive_ml_research.py` — adaptive ML research recommendations.
+- `adaptive_portfolio_intelligence.py` — portfolio intelligence/advisory recommendations.
+- `strategy_promotion_readiness.py` — strategy promotion gates and readiness feedback.
+- `strategy_scorecard.py` — strategy scorecards and performance comparisons.
+- `trade_quality_telemetry.py` — trade-quality telemetry and improvement signals.
+
+### Optional deeper diagnostic routes
+
+Only use these when `/paper/self-check` indicates a warning/failure or when choosing the next major upgrade:
+
+```text
+/paper/ml2-status
+/paper/ml-readiness-status
+/paper/decision-audit-status
+/paper/no-entry-diagnostic
+/paper/risk-on-entry-diagnostic
+/paper/strategy-promotion-readiness-status
+/paper/strategy-scorecard-status
+/paper/mae-mfe-status
+/paper/mae-mfe-integration-status
+/paper/news-sentiment-status
+/paper/catalyst-watchlist
+/paper/news-risk-status
+/paper/market-extension-status
+/paper/risk-reward-status
+/paper/adaptive-ml-status
+/paper/adaptive-portfolio-status
+```
+
+Do not make these part of routine testing. They are for targeted inspection only.
+
+### Why recommendation feedback may disappear from normal view
+
+The project intentionally uses a mobile-safe one-test policy. `/paper/self-check` may internally read state directly and only show `/health` and `/paper/status` as checked paths. That keeps testing fast and stable, but it can hide detailed recommendation text from deeper endpoints. When important recommendations matter, future code should promote a compact version into:
+
+- `decision_audit_next_actions`
+- `operator_summary`
+- `decision_audit_summary`
+- `warnings`, if it is truly actionable
 
 ## One-test workflow
 
@@ -187,6 +298,51 @@ Current ML recommendation:
 - Add formal walk-forward validation.
 - Require Phase 3A readiness before any live ML weighting.
 
+## Update ledger
+
+Use this ledger for future update continuity. Add newest entries at the top.
+
+### 2026-06-03 — Added project handoff and recommendation tracking
+
+- Commit `74df666536fd699a7ce73c7a8e69203cd9928006` — added `PROJECT_HANDOFF.md`.
+- This update adds the handoff maintenance protocol and recommendation/advisory source list.
+- Trading authority changed: no.
+- ML authority changed: no.
+- Risk controls changed: no.
+- One-test workflow changed: no.
+- Next planned focus: MAE/MFE telemetry, formal walk-forward validation, and Phase 3A readiness gates.
+
+### 2026-06-03 — ML shadow counts surfaced in one-test path
+
+- Commit `0d30626f040d3fadc5f1d9db09335ee6130d289d` — surfaced ML shadow counts in decision audit.
+- Commit `a4097743652ecf657b60709b653663a8c57b3d97` — showed ML shadow counts in one-test next actions.
+- Trading authority changed: no.
+- ML authority changed: no.
+- Risk controls changed: no.
+- One-test workflow changed: preserved.
+
+### 2026-06-03 — Decision audit added to one-test workflow
+
+- Commit `eb9608900d58b5937954d84cf6145fc5f4b3dda6` — added compact decision audit consolidation.
+- Commit `edbee88fb3528b159a3f00e9d764f923d7c44511` — included decision audit in one-test startup path.
+- Commit `21afb52885053dce6c64f4725fc515f12b9a2faa` — surfaced decision audit in one-test self-check.
+- Commit `c4fed90d3a14b8eb24f097711090017de7636ca0` — treated final close lock as protective decision-audit pass.
+- Trading authority changed: no.
+- ML authority changed: no.
+- Risk controls changed: no.
+- One-test workflow changed: enhanced, still one routine link.
+
+### 2026-06-03 — Post-harvest redeployment hardening
+
+- Commit `2322947c4c8bf25d2d60d4ef899bb1d250b04062` — hardened post-harvest redeployment controller.
+- Commit `a058a7e1844b12e553dc4e8fda158ba7fdb7c29c` — bridged post-harvest starter entries through profit pause.
+- Commit `845f656bf20a3b1462e4834d06c281dab85dfda1` — added guarded post-harvest entry fallback.
+- Commit `e1a20eeba2281bb7710714303930ec726be8207b` — wired post-harvest entry fallback into startup.
+- Trading authority changed: no forced authority; entries still go through safety/quality checks.
+- ML authority changed: no.
+- Risk controls changed: no bypasses added.
+- One-test workflow changed: no.
+
 ## Recent important commits
 
 Recent successful commits from the handoff period:
@@ -201,6 +357,7 @@ Recent successful commits from the handoff period:
 - `c4fed90d3a14b8eb24f097711090017de7636ca0` — treated final close lock as protective decision-audit pass.
 - `0d30626f040d3fadc5f1d9db09335ee6130d289d` — surfaced ML shadow counts in decision audit.
 - `a4097743652ecf657b60709b653663a8c57b3d97` — showed ML shadow counts in one-test next actions.
+- `74df666536fd699a7ce73c7a8e69203cd9928006` — added initial project handoff file.
 
 ## Current upgrade plan
 
@@ -212,6 +369,7 @@ Recent successful commits from the handoff period:
 4. Improve or verify MAE/MFE telemetry; current readiness says MAE/MFE fields are ready but no rows have MAE/MFE yet.
 5. Add formal walk-forward validation tooling before any Phase 3A live ML weighting.
 6. Expand regime coverage from `2` to at least `3` regimes.
+7. Promote important recommendation text from deeper advisory endpoints into `decision_audit_next_actions` when it affects the next development decision.
 
 ### Do not do yet
 
@@ -237,6 +395,7 @@ Before making changes:
 2. Review recent GitHub commits.
 3. Preserve the one-test workflow.
 4. Do not loosen risk controls or give ML live trade authority without explicit approval.
+5. Review the recommendation/advisory sources listed in PROJECT_HANDOFF.md before choosing the next update.
 
 Current direction:
 - ML remains shadow-only.
@@ -265,3 +424,11 @@ https://trading-bot-clean.up.railway.app/paper/self-check
 - `routine_test_policy.extra_links_required: false`
 
 3. Only request deeper diagnostic links when `/paper/self-check` shows a warning/failure or when debugging a specific module.
+
+4. Update this handoff file with:
+
+- commit SHA
+- files changed
+- test result
+- changed authority, if any
+- next planned update
