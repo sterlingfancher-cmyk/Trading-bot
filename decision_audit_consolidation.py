@@ -10,7 +10,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, List
 
-VERSION = "decision-audit-consolidation-2026-06-03-v3-ml-counts"
+VERSION = "decision-audit-consolidation-2026-06-03-v4-ml-counts-visible"
 REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -266,6 +266,17 @@ def _ml_shadow(core: Any) -> Dict[str, Any]:
     }
 
 
+def _ml_counts_text(ml: Dict[str, Any]) -> str:
+    return (
+        "ML shadow counts: "
+        f"rows={ml.get('rows_total')}, "
+        f"labeled={ml.get('labeled_outcome_rows')}, "
+        f"observed_outcomes={ml.get('observed_outcomes')}, "
+        f"predictions={ml.get('latest_predictions_count')}, "
+        f"phase3a_ready={ml.get('phase3a_ready')}."
+    )
+
+
 def build_payload(core: Any | None = None) -> Dict[str, Any]:
     core = core or _mod()
     if core is None:
@@ -300,8 +311,10 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
         else:
             next_actions.append("Post-harvest controller is standing down because no candidate cleared quality thresholds.")
 
-    if ml.get("available") and not ml.get("phase3a_ready"):
-        next_actions.append("ML remains shadow-only while rows and observed outcomes continue accumulating.")
+    if ml.get("available"):
+        next_actions.append(_ml_counts_text(ml))
+        if not ml.get("phase3a_ready"):
+            next_actions.append("ML remains shadow-only while rows and observed outcomes continue accumulating.")
 
     if not next_actions:
         next_actions.append("No decision-audit issue detected; continue using the one-link self-check workflow.")
