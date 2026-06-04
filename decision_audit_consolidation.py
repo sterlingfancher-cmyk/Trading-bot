@@ -1,16 +1,17 @@
 """Compact decision audit consolidation.
 
 Read-only advisory layer. Summarizes the latest scanner/result flow,
-post-harvest redeployment, fallback state, news/catalyst availability, and ML
-shadow counts so the operator can keep using one routine self-check link.
+post-harvest redeployment, fallback state, news/catalyst availability, ML shadow
+counts, and repo-native advisory coaches so the operator can keep using one
+routine self-check link.
 """
 from __future__ import annotations
 
 import datetime as dt
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
-VERSION = "decision-audit-consolidation-2026-06-03-v4-ml-counts-visible"
+VERSION = "decision-audit-consolidation-2026-06-04-v5-advisory-coaches"
 REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -91,7 +92,7 @@ def _syms(rows: Any, limit: int = 12) -> List[str]:
 def _reason(row: Any) -> str:
     if not isinstance(row, dict):
         return "unknown"
-    for key in ("reason", "entry_block_reason", "block_reason", "reject_reason", "status"):
+    for key in ("reason", "entry_block_reason", "block_reason", "reject_reason", "exit_reason", "status"):
         if row.get(key):
             return str(row.get(key))
     for key in ("quality_info", "rotation_info", "entry_fallback"):
@@ -266,6 +267,146 @@ def _ml_shadow(core: Any) -> Dict[str, Any]:
     }
 
 
+def _is_exit_row(row: Dict[str, Any]) -> bool:
+    text = " ".join(str(row.get(k, "")).lower() for k in ("action", "type", "reason", "exit_reason"))
+    return bool(row.get("pnl_dollars") is not None or row.get("pnl_pct") is not None or "exit" in text or "sell" in text or "close" in text or "stop" in text)
+
+
+def _trade_rows(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [row for row in _l(state.get("trades")) if isinstance(row, dict)]
+
+
+def _trade_quality_coach(core: Any) -> Dict[str, Any]:
+    state = _state(core)
+    trades = _trade_rows(state)
+    exits = [row for row in trades if _is_exit_row(row)]
+    performance = _d(state.get("performance"))
+    wins = _i(performance.get("wins_total"), 0)
+    losses = _i(performance.get("losses_total"), 0)
+    gross_profit = 0.0
+    gross_loss = 0.0
+    exit_reasons: Dict[str, int] = {}
+    symbol_pnl: Dict[str, float] = {}
+    if wins + losses <= 0:
+        wins = 0
+        losses = 0
+    for row in exits:
+        pnl = _f(row.get("pnl_dollars"), _f(row.get("pnl"), 0.0))
+        if pnl > 0:
+            gross_profit += pnl
+            if wins + losses <= 0:
+                wins += 1
+        elif pnl < 0:
+            gross_loss += abs(pnl)
+            if wins + losses <= 0:
+                losses += 1
+        reason = _reason(row)
+        exit_reasons[reason] = exit_reasons.get(reason, 0) + 1
+        sym = _sym(row)
+        if sym:
+            symbol_pnl[sym] = symbol_pnl.get(sym, 0.0) + pnl
+    closed = wins + losses
+    win_rate = round(wins / closed, 4) if closed else 0.0
+    profit_factor = round((gross_profit / gross_loss) if gross_loss > 0 else (999.0 if gross_profit > 0 else 0.0), 3)
+    top_symbols = sorted(symbol_pnl.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    weakest_symbols = sorted(symbol_pnl.items(), key=lambda kv: kv[1])[:5]
+    if len(trades) < 150:
+        posture = "collect_more_executions"
+        recommendation = f"Trade Quality Coach: execution_rows={len(trades)}/150; continue collecting outcomes before changing ML authority."
+    elif profit_factor >= 1.15 and win_rate >= 0.48:
+        posture = "quality_positive"
+        recommendation = f"Trade Quality Coach: realized quality is positive with win_rate={win_rate} and profit_factor={profit_factor}; continue validation."
+    else:
+        posture = "quality_review_needed"
+        recommendation = f"Trade Quality Coach: review exits and setup quality; win_rate={win_rate}, profit_factor={profit_factor}."
+    return {
+        "status": "ok",
+        "advisory_only": True,
+        "authority_changed": False,
+        "execution_rows": len(trades),
+        "exit_rows": len(exits),
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+        "gross_profit": round(gross_profit, 2),
+        "gross_loss": round(gross_loss, 2),
+        "profit_factor": profit_factor,
+        "posture": posture,
+        "top_symbols": [{"symbol": sym, "pnl": round(pnl, 2)} for sym, pnl in top_symbols],
+        "weakest_symbols": [{"symbol": sym, "pnl": round(pnl, 2)} for sym, pnl in weakest_symbols],
+        "top_exit_reasons": dict(sorted(exit_reasons.items(), key=lambda kv: kv[1], reverse=True)[:5]),
+        "recommendation": recommendation,
+    }
+
+
+def _risk_coach(core: Any, risk: Dict[str, Any]) -> Dict[str, Any]:
+    cash_pct = _f(risk.get("cash_pct"), 0.0)
+    positions = _i(risk.get("open_positions_count"), 0)
+    drawdown = _f(risk.get("daily_drawdown_pct"), 0.0)
+    halted = bool(risk.get("halted"))
+    self_defense = bool(risk.get("self_defense_active"))
+    if halted or self_defense:
+        posture = "protected"
+        recommendation = "Risk Coach: protective controls are active; do not override entries."
+    elif cash_pct >= 0.75 and positions <= 3:
+        posture = "defensive_underdeployed"
+        recommendation = f"Risk Coach: cash_pct={cash_pct:.2%} with {positions} positions; redeploy only through high-quality candidates."
+    elif drawdown >= 1.0:
+        posture = "drawdown_watch"
+        recommendation = f"Risk Coach: drawdown={drawdown}% is elevated; keep new-entry discipline tight."
+    else:
+        posture = "clean"
+        recommendation = f"Risk Coach: controls are clean; cash_pct={cash_pct:.2%}, positions={positions}, drawdown={drawdown}%."
+    return {
+        "status": "ok",
+        "advisory_only": True,
+        "authority_changed": False,
+        "posture": posture,
+        "cash_pct": cash_pct,
+        "open_positions_count": positions,
+        "daily_drawdown_pct": drawdown,
+        "halted": halted,
+        "self_defense_active": self_defense,
+        "recommendation": recommendation,
+    }
+
+
+def _post_harvest_coach(core: Any, post: Dict[str, Any], risk: Dict[str, Any], cycle: Dict[str, Any]) -> Dict[str, Any]:
+    cash_pct = _f(risk.get("cash_pct"), 0.0)
+    positions = _i(risk.get("open_positions_count"), 0)
+    outcome = str(post.get("outcome") or "not_available")
+    signals = _i(cycle.get("signals_found"), 0)
+    candidates = _l(post.get("candidates"))
+    if outcome == "entered":
+        posture = "redeployed"
+        recommendation = "Post-Harvest Coach: redeployment entered through the controlled ladder; monitor follow-through rather than adding new risk."
+    elif outcome == "selected_without_final_decision":
+        posture = "decision_visibility_needed"
+        recommendation = "Post-Harvest Coach: selected candidate lacks a final visible entry/block result; inspect fallback and entry-quality path."
+    elif positions <= 3 and cash_pct >= 0.75 and signals >= 8:
+        posture = "underdeployed_but_selective"
+        recommendation = "Post-Harvest Coach: underdeployed with scanner activity; keep starter-only redeployment and do not lower thresholds blindly."
+    elif outcome == "no_candidate_qualified":
+        posture = "standing_down_correctly"
+        recommendation = "Post-Harvest Coach: no candidate qualified; standing down is preferred to forcing a weak redeployment."
+    else:
+        posture = "not_applicable"
+        recommendation = "Post-Harvest Coach: no active post-harvest action needed."
+    return {
+        "status": "ok",
+        "advisory_only": True,
+        "authority_changed": False,
+        "posture": posture,
+        "outcome": outcome,
+        "reason": post.get("reason"),
+        "candidate_symbols": post.get("candidate_symbols") or _syms(candidates),
+        "cash_pct": cash_pct,
+        "open_positions_count": positions,
+        "signals_found": signals,
+        "recommendation": recommendation,
+    }
+
+
 def _ml_counts_text(ml: Dict[str, Any]) -> str:
     return (
         "ML shadow counts: "
@@ -286,6 +427,9 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
     post = _post_harvest(core)
     risk = _risk_book(core)
     ml = _ml_shadow(core)
+    trade_quality = _trade_quality_coach(core)
+    risk_coach = _risk_coach(core, risk)
+    post_harvest_coach = _post_harvest_coach(core, post, risk, cycle)
     warnings: List[Dict[str, Any]] = []
     next_actions: List[str] = []
 
@@ -311,11 +455,16 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
         else:
             next_actions.append("Post-harvest controller is standing down because no candidate cleared quality thresholds.")
 
+    next_actions.append(trade_quality.get("recommendation"))
+    next_actions.append(risk_coach.get("recommendation"))
+    next_actions.append(post_harvest_coach.get("recommendation"))
+
     if ml.get("available"):
         next_actions.append(_ml_counts_text(ml))
         if not ml.get("phase3a_ready"):
             next_actions.append("ML remains shadow-only while rows and observed outcomes continue accumulating.")
 
+    next_actions = [str(x) for x in next_actions if x]
     if not next_actions:
         next_actions.append("No decision-audit issue detected; continue using the one-link self-check workflow.")
 
@@ -332,9 +481,12 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
         "post_harvest": post,
         "news_catalyst": _news(core),
         "ml_shadow": ml,
+        "trade_quality_coach": trade_quality,
+        "risk_coach": risk_coach,
+        "post_harvest_coach": post_harvest_coach,
         "risk_book": risk,
         "warnings": warnings,
-        "next_actions": next_actions[:6],
+        "next_actions": next_actions[:8],
         "single_test_policy": {
             "routine_test_url": "https://trading-bot-clean.up.railway.app/paper/self-check",
             "extra_links_required_after_push": False,
@@ -352,6 +504,9 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
             "entries_count": cycle.get("entries_count"),
             "expected_final_close_lock": final_lock,
             "ml_shadow": ml,
+            "trade_quality_coach": trade_quality,
+            "risk_coach": risk_coach,
+            "post_harvest_coach": post_harvest_coach,
         }
     except Exception:
         pass
