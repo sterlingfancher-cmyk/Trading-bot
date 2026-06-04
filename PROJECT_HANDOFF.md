@@ -20,6 +20,7 @@ This file is the project continuity source of truth for future ChatGPT sessions.
 - After normal pushes, ask the operator to run only `/paper/self-check`.
 - Do not require multiple routine test links unless debugging a specific issue.
 - Prefer direct GitHub updates or full-file-safe updates over patch fragments.
+- Proactively recommend high-value, low-risk updates when they improve diagnostics, ML readiness, safety, or continuity, especially when they preserve trading authority, ML authority, risk controls, and the one-test workflow.
 - Do not loosen risk controls without explicit approval.
 - Do not give ML live trade authority without explicit approval and promotion-gate evidence.
 - Keep manual `/paper/run` protected by `RUN_KEY`.
@@ -144,6 +145,23 @@ The project intentionally uses a mobile-safe one-test policy. `/paper/self-check
 - `operator_summary`
 - `decision_audit_summary`
 - `warnings`, if it is truly actionable
+
+## Proactive recommendation policy
+
+Future assistants should recommend additional high-value, low-risk updates before the operator has to ask, as long as the recommendation is clearly labeled and does not silently change authority.
+
+Good proactive recommendations include:
+
+- better observability inside `/paper/self-check`
+- internal advisory coaches
+- MAE/MFE telemetry improvements
+- formal walk-forward validation
+- feature-journal quality improvements
+- safer readiness gates
+- handoff/continuity improvements
+- clearer diagnostics for blocked, rejected, or no-decision trades
+
+Do not proactively implement changes that loosen risk controls, grant ML live authority, lower post-harvest thresholds, bypass self-defense, or change trade execution authority without explicit operator approval.
 
 ## One-test workflow
 
@@ -315,6 +333,16 @@ Current ML recommendation:
 
 Use this ledger for future update continuity. Add newest entries at the top.
 
+### 2026-06-04 — Proactive update recommendation preference recorded
+
+- Files changed: `PROJECT_HANDOFF.md`.
+- Reason: operator wants future assistants to proactively recommend high-value, low-risk updates like internal advisory coaches instead of waiting for direct prompting.
+- Trading authority changed: no.
+- ML authority changed: no.
+- Risk controls changed: no.
+- One-test workflow changed: no.
+- Next planned focus: continue recommending safe observability, readiness, and advisory improvements before implementation.
+
 ### 2026-06-04 — Internal advisory coaches added to decision audit
 
 - Commit `8fd184368b1bcc40cc9d174f3eb6bac327b1c2ca` — added Trade Quality Coach, Risk Coach, and Post-Harvest Coach inside `decision_audit_consolidation.py`.
@@ -399,6 +427,7 @@ Recent successful commits from the handoff period:
 6. Add formal walk-forward validation tooling before any Phase 3A live ML weighting.
 7. Expand regime coverage from `2` to at least `3` regimes.
 8. Promote important recommendation text from deeper advisory endpoints into `decision_audit_next_actions` when it affects the next development decision.
+9. Proactively recommend safe, low-risk observability and readiness upgrades when they are likely to improve the system without changing authority.
 
 ### Do not do yet
 
@@ -425,6 +454,7 @@ Before making changes:
 3. Preserve the one-test workflow.
 4. Do not loosen risk controls or give ML live trade authority without explicit approval.
 5. Review the recommendation/advisory sources listed in PROJECT_HANDOFF.md before choosing the next update.
+6. Proactively recommend high-value, low-risk updates when they improve observability, safety, readiness, or continuity without changing trading authority.
 
 Current direction:
 - ML remains shadow-only.
@@ -432,6 +462,7 @@ Current direction:
 - Decision audit is included in /paper/self-check.
 - ML shadow counts are surfaced in /paper/self-check.
 - Internal advisory coaches are now included in decision_audit_next_actions.
+- Future assistants should proactively recommend safe readiness/observability improvements before implementation.
 - Next upgrades should focus on feature journal quality, MAE/MFE telemetry, formal walk-forward validation, and Phase 3A readiness gates.
 ```
 
