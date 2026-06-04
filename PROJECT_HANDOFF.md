@@ -46,37 +46,39 @@ Do not make heavy diagnostic routes part of routine testing.
 
 ## Latest known bot state
 
-Most recent known self-check from 2026-06-04 13:52 CDT after the feature-journal/regime-tagging push:
+Most recent self-check from 2026-06-04 15:26 CDT after the state-size retention push:
 
 - Self-check: `overall: pass`, `status: ok`, `warnings: []`
 - Decision audit: `pass`, `status: ok`
 - Decision audit version: `decision-audit-consolidation-2026-06-04-v6-chief-advisory-coach`
-- Equity: about `$11,015.93`
-- Total gain from `$10,000`: about `+10.16%`
+- Equity: about `$11,001.76`
+- Total gain from `$10,000`: about `+10.02%`
 - Cash: about `$9,672.49`
-- Cash percentage: about `87.80%`
+- Cash percentage: about `87.92%`
 - Open positions: `3`
 - Positions: `DELL`, `QQQ`, `SNDK`
 - Realized today: `$0.00`
 - Realized total: `$857.68`
-- Unrealized P&L: about `$158.26`
-- Daily/intraday drawdown: about `0.073% / 0.119%`
+- Unrealized P&L: about `$144.10`
+- Daily/intraday drawdown: about `0.201% / 0.248%`
 - Self-defense: inactive; reason `feedback loop clear`
 - Losses today: `0`
-- Scanner signals: `54`
-- Blocked entries: `1`; top blocked symbol `TEM`
-- Post-harvest outcome: `blocked`
-- Post-harvest reason: `post_harvest_controlled_redeployment_candidates`
+- Scanner signals: `29`
+- Blocked entries: `10`
+- Top blocked symbols: `IESC`, `MOD`, `NRG`, `HIVE`, `VRT`, `CEG`, `VST`, `PANW`, `HWM`, `CDE`
+- Post-harvest outcome: `no_candidate_qualified`
+- Post-harvest reason: `self_defense_active` / protective close lock context
 - ML shadow rows: `6000`
-- ML labeled outcome rows: about `2281`
+- ML labeled outcome rows: about `1823`
 - ML observed outcomes: `49`
 - ML latest predictions: `25`
 - Phase 3A ready: `false`
+- State file size: `14,499,209` bytes, down from about `16.86 MB` after feature-journal enrichment.
 - Chief Advisory Coach remains active and still prioritizes MAE/MFE telemetry, formal walk-forward validation, regime coverage, and execution-row collection before Phase 3A.
 
 ## Deployment/data-feed note from 2026-06-04
 
-Railway sent a failed-build email, but the build/deploy logs provided by the operator showed successful image build and Gunicorn startup. Runtime logs showed transient data-provider SSL download failures for `DDOG` and `ARM`. Current interpretation: temporary ticker-level data-provider/network failure, not a Railway build failure, app crash, or broken deployment. Do not patch or roll back solely for this unless self-check fails or repeated ticker-download errors degrade scanner behavior.
+Railway sent a failed-build email, but logs provided by the operator showed successful image build and Gunicorn startup. Runtime logs showed transient data-provider SSL download failures for `DDOG` and `ARM`. Current interpretation: temporary ticker-level data-provider/network failure, not a Railway build failure, app crash, or broken deployment. Do not patch or roll back solely for this unless self-check fails or repeated ticker-download errors degrade scanner behavior.
 
 ## Active modules and status
 
@@ -147,7 +149,7 @@ Current status:
 - ML does not place trades.
 - ML does not override risk controls.
 - ML does not override entries or exits.
-- Latest visible self-check values: rows `6000`, labeled about `2281`, observed outcomes `49`, predictions `25`, Phase 3A ready `false`.
+- Latest visible self-check values: rows `6000`, labeled about `1823`, observed outcomes `49`, predictions `25`, Phase 3A ready `false`.
 
 ### Feature journal quality and regime tagging
 
@@ -243,6 +245,8 @@ Important retention settings:
 - ML authority changed: `false`
 - Trading authority changed: `false`
 
+Latest result: state-size retention appears successful. `/data/state.json` dropped from about `16.86 MB` to `14,499,209` bytes while self-check remained clean and trade/account state remained intact.
+
 ## Optional deeper diagnostic routes
 
 Use only when `/paper/self-check` indicates a warning/failure or when choosing the next major upgrade:
@@ -297,11 +301,23 @@ Current priority remains trading-system quality first: execution outcome collect
 
 ## Update ledger
 
+### 2026-06-04 — End-of-day self-check passed after state-size retention
+
+- Files changed in this ledger update: `PROJECT_HANDOFF.md`.
+- Reason: record successful EOD `/paper/self-check` after conservative state-size retention update.
+- Latest test: `overall: pass`, `status: ok`, `warnings: []`, decision audit `pass`, 3 positions, equity about `$11,001.76`, cash about `87.92%`, no self-defense, no losses today, 29 signals, 10 blocked entries, ML still shadow-only.
+- State-size result: `/data/state.json` size was `14,499,209` bytes, down from about `16.86 MB`; compaction/retention appears effective.
+- Trading authority changed: no.
+- ML authority changed: no; Phase 3A remains false.
+- Risk controls changed: no.
+- One-test workflow changed: no.
+- Next planned focus: continue collecting execution rows toward `150`, true regime coverage, MAE/MFE/walk-forward validation maturity, and optional data-feed resilience if SSL ticker failures persist.
+
 ### 2026-06-04 — Conservative state-size retention policy added
 
 - Commit `501f47566495e5e4e08c72b9c62cb74ebb9ca09a` — updated `state_size_watchdog.py` from advisory-only reporting to conservative retention/compaction policy.
-- Files changed: `state_size_watchdog.py`, `PROJECT_HANDOFF.md`.
-- Reason: state file grew to about `16.86 MB` after feature-journal enrichment; add safe compaction now before it reaches watch/warn thresholds.
+- Commit `7f50badf70baca8b6d7a27a92bd234cdfd6d0b7a` — updated handoff with state-size retention details.
+- Reason: state file grew to about `16.86 MB` after feature-journal enrichment; add safe compaction before it reaches watch/warn thresholds.
 - Trading authority changed: no.
 - ML authority changed: no.
 - Risk controls changed: no.
@@ -309,13 +325,11 @@ Current priority remains trading-system quality first: execution outcome collect
 - One-test workflow changed: no.
 - Data preserved: trades, positions, cash/equity, risk controls, performance, realized P&L, open-state summaries.
 - Data compacted only if threshold is reached: old/derived ML rows, scanner lists, report histories, path archives, MAE/MFE/advisory tails, and excessive equity history.
-- Next planned focus: run `/paper/self-check` after Railway redeploy. If self-check passes, monitor `state_diagnostic.size_bytes` and use `/paper/state-size-watchdog` only if deeper state-size detail is needed.
 
 ### 2026-06-04 — Feature-journal post-push self-check passed; transient data-feed errors noted
 
 - Commit `c16f8231f7222384081ba31fa75ae23987deb010` — logged successful post-feature-journal `/paper/self-check` and transient DDOG/ARM data-feed errors.
 - Latest test: `overall: pass`, `status: ok`, `warnings: []`, decision audit `pass`, 3 positions, equity about `$11,015.93`, cash about `87.80%`, no self-defense, no losses today, 54 signals, 1 blocked entry, post-harvest candidate `TEM` blocked, ML still shadow-only.
-- Deployment note: Railway build/deploy appears healthy; DDOG/ARM SSL messages are transient ticker-download/data-feed failures rather than app startup failures.
 - State size note: `/data/state.json` about `16.86 MB`.
 - Trading authority changed: no.
 - ML authority changed: no; Phase 3A remains false.
@@ -363,14 +377,12 @@ Current priority remains trading-system quality first: execution outcome collect
 
 ## Current upgrade plan
 
-1. Run only `/paper/self-check` after the state-size retention push.
-2. Confirm `overall: pass`, `status: ok`, and `warnings: []`.
-3. Monitor `state_diagnostic.size_bytes` in `/paper/self-check`.
-4. Keep ML shadow-only.
-5. Continue collecting execution outcomes until at least `150` execution rows.
-6. Continue expanding true regime coverage from `2` to at least `3` regimes.
-7. If repeated ticker SSL failures persist, add a data-fetch retry/backoff and warning aggregation layer.
-8. Preserve productization path for later dashboard/demo/reporting, but keep current priority on trading quality, telemetry, validation, and state stability.
+1. Keep ML shadow-only.
+2. Continue collecting execution outcomes until at least `150` execution rows.
+3. Continue expanding true regime coverage from `2` to at least `3` regimes.
+4. Monitor `state_diagnostic.size_bytes` in `/paper/self-check`; state-size retention is working, so no more compaction changes are needed unless growth resumes.
+5. If repeated ticker SSL failures persist, add a data-fetch retry/backoff and warning aggregation layer.
+6. Preserve productization path for later dashboard/demo/reporting, but keep current priority on trading quality, telemetry, validation, and state stability.
 
 ## Do not do yet
 
@@ -407,8 +419,7 @@ Current direction:
 - Internal advisory coaches and Chief Advisory Coach are included in decision_audit_next_actions.
 - MAE/MFE telemetry integration and formal walk-forward validation are upgraded.
 - ML feature-journal quality and regime tagging are advisory-only readiness/diagnostic layers.
-- State-size watchdog now has conservative retention/compaction policy.
-- Latest self-check before the state-size push passed.
+- State-size watchdog has conservative retention/compaction policy and latest EOD self-check confirms state size dropped to 14,499,209 bytes.
 - DDOG/ARM SSL download errors appeared in runtime logs but self-check passed; treat as transient data-feed warnings unless persistent.
 - Commercial path is documented as a future web-based/paper-trading analytics dashboard first.
 - Next upgrades should focus on execution outcome collection, true regime coverage, Phase 3A readiness gates, data-feed resilience if needed, and state-size stability.
