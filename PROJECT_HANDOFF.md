@@ -45,45 +45,57 @@ Expected characteristics:
 
 Do not make heavy diagnostic routes part of routine testing.
 
-## Handoff maintenance protocol
-
-Update this file after any meaningful push, test-result change, module addition, bug fix, strategy-direction change, or ML readiness-gate change.
-
-For each update, preserve date/time, commit SHA, files changed, reason for change, trading/ML/risk/one-test impact, latest `/paper/self-check` summary when available, and next planned update.
-
-If a future chat changes GitHub but does not update this file, treat the handoff as stale and inspect recent commits before making assumptions.
-
 ## Current high-level bot state
 
-Most recent known self-check state from 2026-06-04 09:35 CDT after the MAE/MFE and walk-forward push:
+Most recent known self-check state from 2026-06-04 13:52 CDT after the feature-journal/regime-tagging push:
 
 - Self-check: `overall: pass`, `status: ok`, `warnings: []`
 - Decision audit: `pass`, `status: ok`
 - Decision audit version: `decision-audit-consolidation-2026-06-04-v6-chief-advisory-coach`
-- Equity: about `$10,997.42`
-- Total gain from `$10,000`: about `+9.97%`
+- Equity: about `$11,015.93`
+- Total gain from `$10,000`: about `+10.16%`
 - Cash: about `$9,672.49`
-- Cash percentage: about `87.95%`
+- Cash percentage: about `87.80%`
 - Open positions: `3`
 - Positions: `DELL`, `QQQ`, `SNDK`
 - Realized today: `$0.00`
 - Realized total: `$857.68`
-- Unrealized P&L: about `$139.75`
-- Daily/intraday drawdown: about `0.241%`
+- Unrealized P&L: about `$158.26`
+- Daily loss/drawdown: about `0.073% / 0.119%`
 - Self-defense: inactive; reason `feedback loop clear`
 - Losses today: `0`
-- Scanner signals: `31`
-- Blocked entries: `15`
-- Post-harvest outcome: `no_candidate_qualified`
-- Post-harvest reason: `market_not_clean_for_post_harvest_redeploy`
+- Scanner signals: `54`
+- Blocked entries: `1`
+- Top blocked symbol: `TEM`
+- Post-harvest outcome: `blocked`
+- Post-harvest reason: `post_harvest_controlled_redeployment_candidates`
 - ML shadow rows: `6000`
-- ML labeled outcome rows: about `2477`
+- ML labeled outcome rows: about `2281`
 - ML observed outcomes: `49`
 - ML latest predictions: `25`
 - Phase 3A ready: `false`
 - Chief Advisory Coach remains active and still prioritizes MAE/MFE telemetry, formal walk-forward validation, regime coverage, and execution-row collection before Phase 3A.
 
-## Active major modules and status
+## Deployment note from 2026-06-04
+
+Railway sent a failed-build email, but the build/deploy logs provided by the operator showed a successful image build and a successful Gunicorn startup:
+
+```text
+Starting gunicorn 26.0.0
+Listening at: http://0.0.0.0:8080
+Booting worker with pid: 2
+```
+
+The only runtime issue shown was transient market-data download failures:
+
+```text
+['DDOG']: SSLError('Failed to perform, curl: (35) Recv failure: Connection reset by peer...')
+['ARM']: SSLError('Failed to perform, curl: (35) Recv failure: Connection reset by peer...')
+```
+
+Current interpretation: this is a temporary data-provider/network failure for specific tickers, not a Railway build failure, app crash, or broken deployment. Do not patch or roll back solely for this unless self-check fails or the same ticker-download errors become persistent and degrade scanner behavior.
+
+## Active modules and status
 
 ### Core trading engine
 
@@ -107,13 +119,9 @@ Purpose:
 - Do not force entries.
 - Do not rebuy recently harvested symbols unless they requalify strongly.
 
-Recent behavior:
+Recent posture: underdeployed but selective. Do not lower thresholds blindly.
 
-- SNDK entered after the bot moved from 2 positions to 3 positions.
-- Later post-harvest status correctly stood down with `no_candidate_qualified`.
-- Current posture remains underdeployed but selective; do not lower thresholds blindly.
-
-### Decision audit and one-test visibility
+### Decision audit and advisory coaches
 
 File:
 
@@ -132,7 +140,7 @@ Purpose:
 - Does not scan, trade, resize, or change authority.
 - Included in `/paper/self-check` output.
 
-Expected visible self-check lines include:
+Expected visible self-check lines:
 
 ```text
 Chief Advisory Coach: highest priority is ...
@@ -142,14 +150,12 @@ Post-Harvest Coach: ...
 ML shadow counts: ...
 ```
 
-### Internal advisory coaches
-
-Implemented inside `decision_audit_consolidation.py` and surfaced through `/paper/self-check` via `decision_audit_next_actions`.
+Advisory coaches:
 
 - Trade Quality Coach: reviews execution rows, exits, win/loss quality, profit factor, exit reasons, and symbol-level realized P&L.
 - Risk Coach: reviews cash percentage, position count, drawdown, halts, and self-defense state.
 - Post-Harvest Coach: reviews post-harvest redeployment posture, underdeployment, qualifying candidates, and whether standing down is appropriate.
-- Chief Advisory Coach: analyzes all lower-level coaches plus ML shadow state and news/catalyst availability to produce a prioritized action plan.
+- Chief Advisory Coach: analyzes lower-level coaches plus ML shadow state and news/catalyst availability to produce a prioritized action plan.
 
 All coaches are read-only and advisory-only. They do not trade, resize, change risk rules, change ML authority, modify post-harvest thresholds, or override self-defense.
 
@@ -194,7 +200,7 @@ Current status:
 - ML does not place trades.
 - ML does not override risk controls.
 - ML does not override entries or exits.
-- Latest visible self-check values: rows `6000`, labeled about `2477`, observed outcomes `49`, predictions `25`, Phase 3A ready `false`.
+- Latest visible self-check values: rows `6000`, labeled about `2281`, observed outcomes `49`, predictions `25`, Phase 3A ready `false`.
 
 ### Feature journal quality and regime tagging
 
@@ -222,6 +228,8 @@ Purpose:
 - Keep all outputs advisory-only.
 - Do not invent trade outcomes, synthetic MAE/MFE values, or grant ML authority.
 
+Note: `/data/state.json` increased to about `16.86 MB` after enrichment. This is not currently failing, but future chats should monitor state size and consider feature-journal compaction if growth continues.
+
 ### MAE/MFE telemetry and formal walk-forward validation
 
 Files:
@@ -248,21 +256,9 @@ Purpose:
 - Do not invent synthetic MAE/MFE values.
 - Do not grant ML authority.
 
-Current readiness expectation:
+## Optional deeper diagnostic routes
 
-- MAE/MFE may move from placeholder/incomplete to telemetry-available once path rows exist and the readiness route/state refreshes.
-- Formal walk-forward now runs a chronological train/forward-test check, but may still fail until enough realized exit rows and forward-test rows exist.
-- Phase 3A remains blocked until all gates pass and manual approval is given.
-
-## Recommendation and advisory sources to review
-
-Primary routine source:
-
-```text
-https://trading-bot-clean.up.railway.app/paper/self-check
-```
-
-Optional deeper diagnostic routes, only when `/paper/self-check` indicates a warning/failure or when choosing the next major upgrade:
+Use only when `/paper/self-check` indicates a warning/failure or when choosing the next major upgrade:
 
 ```text
 /paper/ml2-status
@@ -287,13 +283,13 @@ Optional deeper diagnostic routes, only when `/paper/self-check` indicates a war
 /paper/adaptive-portfolio-status
 ```
 
-Do not make these part of routine testing. They are for targeted inspection only.
+Do not make these part of routine testing.
 
 ## Proactive recommendation policy
 
 Future assistants should recommend additional high-value, low-risk updates before the operator has to ask, as long as the recommendation is clearly labeled and does not silently change authority.
 
-Good proactive recommendations include better observability inside `/paper/self-check`, internal advisory coaches, MAE/MFE telemetry, formal walk-forward validation, feature-journal quality improvements, safer readiness gates, handoff/continuity improvements, and clearer diagnostics for blocked/rejected/no-decision trades.
+Good proactive recommendations include better observability inside `/paper/self-check`, internal advisory coaches, MAE/MFE telemetry, formal walk-forward validation, feature-journal quality improvements, safer readiness gates, handoff/continuity improvements, clearer diagnostics for blocked/rejected/no-decision trades, data-provider resilience, and state-size compaction.
 
 Do not proactively implement changes that loosen risk controls, grant ML live authority, lower post-harvest thresholds, bypass self-defense, or change trade execution authority without explicit operator approval.
 
@@ -322,45 +318,52 @@ Commercial roadmap:
 3. SaaS architecture: auth, per-user state, admin dashboard, billing, plan limits, public demo, legal pages, audit logs, support workflow, secret management.
 4. Live automation only after legal/compliance review. Do not build multi-user broker-connected live trading as the first commercial product.
 
-Current priority remains trading-system quality first: MAE/MFE telemetry, formal walk-forward validation, execution outcome collection, regime coverage, and Phase 3A readiness gates.
+Current priority remains trading-system quality first: MAE/MFE telemetry, formal walk-forward validation, execution outcome collection, regime coverage, state-size stability, and Phase 3A readiness gates.
 
 ## Update ledger
 
 Use this ledger for future update continuity. Add newest entries at the top.
+
+### 2026-06-04 — Feature-journal post-push self-check passed; transient data-feed errors noted
+
+- Files changed in this ledger update: `PROJECT_HANDOFF.md`.
+- Reason: record successful post-feature-journal `/paper/self-check` and note Railway runtime data-provider warnings.
+- Latest test: `overall: pass`, `status: ok`, `warnings: []`, decision audit `pass`, 3 positions, equity about `$11,015.93`, cash about `87.80%`, no self-defense, no losses today, 54 signals, 1 blocked entry, post-harvest candidate `TEM` blocked, ML still shadow-only.
+- Deployment note: Railway build/deploy appears healthy; DDOG/ARM SSL messages are transient ticker-download/data-feed failures rather than app startup failures.
+- State size note: `/data/state.json` about `16.86 MB`; monitor after feature-journal enrichment and consider compaction if growth continues.
+- Trading authority changed: no.
+- ML authority changed: no; Phase 3A remains false.
+- Risk controls changed: no.
+- One-test workflow changed: no.
+- Next planned focus: continue collecting execution rows toward `150`, monitor data-provider resilience and state-size growth, and inspect `/paper/ml-feature-journal-status` only if deeper feature-journal detail is needed.
 
 ### 2026-06-04 — Feature journal quality and regime tagging added
 
 - Commit `726dd35bb9a6b9bf8b0d3ce43f45a978845b4403` — created `ml_feature_journal_quality.py`.
 - Commit `df2ee8e3938e0323028d548200c8f33c2a98cdb6` — hardened feature journal enrichment to run after ML2 row refresh.
 - Commit `cfb151b244fe093a933ce45e2e1229d0e1424abe` — wired `ml_feature_journal_quality.py` into `wsgi.py` and added optional diagnostic routes to light endpoint registration.
+- Commit `c5cc65ae1bec0f5ca5b88560e1be6d52301a64cc` — updated `PROJECT_HANDOFF.md` with feature-journal notes.
 - Files changed: `ml_feature_journal_quality.py`, `wsgi.py`, `PROJECT_HANDOFF.md`.
 - Reason: improve ML feature-journal quality, normalize regime tagging, and add richer regime/cluster/risk-state metadata without changing trading authority.
 - Trading authority changed: no.
 - ML authority changed: no; ML remains shadow-only.
 - Risk controls changed: no.
 - One-test workflow changed: no; optional routes are deeper diagnostics only.
-- Latest known test before this push: `/paper/self-check` passed after MAE/MFE and walk-forward updates.
-- Next planned focus: run `/paper/self-check` after Railway redeploy and verify no warnings. Use `/paper/ml-feature-journal-status` only if deeper feature-journal detail is needed.
 
 ### 2026-06-04 — Post-update self-check passed after MAE/MFE and walk-forward push
 
 - Commit `0688db61dea79f0b7c48f12ee35b033b3ac24603` — logged successful post-update `/paper/self-check` result.
-- Files changed: `PROJECT_HANDOFF.md`.
-- Reason: record successful post-update `/paper/self-check` result.
 - Latest test: `overall: pass`, `status: ok`, `warnings: []`, decision audit `pass`, 3 positions, equity about `$10,997.42`, cash about `87.95%`, no self-defense, no losses today, 31 signals, 15 blocked entries.
 - Trading authority changed: no.
 - ML authority changed: no; Phase 3A remains false.
 - Risk controls changed: no.
 - One-test workflow changed: no.
-- Next planned focus: continue collecting execution rows toward `150`, monitor whether the Chief Advisory Coach changes once MAE/MFE and walk-forward readiness state refreshes, and only inspect `/paper/ml-readiness-status` if deeper gate detail is needed.
 
 ### 2026-06-04 — MAE/MFE telemetry and formal walk-forward validation upgraded
 
 - Commit `00b25cb8f8927ff545f29821c2430e56b9c80e95` — updated `ml_phase25_readiness.py` with formal chronological walk-forward validation and real MAE/MFE readiness validation.
 - Commit `f405c2a0582e779a9722fcf73b131632b3c3db2a` — updated `mae_mfe_integration.py` to refresh intratrade path capture, enrich ML/trade rows from real path telemetry, and expose telemetry counts.
 - Commit `53275b01aa7654c5ed05a6f2de1dbab6260ae139` — updated `PROJECT_HANDOFF.md` with the MAE/MFE and walk-forward upgrade notes.
-- Files changed: `ml_phase25_readiness.py`, `mae_mfe_integration.py`, `PROJECT_HANDOFF.md`.
-- Reason: address the Chief Advisory Coach's highest-priority recommendation: MAE/MFE telemetry, formal walk-forward validation, and Phase 3A readiness gates.
 - Trading authority changed: no.
 - ML authority changed: no.
 - Risk controls changed: no.
@@ -370,8 +373,6 @@ Use this ledger for future update continuity. Add newest entries at the top.
 
 - Commit `49ede794ad1de0cd2a16ae487fb28ace103913b0` — added Chief Advisory Coach synthesis to `decision_audit_consolidation.py`.
 - Commit `51a9cd2f6912af04a65650157c89757dde594a25` — documented Chief Advisory Coach in `PROJECT_HANDOFF.md`.
-- Files changed: `decision_audit_consolidation.py`, `PROJECT_HANDOFF.md`.
-- Reason: synthesize Trade Quality Coach, Risk Coach, Post-Harvest Coach, ML shadow state, and news/catalyst availability into a prioritized action plan.
 - Trading authority changed: no.
 - ML authority changed: no.
 - Risk controls changed: no.
@@ -380,8 +381,6 @@ Use this ledger for future update continuity. Add newest entries at the top.
 ### 2026-06-04 — Productization roadmap documented
 
 - Commit `a83a88f924694ac74a43ab971c3081557e82258c` — added commercial/productization roadmap to `PROJECT_HANDOFF.md`.
-- Files changed: `PROJECT_HANDOFF.md`.
-- Reason: document future monetization path around a web-based/paper-trading analytics platform first, with live account automation treated as a later compliance-reviewed phase.
 - Trading authority changed: no.
 - ML authority changed: no.
 - Risk controls changed: no.
@@ -390,7 +389,6 @@ Use this ledger for future update continuity. Add newest entries at the top.
 ### 2026-06-04 — Proactive update recommendation preference recorded
 
 - Commit `929d4b27c1e70cd78f8d0c3e80f133ddd3482911` — recorded proactive update recommendation preference in `PROJECT_HANDOFF.md`.
-- Files changed: `PROJECT_HANDOFF.md`.
 - Trading authority changed: no.
 - ML authority changed: no.
 - Risk controls changed: no.
@@ -425,35 +423,19 @@ Use this ledger for future update continuity. Add newest entries at the top.
 - Risk controls changed: no bypasses added.
 - One-test workflow changed: no.
 
-## Recent important commits
-
-- `cfb151b244fe093a933ce45e2e1229d0e1424abe` — wired ML feature journal quality into WSGI.
-- `df2ee8e3938e0323028d548200c8f33c2a98cdb6` — hardened feature journal enrichment after ML2 update.
-- `726dd35bb9a6b9bf8b0d3ce43f45a978845b4403` — added ML feature journal quality and regime tagging module.
-- `0688db61dea79f0b7c48f12ee35b033b3ac24603` — logged successful post-update self-check.
-- `f405c2a0582e779a9722fcf73b131632b3c3db2a` — completed MAE/MFE telemetry integration bridge.
-- `00b25cb8f8927ff545f29821c2430e56b9c80e95` — added formal walk-forward and MAE/MFE readiness validation.
-- `49ede794ad1de0cd2a16ae487fb28ace103913b0` — added Chief Advisory Coach synthesis.
-- `a83a88f924694ac74a43ab971c3081557e82258c` — added productization roadmap to handoff.
-- `929d4b27c1e70cd78f8d0c3e80f133ddd3482911` — recorded proactive update recommendation preference.
-- `8fd184368b1bcc40cc9d174f3eb6bac327b1c2ca` — added internal advisory coaches to decision audit.
-- `a4097743652ecf657b60709b653663a8c57b3d97` — showed ML shadow counts in one-test next actions.
-- `0d30626f040d3fadc5f1d9db09335ee6130d289d` — surfaced ML shadow counts in decision audit.
-- `2322947c4c8bf25d2d60d4ef899bb1d250b04062` — hardened post-harvest redeployment controller.
-
 ## Current upgrade plan
 
 ### Immediate next priorities
 
-1. Run `/paper/self-check` after the feature journal/regime tagging push.
-2. Confirm the self-check still shows `overall: pass`, `status: ok`, and no warnings.
-3. Keep ML shadow-only.
-4. Continue collecting execution outcomes until at least `150` execution rows.
-5. Monitor whether feature-journal quality and regime tags improve readiness visibility after normal bot cycles.
+1. Keep ML shadow-only.
+2. Continue collecting execution outcomes until at least `150` execution rows.
+3. Monitor whether feature-journal quality and regime tags improve readiness visibility after normal bot cycles.
+4. Monitor state size after feature-journal enrichment. If `/data/state.json` keeps growing quickly, prioritize state-size compaction/retention before more feature expansion.
+5. Monitor transient data-provider errors. If repeated ticker SSL failures persist, add a data-fetch resilience layer with retries/backoff and warning aggregation.
 6. Use `/paper/ml-feature-journal-status` only if deeper feature-journal detail is needed.
 7. Use `/paper/ml-readiness-status` only if deeper readiness-gate inspection is needed.
 8. Continue expanding true regime coverage from `2` to at least `3` regimes. Derived tags help visibility but do not alone justify Phase 3A promotion.
-9. Preserve the productization path for later dashboard/demo/reporting work, but keep current priority on trading quality, telemetry, and validation.
+9. Preserve the productization path for later dashboard/demo/reporting work, but keep current priority on trading quality, telemetry, validation, and state stability.
 
 ### Do not do yet
 
@@ -465,8 +447,6 @@ Use this ledger for future update continuity. Add newest entries at the top.
 - Do not build live multi-user brokerage automation before legal/compliance review.
 
 ## New-chat startup instructions
-
-When starting a new ChatGPT session, use this prompt:
 
 ```text
 Please continue my automated trading bot project.
@@ -491,11 +471,12 @@ Current direction:
 - ML shadow counts are surfaced in /paper/self-check.
 - Internal advisory coaches and Chief Advisory Coach are included in decision_audit_next_actions.
 - MAE/MFE telemetry integration and formal walk-forward validation are upgraded.
-- ML feature-journal quality and regime tagging are now added as an advisory-only readiness/diagnostic layer.
-- Latest self-check before the feature-journal push passed.
-- Future assistants should proactively recommend safe readiness/observability improvements before implementation.
+- ML feature-journal quality and regime tagging are added as advisory-only readiness/diagnostic layers.
+- Latest self-check after the feature-journal push passed.
+- DDOG/ARM SSL download errors appeared in runtime logs but self-check passed; treat as transient data-feed warnings unless persistent.
+- State size reached about 16.86 MB after feature-journal enrichment; monitor for growth and consider compaction if needed.
 - Commercial path is documented as a future web-based/paper-trading analytics dashboard first.
-- Next upgrades should focus on execution outcome collection, true regime coverage, Phase 3A readiness gates, and dashboard/productization only after system quality improves.
+- Next upgrades should focus on execution outcome collection, true regime coverage, Phase 3A readiness gates, data-feed resilience if needed, and state-size stability.
 ```
 
 ## Post-update checklist for future assistants
