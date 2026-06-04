@@ -2,8 +2,8 @@
 
 Read-only advisory layer. Summarizes the latest scanner/result flow,
 post-harvest redeployment, fallback state, news/catalyst availability, ML shadow
-counts, and repo-native advisory coaches so the operator can keep using one
-routine self-check link.
+counts, repo-native advisory coaches, and a Chief Advisory Coach synthesis so the
+operator can keep using one routine self-check link.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, List, Tuple
 
-VERSION = "decision-audit-consolidation-2026-06-04-v5-advisory-coaches"
+VERSION = "decision-audit-consolidation-2026-06-04-v6-chief-advisory-coach"
 REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -407,6 +407,113 @@ def _post_harvest_coach(core: Any, post: Dict[str, Any], risk: Dict[str, Any], c
     }
 
 
+def _add_priority(priorities: List[Dict[str, Any]], level: str, category: str, action: str, reason: str, authority_impact: str = "none") -> None:
+    order = {"high": 0, "medium": 1, "low": 2}.get(level, 3)
+    priorities.append({
+        "priority": level,
+        "priority_order": order,
+        "category": category,
+        "recommended_action": action,
+        "reason": reason,
+        "authority_impact": authority_impact,
+    })
+
+
+def _chief_advisory_coach(
+    trade_quality: Dict[str, Any],
+    risk_coach: Dict[str, Any],
+    post_harvest_coach: Dict[str, Any],
+    ml: Dict[str, Any],
+    news: Dict[str, Any],
+) -> Dict[str, Any]:
+    priorities: List[Dict[str, Any]] = []
+    execution_rows = _i(trade_quality.get("execution_rows"), 0)
+    gates_failed = _i(ml.get("gates_failed"), 0)
+
+    if risk_coach.get("posture") in {"protected", "drawdown_watch"}:
+        _add_priority(
+            priorities,
+            "high",
+            "risk",
+            "Respect protective controls and avoid new-entry overrides.",
+            str(risk_coach.get("recommendation") or "Risk posture requires discipline."),
+        )
+
+    if post_harvest_coach.get("posture") == "decision_visibility_needed":
+        _add_priority(
+            priorities,
+            "high",
+            "post_harvest_visibility",
+            "Inspect fallback and entry-quality instrumentation before changing redeployment thresholds.",
+            str(post_harvest_coach.get("recommendation") or "A candidate reached selection without a final visible decision."),
+        )
+
+    if execution_rows < 150:
+        _add_priority(
+            priorities,
+            "high",
+            "trade_quality",
+            "Continue collecting execution outcomes until at least 150 rows before ML authority changes.",
+            f"execution_rows={execution_rows}/150 remains below the Phase 3A execution gate.",
+        )
+
+    if ml.get("available") and not ml.get("phase3a_ready"):
+        _add_priority(
+            priorities,
+            "high",
+            "ml_readiness",
+            "Prioritize MAE/MFE telemetry, formal walk-forward validation, regime coverage, and execution-row collection before Phase 3A.",
+            f"phase3a_ready={ml.get('phase3a_ready')}, gates_failed={gates_failed}, observed_outcomes={ml.get('observed_outcomes')}.",
+        )
+
+    if risk_coach.get("posture") == "defensive_underdeployed" and post_harvest_coach.get("posture") in {"underdeployed_but_selective", "standing_down_correctly"}:
+        _add_priority(
+            priorities,
+            "medium",
+            "redeployment",
+            "Keep post-harvest redeployment starter-only and do not lower thresholds blindly.",
+            "The book is cash-heavy, but the redeployment coach is still favoring selectivity over forced entries.",
+        )
+
+    if not news.get("available"):
+        _add_priority(
+            priorities,
+            "low",
+            "news_catalyst",
+            "Keep catalyst context advisory-only and verify availability before using it in feature journals.",
+            "News/catalyst context was not available in the current snapshot.",
+        )
+
+    _add_priority(
+        priorities,
+        "low",
+        "productization",
+        "Keep productization secondary until telemetry, validation, and ML readiness gates are stronger.",
+        "The commercial roadmap is documented, but current development priority remains trading-system quality.",
+    )
+
+    priorities.sort(key=lambda item: (item.get("priority_order", 9), str(item.get("category") or "")))
+    top = priorities[0] if priorities else {
+        "priority": "low",
+        "category": "monitoring",
+        "recommended_action": "Continue monitoring the one-test self-check workflow.",
+        "reason": "No higher-priority advisory issue was detected.",
+        "authority_impact": "none",
+    }
+    recommendation = f"Chief Advisory Coach: highest priority is {top.get('recommended_action')}"
+    return {
+        "status": "ok",
+        "advisory_only": True,
+        "authority_changed": False,
+        "execution_authority": False,
+        "ml_authority": False,
+        "risk_control_authority": False,
+        "top_priority": top,
+        "priority_stack": [{k: v for k, v in item.items() if k != "priority_order"} for item in priorities[:6]],
+        "recommendation": recommendation,
+    }
+
+
 def _ml_counts_text(ml: Dict[str, Any]) -> str:
     return (
         "ML shadow counts: "
@@ -426,10 +533,12 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
     cycle = _cycle(core)
     post = _post_harvest(core)
     risk = _risk_book(core)
+    news = _news(core)
     ml = _ml_shadow(core)
     trade_quality = _trade_quality_coach(core)
     risk_coach = _risk_coach(core, risk)
     post_harvest_coach = _post_harvest_coach(core, post, risk, cycle)
+    chief_advisory_coach = _chief_advisory_coach(trade_quality, risk_coach, post_harvest_coach, ml, news)
     warnings: List[Dict[str, Any]] = []
     next_actions: List[str] = []
 
@@ -455,6 +564,7 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
         else:
             next_actions.append("Post-harvest controller is standing down because no candidate cleared quality thresholds.")
 
+    next_actions.append(chief_advisory_coach.get("recommendation"))
     next_actions.append(trade_quality.get("recommendation"))
     next_actions.append(risk_coach.get("recommendation"))
     next_actions.append(post_harvest_coach.get("recommendation"))
@@ -479,11 +589,12 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
         "authority_changed": False,
         "latest_cycle": cycle,
         "post_harvest": post,
-        "news_catalyst": _news(core),
+        "news_catalyst": news,
         "ml_shadow": ml,
         "trade_quality_coach": trade_quality,
         "risk_coach": risk_coach,
         "post_harvest_coach": post_harvest_coach,
+        "chief_advisory_coach": chief_advisory_coach,
         "risk_book": risk,
         "warnings": warnings,
         "next_actions": next_actions[:8],
@@ -507,6 +618,7 @@ def build_payload(core: Any | None = None) -> Dict[str, Any]:
             "trade_quality_coach": trade_quality,
             "risk_coach": risk_coach,
             "post_harvest_coach": post_harvest_coach,
+            "chief_advisory_coach": chief_advisory_coach,
         }
     except Exception:
         pass
