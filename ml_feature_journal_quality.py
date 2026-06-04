@@ -20,11 +20,12 @@ import sys
 from collections import Counter
 from typing import Any, Dict, List, Tuple
 
-VERSION = "ml-feature-journal-quality-2026-06-04-v1-regime-tags"
+VERSION = "ml-feature-journal-quality-2026-06-04-v2-post-ml2-enrichment"
 ENABLED = os.environ.get("ML_FEATURE_JOURNAL_QUALITY_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 LIVE_DECIDER = False
 REGISTERED_APP_IDS: set[int] = set()
 PATCHED_MODULE_IDS: set[int] = set()
+PATCHED_ML2_IDS: set[int] = set()
 _PATCHING = False
 
 REQUIRED_FIELDS = ("symbol", "side", "decision", "bucket", "sector", "rule_score", "entry_floor", "score_edge", "date")
@@ -44,13 +45,6 @@ def _f(x: Any, default: float = 0.0) -> float:
             return default
         value = float(x)
         return default if math.isnan(value) or math.isinf(value) else value
-    except Exception:
-        return default
-
-
-def _i(x: Any, default: int = 0) -> int:
-    try:
-        return int(float(x))
     except Exception:
         return default
 
@@ -174,13 +168,7 @@ def _derive_regime(row: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]
         else:
             normalized = "neutral"
 
-    if normalized == "bull":
-        family = "risk_on"
-    elif normalized == "bear":
-        family = "risk_off"
-    else:
-        family = "neutral_mixed"
-
+    family = "risk_on" if normalized == "bull" else "risk_off" if normalized == "bear" else "neutral_mixed"
     if cluster == "precious_metals_defensive" and normalized in {"bear", "neutral"}:
         subregime = "defensive_rotation"
     elif cluster in {"ai_data_center_compute", "mega_cap_growth", "bitcoin_ai_compute"} and normalized == "bull":
@@ -189,15 +177,7 @@ def _derive_regime(row: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]
         subregime = "underdeployed_selective"
     else:
         subregime = f"{family}_{risk_state}"
-
-    return {
-        "regime": normalized,
-        "original_regime": original,
-        "regime_source": source,
-        "regime_family": family,
-        "regime_subtype": subregime,
-        "regime_signature": f"{normalized}|{family}|{subregime}|{cluster}",
-    }
+    return {"regime": normalized, "original_regime": original, "regime_source": source, "regime_family": family, "regime_subtype": subregime, "regime_signature": f"{normalized}|{family}|{subregime}|{cluster}"}
 
 
 def _feature_quality(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,12 +196,7 @@ def _feature_quality(row: Dict[str, Any]) -> Dict[str, Any]:
     if row.get("mae_mfe_feature_enriched") or _dict(row.get("mae_mfe_features")):
         score += 0.05
     score = max(0.0, min(1.0, score))
-    if score >= 0.88:
-        label = "high_quality"
-    elif score >= 0.68:
-        label = "usable"
-    else:
-        label = "sparse"
+    label = "high_quality" if score >= 0.88 else "usable" if score >= 0.68 else "sparse"
     return {"feature_quality_score": round(score, 4), "feature_quality": label, "feature_missing_fields": missing[:12]}
 
 
@@ -242,7 +217,6 @@ def _enrich_row(row: Dict[str, Any], state: Dict[str, Any]) -> Tuple[Dict[str, A
     row["positions_count_at_log"] = _positions_count(state)
     row["underdeployed_at_log"] = bool(row["cash_pct_at_log"] >= 0.75 and row["positions_count_at_log"] <= 3)
     row["market_clean_for_entries"] = bool(row.get("risk_state") not in {"protected", "drawdown_watch"})
-
     regime = _derive_regime(row, state)
     if not row.get("regime") or str(row.get("regime")).lower() in {"unknown", "mixed"}:
         row["regime"] = regime["regime"]
@@ -251,9 +225,7 @@ def _enrich_row(row: Dict[str, Any], state: Dict[str, Any]) -> Tuple[Dict[str, A
     row["regime_family"] = row.get("regime_family") or regime["regime_family"]
     row["regime_subtype"] = row.get("regime_subtype") or regime["regime_subtype"]
     row["regime_signature"] = row.get("regime_signature") or regime["regime_signature"]
-
-    q = _feature_quality(row)
-    row.update(q)
+    row.update(_feature_quality(row))
     row["feature_journal_enriched"] = True
     return row, row != before
 
@@ -273,23 +245,7 @@ def _summary(rows: List[Dict[str, Any]], changed: int) -> Dict[str, Any]:
         for field in _list(row.get("feature_missing_fields")):
             missing[str(field)] += 1
     avg_quality = round(sum(scores) / max(1, len(scores)), 4)
-    return {
-        "rows_total": len(rows),
-        "rows_enriched_or_refreshed": changed,
-        "average_feature_quality_score": avg_quality,
-        "quality_counts": dict(quality.most_common()),
-        "regimes_seen": sorted([k for k in regimes if k and k != "unknown"]),
-        "regime_counts": dict(regimes.most_common()),
-        "regime_family_counts": dict(families.most_common()),
-        "signal_cluster_counts": dict(clusters.most_common(12)),
-        "risk_state_counts": dict(risk_states.most_common()),
-        "top_missing_fields": dict(missing.most_common(12)),
-        "phase3a_support": {
-            "regime_tags_available": bool(len([k for k in regimes if k and k != "unknown"]) >= 1),
-            "feature_quality_available": bool(len(scores) > 0),
-            "authority_changed": False,
-        },
-    }
+    return {"rows_total": len(rows), "rows_enriched_or_refreshed": changed, "average_feature_quality_score": avg_quality, "quality_counts": dict(quality.most_common()), "regimes_seen": sorted([k for k in regimes if k and k != "unknown"]), "regime_counts": dict(regimes.most_common()), "regime_family_counts": dict(families.most_common()), "signal_cluster_counts": dict(clusters.most_common(12)), "risk_state_counts": dict(risk_states.most_common()), "top_missing_fields": dict(missing.most_common(12)), "phase3a_support": {"regime_tags_available": bool(len([k for k in regimes if k and k != "unknown"]) >= 1), "feature_quality_available": bool(len(scores) > 0), "authority_changed": False}}
 
 
 def enrich_state(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
@@ -298,7 +254,7 @@ def enrich_state(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
     ml2 = _dict(state.get("ml_phase2"))
     dataset = _list(ml2.get("dataset"))
     changed = 0
-    enriched_rows = []
+    enriched_rows: List[Any] = []
     for row in dataset:
         if isinstance(row, dict):
             enriched, row_changed = _enrich_row(row, state)
@@ -306,73 +262,94 @@ def enrich_state(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
             enriched_rows.append(enriched)
         else:
             enriched_rows.append(row)
-    if isinstance(ml2, dict):
-        ml2["dataset"] = enriched_rows
-        model = _dict(ml2.get("model"))
-        summary = _summary([r for r in enriched_rows if isinstance(r, dict)], changed)
-        model["feature_journal_quality"] = summary
-        ml2["model"] = model
-        ml2["feature_journal_quality"] = summary
-        ml2["feature_journal_quality_version"] = VERSION
-        ml2["feature_journal_last_enriched_local"] = _now(mod)
-        predictions = []
-        for pred in _list(ml2.get("last_predictions")):
-            if not isinstance(pred, dict):
-                continue
-            key = str(pred.get("symbol") or "").upper()
-            match = next((r for r in reversed(enriched_rows) if isinstance(r, dict) and str(r.get("symbol") or "").upper() == key), None)
-            if match:
-                pred = dict(pred)
-                for k in ("regime", "regime_family", "regime_subtype", "signal_cluster", "feature_quality", "risk_state"):
-                    pred[k] = match.get(k)
-            predictions.append(pred)
-        if predictions:
-            ml2["last_predictions"] = predictions
-    else:
-        summary = _summary([], 0)
+    ml2["dataset"] = enriched_rows
+    model = _dict(ml2.get("model"))
+    summary = _summary([r for r in enriched_rows if isinstance(r, dict)], changed)
+    model["feature_journal_quality"] = summary
+    groups = _dict(model.get("groups"))
+    labeled = [r for r in enriched_rows if isinstance(r, dict) and not r.get("future_outcome_pending")]
+    groups["regime"] = _group_for_summary(labeled, "regime")
+    groups["regime_family"] = _group_for_summary(labeled, "regime_family")
+    groups["signal_cluster"] = _group_for_summary(labeled, "signal_cluster")
+    groups["risk_state"] = _group_for_summary(labeled, "risk_state")
+    groups["feature_quality"] = _group_for_summary(labeled, "feature_quality")
+    model["groups"] = groups
+    ml2["model"] = model
+    ml2["feature_journal_quality"] = summary
+    ml2["feature_journal_quality_version"] = VERSION
+    ml2["feature_journal_last_enriched_local"] = _now(mod)
+    predictions = []
+    for pred in _list(ml2.get("last_predictions")):
+        if not isinstance(pred, dict):
+            continue
+        key = str(pred.get("symbol") or "").upper()
+        match = next((r for r in reversed(enriched_rows) if isinstance(r, dict) and str(r.get("symbol") or "").upper() == key), None)
+        if match:
+            pred = dict(pred)
+            for k in ("regime", "regime_family", "regime_subtype", "signal_cluster", "feature_quality", "risk_state"):
+                pred[k] = match.get(k)
+        predictions.append(pred)
+    if predictions:
+        ml2["last_predictions"] = predictions
     section = state.setdefault("ml_feature_journal_quality", {})
-    section.update({
-        "status": "ok",
-        "type": "ml_feature_journal_quality_status",
-        "version": VERSION,
-        "generated_local": _now(mod),
-        "enabled": ENABLED,
-        "advisory_only": True,
-        "live_trade_decider": False,
-        "authority_changed": False,
-        "summary": summary,
-        "recommended_actions": [
-            "Use enriched regime and feature-quality tags for ML diagnostics only; keep ML shadow-only.",
-            "Do not treat derived regime tags as proof of Phase 3A readiness by themselves.",
-            "Continue collecting executions and observed outcomes before live ML weighting.",
-        ],
-    })
+    section.update({"status": "ok", "type": "ml_feature_journal_quality_status", "version": VERSION, "generated_local": _now(mod), "enabled": ENABLED, "advisory_only": True, "live_trade_decider": False, "authority_changed": False, "summary": summary, "recommended_actions": ["Use enriched regime and feature-quality tags for ML diagnostics only; keep ML shadow-only.", "Do not treat derived regime tags as proof of Phase 3A readiness by themselves.", "Continue collecting executions and observed outcomes before live ML weighting."]})
     return section
+
+
+def _group_for_summary(rows: List[Dict[str, Any]], field: str) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        key = str(row.get(field) or "unknown")
+        g = out.setdefault(key, {"rows": 0, "wins": 0, "pnl_pct": 0.0})
+        g["rows"] += 1
+        g["wins"] += 1 if row.get("future_win") else 0
+        g["pnl_pct"] += _f(row.get("future_pnl_pct"), 0.0)
+    for g in out.values():
+        n = max(1, int(g.get("rows") or 1))
+        g["win_rate"] = round(g["wins"] / n, 4)
+        g["avg_pnl_pct"] = round(g["pnl_pct"] / n, 4)
+    return out
 
 
 def payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
     section = enrich_state(state, mod) if ENABLED else _dict(state.get("ml_feature_journal_quality"))
-    return {
-        "status": "ok",
-        "type": "ml_feature_journal_quality_status",
-        "version": VERSION,
-        "generated_local": _now(mod),
-        "enabled": ENABLED,
-        "advisory_only": True,
-        "authority_changed": False,
-        "live_trade_decider": False,
-        "summary": section.get("summary", {}),
-        "recommended_actions": section.get("recommended_actions", []),
-    }
+    return {"status": "ok", "type": "ml_feature_journal_quality_status", "version": VERSION, "generated_local": _now(mod), "enabled": ENABLED, "advisory_only": True, "authority_changed": False, "live_trade_decider": False, "summary": section.get("summary", {}), "recommended_actions": section.get("recommended_actions", [])}
+
+
+def _patch_ml2_update() -> bool:
+    try:
+        import ml_phase2_shadow
+    except Exception:
+        return False
+    if id(ml_phase2_shadow) in PATCHED_ML2_IDS:
+        return True
+    original = getattr(ml_phase2_shadow, "_update", None)
+    if not callable(original):
+        return False
+    def patched_update(state, mod=None):
+        result = original(state, mod)
+        try:
+            enrich_state(result if isinstance(result, dict) else state, mod)
+        except Exception as exc:
+            try:
+                (result if isinstance(result, dict) else state).setdefault("ml_feature_journal_quality", {})["last_error"] = str(exc)
+            except Exception:
+                pass
+        return result
+    patched_update._ml_feature_journal_quality_wrapped = True  # type: ignore[attr-defined]
+    ml_phase2_shadow._update = patched_update
+    PATCHED_ML2_IDS.add(id(ml_phase2_shadow))
+    return True
 
 
 def apply(module: Any = None) -> Dict[str, Any]:
     global _PATCHING
     module = module or _mod()
+    ml2_patched = _patch_ml2_update()
     if module is None:
-        return {"status": "not_applied", "version": VERSION, "reason": "module_missing"}
+        return {"status": "not_applied", "version": VERSION, "reason": "module_missing", "ml2_update_patched": ml2_patched}
     if id(module) in PATCHED_MODULE_IDS:
-        return {"status": "ok", "version": VERSION, "already_patched": True, "live_trade_decider": False}
+        return {"status": "ok", "version": VERSION, "already_patched": True, "ml2_update_patched": ml2_patched, "live_trade_decider": False}
     try:
         original = getattr(module, "save_state", None)
         if callable(original):
@@ -382,16 +359,22 @@ def apply(module: Any = None) -> Dict[str, Any]:
                     return original(state)
                 try:
                     _PATCHING = True
+                    # Call original first so ML2 creates/refreshed rows, then enrich and persist a second direct save if available.
+                    result = original(state)
                     if ENABLED and isinstance(state, dict):
                         enrich_state(state, module)
+                        raw_save = getattr(module, "_original_save_state", None) or getattr(module, "save_state_original", None)
+                        if callable(raw_save):
+                            return raw_save(state)
+                    return result
                 except Exception as exc:
                     try:
                         state.setdefault("ml_feature_journal_quality", {})["last_error"] = str(exc)
                     except Exception:
                         pass
+                    return original(state)
                 finally:
                     _PATCHING = False
-                return original(state)
             patched_save_state._ml_feature_journal_quality_patched = True  # type: ignore[attr-defined]
             module.save_state = patched_save_state
     except Exception:
@@ -401,7 +384,7 @@ def apply(module: Any = None) -> Dict[str, Any]:
     except Exception:
         pass
     PATCHED_MODULE_IDS.add(id(module))
-    return {"status": "ok", "version": VERSION, "enabled": ENABLED, "live_trade_decider": False}
+    return {"status": "ok", "version": VERSION, "enabled": ENABLED, "ml2_update_patched": ml2_patched, "live_trade_decider": False}
 
 
 def register_routes(flask_app: Any, module: Any = None) -> Dict[str, Any]:
