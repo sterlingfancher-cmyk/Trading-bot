@@ -2,7 +2,7 @@
 
 Last updated: 2026-06-04
 
-This file is the project continuity source of truth for future ChatGPT sessions. New chats should read this file, inspect recent GitHub commits, and then continue from the current state without asking the operator to reconstruct prior conversations.
+This file is the project continuity source of truth for future ChatGPT sessions. New chats should read this file, inspect recent GitHub commits, and continue without asking the operator to reconstruct prior conversations.
 
 ## Repository and deployment
 
@@ -30,8 +30,6 @@ This file is the project continuity source of truth for future ChatGPT sessions.
 
 Every future assistant should treat this file as a living project ledger. After any meaningful update, append or refresh the relevant sections below.
 
-### Required handoff updates after each meaningful push
-
 Update this file when any of the following happens:
 
 1. A code change is pushed.
@@ -41,8 +39,6 @@ Update this file when any of the following happens:
 5. A new next-step priority is chosen.
 6. ML readiness gates change.
 7. The one-test workflow changes.
-
-### Minimum update fields to preserve
 
 For each future update, record:
 
@@ -57,17 +53,11 @@ For each future update, record:
 - Latest `/paper/self-check` result summary.
 - Next planned update.
 
-### Permanent rule
-
-If a future chat changes GitHub but does not update this file, the next chat should consider the project handoff stale and should inspect recent commits before making assumptions.
+Permanent rule: if a future chat changes GitHub but does not update this file, the next chat should consider the handoff stale and inspect recent commits before making assumptions.
 
 ## Recommendation and advisory sources to review
 
-There are several code layers that generate recommendations or advisory feedback. Some of them are intentionally hidden from the mobile-safe one-test output unless they are promoted into `decision_audit_next_actions` or another compact summary. Future chats should review these before deciding the next upgrade.
-
-### Primary routine source
-
-Use this first:
+Primary routine source:
 
 ```text
 https://trading-bot-clean.up.railway.app/paper/self-check
@@ -82,39 +72,25 @@ Look for:
 - `operator_summary`
 - `truth_summary`
 
-### Recommendation/advisory code modules
+Known advisory/recommendation modules:
 
-Known advisory/recommendation modules include:
-
-- `decision_audit_consolidation.py` — current compact decision audit, post-harvest status, news availability, ML shadow counts, and internal advisory coaches.
-- `risk_on_recommendation_cleanup.py` — cleans and deduplicates risk-on recommendation text, including entry-ready/watch candidate wording and market participation accelerator wiring.
+- `decision_audit_consolidation.py` — compact decision audit, post-harvest status, news availability, ML shadow counts, internal advisory coaches, and Chief Advisory Coach synthesis.
+- `risk_on_recommendation_cleanup.py` — cleans/deduplicates risk-on recommendation text and accelerator feedback.
 - `risk_on_entry_diagnostic.py` — risk-on entry diagnostics and candidate reasoning.
-- `entry_decision_visibility.py` — explains entered/blocked/skipped/no-decision behavior.
+- `entry_decision_visibility.py` — entered/blocked/skipped/no-decision behavior.
 - `ml_phase2_shadow.py` — ML shadow predictions and recommendation text; never live-authoritative.
-- `ml_phase25_readiness.py` — Phase 2.5/Phase 3A readiness gates and recommended actions.
-- `mae_mfe_integration.py` — MAE/MFE telemetry readiness and recommended actions.
-- `news_sentiment_engine.py` — news/catalyst advisory context and recommended actions.
+- `ml_phase25_readiness.py` — Phase 2.5/Phase 3A readiness gates.
+- `mae_mfe_integration.py` — MAE/MFE telemetry readiness.
+- `news_sentiment_engine.py` — news/catalyst advisory context.
 - `market_extension_guard.py` — market extension/overextension advisories.
 - `benchmark_participation.py` — benchmark/risk-on participation diagnostics.
 - `adaptive_ml_research.py` — adaptive ML research recommendations.
 - `adaptive_portfolio_intelligence.py` — portfolio intelligence/advisory recommendations.
-- `strategy_promotion_readiness.py` — strategy promotion gates and readiness feedback.
+- `strategy_promotion_readiness.py` — strategy promotion gates.
 - `strategy_scorecard.py` — strategy scorecards and performance comparisons.
 - `trade_quality_telemetry.py` — trade-quality telemetry and improvement signals.
 
-### Internal advisory coaches
-
-As of 2026-06-04, the repo-native advisory coaches are implemented inside `decision_audit_consolidation.py` and are surfaced through `/paper/self-check` via `decision_audit_next_actions`.
-
-- Trade Quality Coach: reviews execution rows, exits, win/loss quality, profit factor, exit reasons, and symbol-level realized P&L.
-- Risk Coach: reviews cash percentage, position count, drawdown, halts, and self-defense state.
-- Post-Harvest Coach: reviews post-harvest redeployment posture, underdeployment, qualifying candidates, and whether standing down is appropriate.
-
-These coaches are read-only and advisory-only. They do not trade, resize, change risk rules, change ML authority, or modify post-harvest thresholds.
-
-### Optional deeper diagnostic routes
-
-Only use these when `/paper/self-check` indicates a warning/failure or when choosing the next major upgrade:
+Optional deeper diagnostic routes, only when `/paper/self-check` indicates a warning/failure or when choosing the next major upgrade:
 
 ```text
 /paper/ml2-status
@@ -137,14 +113,26 @@ Only use these when `/paper/self-check` indicates a warning/failure or when choo
 
 Do not make these part of routine testing. They are for targeted inspection only.
 
-### Why recommendation feedback may disappear from normal view
+## Internal advisory coaches
 
-The project intentionally uses a mobile-safe one-test policy. `/paper/self-check` may internally read state directly and only show `/health` and `/paper/status` as checked paths. That keeps testing fast and stable, but it can hide detailed recommendation text from deeper endpoints. When important recommendations matter, future code should promote a compact version into:
+As of 2026-06-04, the repo-native advisory coaches are implemented inside `decision_audit_consolidation.py` and are surfaced through `/paper/self-check` via `decision_audit_next_actions`.
 
-- `decision_audit_next_actions`
-- `operator_summary`
-- `decision_audit_summary`
-- `warnings`, if it is truly actionable
+- Trade Quality Coach: reviews execution rows, exits, win/loss quality, profit factor, exit reasons, and symbol-level realized P&L.
+- Risk Coach: reviews cash percentage, position count, drawdown, halts, and self-defense state.
+- Post-Harvest Coach: reviews post-harvest redeployment posture, underdeployment, qualifying candidates, and whether standing down is appropriate.
+- Chief Advisory Coach: analyzes the Trade Quality Coach, Risk Coach, Post-Harvest Coach, ML shadow state, and news/catalyst availability to produce a prioritized action plan.
+
+All coaches are read-only and advisory-only. They do not trade, resize, change risk rules, change ML authority, modify post-harvest thresholds, or override self-defense.
+
+Expected visible self-check lines include:
+
+```text
+Chief Advisory Coach: highest priority is ...
+Trade Quality Coach: ...
+Risk Coach: ...
+Post-Harvest Coach: ...
+ML shadow counts: rows=6000, labeled=2700, observed_outcomes=49, predictions=25, phase3a_ready=False.
+```
 
 ## Proactive recommendation policy
 
@@ -167,11 +155,9 @@ Do not proactively implement changes that loosen risk controls, grant ML live au
 
 The operator eventually wants a path to make the system profitable by selling access to the platform, code, dashboard, reports, or app-style experience.
 
-### Productization principle
+The safest first commercial product should be a web-based/app-style trading intelligence and paper-trading analytics platform, not an auto-trading product that controls other users' live brokerage accounts.
 
-The safest first commercial product should be a web-based or app-style trading intelligence and paper-trading analytics platform, not an auto-trading product that controls other users' live brokerage accounts.
-
-Initial positioning should be:
+Initial positioning:
 
 ```text
 Trading intelligence dashboard with paper-trading, risk analytics, ML shadow rankings, scanner diagnostics, decision explanations, and performance reporting.
@@ -183,87 +169,21 @@ Avoid positioning it as:
 Guaranteed AI auto-trading system that makes money for users.
 ```
 
-### Phase 1 — Web dashboard / paper analytics product
+Commercial roadmap:
 
-Recommended first commercial version:
+1. Web dashboard / paper analytics product: status cards, scanner rankings, model portfolio, coach summaries, performance reports, demo mode, and no broker connectivity.
+2. Strategy access and alerts: watchlist rankings, alerts, paper-first model portfolio, manual-copy trade ideas, setup scores, and reports.
+3. SaaS architecture: auth, per-user state, admin dashboard, billing, plan limits, public demo, legal pages, audit logs, support workflow, secret management.
+4. Live automation only after legal/compliance review. Do not build multi-user broker-connected live trading as the first commercial product.
 
-- user-facing dashboard instead of raw JSON
-- market regime and risk-on/risk-off status
-- scanner rankings and watchlist intelligence
-- post-harvest redeployment signals
-- ML shadow rankings and confidence context
-- Trade Quality Coach, Risk Coach, and Post-Harvest Coach summaries
-- paper-trading simulator or model portfolio
-- daily/weekly/monthly performance reports
-- equity curve, drawdown, win rate, profit factor, open positions, trade log
-- exportable CSV/PDF reports later
-- demo mode that exposes no secrets, no broker keys, and no private state
-
-This version should not connect to users' live broker accounts. It should provide analytics, education, simulated/paper results, and decision-support tooling.
-
-### Phase 2 — Strategy access and alerts
-
-Potential second commercial layer:
-
-- subscription watchlist rankings
-- trade alert emails/texts/push notifications
-- paper-first model portfolio
-- manual-copy trade ideas
-- setup scoring and risk notes
-- strategy reports and performance analytics
-
-This can remain lower-complexity than live account automation as long as users retain discretion and the product avoids representing itself as personalized investment management.
-
-### Phase 3 — User accounts / SaaS architecture
-
-Before a real SaaS launch, the architecture would eventually need:
-
-- authentication and user accounts
-- separate per-user state/workspaces
-- admin dashboard
-- subscription billing and plan limits
-- public demo environment
-- terms of service and disclaimers
-- audit logs
-- data retention rules
-- support workflow
-- non-secret public dashboard mode
-- secret management for any private integrations
-
-### Phase 4 — Live automation only after legal/compliance review
-
-Connecting to user brokerage accounts, placing trades for other users, copy-trading, or managing user accounts is a materially different product and should only be considered after legal/compliance review.
-
-Guardrails:
-
-- Do not build broker-connected multi-user live trading as the first commercial product.
-- Do not advertise guaranteed returns.
-- Do not give users the impression that the system eliminates trading risk.
-- Do not give ML, FinRobot-style research, or any advisory layer live authority without explicit approval and readiness evidence.
-- Treat any version that trades other users' money as a later-stage regulated/compliance-sensitive product.
-
-### Possible pricing ideas to revisit later
-
-These are placeholders, not commitments:
+Possible pricing ideas to revisit later:
 
 - basic dashboard: `$19-$49/month`
 - pro dashboard plus alerts: `$79-$149/month`
 - advanced analytics/reporting: `$199+/month`
 - one-time code/template license: `$299-$999`
 - setup/coaching package: `$500-$2,500`
-- white-label or private workspace: later-stage pricing only
-
-### Productization next steps when ready
-
-Good low-risk future updates:
-
-1. Add a `PRODUCT_ROADMAP.md` or expand this handoff into a product roadmap.
-2. Add a read-only dashboard route that presents status cards instead of JSON.
-3. Add a public demo mode with fake/sanitized state.
-4. Add exportable performance reports.
-5. Add a weekly report route.
-6. Add a strategy transparency page explaining risk controls and ML shadow mode.
-7. Add SaaS architecture notes before any auth/billing work.
+- white-label/private workspace: later-stage pricing only
 
 Current priority remains trading-system quality first: MAE/MFE telemetry, formal walk-forward validation, execution outcome collection, regime coverage, and Phase 3A readiness gates.
 
@@ -282,7 +202,7 @@ Expected characteristics:
 - `warnings: []`, unless a real diagnostic issue is present
 - `single_best_link` points back to `/paper/self-check`
 - `routine_test_policy.extra_links_required: false`
-- Mobile-safe mode may only internally check `/health` and `/paper/status`, but it also promotes compact summaries from decision audit and ML counts into the payload.
+- Mobile-safe mode may only internally check `/health` and `/paper/status`, but it promotes compact summaries from decision audit, advisory coaches, and ML counts into the payload.
 
 Heavy diagnostic routes are optional and should not be part of routine post-push testing.
 
@@ -299,7 +219,7 @@ Most recent known self-check state from 2026-06-03 evening:
 - Realized total: `$857.68`
 - Unrealized P&L: about `$166.28`
 - Losses today: `0`
-- Self-defense: inactive in the latest status, final-close lock was previously recognized correctly as protective rather than a warning
+- Self-defense: inactive in the latest status; final-close lock was previously recognized correctly as protective rather than a warning
 - Scanner signals in latest snapshot: about `33`
 - Blocked entries in latest snapshot: about `10`
 
@@ -318,7 +238,7 @@ Files:
 - `post_harvest_redeployment_controller.py`
 - `post_harvest_entry_fallback.py`
 
-Current purpose:
+Purpose:
 
 - Detect when the bot is underdeployed after harvesting profit.
 - Redeploy only through 1-2 high-quality starter candidates.
@@ -341,23 +261,16 @@ File:
 
 Current version expected after the latest update:
 
-- `decision-audit-consolidation-2026-06-04-v5-advisory-coaches`
+```text
+decision-audit-consolidation-2026-06-04-v6-chief-advisory-coach
+```
 
 Purpose:
 
 - Read-only advisory layer.
-- Consolidates scanner/result flow, post-harvest state, fallback state, news/catalyst availability, ML shadow counts, and the repo-native advisory coaches.
+- Consolidates scanner/result flow, post-harvest state, fallback state, news/catalyst availability, ML shadow counts, repo-native advisory coaches, and Chief Advisory Coach synthesis.
 - Does not scan, trade, resize, or change authority.
 - Included in `/paper/self-check` output.
-
-Expected visible self-check lines include:
-
-```text
-ML shadow counts: rows=6000, labeled=2700, observed_outcomes=49, predictions=25, phase3a_ready=False.
-Trade Quality Coach: ...
-Risk Coach: ...
-Post-Harvest Coach: ...
-```
 
 ### One-link self-check policy
 
@@ -365,7 +278,7 @@ File:
 
 - `one_link_check.py`
 
-Current purpose:
+Purpose:
 
 - Keep `/paper/self-check` as the only routine test link.
 - Hide verbose link lists unless `SELF_CHECK_VERBOSE_LINKS=1`.
@@ -378,7 +291,7 @@ File:
 
 - `news_sentiment_engine.py`
 
-Current purpose:
+Purpose:
 
 - Advisory-only news/catalyst visibility.
 - News/catalyst layer is available in latest self-check summaries.
@@ -437,9 +350,21 @@ Current ML recommendation:
 
 Use this ledger for future update continuity. Add newest entries at the top.
 
+### 2026-06-04 — Chief Advisory Coach added
+
+- Commit `49ede794ad1de0cd2a16ae487fb28ace103913b0` — added Chief Advisory Coach synthesis to `decision_audit_consolidation.py`.
+- Files changed: `decision_audit_consolidation.py`, `PROJECT_HANDOFF.md`.
+- Reason: synthesize Trade Quality Coach, Risk Coach, Post-Harvest Coach, ML shadow state, and news/catalyst availability into a prioritized action plan.
+- Trading authority changed: no.
+- ML authority changed: no.
+- Risk controls changed: no.
+- One-test workflow changed: preserved; Chief Advisory Coach text should appear inside `decision_audit_next_actions` from `/paper/self-check`.
+- Latest known test before this push: `/paper/self-check` passed with decision audit and ML count visibility.
+- Next planned focus: verify Chief Advisory Coach line in `/paper/self-check`, then continue toward MAE/MFE telemetry and formal walk-forward validation.
+
 ### 2026-06-04 — Productization roadmap documented
 
-- Commit `PRODUCTIZATION_ROADMAP_COMMIT_PLACEHOLDER` — added commercial/productization roadmap to `PROJECT_HANDOFF.md`.
+- Commit `a83a88f924694ac74a43ab971c3081557e82258c` — added commercial/productization roadmap to `PROJECT_HANDOFF.md`.
 - Files changed: `PROJECT_HANDOFF.md`.
 - Reason: document future monetization path around a web-based/paper-trading analytics platform first, with live account automation treated as a later compliance-reviewed phase.
 - Trading authority changed: no.
@@ -450,6 +375,7 @@ Use this ledger for future update continuity. Add newest entries at the top.
 
 ### 2026-06-04 — Proactive update recommendation preference recorded
 
+- Commit `929d4b27c1e70cd78f8d0c3e80f133ddd3482911` — recorded proactive update recommendation preference in `PROJECT_HANDOFF.md`.
 - Files changed: `PROJECT_HANDOFF.md`.
 - Reason: operator wants future assistants to proactively recommend high-value, low-risk updates like internal advisory coaches instead of waiting for direct prompting.
 - Trading authority changed: no.
@@ -461,6 +387,7 @@ Use this ledger for future update continuity. Add newest entries at the top.
 ### 2026-06-04 — Internal advisory coaches added to decision audit
 
 - Commit `8fd184368b1bcc40cc9d174f3eb6bac327b1c2ca` — added Trade Quality Coach, Risk Coach, and Post-Harvest Coach inside `decision_audit_consolidation.py`.
+- Commit `6a0678de506240cf7de051f233abf98968a63ae2` — logged internal advisory coaches in `PROJECT_HANDOFF.md`.
 - Files changed: `decision_audit_consolidation.py`, `PROJECT_HANDOFF.md`.
 - Reason: add repo-native advisory agents without external API keys or new accounts.
 - Trading authority changed: no.
@@ -474,7 +401,6 @@ Use this ledger for future update continuity. Add newest entries at the top.
 
 - Commit `74df666536fd699a7ce73c7a8e69203cd9928006` — added `PROJECT_HANDOFF.md`.
 - Commit `d061946dcbb4f42fc28350da213477ceb8fa4fc6` — added handoff maintenance protocol and recommendation/advisory source list.
-- This update adds the handoff maintenance protocol and recommendation/advisory source list.
 - Trading authority changed: no.
 - ML authority changed: no.
 - Risk controls changed: no.
@@ -514,10 +440,11 @@ Use this ledger for future update continuity. Add newest entries at the top.
 
 ## Recent important commits
 
-Recent successful commits from the handoff period:
-
-- `PRODUCTIZATION_ROADMAP_COMMIT_PLACEHOLDER` — added productization roadmap to handoff.
+- `49ede794ad1de0cd2a16ae487fb28ace103913b0` — added Chief Advisory Coach synthesis.
+- `a83a88f924694ac74a43ab971c3081557e82258c` — added productization roadmap to handoff.
+- `929d4b27c1e70cd78f8d0c3e80f133ddd3482911` — recorded proactive update recommendation preference.
 - `8fd184368b1bcc40cc9d174f3eb6bac327b1c2ca` — added internal advisory coaches to decision audit.
+- `6a0678de506240cf7de051f233abf98968a63ae2` — logged internal advisory coaches in handoff.
 - `d061946dcbb4f42fc28350da213477ceb8fa4fc6` — added handoff update ledger and recommendation sources.
 - `74df666536fd699a7ce73c7a8e69203cd9928006` — added initial project handoff file.
 - `a4097743652ecf657b60709b653663a8c57b3d97` — showed ML shadow counts in one-test next actions.
@@ -535,9 +462,9 @@ Recent successful commits from the handoff period:
 
 ### Immediate next priorities
 
-1. Run `/paper/self-check` after the advisory coach push and verify the three coach lines are visible in `decision_audit_next_actions`.
+1. Run `/paper/self-check` after the Chief Advisory Coach push and verify the Chief Advisory Coach line is visible in `decision_audit_next_actions`.
 2. Keep monitoring `/paper/self-check` only after pushes.
-3. Verify ML count line remains visible in `decision_audit_next_actions`.
+3. Verify ML count line and the three lower-level coach lines remain visible in `decision_audit_next_actions`.
 4. Continue collecting execution outcomes until at least `150` execution rows.
 5. Improve or verify MAE/MFE telemetry; current readiness says MAE/MFE fields are ready but no rows have MAE/MFE yet.
 6. Add formal walk-forward validation tooling before any Phase 3A live ML weighting.
@@ -580,7 +507,7 @@ Current direction:
 - Post-harvest redeployment is active.
 - Decision audit is included in /paper/self-check.
 - ML shadow counts are surfaced in /paper/self-check.
-- Internal advisory coaches are now included in decision_audit_next_actions.
+- Internal advisory coaches and Chief Advisory Coach are included in decision_audit_next_actions.
 - Future assistants should proactively recommend safe readiness/observability improvements before implementation.
 - Commercial path is documented as a future web-based/paper-trading analytics dashboard first.
 - Next upgrades should focus on feature journal quality, MAE/MFE telemetry, formal walk-forward validation, and Phase 3A readiness gates.
@@ -601,6 +528,7 @@ https://trading-bot-clean.up.railway.app/paper/self-check
 - `overall: pass`
 - `status: ok`
 - `decision_audit_overall: pass` when no issue is present
+- Chief Advisory Coach line in `decision_audit_next_actions`
 - ML shadow count line in `decision_audit_next_actions`
 - Trade Quality Coach line in `decision_audit_next_actions`
 - Risk Coach line in `decision_audit_next_actions`
