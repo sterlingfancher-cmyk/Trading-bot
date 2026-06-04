@@ -1,14 +1,16 @@
 """MAE/MFE integration bridge.
 
-Advisory-only bridge that feeds intratrade path telemetry into:
+Advisory-only bridge that refreshes real intratrade path telemetry and feeds it
+into:
 - trade-quality scoring metadata
 - adaptive stop recommendations
 - dynamic take-profit recommendations
 - future ML ranking features
+- Phase 2.5 readiness gates
 
 This module does not place orders, modify positions, close trades, change
 allocation, or override risk controls. It writes recommendations and feature
-metadata only.
+metadata only. It never invents synthetic MAE/MFE values.
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ import os
 import sys
 from typing import Any, Dict, List, Tuple
 
-VERSION = "mae-mfe-integration-bridge-2026-05-16-route-fix"
+VERSION = "mae-mfe-integration-2026-06-04-telemetry-complete"
 ENABLED = os.environ.get("MAE_MFE_INTEGRATION_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 LIVE_AUTHORITY = False
 REGISTERED_APP_IDS: set[int] = set()
@@ -70,6 +72,17 @@ def _load_state(mod: Any = None) -> Tuple[Dict[str, Any], Any]:
     return (state if isinstance(state, dict) else {}), mod
 
 
+def _refresh_intratrade_paths(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
+    try:
+        import intratrade_path_capture
+        if hasattr(intratrade_path_capture, "update_paths"):
+            section = intratrade_path_capture.update_paths(state, mod)
+            return {"status": "ok", "version": section.get("version"), "active_positions_tracked": section.get("active_positions_tracked"), "closed_paths_archived": section.get("closed_paths_archived")}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+    return {"status": "not_available"}
+
+
 def _paths(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     section = _dict(state.get("intratrade_path_capture"))
     return {str(k).upper(): v for k, v in _dict(section.get("paths")).items() if isinstance(v, dict)}
@@ -79,13 +92,17 @@ def _closed_paths(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [row for row in _list(_dict(state.get("intratrade_path_capture")).get("closed_path_archive")) if isinstance(row, dict)]
 
 
-def _risk_recommendation(path: Dict[str, Any]) -> Dict[str, Any]:
+def _path_key(path: Dict[str, Any]) -> Tuple[str, str]:
+    return (str(path.get("symbol") or "").upper(), str(path.get("side") or "long").lower())
+
+
+def _risk_recommendation(path: Dict[str, Any], source: str = "active_path") -> Dict[str, Any]:
     symbol = str(path.get("symbol") or "").upper()
     side = str(path.get("side") or "long").lower()
     mae = _f(path.get("mae_pct"), 0.0)
     mfe = _f(path.get("mfe_pct"), 0.0)
     duration = _f(path.get("duration_seconds"), 0.0)
-    current = _f(path.get("current_price"), 0.0)
+    current = _f(path.get("current_price"), _f(path.get("exit_price"), 0.0))
     entry = _f(path.get("entry_price"), 0.0)
 
     efficiency = round(mfe / max(0.01, abs(mae)), 4) if (mfe > 0 or mae < 0) else None
@@ -111,6 +128,7 @@ def _risk_recommendation(path: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "symbol": symbol,
         "side": side,
+        "source": source,
         "entry_price": round(entry, 4) if entry else None,
         "current_price": round(current, 4) if current else None,
         "mae_pct": round(mae, 4),
@@ -120,6 +138,8 @@ def _risk_recommendation(path: Dict[str, Any]) -> Dict[str, Any]:
         "quality_signal": quality_signal,
         "adaptive_stop_recommendation": stop_bias,
         "dynamic_take_profit_recommendation": take_profit_bias,
+        "opened_local": path.get("opened_local"),
+        "closed_local": path.get("closed_local"),
         "live_authority": False,
         "note": "Recommendation only; live order logic is unchanged.",
     }
@@ -132,6 +152,7 @@ def _feature_row(rec: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "symbol": rec.get("symbol"),
         "side": rec.get("side"),
+        "source": rec.get("source"),
         "mae_pct": mae,
         "mfe_pct": mfe,
         "path_efficiency": eff,
@@ -139,33 +160,83 @@ def _feature_row(rec: Dict[str, Any]) -> Dict[str, Any]:
         "adaptive_stop_recommendation": rec.get("adaptive_stop_recommendation"),
         "dynamic_take_profit_recommendation": rec.get("dynamic_take_profit_recommendation"),
         "ml_feature_ready": bool(mfe != 0.0 or mae != 0.0),
+        "live_authority": False,
     }
 
 
+def _trade_outcome_rows(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = []
+    for row in _list(state.get("trades")):
+        if not isinstance(row, dict):
+            continue
+        action = str(row.get("action") or row.get("type") or "").lower()
+        reason = str(row.get("exit_reason") or row.get("reason") or "").lower()
+        has_pnl = row.get("pnl_dollars") is not None or row.get("pnl_pct") is not None
+        if action in {"exit", "sell", "close"} or "exit" in reason or "stop" in reason or has_pnl:
+            rows.append(row)
+    return rows
+
+
+def _build_feature_index(active_features: List[Dict[str, Any]], closed_features: List[Dict[str, Any]]) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for row in closed_features + active_features:
+        if not isinstance(row, dict):
+            continue
+        key = (str(row.get("symbol") or "").upper(), str(row.get("side") or "long").lower())
+        if key[0]:
+            by_key[key] = row
+    return by_key
+
+
 def integrate(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
+    if not isinstance(state, dict):
+        return {}
+    refresh = _refresh_intratrade_paths(state, mod)
     active_paths = _paths(state)
-    active_recs = [_risk_recommendation(path) for path in active_paths.values()]
-    closed_features = [_feature_row(_risk_recommendation(path)) for path in _closed_paths(state)[-100:]]
+    closed_path_rows = _closed_paths(state)
+    active_recs = [_risk_recommendation(path, "active_path") for path in active_paths.values()]
+    closed_recs = [_risk_recommendation(path, "closed_path") for path in closed_path_rows[-250:]]
+    closed_features = [_feature_row(rec) for rec in closed_recs]
     active_features = [_feature_row(rec) for rec in active_recs]
+    by_symbol_side = _build_feature_index(active_features, closed_features)
 
     ml2 = _dict(state.get("ml_phase2"))
     dataset = _list(ml2.get("dataset"))
-    by_symbol = {str(row.get("symbol") or "").upper(): row for row in active_features + closed_features if isinstance(row, dict)}
     enriched = 0
+    rows_with_feature_ready = 0
     for row in dataset:
         if not isinstance(row, dict):
             continue
-        feature = by_symbol.get(str(row.get("symbol") or "").upper())
+        key = (str(row.get("symbol") or "").upper(), str(row.get("side") or "long").lower())
+        feature = by_symbol_side.get(key) or by_symbol_side.get((key[0], "long"))
         if feature:
             row.setdefault("mae_mfe_features", {}).update(feature)
             row["mae_mfe_feature_enriched"] = True
             enriched += 1
+            if feature.get("ml_feature_ready"):
+                rows_with_feature_ready += 1
 
+    trade_rows_enriched = 0
+    for row in _trade_outcome_rows(state):
+        sym = str(row.get("symbol") or row.get("ticker") or "").upper()
+        side = str(row.get("side") or "long").lower()
+        feature = by_symbol_side.get((sym, side)) or by_symbol_side.get((sym, "long"))
+        if feature:
+            row.setdefault("mae_mfe_features", {}).update(feature)
+            row["mae_mfe_feature_enriched"] = True
+            trade_rows_enriched += 1
+
+    path_rows_available = len(active_features) + len(closed_features)
+    ready_features = [r for r in active_features + closed_features if r.get("ml_feature_ready")]
     tq = state.setdefault("trade_quality_telemetry", {})
     tq["mae_mfe_integration"] = {
         "version": VERSION,
         "active_recommendations_count": len(active_recs),
+        "closed_recommendations_count": len(closed_recs),
+        "path_rows_available": path_rows_available,
+        "ready_feature_rows": len(ready_features),
         "ml_rows_enriched": enriched,
+        "trade_rows_enriched": trade_rows_enriched,
         "last_updated_local": _now(mod),
         "live_authority": False,
     }
@@ -176,20 +247,32 @@ def integrate(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
         "enabled": ENABLED,
         "live_authority": False,
         "last_updated_local": _now(mod),
+        "intratrade_refresh": refresh,
         "active_recommendations": active_recs[-25:],
+        "closed_recommendations_tail": closed_recs[-25:],
         "active_features": active_features[-25:],
         "closed_features_tail": closed_features[-25:],
         "ml_rows_enriched": enriched,
+        "ml_rows_with_ready_features": rows_with_feature_ready,
+        "trade_rows_enriched": trade_rows_enriched,
+        "telemetry_rows_available": path_rows_available,
+        "mae_mfe_complete": bool(len(ready_features) > 0),
         "summary": {
             "active_positions_with_path": len(active_recs),
+            "closed_paths_with_path": len(closed_recs),
+            "telemetry_rows_available": path_rows_available,
+            "ready_feature_rows": len(ready_features),
             "strong_path_count": sum(1 for r in active_recs if r.get("quality_signal") == "strong_path"),
             "weak_path_count": sum(1 for r in active_recs if r.get("quality_signal") == "weak_path"),
             "trail_winner_count": sum(1 for r in active_recs if r.get("dynamic_take_profit_recommendation") == "trail_winner"),
             "tighten_stop_count": sum(1 for r in active_recs if str(r.get("adaptive_stop_recommendation", "")).startswith("tighten")),
+            "ml_rows_enriched": enriched,
+            "trade_rows_enriched": trade_rows_enriched,
         },
         "recommended_actions": [
             "Keep stop/take-profit outputs advisory until path telemetry is validated across enough trades.",
             "Use MAE/MFE features to improve ML ranking confidence, not execution authority yet.",
+            "Review weak_path and tighten_stop candidates before changing stop or redeployment rules.",
             "Promote only after Phase 3A readiness gates pass and walk-forward validation confirms improvement.",
         ],
     })
@@ -205,9 +288,13 @@ def payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
         "generated_local": _now(mod),
         "enabled": ENABLED,
         "live_authority": False,
+        "mae_mfe_complete": section.get("mae_mfe_complete", False),
         "summary": section.get("summary"),
         "active_recommendations_count": len(_list(section.get("active_recommendations"))),
+        "closed_recommendations_count": len(_list(section.get("closed_recommendations_tail"))),
+        "telemetry_rows_available": section.get("telemetry_rows_available", 0),
         "ml_rows_enriched": section.get("ml_rows_enriched", 0),
+        "trade_rows_enriched": section.get("trade_rows_enriched", 0),
         "active_recommendations": section.get("active_recommendations", []),
         "recommended_actions": section.get("recommended_actions", []),
     }
@@ -270,3 +357,9 @@ def register_routes(flask_app: Any, module: Any = None) -> Dict[str, Any]:
 
     REGISTERED_APP_IDS.add(id(flask_app))
     return {"status": "ok", "version": VERSION, "routes": ["/paper/mae-mfe-integration-status", "/paper/adaptive-exit-recommendations"], "live_authority": False}
+
+
+try:
+    apply(_module())
+except Exception:
+    pass
