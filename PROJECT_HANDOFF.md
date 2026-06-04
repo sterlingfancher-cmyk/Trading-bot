@@ -185,6 +185,7 @@ Files:
 
 - `ml_phase2_shadow.py`
 - `ml_phase25_readiness.py`
+- `ml_feature_journal_quality.py`
 
 Current status:
 
@@ -195,6 +196,32 @@ Current status:
 - ML does not override entries or exits.
 - Latest visible self-check values: rows `6000`, labeled about `2477`, observed outcomes `49`, predictions `25`, Phase 3A ready `false`.
 
+### Feature journal quality and regime tagging
+
+Files:
+
+- `ml_feature_journal_quality.py`
+- `wsgi.py`
+
+Current expected version:
+
+```text
+ml-feature-journal-quality-2026-06-04-v2-post-ml2-enrichment
+```
+
+Purpose:
+
+- Enrich ML2 dataset rows after ML2 creates/refreshed rows.
+- Normalize missing or vague regime labels into `bull`, `neutral`, or `bear` when context supports it.
+- Add `regime_family`, `regime_subtype`, and `regime_signature` fields for better regime analysis.
+- Add `signal_cluster` tags such as `ai_data_center_compute`, `bitcoin_ai_compute`, `precious_metals_defensive`, `mega_cap_growth`, `benchmark_index`, and others.
+- Add `risk_state`, `cash_pct_at_log`, `positions_count_at_log`, `underdeployed_at_log`, and `market_clean_for_entries` fields.
+- Add feature-quality metadata including `feature_quality_score`, `feature_quality`, and missing-field lists.
+- Add optional deeper routes: `/paper/ml-feature-journal-status` and `/paper/regime-tagging-status`.
+- Preserve one-test workflow; these routes are optional diagnostics only.
+- Keep all outputs advisory-only.
+- Do not invent trade outcomes, synthetic MAE/MFE values, or grant ML authority.
+
 ### MAE/MFE telemetry and formal walk-forward validation
 
 Files:
@@ -203,7 +230,7 @@ Files:
 - `mae_mfe_integration.py`
 - `ml_phase25_readiness.py`
 
-Current expected versions after the latest update:
+Current expected versions:
 
 ```text
 mae-mfe-integration-2026-06-04-telemetry-complete
@@ -241,6 +268,8 @@ Optional deeper diagnostic routes, only when `/paper/self-check` indicates a war
 /paper/ml2-status
 /paper/ml-readiness-status
 /paper/ml-phase25-status
+/paper/ml-feature-journal-status
+/paper/regime-tagging-status
 /paper/mae-mfe-integration-status
 /paper/intratrade-path-status
 /paper/position-path-status
@@ -299,10 +328,24 @@ Current priority remains trading-system quality first: MAE/MFE telemetry, formal
 
 Use this ledger for future update continuity. Add newest entries at the top.
 
+### 2026-06-04 — Feature journal quality and regime tagging added
+
+- Commit `726dd35bb9a6b9bf8b0d3ce43f45a978845b4403` — created `ml_feature_journal_quality.py`.
+- Commit `df2ee8e3938e0323028d548200c8f33c2a98cdb6` — hardened feature journal enrichment to run after ML2 row refresh.
+- Commit `cfb151b244fe093a933ce45e2e1229d0e1424abe` — wired `ml_feature_journal_quality.py` into `wsgi.py` and added optional diagnostic routes to light endpoint registration.
+- Files changed: `ml_feature_journal_quality.py`, `wsgi.py`, `PROJECT_HANDOFF.md`.
+- Reason: improve ML feature-journal quality, normalize regime tagging, and add richer regime/cluster/risk-state metadata without changing trading authority.
+- Trading authority changed: no.
+- ML authority changed: no; ML remains shadow-only.
+- Risk controls changed: no.
+- One-test workflow changed: no; optional routes are deeper diagnostics only.
+- Latest known test before this push: `/paper/self-check` passed after MAE/MFE and walk-forward updates.
+- Next planned focus: run `/paper/self-check` after Railway redeploy and verify no warnings. Use `/paper/ml-feature-journal-status` only if deeper feature-journal detail is needed.
+
 ### 2026-06-04 — Post-update self-check passed after MAE/MFE and walk-forward push
 
-- Commit `53275b01aa7654c5ed05a6f2de1dbab6260ae139` — prior handoff update for the MAE/MFE and walk-forward push.
-- Files changed in this ledger update: `PROJECT_HANDOFF.md`.
+- Commit `0688db61dea79f0b7c48f12ee35b033b3ac24603` — logged successful post-update `/paper/self-check` result.
+- Files changed: `PROJECT_HANDOFF.md`.
 - Reason: record successful post-update `/paper/self-check` result.
 - Latest test: `overall: pass`, `status: ok`, `warnings: []`, decision audit `pass`, 3 positions, equity about `$10,997.42`, cash about `87.95%`, no self-defense, no losses today, 31 signals, 15 blocked entries.
 - Trading authority changed: no.
@@ -384,6 +427,10 @@ Use this ledger for future update continuity. Add newest entries at the top.
 
 ## Recent important commits
 
+- `cfb151b244fe093a933ce45e2e1229d0e1424abe` — wired ML feature journal quality into WSGI.
+- `df2ee8e3938e0323028d548200c8f33c2a98cdb6` — hardened feature journal enrichment after ML2 update.
+- `726dd35bb9a6b9bf8b0d3ce43f45a978845b4403` — added ML feature journal quality and regime tagging module.
+- `0688db61dea79f0b7c48f12ee35b033b3ac24603` — logged successful post-update self-check.
 - `f405c2a0582e779a9722fcf73b131632b3c3db2a` — completed MAE/MFE telemetry integration bridge.
 - `00b25cb8f8927ff545f29821c2430e56b9c80e95` — added formal walk-forward and MAE/MFE readiness validation.
 - `49ede794ad1de0cd2a16ae487fb28ace103913b0` — added Chief Advisory Coach synthesis.
@@ -398,13 +445,15 @@ Use this ledger for future update continuity. Add newest entries at the top.
 
 ### Immediate next priorities
 
-1. Keep ML shadow-only.
-2. Continue collecting execution outcomes until at least `150` execution rows.
-3. Monitor whether MAE/MFE and walk-forward readiness gates refresh in state after normal bot cycles.
-4. Use `/paper/ml-readiness-status` only if deeper readiness-gate inspection is needed.
-5. Use `/paper/mae-mfe-integration-status` only if MAE/MFE telemetry needs deeper inspection.
-6. Continue expanding regime coverage from `2` to at least `3` regimes.
-7. Preserve the productization path for later dashboard/demo/reporting work, but keep current priority on trading quality, telemetry, and validation.
+1. Run `/paper/self-check` after the feature journal/regime tagging push.
+2. Confirm the self-check still shows `overall: pass`, `status: ok`, and no warnings.
+3. Keep ML shadow-only.
+4. Continue collecting execution outcomes until at least `150` execution rows.
+5. Monitor whether feature-journal quality and regime tags improve readiness visibility after normal bot cycles.
+6. Use `/paper/ml-feature-journal-status` only if deeper feature-journal detail is needed.
+7. Use `/paper/ml-readiness-status` only if deeper readiness-gate inspection is needed.
+8. Continue expanding true regime coverage from `2` to at least `3` regimes. Derived tags help visibility but do not alone justify Phase 3A promotion.
+9. Preserve the productization path for later dashboard/demo/reporting work, but keep current priority on trading quality, telemetry, and validation.
 
 ### Do not do yet
 
@@ -441,11 +490,12 @@ Current direction:
 - Decision audit is included in /paper/self-check.
 - ML shadow counts are surfaced in /paper/self-check.
 - Internal advisory coaches and Chief Advisory Coach are included in decision_audit_next_actions.
-- MAE/MFE telemetry integration and formal walk-forward validation are now upgraded.
-- Latest self-check after those upgrades passed.
+- MAE/MFE telemetry integration and formal walk-forward validation are upgraded.
+- ML feature-journal quality and regime tagging are now added as an advisory-only readiness/diagnostic layer.
+- Latest self-check before the feature-journal push passed.
 - Future assistants should proactively recommend safe readiness/observability improvements before implementation.
 - Commercial path is documented as a future web-based/paper-trading analytics dashboard first.
-- Next upgrades should focus on feature journal quality, execution outcome collection, regime coverage, and Phase 3A readiness gates.
+- Next upgrades should focus on execution outcome collection, true regime coverage, Phase 3A readiness gates, and dashboard/productization only after system quality improves.
 ```
 
 ## Post-update checklist for future assistants
