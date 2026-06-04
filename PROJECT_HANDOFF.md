@@ -2,7 +2,7 @@
 
 Last updated: 2026-06-04
 
-This file is the project continuity source of truth for future ChatGPT sessions. New chats should read this file, inspect recent GitHub commits, and continue without asking the operator to reconstruct prior conversations.
+This file is the continuity source of truth for future ChatGPT sessions. New chats should read this file, inspect recent GitHub commits, and continue without asking the operator to reconstruct prior conversations.
 
 ## Repository and deployment
 
@@ -14,46 +14,227 @@ This file is the project continuity source of truth for future ChatGPT sessions.
 - Persistent Railway state: `/data/state.json`
 - Routine test link: `https://trading-bot-clean.up.railway.app/paper/self-check`
 
-## Operator preferences
+## Operator preferences and rules
 
 - Preserve the one-test workflow.
 - After normal pushes, ask the operator to run only `/paper/self-check`.
 - Do not require multiple routine test links unless debugging a specific issue.
 - Prefer direct GitHub updates or full-file-safe updates over patch fragments.
-- Proactively recommend high-value, low-risk updates when they improve diagnostics, ML readiness, safety, or continuity, especially when they preserve trading authority, ML authority, risk controls, and the one-test workflow.
+- Proactively recommend high-value, low-risk updates when they improve diagnostics, ML readiness, safety, or continuity.
 - Do not loosen risk controls without explicit approval.
 - Do not give ML live trade authority without explicit approval and promotion-gate evidence.
 - Keep manual `/paper/run` protected by `RUN_KEY`.
 - Keep this handoff updated after meaningful code changes, test results, or strategy-direction changes.
 
+## One-test workflow
+
+Routine post-push test:
+
+```text
+https://trading-bot-clean.up.railway.app/paper/self-check
+```
+
+Expected characteristics:
+
+- `overall: pass`
+- `status: ok`
+- `warnings: []`, unless a real diagnostic issue is present
+- `single_best_link` points back to `/paper/self-check`
+- `routine_test_policy.extra_links_required: false`
+- Mobile-safe mode may only internally check `/health` and `/paper/status`, but it promotes compact summaries from decision audit, advisory coaches, and ML counts into the payload.
+
+Do not make heavy diagnostic routes part of routine testing.
+
 ## Handoff maintenance protocol
 
-Every future assistant should treat this file as a living project ledger. After any meaningful update, append or refresh the relevant sections below.
+Update this file after any meaningful push, test-result change, module addition, bug fix, strategy-direction change, or ML readiness-gate change.
 
-Update this file when any of the following happens:
+For each update, preserve:
 
-1. A code change is pushed.
-2. A self-check result changes the known bot state.
-3. A new module, route, endpoint, risk rule, or advisory layer is added.
-4. A bug is found or resolved.
-5. A new next-step priority is chosen.
-6. ML readiness gates change.
-7. The one-test workflow changes.
+- date/time
+- commit SHA
+- files changed
+- reason for change
+- trading authority impact
+- ML authority impact
+- risk-control impact
+- one-test workflow impact
+- latest `/paper/self-check` summary, when available
+- next planned update
 
-For each future update, record:
+If a future chat changes GitHub but does not update this file, treat the handoff as stale and inspect recent commits before making assumptions.
 
-- Date/time.
-- Commit SHA.
-- Files changed.
-- Reason for the change.
-- Whether trading authority changed.
-- Whether ML authority changed.
-- Whether risk controls changed.
-- Whether the one-test workflow changed.
-- Latest `/paper/self-check` result summary.
-- Next planned update.
+## Current high-level bot state
 
-Permanent rule: if a future chat changes GitHub but does not update this file, the next chat should consider the handoff stale and inspect recent commits before making assumptions.
+Most recent known self-check state from 2026-06-04 morning:
+
+- Equity: about `$10,979.20`
+- Total gain from `$10,000`: about `+9.79%`
+- Cash: about `$9,672.49`
+- Cash percentage: about `88.20%`
+- Open positions: `3`
+- Positions: `DELL`, `QQQ`, `SNDK`
+- Realized today: `$0.00`
+- Realized total: `$857.68`
+- Unrealized P&L: about `$121.53`
+- Daily/intraday drawdown: about `0.406%`
+- Self-defense: inactive
+- Losses today: `0`
+- Scanner signals: about `22`
+- Blocked entries: about `13`
+- Decision audit: pass
+- Chief Advisory Coach: active
+
+## Active major modules and status
+
+### Core trading engine
+
+- `app.py` owns market regime, scanner, entries, exits, portfolio state, risk controls, `/paper/run`, and `/paper/status`.
+- Persistent state is stored under `/data/state.json` on Railway.
+- `/paper/run` requires `RUN_KEY`; preferred auth is `X-Run-Key` header.
+
+### Post-harvest redeployment
+
+Files:
+
+- `post_harvest_redeployment_controller.py`
+- `post_harvest_entry_fallback.py`
+
+Purpose:
+
+- Detect underdeployment after profit harvesting.
+- Redeploy only through 1-2 high-quality starter candidates.
+- Keep `max_positions` unchanged.
+- Do not bypass halts, stop losses, self-defense, risk controls, or normal entry-quality checks.
+- Do not force entries.
+- Do not rebuy recently harvested symbols unless they requalify strongly.
+
+Recent behavior:
+
+- SNDK entered after the bot moved from 2 positions to 3 positions.
+- Later post-harvest status correctly stood down with `no_candidate_qualified`.
+- Current posture remains underdeployed but selective; do not lower thresholds blindly.
+
+### Decision audit and one-test visibility
+
+File:
+
+- `decision_audit_consolidation.py`
+
+Current expected version:
+
+```text
+decision-audit-consolidation-2026-06-04-v6-chief-advisory-coach
+```
+
+Purpose:
+
+- Read-only advisory layer.
+- Consolidates scanner/result flow, post-harvest state, fallback state, news/catalyst availability, ML shadow counts, repo-native advisory coaches, and Chief Advisory Coach synthesis.
+- Does not scan, trade, resize, or change authority.
+- Included in `/paper/self-check` output.
+
+Expected visible self-check lines include:
+
+```text
+Chief Advisory Coach: highest priority is ...
+Trade Quality Coach: ...
+Risk Coach: ...
+Post-Harvest Coach: ...
+ML shadow counts: ...
+```
+
+### Internal advisory coaches
+
+Implemented inside `decision_audit_consolidation.py` and surfaced through `/paper/self-check` via `decision_audit_next_actions`.
+
+- Trade Quality Coach: reviews execution rows, exits, win/loss quality, profit factor, exit reasons, and symbol-level realized P&L.
+- Risk Coach: reviews cash percentage, position count, drawdown, halts, and self-defense state.
+- Post-Harvest Coach: reviews post-harvest redeployment posture, underdeployment, qualifying candidates, and whether standing down is appropriate.
+- Chief Advisory Coach: analyzes all lower-level coaches plus ML shadow state and news/catalyst availability to produce a prioritized action plan.
+
+All coaches are read-only and advisory-only. They do not trade, resize, change risk rules, change ML authority, modify post-harvest thresholds, or override self-defense.
+
+### One-link self-check policy
+
+File:
+
+- `one_link_check.py`
+
+Purpose:
+
+- Keep `/paper/self-check` as the only routine test link.
+- Hide verbose link lists unless `SELF_CHECK_VERBOSE_LINKS=1`.
+- Promote important diagnostics into the mobile-safe self-check summary.
+- Preserve `copy_paste_links_separate` as only the self-check link by default.
+
+### News / catalyst advisory layer
+
+File:
+
+- `news_sentiment_engine.py`
+
+Purpose:
+
+- Advisory-only news/catalyst visibility.
+- News/catalyst layer is available in latest self-check summaries.
+- Should not be used as a standalone trading trigger yet.
+- Future use: score support, guardrail, journal context, and catalyst review.
+
+### ML Phase 2 shadow learning
+
+Files:
+
+- `ml_phase2_shadow.py`
+- `ml_phase25_readiness.py`
+
+Current status:
+
+- ML is shadow-only.
+- `live_trade_decider: false`.
+- ML does not place trades.
+- ML does not override risk controls.
+- ML does not override entries or exits.
+
+Most recent known ML values from 2026-06-04 morning:
+
+- Rows total: `6000`
+- Labeled outcome rows: about `2596`
+- Trade outcomes: `49`
+- Latest predictions: `25`
+- Phase 3A ready: `false`
+
+### MAE/MFE telemetry and formal walk-forward validation
+
+Files:
+
+- `intratrade_path_capture.py`
+- `mae_mfe_integration.py`
+- `ml_phase25_readiness.py`
+
+Current expected versions after the latest update:
+
+```text
+mae-mfe-integration-2026-06-04-telemetry-complete
+ml-phase25-readiness-2026-06-04-formal-wf-mae-mfe
+```
+
+Purpose:
+
+- Refresh real intratrade path telemetry from open positions.
+- Archive closed-path telemetry when positions close.
+- Convert real MAE/MFE path telemetry into feature rows for ML and trade-quality review.
+- Enrich ML2 dataset rows and realized trade rows when matching real path telemetry exists.
+- Add formal chronological walk-forward validation using realized exit rows.
+- Keep all outputs advisory-only.
+- Do not invent synthetic MAE/MFE values.
+- Do not grant ML authority.
+
+Current readiness expectation:
+
+- MAE/MFE may move from placeholder/incomplete to telemetry-available once path rows exist.
+- Formal walk-forward now runs a chronological train/forward-test check, but may still fail until enough realized exit rows and forward-test rows exist.
+- Phase 3A remains blocked until all gates pass and manual approval is given.
 
 ## Recommendation and advisory sources to review
 
@@ -63,45 +244,20 @@ Primary routine source:
 https://trading-bot-clean.up.railway.app/paper/self-check
 ```
 
-Look for:
-
-- `decision_audit_next_actions`
-- `decision_audit_summary`
-- `ml_shadow_counts`
-- `warnings`
-- `operator_summary`
-- `truth_summary`
-
-Known advisory/recommendation modules:
-
-- `decision_audit_consolidation.py` — compact decision audit, post-harvest status, news availability, ML shadow counts, internal advisory coaches, and Chief Advisory Coach synthesis.
-- `risk_on_recommendation_cleanup.py` — cleans/deduplicates risk-on recommendation text and accelerator feedback.
-- `risk_on_entry_diagnostic.py` — risk-on entry diagnostics and candidate reasoning.
-- `entry_decision_visibility.py` — entered/blocked/skipped/no-decision behavior.
-- `ml_phase2_shadow.py` — ML shadow predictions and recommendation text; never live-authoritative.
-- `ml_phase25_readiness.py` — Phase 2.5/Phase 3A readiness gates.
-- `mae_mfe_integration.py` — MAE/MFE telemetry readiness.
-- `news_sentiment_engine.py` — news/catalyst advisory context.
-- `market_extension_guard.py` — market extension/overextension advisories.
-- `benchmark_participation.py` — benchmark/risk-on participation diagnostics.
-- `adaptive_ml_research.py` — adaptive ML research recommendations.
-- `adaptive_portfolio_intelligence.py` — portfolio intelligence/advisory recommendations.
-- `strategy_promotion_readiness.py` — strategy promotion gates.
-- `strategy_scorecard.py` — strategy scorecards and performance comparisons.
-- `trade_quality_telemetry.py` — trade-quality telemetry and improvement signals.
-
 Optional deeper diagnostic routes, only when `/paper/self-check` indicates a warning/failure or when choosing the next major upgrade:
 
 ```text
 /paper/ml2-status
 /paper/ml-readiness-status
+/paper/ml-phase25-status
+/paper/mae-mfe-integration-status
+/paper/intratrade-path-status
+/paper/position-path-status
 /paper/decision-audit-status
 /paper/no-entry-diagnostic
 /paper/risk-on-entry-diagnostic
 /paper/strategy-promotion-readiness-status
 /paper/strategy-scorecard-status
-/paper/mae-mfe-status
-/paper/mae-mfe-integration-status
 /paper/news-sentiment-status
 /paper/catalyst-watchlist
 /paper/news-risk-status
@@ -112,27 +268,6 @@ Optional deeper diagnostic routes, only when `/paper/self-check` indicates a war
 ```
 
 Do not make these part of routine testing. They are for targeted inspection only.
-
-## Internal advisory coaches
-
-As of 2026-06-04, the repo-native advisory coaches are implemented inside `decision_audit_consolidation.py` and are surfaced through `/paper/self-check` via `decision_audit_next_actions`.
-
-- Trade Quality Coach: reviews execution rows, exits, win/loss quality, profit factor, exit reasons, and symbol-level realized P&L.
-- Risk Coach: reviews cash percentage, position count, drawdown, halts, and self-defense state.
-- Post-Harvest Coach: reviews post-harvest redeployment posture, underdeployment, qualifying candidates, and whether standing down is appropriate.
-- Chief Advisory Coach: analyzes the Trade Quality Coach, Risk Coach, Post-Harvest Coach, ML shadow state, and news/catalyst availability to produce a prioritized action plan.
-
-All coaches are read-only and advisory-only. They do not trade, resize, change risk rules, change ML authority, modify post-harvest thresholds, or override self-defense.
-
-Expected visible self-check lines include:
-
-```text
-Chief Advisory Coach: highest priority is ...
-Trade Quality Coach: ...
-Risk Coach: ...
-Post-Harvest Coach: ...
-ML shadow counts: rows=6000, labeled=2700, observed_outcomes=49, predictions=25, phase3a_ready=False.
-```
 
 ## Proactive recommendation policy
 
@@ -176,191 +311,35 @@ Commercial roadmap:
 3. SaaS architecture: auth, per-user state, admin dashboard, billing, plan limits, public demo, legal pages, audit logs, support workflow, secret management.
 4. Live automation only after legal/compliance review. Do not build multi-user broker-connected live trading as the first commercial product.
 
-Possible pricing ideas to revisit later:
-
-- basic dashboard: `$19-$49/month`
-- pro dashboard plus alerts: `$79-$149/month`
-- advanced analytics/reporting: `$199+/month`
-- one-time code/template license: `$299-$999`
-- setup/coaching package: `$500-$2,500`
-- white-label/private workspace: later-stage pricing only
-
 Current priority remains trading-system quality first: MAE/MFE telemetry, formal walk-forward validation, execution outcome collection, regime coverage, and Phase 3A readiness gates.
-
-## One-test workflow
-
-Routine post-push test:
-
-```text
-https://trading-bot-clean.up.railway.app/paper/self-check
-```
-
-Expected characteristics:
-
-- `overall: pass`
-- `status: ok`
-- `warnings: []`, unless a real diagnostic issue is present
-- `single_best_link` points back to `/paper/self-check`
-- `routine_test_policy.extra_links_required: false`
-- Mobile-safe mode may only internally check `/health` and `/paper/status`, but it promotes compact summaries from decision audit, advisory coaches, and ML counts into the payload.
-
-Heavy diagnostic routes are optional and should not be part of routine post-push testing.
-
-## Current high-level bot state
-
-Most recent known self-check state from 2026-06-03 evening:
-
-- Equity: about `$11,023.95`
-- Total gain from `$10,000`: about `+10.24%`
-- Cash: about `$9,672.49`
-- Open positions: `3`
-- Positions: `DELL`, `QQQ`, `SNDK`
-- Realized today: `$341.36`
-- Realized total: `$857.68`
-- Unrealized P&L: about `$166.28`
-- Losses today: `0`
-- Self-defense: inactive in the latest status; final-close lock was previously recognized correctly as protective rather than a warning
-- Scanner signals in latest snapshot: about `33`
-- Blocked entries in latest snapshot: about `10`
-
-## Active major modules and status
-
-### Core trading engine
-
-- `app.py` owns market regime, scanner, entries, exits, portfolio state, risk controls, `/paper/run`, and `/paper/status`.
-- Persistent state is stored under `/data/state.json` on Railway.
-- `/paper/run` requires `RUN_KEY`; preferred auth is `X-Run-Key` header.
-
-### Post-harvest redeployment
-
-Files:
-
-- `post_harvest_redeployment_controller.py`
-- `post_harvest_entry_fallback.py`
-
-Purpose:
-
-- Detect when the bot is underdeployed after harvesting profit.
-- Redeploy only through 1-2 high-quality starter candidates.
-- Keep `max_positions` unchanged.
-- Do not bypass halts, stop losses, self-defense, risk controls, or normal entry quality checks.
-- Do not force entries.
-- Do not rebuy recently harvested symbols unless they requalify strongly.
-
-Recent behavior:
-
-- BTDR was selected as a qualifying post-harvest breakout candidate, but the opportunity faded before a durable entry.
-- SNDK later entered, taking the bot from 2 positions to 3 positions.
-- Later post-harvest status correctly stood down with `no_candidate_qualified`.
-
-### Decision audit and one-test visibility
-
-File:
-
-- `decision_audit_consolidation.py`
-
-Current version expected after the latest update:
-
-```text
-decision-audit-consolidation-2026-06-04-v6-chief-advisory-coach
-```
-
-Purpose:
-
-- Read-only advisory layer.
-- Consolidates scanner/result flow, post-harvest state, fallback state, news/catalyst availability, ML shadow counts, repo-native advisory coaches, and Chief Advisory Coach synthesis.
-- Does not scan, trade, resize, or change authority.
-- Included in `/paper/self-check` output.
-
-### One-link self-check policy
-
-File:
-
-- `one_link_check.py`
-
-Purpose:
-
-- Keep `/paper/self-check` as the only routine test link.
-- Hide verbose link lists unless `SELF_CHECK_VERBOSE_LINKS=1`.
-- Promote important diagnostics into the mobile-safe self-check summary.
-- Preserve `copy_paste_links_separate` as only the self-check link by default.
-
-### News / catalyst advisory layer
-
-File:
-
-- `news_sentiment_engine.py`
-
-Purpose:
-
-- Advisory-only news/catalyst visibility.
-- News/catalyst layer is available in latest self-check summaries.
-- Should not be used as a standalone trading trigger yet.
-- Future use: score support, guardrail, journal context, and catalyst review.
-
-### ML Phase 2 shadow learning
-
-Files:
-
-- `ml_phase2_shadow.py`
-- `ml_phase25_readiness.py`
-
-Current status:
-
-- ML is shadow-only.
-- `live_trade_decider: false`.
-- ML does not place trades.
-- ML does not override risk controls.
-- ML does not override entries or exits.
-
-Latest known ML2 counts from 2026-06-03:
-
-- Rows total: `6000`
-- Labeled outcome rows: `2700`
-- Trade outcomes: `49`
-- Latest predictions: `25`
-- Baseline win rate: `0.8111`
-- Readiness: `developing_shadow_model`
-- Phase: `phase_2_shadow_learning`
-- Phase 3A ready: `false`
-
-Latest known Phase 2.5 readiness:
-
-- Execution rows: `82 / 150` gate failing
-- Labeled outcomes: `2700 / 150` passing
-- Scanner decisions: `6000 / 5000` passing
-- Profit factor: `9.068 / 1.15` passing
-- Win rate: `0.6939 / 0.48` passing
-- Regime coverage: `2 / 3` failing
-- Walk-forward proxy days: `13 / 10` passing
-- Formal walk-forward validation: `false` failing
-- MAE/MFE telemetry complete: `false` failing
-- Gates passed: `5`
-- Gates failed: `4`
-
-Current ML recommendation:
-
-- Keep ML shadow-only.
-- Continue collecting execution rows and observed outcomes.
-- Add/verify MAE/MFE telemetry.
-- Add formal walk-forward validation.
-- Require Phase 3A readiness before any live ML weighting.
 
 ## Update ledger
 
 Use this ledger for future update continuity. Add newest entries at the top.
 
+### 2026-06-04 — MAE/MFE telemetry and formal walk-forward validation upgraded
+
+- Commit `00b25cb8f8927ff545f29821c2430e56b9c80e95` — updated `ml_phase25_readiness.py` with formal chronological walk-forward validation and real MAE/MFE readiness validation.
+- Commit `f405c2a0582e779a9722fcf73b131632b3c3db2a` — updated `mae_mfe_integration.py` to refresh intratrade path capture, enrich ML/trade rows from real path telemetry, and expose telemetry counts.
+- Files changed: `ml_phase25_readiness.py`, `mae_mfe_integration.py`, `PROJECT_HANDOFF.md`.
+- Reason: address the Chief Advisory Coach's highest-priority recommendation: MAE/MFE telemetry, formal walk-forward validation, and Phase 3A readiness gates.
+- Trading authority changed: no.
+- ML authority changed: no.
+- Risk controls changed: no.
+- One-test workflow changed: no.
+- Latest known test before this push: `/paper/self-check` passed with Chief Advisory Coach active, Phase 3A not ready, 82 execution rows, and ML still shadow-only.
+- Next planned focus: run `/paper/self-check` after Railway redeploy; verify no warnings and check whether MAE/MFE/walk-forward gates update in `/paper/ml-readiness-status` only if deeper inspection is needed.
+
 ### 2026-06-04 — Chief Advisory Coach added
 
 - Commit `49ede794ad1de0cd2a16ae487fb28ace103913b0` — added Chief Advisory Coach synthesis to `decision_audit_consolidation.py`.
+- Commit `51a9cd2f6912af04a65650157c89757dde594a25` — documented Chief Advisory Coach in `PROJECT_HANDOFF.md`.
 - Files changed: `decision_audit_consolidation.py`, `PROJECT_HANDOFF.md`.
 - Reason: synthesize Trade Quality Coach, Risk Coach, Post-Harvest Coach, ML shadow state, and news/catalyst availability into a prioritized action plan.
 - Trading authority changed: no.
 - ML authority changed: no.
 - Risk controls changed: no.
-- One-test workflow changed: preserved; Chief Advisory Coach text should appear inside `decision_audit_next_actions` from `/paper/self-check`.
-- Latest known test before this push: `/paper/self-check` passed with decision audit and ML count visibility.
-- Next planned focus: verify Chief Advisory Coach line in `/paper/self-check`, then continue toward MAE/MFE telemetry and formal walk-forward validation.
+- One-test workflow changed: preserved.
 
 ### 2026-06-04 — Productization roadmap documented
 
@@ -371,41 +350,24 @@ Use this ledger for future update continuity. Add newest entries at the top.
 - ML authority changed: no.
 - Risk controls changed: no.
 - One-test workflow changed: no.
-- Next planned focus: keep trading-system quality first while preserving the productization path for later dashboard/demo/reporting work.
 
 ### 2026-06-04 — Proactive update recommendation preference recorded
 
 - Commit `929d4b27c1e70cd78f8d0c3e80f133ddd3482911` — recorded proactive update recommendation preference in `PROJECT_HANDOFF.md`.
 - Files changed: `PROJECT_HANDOFF.md`.
-- Reason: operator wants future assistants to proactively recommend high-value, low-risk updates like internal advisory coaches instead of waiting for direct prompting.
 - Trading authority changed: no.
 - ML authority changed: no.
 - Risk controls changed: no.
 - One-test workflow changed: no.
-- Next planned focus: continue recommending safe observability, readiness, and advisory improvements before implementation.
 
 ### 2026-06-04 — Internal advisory coaches added to decision audit
 
 - Commit `8fd184368b1bcc40cc9d174f3eb6bac327b1c2ca` — added Trade Quality Coach, Risk Coach, and Post-Harvest Coach inside `decision_audit_consolidation.py`.
 - Commit `6a0678de506240cf7de051f233abf98968a63ae2` — logged internal advisory coaches in `PROJECT_HANDOFF.md`.
-- Files changed: `decision_audit_consolidation.py`, `PROJECT_HANDOFF.md`.
-- Reason: add repo-native advisory agents without external API keys or new accounts.
 - Trading authority changed: no.
 - ML authority changed: no.
 - Risk controls changed: no.
-- One-test workflow changed: preserved; advisory coach text should appear inside `decision_audit_next_actions` from `/paper/self-check`.
-- Latest known test before this push: `/paper/self-check` passed with decision audit and ML count visibility.
-- Next planned focus: verify the advisory coach lines in `/paper/self-check`, then continue toward MAE/MFE telemetry and formal walk-forward validation.
-
-### 2026-06-03 — Added project handoff and recommendation tracking
-
-- Commit `74df666536fd699a7ce73c7a8e69203cd9928006` — added `PROJECT_HANDOFF.md`.
-- Commit `d061946dcbb4f42fc28350da213477ceb8fa4fc6` — added handoff maintenance protocol and recommendation/advisory source list.
-- Trading authority changed: no.
-- ML authority changed: no.
-- Risk controls changed: no.
-- One-test workflow changed: no.
-- Next planned focus: MAE/MFE telemetry, formal walk-forward validation, and Phase 3A readiness gates.
+- One-test workflow changed: preserved.
 
 ### 2026-06-03 — ML shadow counts surfaced in one-test path
 
@@ -415,17 +377,6 @@ Use this ledger for future update continuity. Add newest entries at the top.
 - ML authority changed: no.
 - Risk controls changed: no.
 - One-test workflow changed: preserved.
-
-### 2026-06-03 — Decision audit added to one-test workflow
-
-- Commit `eb9608900d58b5937954d84cf6145fc5f4b3dda6` — added compact decision audit consolidation.
-- Commit `edbee88fb3528b159a3f00e9d764f923d7c44511` — included decision audit in one-test startup path.
-- Commit `21afb52885053dce6c64f4725fc515f12b9a2faa` — surfaced decision audit in one-test self-check.
-- Commit `c4fed90d3a14b8eb24f097711090017de7636ca0` — treated final close lock as protective decision-audit pass.
-- Trading authority changed: no.
-- ML authority changed: no.
-- Risk controls changed: no.
-- One-test workflow changed: enhanced, still one routine link.
 
 ### 2026-06-03 — Post-harvest redeployment hardening
 
@@ -440,38 +391,28 @@ Use this ledger for future update continuity. Add newest entries at the top.
 
 ## Recent important commits
 
+- `f405c2a0582e779a9722fcf73b131632b3c3db2a` — completed MAE/MFE telemetry integration bridge.
+- `00b25cb8f8927ff545f29821c2430e56b9c80e95` — added formal walk-forward and MAE/MFE readiness validation.
 - `49ede794ad1de0cd2a16ae487fb28ace103913b0` — added Chief Advisory Coach synthesis.
 - `a83a88f924694ac74a43ab971c3081557e82258c` — added productization roadmap to handoff.
 - `929d4b27c1e70cd78f8d0c3e80f133ddd3482911` — recorded proactive update recommendation preference.
 - `8fd184368b1bcc40cc9d174f3eb6bac327b1c2ca` — added internal advisory coaches to decision audit.
-- `6a0678de506240cf7de051f233abf98968a63ae2` — logged internal advisory coaches in handoff.
-- `d061946dcbb4f42fc28350da213477ceb8fa4fc6` — added handoff update ledger and recommendation sources.
-- `74df666536fd699a7ce73c7a8e69203cd9928006` — added initial project handoff file.
 - `a4097743652ecf657b60709b653663a8c57b3d97` — showed ML shadow counts in one-test next actions.
 - `0d30626f040d3fadc5f1d9db09335ee6130d289d` — surfaced ML shadow counts in decision audit.
-- `c4fed90d3a14b8eb24f097711090017de7636ca0` — treated final close lock as protective decision-audit pass.
-- `21afb52885053dce6c64f4725fc515f12b9a2faa` — surfaced decision audit in one-test self-check.
-- `edbee88fb3528b159a3f00e9d764f923d7c44511` — included decision audit in one-test startup path.
-- `eb9608900d58b5937954d84cf6145fc5f4b3dda6` — added compact decision audit consolidation.
-- `e1a20eeba2281bb7710714303930ec726be8207b` — wired post-harvest entry fallback into startup.
-- `845f656bf20a3b1462e4834d06c281dab85dfda1` — added guarded post-harvest entry fallback.
-- `a058a7e1844b12e553dc4e8fda158ba7fdb7c29c` — bridged post-harvest starter entries through profit pause.
 - `2322947c4c8bf25d2d60d4ef899bb1d250b04062` — hardened post-harvest redeployment controller.
 
 ## Current upgrade plan
 
 ### Immediate next priorities
 
-1. Run `/paper/self-check` after the Chief Advisory Coach push and verify the Chief Advisory Coach line is visible in `decision_audit_next_actions`.
-2. Keep monitoring `/paper/self-check` only after pushes.
-3. Verify ML count line and the three lower-level coach lines remain visible in `decision_audit_next_actions`.
+1. Run `/paper/self-check` after the MAE/MFE and walk-forward push.
+2. Confirm the self-check still shows `overall: pass`, `status: ok`, and no warnings.
+3. Keep ML shadow-only.
 4. Continue collecting execution outcomes until at least `150` execution rows.
-5. Improve or verify MAE/MFE telemetry; current readiness says MAE/MFE fields are ready but no rows have MAE/MFE yet.
-6. Add formal walk-forward validation tooling before any Phase 3A live ML weighting.
-7. Expand regime coverage from `2` to at least `3` regimes.
-8. Promote important recommendation text from deeper advisory endpoints into `decision_audit_next_actions` when it affects the next development decision.
-9. Proactively recommend safe, low-risk observability and readiness upgrades when they are likely to improve the system without changing authority.
-10. Preserve the productization path for later dashboard/demo/reporting work, but keep current development priority on trading quality, telemetry, and validation.
+5. Use `/paper/ml-readiness-status` only if a deeper readiness-gate inspection is needed.
+6. Use `/paper/mae-mfe-integration-status` only if MAE/MFE telemetry needs deeper inspection.
+7. Continue expanding regime coverage from `2` to at least `3` regimes.
+8. Preserve the productization path for later dashboard/demo/reporting work, but keep current priority on trading quality, telemetry, and validation.
 
 ### Do not do yet
 
@@ -508,9 +449,10 @@ Current direction:
 - Decision audit is included in /paper/self-check.
 - ML shadow counts are surfaced in /paper/self-check.
 - Internal advisory coaches and Chief Advisory Coach are included in decision_audit_next_actions.
+- MAE/MFE telemetry integration and formal walk-forward validation are now upgraded.
 - Future assistants should proactively recommend safe readiness/observability improvements before implementation.
 - Commercial path is documented as a future web-based/paper-trading analytics dashboard first.
-- Next upgrades should focus on feature journal quality, MAE/MFE telemetry, formal walk-forward validation, and Phase 3A readiness gates.
+- Next upgrades should focus on feature journal quality, execution outcome collection, regime coverage, and Phase 3A readiness gates.
 ```
 
 ## Post-update checklist for future assistants
@@ -537,10 +479,4 @@ https://trading-bot-clean.up.railway.app/paper/self-check
 
 3. Only request deeper diagnostic links when `/paper/self-check` shows a warning/failure or when debugging a specific module.
 
-4. Update this handoff file with:
-
-- commit SHA
-- files changed
-- test result
-- changed authority, if any
-- next planned update
+4. Update this handoff file with commit SHA, files changed, test result, changed authority if any, and next planned update.
