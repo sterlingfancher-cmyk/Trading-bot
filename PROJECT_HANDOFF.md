@@ -49,41 +49,39 @@ Do not make heavy diagnostic routes part of routine testing.
 
 Update this file after any meaningful push, test-result change, module addition, bug fix, strategy-direction change, or ML readiness-gate change.
 
-For each update, preserve:
-
-- date/time
-- commit SHA
-- files changed
-- reason for change
-- trading authority impact
-- ML authority impact
-- risk-control impact
-- one-test workflow impact
-- latest `/paper/self-check` summary, when available
-- next planned update
+For each update, preserve date/time, commit SHA, files changed, reason for change, trading/ML/risk/one-test impact, latest `/paper/self-check` summary when available, and next planned update.
 
 If a future chat changes GitHub but does not update this file, treat the handoff as stale and inspect recent commits before making assumptions.
 
 ## Current high-level bot state
 
-Most recent known self-check state from 2026-06-04 morning:
+Most recent known self-check state from 2026-06-04 09:35 CDT after the MAE/MFE and walk-forward push:
 
-- Equity: about `$10,979.20`
-- Total gain from `$10,000`: about `+9.79%`
+- Self-check: `overall: pass`, `status: ok`, `warnings: []`
+- Decision audit: `pass`, `status: ok`
+- Decision audit version: `decision-audit-consolidation-2026-06-04-v6-chief-advisory-coach`
+- Equity: about `$10,997.42`
+- Total gain from `$10,000`: about `+9.97%`
 - Cash: about `$9,672.49`
-- Cash percentage: about `88.20%`
+- Cash percentage: about `87.95%`
 - Open positions: `3`
 - Positions: `DELL`, `QQQ`, `SNDK`
 - Realized today: `$0.00`
 - Realized total: `$857.68`
-- Unrealized P&L: about `$121.53`
-- Daily/intraday drawdown: about `0.406%`
-- Self-defense: inactive
+- Unrealized P&L: about `$139.75`
+- Daily/intraday drawdown: about `0.241%`
+- Self-defense: inactive; reason `feedback loop clear`
 - Losses today: `0`
-- Scanner signals: about `22`
-- Blocked entries: about `13`
-- Decision audit: pass
-- Chief Advisory Coach: active
+- Scanner signals: `31`
+- Blocked entries: `15`
+- Post-harvest outcome: `no_candidate_qualified`
+- Post-harvest reason: `market_not_clean_for_post_harvest_redeploy`
+- ML shadow rows: `6000`
+- ML labeled outcome rows: about `2477`
+- ML observed outcomes: `49`
+- ML latest predictions: `25`
+- Phase 3A ready: `false`
+- Chief Advisory Coach remains active and still prioritizes MAE/MFE telemetry, formal walk-forward validation, regime coverage, and execution-row collection before Phase 3A.
 
 ## Active major modules and status
 
@@ -195,14 +193,7 @@ Current status:
 - ML does not place trades.
 - ML does not override risk controls.
 - ML does not override entries or exits.
-
-Most recent known ML values from 2026-06-04 morning:
-
-- Rows total: `6000`
-- Labeled outcome rows: about `2596`
-- Trade outcomes: `49`
-- Latest predictions: `25`
-- Phase 3A ready: `false`
+- Latest visible self-check values: rows `6000`, labeled about `2477`, observed outcomes `49`, predictions `25`, Phase 3A ready `false`.
 
 ### MAE/MFE telemetry and formal walk-forward validation
 
@@ -232,7 +223,7 @@ Purpose:
 
 Current readiness expectation:
 
-- MAE/MFE may move from placeholder/incomplete to telemetry-available once path rows exist.
+- MAE/MFE may move from placeholder/incomplete to telemetry-available once path rows exist and the readiness route/state refreshes.
 - Formal walk-forward now runs a chronological train/forward-test check, but may still fail until enough realized exit rows and forward-test rows exist.
 - Phase 3A remains blocked until all gates pass and manual approval is given.
 
@@ -273,16 +264,7 @@ Do not make these part of routine testing. They are for targeted inspection only
 
 Future assistants should recommend additional high-value, low-risk updates before the operator has to ask, as long as the recommendation is clearly labeled and does not silently change authority.
 
-Good proactive recommendations include:
-
-- better observability inside `/paper/self-check`
-- internal advisory coaches
-- MAE/MFE telemetry improvements
-- formal walk-forward validation
-- feature-journal quality improvements
-- safer readiness gates
-- handoff/continuity improvements
-- clearer diagnostics for blocked, rejected, or no-decision trades
+Good proactive recommendations include better observability inside `/paper/self-check`, internal advisory coaches, MAE/MFE telemetry, formal walk-forward validation, feature-journal quality improvements, safer readiness gates, handoff/continuity improvements, and clearer diagnostics for blocked/rejected/no-decision trades.
 
 Do not proactively implement changes that loosen risk controls, grant ML live authority, lower post-harvest thresholds, bypass self-defense, or change trade execution authority without explicit operator approval.
 
@@ -317,18 +299,29 @@ Current priority remains trading-system quality first: MAE/MFE telemetry, formal
 
 Use this ledger for future update continuity. Add newest entries at the top.
 
+### 2026-06-04 — Post-update self-check passed after MAE/MFE and walk-forward push
+
+- Commit `53275b01aa7654c5ed05a6f2de1dbab6260ae139` — prior handoff update for the MAE/MFE and walk-forward push.
+- Files changed in this ledger update: `PROJECT_HANDOFF.md`.
+- Reason: record successful post-update `/paper/self-check` result.
+- Latest test: `overall: pass`, `status: ok`, `warnings: []`, decision audit `pass`, 3 positions, equity about `$10,997.42`, cash about `87.95%`, no self-defense, no losses today, 31 signals, 15 blocked entries.
+- Trading authority changed: no.
+- ML authority changed: no; Phase 3A remains false.
+- Risk controls changed: no.
+- One-test workflow changed: no.
+- Next planned focus: continue collecting execution rows toward `150`, monitor whether the Chief Advisory Coach changes once MAE/MFE and walk-forward readiness state refreshes, and only inspect `/paper/ml-readiness-status` if deeper gate detail is needed.
+
 ### 2026-06-04 — MAE/MFE telemetry and formal walk-forward validation upgraded
 
 - Commit `00b25cb8f8927ff545f29821c2430e56b9c80e95` — updated `ml_phase25_readiness.py` with formal chronological walk-forward validation and real MAE/MFE readiness validation.
 - Commit `f405c2a0582e779a9722fcf73b131632b3c3db2a` — updated `mae_mfe_integration.py` to refresh intratrade path capture, enrich ML/trade rows from real path telemetry, and expose telemetry counts.
+- Commit `53275b01aa7654c5ed05a6f2de1dbab6260ae139` — updated `PROJECT_HANDOFF.md` with the MAE/MFE and walk-forward upgrade notes.
 - Files changed: `ml_phase25_readiness.py`, `mae_mfe_integration.py`, `PROJECT_HANDOFF.md`.
 - Reason: address the Chief Advisory Coach's highest-priority recommendation: MAE/MFE telemetry, formal walk-forward validation, and Phase 3A readiness gates.
 - Trading authority changed: no.
 - ML authority changed: no.
 - Risk controls changed: no.
 - One-test workflow changed: no.
-- Latest known test before this push: `/paper/self-check` passed with Chief Advisory Coach active, Phase 3A not ready, 82 execution rows, and ML still shadow-only.
-- Next planned focus: run `/paper/self-check` after Railway redeploy; verify no warnings and check whether MAE/MFE/walk-forward gates update in `/paper/ml-readiness-status` only if deeper inspection is needed.
 
 ### 2026-06-04 — Chief Advisory Coach added
 
@@ -405,14 +398,13 @@ Use this ledger for future update continuity. Add newest entries at the top.
 
 ### Immediate next priorities
 
-1. Run `/paper/self-check` after the MAE/MFE and walk-forward push.
-2. Confirm the self-check still shows `overall: pass`, `status: ok`, and no warnings.
-3. Keep ML shadow-only.
-4. Continue collecting execution outcomes until at least `150` execution rows.
-5. Use `/paper/ml-readiness-status` only if a deeper readiness-gate inspection is needed.
-6. Use `/paper/mae-mfe-integration-status` only if MAE/MFE telemetry needs deeper inspection.
-7. Continue expanding regime coverage from `2` to at least `3` regimes.
-8. Preserve the productization path for later dashboard/demo/reporting work, but keep current priority on trading quality, telemetry, and validation.
+1. Keep ML shadow-only.
+2. Continue collecting execution outcomes until at least `150` execution rows.
+3. Monitor whether MAE/MFE and walk-forward readiness gates refresh in state after normal bot cycles.
+4. Use `/paper/ml-readiness-status` only if deeper readiness-gate inspection is needed.
+5. Use `/paper/mae-mfe-integration-status` only if MAE/MFE telemetry needs deeper inspection.
+6. Continue expanding regime coverage from `2` to at least `3` regimes.
+7. Preserve the productization path for later dashboard/demo/reporting work, but keep current priority on trading quality, telemetry, and validation.
 
 ### Do not do yet
 
@@ -450,6 +442,7 @@ Current direction:
 - ML shadow counts are surfaced in /paper/self-check.
 - Internal advisory coaches and Chief Advisory Coach are included in decision_audit_next_actions.
 - MAE/MFE telemetry integration and formal walk-forward validation are now upgraded.
+- Latest self-check after those upgrades passed.
 - Future assistants should proactively recommend safe readiness/observability improvements before implementation.
 - Commercial path is documented as a future web-based/paper-trading analytics dashboard first.
 - Next upgrades should focus on feature journal quality, execution outcome collection, regime coverage, and Phase 3A readiness gates.
