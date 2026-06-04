@@ -163,6 +163,110 @@ Good proactive recommendations include:
 
 Do not proactively implement changes that loosen risk controls, grant ML live authority, lower post-harvest thresholds, bypass self-defense, or change trade execution authority without explicit operator approval.
 
+## Commercial/productization roadmap
+
+The operator eventually wants a path to make the system profitable by selling access to the platform, code, dashboard, reports, or app-style experience.
+
+### Productization principle
+
+The safest first commercial product should be a web-based or app-style trading intelligence and paper-trading analytics platform, not an auto-trading product that controls other users' live brokerage accounts.
+
+Initial positioning should be:
+
+```text
+Trading intelligence dashboard with paper-trading, risk analytics, ML shadow rankings, scanner diagnostics, decision explanations, and performance reporting.
+```
+
+Avoid positioning it as:
+
+```text
+Guaranteed AI auto-trading system that makes money for users.
+```
+
+### Phase 1 — Web dashboard / paper analytics product
+
+Recommended first commercial version:
+
+- user-facing dashboard instead of raw JSON
+- market regime and risk-on/risk-off status
+- scanner rankings and watchlist intelligence
+- post-harvest redeployment signals
+- ML shadow rankings and confidence context
+- Trade Quality Coach, Risk Coach, and Post-Harvest Coach summaries
+- paper-trading simulator or model portfolio
+- daily/weekly/monthly performance reports
+- equity curve, drawdown, win rate, profit factor, open positions, trade log
+- exportable CSV/PDF reports later
+- demo mode that exposes no secrets, no broker keys, and no private state
+
+This version should not connect to users' live broker accounts. It should provide analytics, education, simulated/paper results, and decision-support tooling.
+
+### Phase 2 — Strategy access and alerts
+
+Potential second commercial layer:
+
+- subscription watchlist rankings
+- trade alert emails/texts/push notifications
+- paper-first model portfolio
+- manual-copy trade ideas
+- setup scoring and risk notes
+- strategy reports and performance analytics
+
+This can remain lower-complexity than live account automation as long as users retain discretion and the product avoids representing itself as personalized investment management.
+
+### Phase 3 — User accounts / SaaS architecture
+
+Before a real SaaS launch, the architecture would eventually need:
+
+- authentication and user accounts
+- separate per-user state/workspaces
+- admin dashboard
+- subscription billing and plan limits
+- public demo environment
+- terms of service and disclaimers
+- audit logs
+- data retention rules
+- support workflow
+- non-secret public dashboard mode
+- secret management for any private integrations
+
+### Phase 4 — Live automation only after legal/compliance review
+
+Connecting to user brokerage accounts, placing trades for other users, copy-trading, or managing user accounts is a materially different product and should only be considered after legal/compliance review.
+
+Guardrails:
+
+- Do not build broker-connected multi-user live trading as the first commercial product.
+- Do not advertise guaranteed returns.
+- Do not give users the impression that the system eliminates trading risk.
+- Do not give ML, FinRobot-style research, or any advisory layer live authority without explicit approval and readiness evidence.
+- Treat any version that trades other users' money as a later-stage regulated/compliance-sensitive product.
+
+### Possible pricing ideas to revisit later
+
+These are placeholders, not commitments:
+
+- basic dashboard: `$19-$49/month`
+- pro dashboard plus alerts: `$79-$149/month`
+- advanced analytics/reporting: `$199+/month`
+- one-time code/template license: `$299-$999`
+- setup/coaching package: `$500-$2,500`
+- white-label or private workspace: later-stage pricing only
+
+### Productization next steps when ready
+
+Good low-risk future updates:
+
+1. Add a `PRODUCT_ROADMAP.md` or expand this handoff into a product roadmap.
+2. Add a read-only dashboard route that presents status cards instead of JSON.
+3. Add a public demo mode with fake/sanitized state.
+4. Add exportable performance reports.
+5. Add a weekly report route.
+6. Add a strategy transparency page explaining risk controls and ML shadow mode.
+7. Add SaaS architecture notes before any auth/billing work.
+
+Current priority remains trading-system quality first: MAE/MFE telemetry, formal walk-forward validation, execution outcome collection, regime coverage, and Phase 3A readiness gates.
+
 ## One-test workflow
 
 Routine post-push test:
@@ -333,6 +437,17 @@ Current ML recommendation:
 
 Use this ledger for future update continuity. Add newest entries at the top.
 
+### 2026-06-04 — Productization roadmap documented
+
+- Commit `PRODUCTIZATION_ROADMAP_COMMIT_PLACEHOLDER` — added commercial/productization roadmap to `PROJECT_HANDOFF.md`.
+- Files changed: `PROJECT_HANDOFF.md`.
+- Reason: document future monetization path around a web-based/paper-trading analytics platform first, with live account automation treated as a later compliance-reviewed phase.
+- Trading authority changed: no.
+- ML authority changed: no.
+- Risk controls changed: no.
+- One-test workflow changed: no.
+- Next planned focus: keep trading-system quality first while preserving the productization path for later dashboard/demo/reporting work.
+
 ### 2026-06-04 — Proactive update recommendation preference recorded
 
 - Files changed: `PROJECT_HANDOFF.md`.
@@ -401,6 +516,7 @@ Use this ledger for future update continuity. Add newest entries at the top.
 
 Recent successful commits from the handoff period:
 
+- `PRODUCTIZATION_ROADMAP_COMMIT_PLACEHOLDER` — added productization roadmap to handoff.
 - `8fd184368b1bcc40cc9d174f3eb6bac327b1c2ca` — added internal advisory coaches to decision audit.
 - `d061946dcbb4f42fc28350da213477ceb8fa4fc6` — added handoff update ledger and recommendation sources.
 - `74df666536fd699a7ce73c7a8e69203cd9928006` — added initial project handoff file.
@@ -428,6 +544,7 @@ Recent successful commits from the handoff period:
 7. Expand regime coverage from `2` to at least `3` regimes.
 8. Promote important recommendation text from deeper advisory endpoints into `decision_audit_next_actions` when it affects the next development decision.
 9. Proactively recommend safe, low-risk observability and readiness upgrades when they are likely to improve the system without changing authority.
+10. Preserve the productization path for later dashboard/demo/reporting work, but keep current development priority on trading quality, telemetry, and validation.
 
 ### Do not do yet
 
@@ -436,6 +553,7 @@ Recent successful commits from the handoff period:
 - Do not loosen final-close protection.
 - Do not bypass self-defense or risk controls.
 - Do not require multiple routine test links again.
+- Do not build live multi-user brokerage automation before legal/compliance review.
 
 ## New-chat startup instructions
 
@@ -455,6 +573,7 @@ Before making changes:
 4. Do not loosen risk controls or give ML live trade authority without explicit approval.
 5. Review the recommendation/advisory sources listed in PROJECT_HANDOFF.md before choosing the next update.
 6. Proactively recommend high-value, low-risk updates when they improve observability, safety, readiness, or continuity without changing trading authority.
+7. Preserve the productization roadmap: first commercial version should be analytics/paper/dashboard/reporting, not live multi-user brokerage automation.
 
 Current direction:
 - ML remains shadow-only.
@@ -463,6 +582,7 @@ Current direction:
 - ML shadow counts are surfaced in /paper/self-check.
 - Internal advisory coaches are now included in decision_audit_next_actions.
 - Future assistants should proactively recommend safe readiness/observability improvements before implementation.
+- Commercial path is documented as a future web-based/paper-trading analytics dashboard first.
 - Next upgrades should focus on feature journal quality, MAE/MFE telemetry, formal walk-forward validation, and Phase 3A readiness gates.
 ```
 
