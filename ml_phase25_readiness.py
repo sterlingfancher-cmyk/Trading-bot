@@ -11,19 +11,19 @@ Routes:
 Design goals:
 - Surface Phase 3A readiness gates clearly.
 - Track execution rows, labeled outcomes, blocked/rejected decisions, and review rows.
-- Prepare MAE/MFE fields as telemetry placeholders without inventing data.
+- Validate MAE/MFE telemetry from real intratrade path capture; no synthetic path values.
+- Run a conservative chronological walk-forward validation from realized trade rows.
 - Keep ML live_trade_decider false until thresholds are met and manually enabled later.
 """
 from __future__ import annotations
 
 import datetime as dt
-import json
 import math
 import os
 import sys
 from typing import Any, Dict, List, Tuple
 
-VERSION = "ml-phase25-readiness-2026-05-16"
+VERSION = "ml-phase25-readiness-2026-06-04-formal-wf-mae-mfe"
 PHASE = "phase_2_5_readiness_governance"
 LIVE_DECIDER = False
 ENABLED = os.environ.get("ML25_READINESS_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
@@ -35,6 +35,7 @@ MIN_PROFIT_FACTOR_PHASE3A = float(os.environ.get("ML25_MIN_PROFIT_FACTOR_PHASE3A
 MIN_WIN_RATE_PHASE3A = float(os.environ.get("ML25_MIN_WIN_RATE_PHASE3A", "0.48"))
 MIN_REGIME_COUNT_PHASE3A = int(os.environ.get("ML25_MIN_REGIME_COUNT_PHASE3A", "3"))
 MIN_WALK_FORWARD_DAYS_PHASE3A = int(os.environ.get("ML25_MIN_WALK_FORWARD_DAYS_PHASE3A", "10"))
+MIN_WALK_FORWARD_EXITS_PHASE3A = int(os.environ.get("ML25_MIN_WALK_FORWARD_EXITS_PHASE3A", "30"))
 
 REGISTERED_APP_IDS: set[int] = set()
 PATCHED_MODULE_IDS: set[int] = set()
@@ -93,11 +94,7 @@ def _load_state(mod: Any = None) -> Tuple[Dict[str, Any], Any]:
 
 
 def _execution_rows(state: Dict[str, Any]) -> List[Dict[str, Any]]:
-    rows = []
-    for row in _list(state.get("trades")):
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
+    return [row for row in _list(state.get("trades")) if isinstance(row, dict)]
 
 
 def _actual_exit_rows(state: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -142,7 +139,7 @@ def _profit_metrics(exit_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     wins = 0
     losses = 0
     for row in exit_rows:
-        pnl = _f(row.get("pnl_dollars"), 0.0)
+        pnl = _f(row.get("pnl_dollars"), _f(row.get("pnl"), 0.0))
         if pnl > 0:
             gross_profit += pnl
             wins += 1
@@ -172,44 +169,161 @@ def _regime_count(state: Dict[str, Any]) -> Dict[str, Any]:
     return {"count": len(regimes), "regimes_seen": sorted(regimes)}
 
 
-def _walk_forward_proxy(state: Dict[str, Any]) -> Dict[str, Any]:
-    # This is intentionally conservative. Until a dedicated walk-forward runner
-    # exists, count distinct trade dates as a proxy and mark formal validation false.
-    dates = set()
-    for row in _execution_rows(state):
-        if not isinstance(row, dict):
-            continue
-        date_value = row.get("date") or row.get("local_date") or row.get("day")
-        if not date_value and row.get("time"):
+def _trade_date(row: Dict[str, Any]) -> str | None:
+    date_value = row.get("date") or row.get("local_date") or row.get("day")
+    if date_value:
+        return str(date_value)[:10]
+    for key in ("exit_time", "time", "timestamp", "ts"):
+        if row.get(key) is not None:
             try:
-                date_value = dt.datetime.fromtimestamp(float(row.get("time"))).strftime("%Y-%m-%d")
+                return dt.datetime.fromtimestamp(float(row.get(key))).strftime("%Y-%m-%d")
             except Exception:
-                date_value = None
-        if date_value:
-            dates.add(str(date_value)[:10])
+                pass
+    return None
+
+
+def _walk_forward_validation(exit_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    rows: List[Dict[str, Any]] = []
+    dates = set()
+    for row in exit_rows:
+        date_value = _trade_date(row)
+        if not date_value:
+            continue
+        pnl = _f(row.get("pnl_dollars"), _f(row.get("pnl"), 0.0))
+        rows.append({"date": date_value, "pnl": pnl})
+        dates.add(date_value)
+    rows.sort(key=lambda r: r.get("date") or "")
+    distinct_dates = sorted(dates)
+    proxy_days = len(distinct_dates)
+
+    if not rows:
+        return {
+            "formal_walk_forward_passed": False,
+            "proxy_trade_days": 0,
+            "distinct_trade_dates": [],
+            "required_walk_forward_days": MIN_WALK_FORWARD_DAYS_PHASE3A,
+            "validation_splits": [],
+            "reason": "no_exit_rows_with_dates",
+            "note": "Formal walk-forward uses chronological realized trade outcomes only; no synthetic validation rows are invented.",
+        }
+
+    split_index = max(1, int(len(distinct_dates) * 0.6))
+    split_index = min(split_index, max(1, len(distinct_dates) - 1)) if len(distinct_dates) > 1 else 1
+    train_dates = set(distinct_dates[:split_index])
+    test_dates = set(distinct_dates[split_index:])
+    if not test_dates and distinct_dates:
+        test_dates = {distinct_dates[-1]}
+        train_dates = set(distinct_dates[:-1])
+
+    train_rows = [r for r in rows if r.get("date") in train_dates]
+    test_rows = [r for r in rows if r.get("date") in test_dates]
+    train_metrics = _profit_metrics([{"pnl_dollars": r.get("pnl")} for r in train_rows])
+    test_metrics = _profit_metrics([{"pnl_dollars": r.get("pnl")} for r in test_rows])
+
+    enough_days = proxy_days >= MIN_WALK_FORWARD_DAYS_PHASE3A
+    enough_exits = len(rows) >= MIN_WALK_FORWARD_EXITS_PHASE3A
+    enough_test = len(test_rows) >= max(5, min(10, int(len(rows) * 0.2)))
+    train_pass = _f(train_metrics.get("profit_factor")) >= MIN_PROFIT_FACTOR_PHASE3A and _f(train_metrics.get("win_rate")) >= MIN_WIN_RATE_PHASE3A
+    test_pass = _f(test_metrics.get("profit_factor")) >= MIN_PROFIT_FACTOR_PHASE3A and _f(test_metrics.get("win_rate")) >= MIN_WIN_RATE_PHASE3A
+    formal_passed = bool(enough_days and enough_exits and enough_test and train_pass and test_pass)
+
     return {
-        "formal_walk_forward_passed": False,
-        "proxy_trade_days": len(dates),
-        "distinct_trade_dates": sorted(dates)[-20:],
+        "formal_walk_forward_passed": formal_passed,
+        "proxy_trade_days": proxy_days,
+        "distinct_trade_dates": distinct_dates[-20:],
         "required_walk_forward_days": MIN_WALK_FORWARD_DAYS_PHASE3A,
-        "note": "Formal walk-forward validation is not yet authoritative; this proxy only tracks trade-day coverage.",
+        "required_exit_rows": MIN_WALK_FORWARD_EXITS_PHASE3A,
+        "exit_rows_with_dates": len(rows),
+        "validation_splits": [
+            {
+                "name": "chronological_train",
+                "date_count": len(train_dates),
+                "exit_rows": len(train_rows),
+                **train_metrics,
+                "passed": bool(train_pass),
+            },
+            {
+                "name": "chronological_forward_test",
+                "date_count": len(test_dates),
+                "exit_rows": len(test_rows),
+                **test_metrics,
+                "passed": bool(test_pass and enough_test),
+            },
+        ],
+        "gate_checks": {
+            "enough_days": enough_days,
+            "enough_exits": enough_exits,
+            "enough_forward_test_rows": enough_test,
+            "train_metrics_pass": bool(train_pass),
+            "forward_test_metrics_pass": bool(test_pass),
+        },
+        "reason": "formal_walk_forward_passed" if formal_passed else "formal_walk_forward_incomplete_or_failed",
+        "note": "Formal walk-forward is a chronological train/forward-test split over realized exits; it remains advisory and does not grant ML authority.",
     }
 
 
-def _mae_mfe_status(state: Dict[str, Any]) -> Dict[str, Any]:
+def _refresh_path_modules(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
+    refresh = {"intratrade_path_capture": "not_run", "mae_mfe_integration": "not_run"}
+    try:
+        import intratrade_path_capture
+        if hasattr(intratrade_path_capture, "update_paths"):
+            intratrade_path_capture.update_paths(state, mod)
+            refresh["intratrade_path_capture"] = "ok"
+    except Exception as exc:
+        refresh["intratrade_path_capture"] = f"error:{exc}"
+    try:
+        import mae_mfe_integration
+        if hasattr(mae_mfe_integration, "integrate"):
+            mae_mfe_integration.integrate(state, mod)
+            refresh["mae_mfe_integration"] = "ok"
+    except Exception as exc:
+        refresh["mae_mfe_integration"] = f"error:{exc}"
+    return refresh
+
+
+def _row_has_mae(row: Dict[str, Any]) -> bool:
+    feature = _dict(row.get("mae_mfe_features"))
+    return row.get("mae_pct") is not None or row.get("future_mae_pct") is not None or feature.get("mae_pct") is not None
+
+
+def _row_has_mfe(row: Dict[str, Any]) -> bool:
+    feature = _dict(row.get("mae_mfe_features"))
+    return row.get("mfe_pct") is not None or row.get("future_mfe_pct") is not None or feature.get("mfe_pct") is not None
+
+
+def _path_has_mae_mfe(path: Dict[str, Any]) -> bool:
+    return path.get("mae_pct") is not None and path.get("mfe_pct") is not None
+
+
+def _mae_mfe_status(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
+    refresh = _refresh_path_modules(state, mod)
     ml2_rows = _list(_dict(state.get("ml_phase2")).get("dataset"))
     rows_with_mae = 0
     rows_with_mfe = 0
     for row in ml2_rows:
         if isinstance(row, dict):
-            rows_with_mae += 1 if row.get("mae_pct") is not None or row.get("future_mae_pct") is not None else 0
-            rows_with_mfe += 1 if row.get("mfe_pct") is not None or row.get("future_mfe_pct") is not None else 0
+            rows_with_mae += 1 if _row_has_mae(row) else 0
+            rows_with_mfe += 1 if _row_has_mfe(row) else 0
+    path_section = _dict(state.get("intratrade_path_capture"))
+    active_paths = [p for p in _dict(path_section.get("paths")).values() if isinstance(p, dict)]
+    closed_paths = [p for p in _list(path_section.get("closed_path_archive")) if isinstance(p, dict)]
+    active_with_mae_mfe = sum(1 for p in active_paths if _path_has_mae_mfe(p))
+    closed_with_mae_mfe = sum(1 for p in closed_paths if _path_has_mae_mfe(p))
+    integration = _dict(state.get("mae_mfe_integration"))
+    ml_rows_enriched = _i(integration.get("ml_rows_enriched"), 0)
+    telemetry_rows = max(rows_with_mae, rows_with_mfe, active_with_mae_mfe + closed_with_mae_mfe, ml_rows_enriched)
+    complete = telemetry_rows > 0 and (active_with_mae_mfe + closed_with_mae_mfe > 0 or ml_rows_enriched > 0 or (rows_with_mae > 0 and rows_with_mfe > 0))
     return {
         "enabled": True,
         "rows_with_mae": rows_with_mae,
         "rows_with_mfe": rows_with_mfe,
-        "mae_mfe_complete": bool(rows_with_mae > 0 and rows_with_mfe > 0),
-        "note": "MAE/MFE fields are ready for telemetry; no synthetic MAE/MFE values are invented.",
+        "active_paths_with_mae_mfe": active_with_mae_mfe,
+        "closed_paths_with_mae_mfe": closed_with_mae_mfe,
+        "ml_rows_enriched": ml_rows_enriched,
+        "telemetry_rows_available": telemetry_rows,
+        "mae_mfe_complete": bool(complete),
+        "refresh": refresh,
+        "note": "MAE/MFE validation uses real intratrade path capture and enriched ML feature rows; no synthetic MAE/MFE values are invented.",
     }
 
 
@@ -222,8 +336,8 @@ def readiness_payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
     scanner = _scanner_counts(state)
     metrics = _profit_metrics(exits)
     regimes = _regime_count(state)
-    walk_forward = _walk_forward_proxy(state)
-    mae_mfe = _mae_mfe_status(state)
+    walk_forward = _walk_forward_validation(exits)
+    mae_mfe = _mae_mfe_status(state, mod)
     ml2 = _dict(state.get("ml_phase2"))
     labeled = _i(ml2.get("labeled_outcome_rows"), len([r for r in _list(ml2.get("dataset")) if isinstance(r, dict) and not r.get("future_outcome_pending")]))
     executions = len(_execution_rows(state))
@@ -236,8 +350,8 @@ def readiness_payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
         _gate("profit_factor", metrics.get("profit_factor"), MIN_PROFIT_FACTOR_PHASE3A, _f(metrics.get("profit_factor")) >= MIN_PROFIT_FACTOR_PHASE3A, "Execution-only realized profit factor."),
         _gate("win_rate", metrics.get("win_rate"), MIN_WIN_RATE_PHASE3A, _f(metrics.get("win_rate")) >= MIN_WIN_RATE_PHASE3A, "Execution-only realized win rate."),
         _gate("regime_coverage", regimes.get("count"), MIN_REGIME_COUNT_PHASE3A, regimes.get("count", 0) >= MIN_REGIME_COUNT_PHASE3A, "Distinct regimes represented in ML2 dataset."),
-        _gate("walk_forward_days_proxy", walk_forward.get("proxy_trade_days"), MIN_WALK_FORWARD_DAYS_PHASE3A, walk_forward.get("proxy_trade_days", 0) >= MIN_WALK_FORWARD_DAYS_PHASE3A, "Proxy only; formal validation still required."),
-        _gate("formal_walk_forward_validation", walk_forward.get("formal_walk_forward_passed"), True, bool(walk_forward.get("formal_walk_forward_passed")), "Must be true before Phase 3A live weighting."),
+        _gate("walk_forward_days_proxy", walk_forward.get("proxy_trade_days"), MIN_WALK_FORWARD_DAYS_PHASE3A, walk_forward.get("proxy_trade_days", 0) >= MIN_WALK_FORWARD_DAYS_PHASE3A, "Trade-day coverage for chronological validation."),
+        _gate("formal_walk_forward_validation", walk_forward.get("formal_walk_forward_passed"), True, bool(walk_forward.get("formal_walk_forward_passed")), "Chronological realized train/forward-test split must pass before Phase 3A live weighting."),
         _gate("mae_mfe_telemetry", mae_mfe.get("mae_mfe_complete"), True, bool(mae_mfe.get("mae_mfe_complete")), "Needed for quality labels and stop-efficiency learning."),
     ]
     passed = [g for g in gates if g.get("passed")]
@@ -249,12 +363,12 @@ def readiness_payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
         recommendation = "All gates pass; ML may be considered for tiny shadow-to-weighting experiments only after manual review."
     elif executions >= 50 or labeled >= 50 or scanner_decisions >= 2500:
         phase = "phase_2_5_collecting_validating"
-        recommendation = "Continue shadow collection; start formal walk-forward tooling before live ML weighting."
+        recommendation = "Continue shadow collection; close remaining gates before live ML weighting."
     else:
         phase = "phase_2_5_early_data_collection"
         recommendation = "Keep ML shadow-only; focus on outcome volume and MAE/MFE labeling before Phase 3A."
 
-    return {
+    payload = {
         "status": "ok",
         "type": "ml_readiness_status",
         "version": VERSION,
@@ -268,11 +382,7 @@ def readiness_payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
         "gates_passed": len(passed),
         "gates_failed": len(failed),
         "gates": gates,
-        "execution_summary": {
-            "execution_rows": executions,
-            "exit_rows": len(exits),
-            **metrics,
-        },
+        "execution_summary": {"execution_rows": executions, "exit_rows": len(exits), **metrics},
         "scanner_summary": scanner,
         "ml2_summary": {
             "rows_total": ml2.get("rows_total", len(_list(ml2.get("dataset")))),
@@ -291,8 +401,11 @@ def readiness_payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
             "min_win_rate_phase3a": MIN_WIN_RATE_PHASE3A,
             "min_regime_count_phase3a": MIN_REGIME_COUNT_PHASE3A,
             "min_walk_forward_days_phase3a": MIN_WALK_FORWARD_DAYS_PHASE3A,
+            "min_walk_forward_exits_phase3a": MIN_WALK_FORWARD_EXITS_PHASE3A,
         },
     }
+    _ensure_state_section(state, payload)
+    return payload
 
 
 def _ensure_state_section(state: Dict[str, Any], payload: Dict[str, Any]) -> None:
@@ -308,6 +421,7 @@ def _ensure_state_section(state: Dict[str, Any], payload: Dict[str, Any]) -> Non
         "last_updated_local": payload.get("generated_local"),
         "recommendation": payload.get("recommendation"),
         "mae_mfe": payload.get("mae_mfe"),
+        "walk_forward": payload.get("walk_forward"),
     })
 
 
@@ -369,3 +483,9 @@ def register_routes(flask_app: Any, module: Any = None) -> Dict[str, Any]:
 
     REGISTERED_APP_IDS.add(id(flask_app))
     return {"status": "ok", "version": VERSION, "routes": ["/paper/ml-readiness-status", "/paper/ml-phase25-status"], "live_trade_decider": False}
+
+
+try:
+    apply(_module())
+except Exception:
+    pass
