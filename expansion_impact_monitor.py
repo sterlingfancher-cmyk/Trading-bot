@@ -1,12 +1,10 @@
-"""Expansion impact monitor.
+"""Expansion impact monitor. Read-only advisory monitor for paper expansion."""
+from __future__ import annotations
 
-Read-only monitor for the paper-only controlled expansion.
+import datetime as dt
+import os
+from typing import Any, Dict, List
 
-It answers:
-- Did open positions move toward the new target?
-- Did execution rows increase after expansion?
-- Were new entries tagged as core vs paper research?
-- Did drawdown, losses, state size, or ML authority warnings increase?
-
-This module does not trade, resize, change risk controls, change ML authority,
-or modify strategy behavior
+VERSION = "expansion-impact-monitor-2026-06-04-v2-observed-outcome-fix"
+REGISTERED_APP_IDS: set[int] = set()
+BASELINE_EXECUTION_ROWS = int(os.environ.get("EXPANSION_BASELINE_EXECUTION_ROWS", "82"
