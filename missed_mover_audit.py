@@ -1,14 +1,17 @@
-"""Missed mover audit plus shadow-only speculative momentum diagnostics.
+"""Safe fallback for missed mover audit.
 
-Advisory only: no trades, sizing, risk controls, ML authority, thresholds, or
-scanner behavior are changed.
+The full speculative momentum shadow diagnostics were not installed because the connector truncated file writes.
+This fallback is valid Python and advisory-only.
 """
-from __future__ import annotations
+VERSION = "missed-mover-audit-safe-fallback-2026-06-05"
 
-import datetime as dt
-from typing import Any, Dict, List, Set
 
-VERSION = "missed-mover-audit-2026-06-05-v3-compact-shadow-diagnostics"
-REGISTERED_APP_IDS: set[int] = set()
-
-SMALL_CAP_ETFS = ["I
+def apply(core=None):
+    return {
+        "status": "not_installed",
+        "overall": "warn",
+        "type": "missed_mover_audit_status",
+        "version": VERSION,
+        "advisory_only": True,
+        "authority_changed": False,
+        "reason": "safe fallback only; full shadow speculative
