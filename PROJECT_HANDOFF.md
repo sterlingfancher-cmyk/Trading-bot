@@ -47,6 +47,37 @@ Most recent self-check before the newest expansion push was 2026-06-04 15:26 CDT
 
 ## Active modules
 
+### Shadow speculative momentum discovery
+
+File:
+
+- `missed_mover_audit.py`
+
+Routes:
+
+- `/paper/missed-mover-audit?symbol=MNTS`
+- `/paper/missed-mover-audit-status`
+- `/paper/speculative-momentum-status`
+- `/paper/speculative-movers`
+
+Purpose:
+
+- Add small-cap ETF context using IWM, IWO, IJR, XBI, ARKK, and UFO.
+- Add shadow-only speculative buckets for space momentum, small-cap momentum, bitcoin/AI compute, AI software momentum, and speculative biotech.
+- Add dynamic missed-mover discovery tags.
+- Report top shadow-only speculative movers seen.
+- Distinguish universe gaps from rejected, blocked, or candidate-not-entered symbols.
+
+Guardrails:
+
+- Advisory-only.
+- No trading authority.
+- ML remains shadow-only.
+- Does not change risk controls.
+- Does not lower score thresholds.
+- Does not bypass self-defense or final-close protection.
+- One-test workflow preserved.
+
 ### Missed Mover Audit
 
 File:
@@ -203,6 +234,20 @@ Use only when needed:
 ```
 
 ## Update ledger
+
+### 2026-06-05 — Shadow speculative momentum discovery added
+
+- Files changed: `missed_mover_audit.py`, optionally `wsgi.py`, `PROJECT_HANDOFF.md`.
+- Reason: MNTS was confirmed as a scanner-universe gap. Add shadow-only small-cap/speculative discovery so future movers are observed and tagged without being traded.
+- Added small-cap ETF context scanner.
+- Added speculative momentum shadow bucket.
+- Added dynamic missed-mover discovery tags.
+- Added `/paper/speculative-movers` route.
+- Trading authority changed: no.
+- ML authority changed: no.
+- Risk controls changed: no.
+- Entry thresholds changed: no.
+- One-test workflow changed: no.
 
 ### 2026-06-04 — Missed Mover Audit added
 
