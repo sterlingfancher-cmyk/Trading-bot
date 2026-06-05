@@ -1,8 +1,11 @@
-"""Runtime module registry and startup patch verification.
+"""Runtime module registry and startup verification.
 
-Read-only observability for the overlay architecture. It records module imports,
-startup function calls, expected diagnostic routes, and critical overlay health.
-It does not trade, alter risk controls, or change ML authority.
+Read-only observability layer for the overlay-based architecture. It records
+which auxiliary modules imported, which startup hooks were attempted, which
+routes appear registered, and whether critical overlays are present.
+
+It never trades, changes risk controls, grants ML authority, or modifies
+strategy behavior.
 """
 from __future__ import annotations
 
@@ -11,4 +14,4 @@ import os
 import sys
 from typing import Any, Dict, List
 
-VERSION = "
+VERSION = "runtime-module-registry-2026-06-
