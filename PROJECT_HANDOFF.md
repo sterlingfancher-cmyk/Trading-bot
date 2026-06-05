@@ -47,6 +47,33 @@ Most recent self-check before the newest expansion push was 2026-06-04 15:26 CDT
 
 ## Active modules
 
+### Missed Mover Audit
+
+File:
+
+- `missed_mover_audit.py`
+
+Routes:
+
+- `/paper/missed-mover-audit?symbol=MNTS`
+- `/paper/missed-mover-audit-status`
+
+Purpose:
+
+- Explain why a fast-moving symbol was missed.
+- Determine whether a symbol was in the watchlist/universe, open positions, recent trades, scanner/decision sections, candidate symbols, or blocked symbols.
+- Classify known speculative/microcap buckets such as space and small-cap momentum.
+- Recommend whether the miss looks like a universe gap, rejection/block, or timing/quality-gate issue.
+
+Guardrails:
+
+- Advisory-only.
+- Does not trade.
+- Does not change risk controls.
+- Does not change ML authority.
+- Does not lower thresholds.
+- Does not change the one-test workflow.
+
 ### Paper-only controlled expansion
 
 Files:
@@ -176,6 +203,17 @@ Use only when needed:
 ```
 
 ## Update ledger
+
+### 2026-06-04 — Missed Mover Audit added
+
+- Files changed: `missed_mover_audit.py`, `wsgi.py`, `PROJECT_HANDOFF.md`.
+- Reason: MNTS made a large move and was not visible in open positions, candidates, or blocked symbols. Add a diagnostic route to distinguish scanner-universe gaps from rejected/blocked/timing issues.
+- Route: `/paper/missed-mover-audit?symbol=MNTS`.
+- Trading authority changed: no.
+- ML authority changed: no.
+- Risk controls changed: no.
+- Entry thresholds changed: no.
+- One-test workflow changed: no.
 
 ### 2026-06-04 — Runtime registry and expansion impact monitor added manually
 
