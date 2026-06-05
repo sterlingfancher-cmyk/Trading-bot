@@ -182,6 +182,8 @@ try:
                 ("/paper/expansion-impact-monitor", "governance", False),
                 ("/paper/missed-mover-audit-status", "governance", False),
                 ("/paper/missed-mover-audit", "governance", False),
+                ("/paper/speculative-momentum-status", "governance", False),
+                ("/paper/speculative-movers", "governance", False),
                 ("/paper/strategy-label-schema-status", "governance", False),
                 ("/paper/setup-label-quality-status", "governance", False),
                 ("/paper/strategy-label-propagation-status", "governance", False),
