@@ -79,6 +79,37 @@ Optional route:
 ```text
 /paper/paper-controlled-expansion-status
 ```
+### Runtime module registry and expansion impact monitor
+
+Files:
+
+- `runtime_module_registry.py`
+- `expansion_impact_monitor.py`
+- `wsgi.py`
+
+Purpose:
+
+- Verify important runtime overlays are loaded.
+- Confirm optional diagnostic routes are registered.
+- Monitor the paper-only controlled expansion after the 14 → 16 max-position change.
+- Track execution rows, observed outcomes, open positions versus target, paper-learning tag quality, state-size growth, drawdown, losses, and ML authority.
+- Keep both modules advisory-only.
+
+Routes:
+
+- `/paper/runtime-module-registry-status`
+- `/paper/startup-patch-status`
+- `/paper/expansion-impact-status`
+- `/paper/expansion-impact-monitor`
+
+Guardrails:
+
+- No trading authority changed.
+- No ML authority changed.
+- No risk controls changed.
+- No entry thresholds lowered.
+- No self-defense/final-close bypass.
+- One-test workflow preserved.
 
 ### Post-harvest redeployment
 
@@ -145,6 +176,18 @@ Use only when needed:
 ```
 
 ## Update ledger
+
+### 2026-06-04 — Runtime registry and expansion impact monitor added manually
+
+- Files changed: `runtime_module_registry.py`, `expansion_impact_monitor.py`, `wsgi.py`, `PROJECT_HANDOFF.md`.
+- Reason: after paper-only controlled expansion, add observability before adding more trading features.
+- Runtime registry checks whether critical overlays and optional diagnostic routes are present.
+- Expansion impact monitor tracks execution-row growth, observed outcomes, position count versus target, paper-learning tag quality, state-size growth, drawdown, losses, and ML authority after the expansion.
+- Trading authority changed: no.
+- ML authority changed: no; ML remains shadow-only.
+- Risk controls changed: no.
+- One-test workflow changed: no.
+- Next step: run only `/paper/self-check` after Railway redeploy.
 
 ### 2026-06-04 — Paper-only controlled expansion added
 
