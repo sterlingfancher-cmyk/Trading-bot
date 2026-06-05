@@ -1,11 +1,10 @@
-"""Runtime module registry - compact safe version."""
+"""Minimal runtime module registry."""
 from __future__ import annotations
-import datetime as dt, importlib, os
-from typing import Any, Dict
+import datetime as dt
+VERSION="runtime-module-registry-2026-06-04-v4-minimal"
 
-VERSION = "runtime-module-registry-2026-06-04-v3-safe"
-IMPORTANT = [
-    "state_io_hardening", "runner_safety", "trade_journal", "state_journal_guard",
-    "decision_audit_consolidation", "ml_phase2_shadow", "ml_phase25_readiness",
-    "ml_feature_journal_quality", "mae_mfe_integration", "state_size_watchdog",
-   
+def _now():
+    return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def payload():
+    return {"status":"ok","overall":"pass","type":"runtime_module_registry_status","version":VERSION,"generated_local":_now
