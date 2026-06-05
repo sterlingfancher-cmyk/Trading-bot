@@ -1,16 +1,11 @@
-"""Compact runtime module registry.
-
-Read-only startup visibility for the overlay architecture. This module reports
-which important overlays are importable and which optional diagnostic routes are
-registered. It does not trade, patch strategy logic, change risk controls, or
-grant ML authority.
-"""
+"""Runtime module registry - compact safe version."""
 from __future__ import annotations
+import datetime as dt, importlib, os
+from typing import Any, Dict
 
-import datetime as dt
-import importlib
-import os
-import sys
-from typing import Any, Dict, List
-
-VERSION = "runtime-module-registry-2026-06-04-v2-compact
+VERSION = "runtime-module-registry-2026-06-04-v3-safe"
+IMPORTANT = [
+    "state_io_hardening", "runner_safety", "trade_journal", "state_journal_guard",
+    "decision_audit_consolidation", "ml_phase2_shadow", "ml_phase25_readiness",
+    "ml_feature_journal_quality", "mae_mfe_integration", "state_size_watchdog",
+   
