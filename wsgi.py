@@ -1,4 +1,4 @@
-“”“WSGI entry point for the trading bot auxiliary layers.”””
+"""WSGI entry point for the trading bot auxiliary layers."""
 from future import annotations
 
 try:
