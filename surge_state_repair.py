@@ -13,13 +13,15 @@ It can repair:
 1. A malformed SPY paper surge position missing legacy aliases:
    entry / shares
 2. Stale risk-control drawdown flags left at 8.0 after the SPY repair is valid.
+3. A stale halted=True / halt_reason="daily loss limit hit" flag when account
+   reality is clean.
 """
 from __future__ import annotations
 
 import datetime as dt
 from typing import Any, Dict
 
-VERSION = "surge-state-repair-2026-06-08-v3-spy-aliases-and-stale-risk-flags"
+VERSION = "surge-state-repair-2026-06-08-v4-clear-stale-halt-flag"
 REGISTERED_APP_IDS: set[int] = set()
 
 SPY_REPAIR = {
@@ -164,7 +166,7 @@ def _spy_complete(spy: Dict[str, Any] | None) -> bool:
     return entry > 0.0 and shares > 0.0
 
 
-def _stale_risk_repair_needed(
+def _account_reality_clean(
     pf: Dict[str, Any],
     state: Dict[str, Any],
     spy: Dict[str, Any] | None,
@@ -175,30 +177,73 @@ def _stale_risk_repair_needed(
     risk = _risk_controls(pf, state)
     perf = _performance(pf, state)
 
-    daily_loss_pct = _safe_float(risk.get("daily_loss_pct"))
-    daily_drawdown_pct = _safe_float(risk.get("daily_drawdown_pct"))
-    intraday_drawdown_pct = _safe_float(risk.get("intraday_drawdown_pct"))
-
     self_defense_active = bool(risk.get("self_defense_active", False))
-
     realized_today = _safe_float(
         perf.get("realized_pnl_today", perf.get("realized_today", 0.0))
     )
     losses_today = _safe_int(perf.get("losses_today", 0))
 
-    stale_drawdown = (
-        daily_loss_pct >= 7.5
-        or daily_drawdown_pct >= 7.5
-        or intraday_drawdown_pct >= 7.5
-    )
-
-    clean_reality = (
+    return (
         not self_defense_active
         and realized_today >= 0.0
         and losses_today == 0
     )
 
-    return stale_drawdown and clean_reality
+
+def _stale_drawdown_repair_needed(
+    pf: Dict[str, Any],
+    state: Dict[str, Any],
+    spy: Dict[str, Any] | None,
+) -> bool:
+    if not _account_reality_clean(pf, state, spy):
+        return False
+
+    risk = _risk_controls(pf, state)
+
+    daily_loss_pct = _safe_float(risk.get("daily_loss_pct"))
+    daily_drawdown_pct = _safe_float(risk.get("daily_drawdown_pct"))
+    intraday_drawdown_pct = _safe_float(risk.get("intraday_drawdown_pct"))
+
+    return (
+        daily_loss_pct >= 7.5
+        or daily_drawdown_pct >= 7.5
+        or intraday_drawdown_pct >= 7.5
+    )
+
+
+def _stale_halt_repair_needed(
+    pf: Dict[str, Any],
+    state: Dict[str, Any],
+    spy: Dict[str, Any] | None,
+) -> bool:
+    if not _account_reality_clean(pf, state, spy):
+        return False
+
+    risk = _risk_controls(pf, state)
+
+    halted = bool(risk.get("halted", False))
+    halt_reason = str(risk.get("halt_reason", "") or "").lower()
+
+    if not halted:
+        return False
+
+    stale_daily_loss_halt = (
+        "daily loss" in halt_reason
+        or "loss limit" in halt_reason
+        or "drawdown" in halt_reason
+    )
+
+    daily_loss_pct = _safe_float(risk.get("daily_loss_pct"))
+    daily_drawdown_pct = _safe_float(risk.get("daily_drawdown_pct"))
+    intraday_drawdown_pct = _safe_float(risk.get("intraday_drawdown_pct"))
+
+    drawdowns_now_clean = (
+        daily_loss_pct <= 0.01
+        and daily_drawdown_pct <= 0.01
+        and intraday_drawdown_pct <= 0.01
+    )
+
+    return stale_daily_loss_halt and drawdowns_now_clean
 
 
 def _repair_spy_aliases(spy: Dict[str, Any]) -> Dict[str, Any]:
@@ -297,8 +342,10 @@ def _status(core: Any = None) -> Dict[str, Any]:
     risk = _risk_controls(pf, state)
 
     alias_needed = _alias_repair_needed(spy)
-    stale_risk_needed = _stale_risk_repair_needed(pf, state, spy)
-    repair_needed = alias_needed or stale_risk_needed
+    stale_drawdown_needed = _stale_drawdown_repair_needed(pf, state, spy)
+    stale_halt_needed = _stale_halt_repair_needed(pf, state, spy)
+
+    repair_needed = alias_needed or stale_drawdown_needed or stale_halt_needed
 
     cash = _safe_float(pf.get("cash", state.get("cash", 0.0)))
     equity = _safe_float(pf.get("equity", state.get("equity", 0.0)))
@@ -315,7 +362,8 @@ def _status(core: Any = None) -> Dict[str, Any]:
         "authority_changed": False,
         "repair_needed": repair_needed,
         "alias_repair_needed": alias_needed,
-        "stale_risk_repair_needed": stale_risk_needed,
+        "stale_drawdown_repair_needed": stale_drawdown_needed,
+        "stale_halt_repair_needed": stale_halt_needed,
         "detected_position": spy,
         "risk_controls": risk,
         "cash": round(cash, 4),
@@ -326,7 +374,8 @@ def _status(core: Any = None) -> Dict[str, Any]:
             "shares": SPY_REPAIR["shares"],
             "cash_action": "no_cash_change",
             "risk_action": (
-                "clear_stale_8pct_drawdown_flags_only_if_spy_is_complete_and_realized_today_is_nonnegative"
+                "clear stale drawdown/halt flags only if SPY is complete, "
+                "self-defense is inactive, realized_today is nonnegative, and losses_today is zero"
             ),
             "reason": (
                 "Cash was already deducted by the prior paper surge executor run; "
@@ -369,17 +418,19 @@ def apply_repair(core: Any = None, confirm: bool = False) -> Dict[str, Any]:
         pf["positions"] = positions
         actions.append("repaired_spy_position_aliases")
 
-    if status.get("stale_risk_repair_needed"):
+    if status.get("stale_drawdown_repair_needed") or status.get("stale_halt_repair_needed"):
         risk = _risk_controls(pf, state)
         risk["daily_loss_pct"] = 0.0
         risk["daily_drawdown_pct"] = 0.0
         risk["intraday_drawdown_pct"] = 0.0
+        risk["halted"] = False
+        risk["halt_reason"] = ""
         risk["self_defense_active"] = False
         risk["self_defense_reason"] = "feedback loop clear"
         risk["surge_state_repair_version"] = VERSION
         risk["surge_state_repair_time"] = _now(core)
         pf["risk_controls"] = risk
-        actions.append("cleared_stale_risk_drawdown_flags")
+        actions.append("cleared_stale_drawdown_and_halt_flags")
 
     totals = _recompute_portfolio_totals(pf, state)
     save_result = _save(core, pf)
