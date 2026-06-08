@@ -1,22 +1,25 @@
 """Targeted paper-state repair for market surge queue entries.
 
-Fixes a known paper-only state accounting issue where a surge queue entry
-reduced cash but saved a position with entry=0 and shares=0.
+Fixes paper-only state accounting issues from market surge queue execution.
 
 Routes:
 - /paper/surge-state-repair-status
 - /paper/surge-state-repair?confirm=1
 
-This module does not trade, does not change ML authority, and does not alter
-live-trading settings. It only completes the malformed paper SPY position when
-that exact broken pattern is detected.
+This module does not trade, does not change cash, does not change ML authority,
+and does not enable live trading.
+
+It can repair:
+1. A malformed SPY paper surge position missing legacy aliases:
+   entry / shares
+2. Stale risk-control drawdown flags left at 8.0 after the SPY repair is valid.
 """
 from __future__ import annotations
 
 import datetime as dt
 from typing import Any, Dict
 
-VERSION = "surge-state-repair-2026-06-08-v2-ascii-safe"
+VERSION = "surge-state-repair-2026-06-08-v3-spy-aliases-and-stale-risk-flags"
 REGISTERED_APP_IDS: set[int] = set()
 
 SPY_REPAIR = {
@@ -85,6 +88,24 @@ def _positions(pf: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
     return obj
 
 
+def _performance(pf: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
+    obj = pf.get("performance")
+    if not isinstance(obj, dict):
+        obj = state.get("performance")
+    if not isinstance(obj, dict):
+        obj = {}
+    return obj
+
+
+def _risk_controls(pf: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
+    obj = pf.get("risk_controls")
+    if not isinstance(obj, dict):
+        obj = state.get("risk_controls")
+    if not isinstance(obj, dict):
+        obj = {}
+    return obj
+
+
 def _save(core: Any, pf: Dict[str, Any]) -> Dict[str, Any]:
     attempted = False
     ok = False
@@ -118,28 +139,173 @@ def _compute_pnl(entry: float, last_price: float, shares: float) -> Dict[str, fl
     }
 
 
+def _spy_position(positions: Dict[str, Any]) -> Dict[str, Any] | None:
+    spy = positions.get("SPY")
+    return spy if isinstance(spy, dict) else None
+
+
+def _alias_repair_needed(spy: Dict[str, Any] | None) -> bool:
+    if spy is None:
+        return False
+
+    entry = _safe_float(spy.get("entry"))
+    shares = _safe_float(spy.get("shares"))
+
+    return entry <= 0.0 or shares <= 0.0
+
+
+def _spy_complete(spy: Dict[str, Any] | None) -> bool:
+    if spy is None:
+        return False
+
+    entry = _safe_float(spy.get("entry"))
+    shares = _safe_float(spy.get("shares"))
+
+    return entry > 0.0 and shares > 0.0
+
+
+def _stale_risk_repair_needed(
+    pf: Dict[str, Any],
+    state: Dict[str, Any],
+    spy: Dict[str, Any] | None,
+) -> bool:
+    if not _spy_complete(spy):
+        return False
+
+    risk = _risk_controls(pf, state)
+    perf = _performance(pf, state)
+
+    daily_loss_pct = _safe_float(risk.get("daily_loss_pct"))
+    daily_drawdown_pct = _safe_float(risk.get("daily_drawdown_pct"))
+    intraday_drawdown_pct = _safe_float(risk.get("intraday_drawdown_pct"))
+
+    self_defense_active = bool(risk.get("self_defense_active", False))
+
+    realized_today = _safe_float(
+        perf.get("realized_pnl_today", perf.get("realized_today", 0.0))
+    )
+    losses_today = _safe_int(perf.get("losses_today", 0))
+
+    stale_drawdown = (
+        daily_loss_pct >= 7.5
+        or daily_drawdown_pct >= 7.5
+        or intraday_drawdown_pct >= 7.5
+    )
+
+    clean_reality = (
+        not self_defense_active
+        and realized_today >= 0.0
+        and losses_today == 0
+    )
+
+    return stale_drawdown and clean_reality
+
+
+def _repair_spy_aliases(spy: Dict[str, Any]) -> Dict[str, Any]:
+    entry = _safe_float(spy.get("entry"), 0.0)
+    if entry <= 0.0:
+        entry = _safe_float(spy.get("entry_price"), SPY_REPAIR["entry"])
+    if entry <= 0.0:
+        entry = float(SPY_REPAIR["entry"])
+
+    shares = _safe_float(spy.get("shares"), 0.0)
+    if shares <= 0.0:
+        shares = _safe_float(spy.get("qty"), SPY_REPAIR["shares"])
+    if shares <= 0.0:
+        shares = float(SPY_REPAIR["shares"])
+
+    last_price = _safe_float(spy.get("last_price"), entry)
+    if last_price <= 0.0:
+        last_price = entry
+
+    pnl = _compute_pnl(entry, last_price, shares)
+
+    repaired = dict(spy)
+    repaired.update(
+        {
+            "entry": round(entry, 4),
+            "entry_price": round(entry, 4),
+            "shares": round(shares, 6),
+            "qty": round(shares, 6),
+            "last_price": round(last_price, 4),
+            "market_value": round(shares * last_price, 4),
+            "cost_basis": round(shares * entry, 4),
+            "side": repaired.get("side") or "long",
+            "sector": repaired.get("sector") or "SPY",
+            "score": _safe_float(repaired.get("score"), 0.0),
+            "adds": _safe_int(repaired.get("adds"), 0),
+            "entry_time": repaired.get("entry_time") or int(dt.datetime.now().timestamp()),
+            "pnl_dollars": pnl["pnl_dollars"],
+            "pnl_pct": pnl["pnl_pct"],
+            "entry_tag": repaired.get("entry_tag") or "paper_surge_entry_repaired",
+            "trade_authority": "paper_only_state_entry",
+            "live_trade_authority": "none",
+            "ml_authority": "shadow_only",
+            "repair_version": VERSION,
+        }
+    )
+    return repaired
+
+
+def _recompute_portfolio_totals(pf: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
+    positions = _positions(pf, state)
+    cash = _safe_float(pf.get("cash", state.get("cash", 0.0)))
+
+    market_value = 0.0
+    unrealized = 0.0
+
+    for pos in positions.values():
+        if not isinstance(pos, dict):
+            continue
+
+        shares = _safe_float(pos.get("shares"), _safe_float(pos.get("qty")))
+        entry = _safe_float(pos.get("entry"), _safe_float(pos.get("entry_price")))
+        last_price = _safe_float(pos.get("last_price"), entry)
+
+        if shares > 0.0 and last_price > 0.0:
+            market_value += shares * last_price
+
+        if shares > 0.0 and entry > 0.0 and last_price > 0.0:
+            unrealized += (last_price - entry) * shares
+        else:
+            unrealized += _safe_float(
+                pos.get("pnl_dollars", pos.get("unrealized_pnl", 0.0))
+            )
+
+    pf["positions"] = positions
+    pf["equity"] = round(cash + market_value, 4)
+
+    perf = _performance(pf, state)
+    perf["open_positions"] = positions
+    perf["unrealized_pnl"] = round(unrealized, 4)
+    pf["performance"] = perf
+
+    return {
+        "cash": round(cash, 4),
+        "market_value": round(market_value, 4),
+        "equity": pf["equity"],
+        "unrealized_pnl": perf["unrealized_pnl"],
+    }
+
+
 def _status(core: Any = None) -> Dict[str, Any]:
     pf = _portfolio(core)
     state = _load_state(core)
     positions = _positions(pf, state)
+    spy = _spy_position(positions)
 
-    spy = positions.get("SPY")
-    if not isinstance(spy, dict):
-        spy = None
+    risk = _risk_controls(pf, state)
 
-    broken = False
-    if spy is not None:
-        broken = (
-            _safe_float(spy.get("entry")) <= 0.0
-            or _safe_float(spy.get("shares")) <= 0.0
-        )
+    alias_needed = _alias_repair_needed(spy)
+    stale_risk_needed = _stale_risk_repair_needed(pf, state, spy)
+    repair_needed = alias_needed or stale_risk_needed
 
     cash = _safe_float(pf.get("cash", state.get("cash", 0.0)))
     equity = _safe_float(pf.get("equity", state.get("equity", 0.0)))
 
     return {
         "status": "ok",
-        "overall": "warn" if broken else "pass",
+        "overall": "warn" if repair_needed else "pass",
         "type": "surge_state_repair_status",
         "version": VERSION,
         "generated_local": _now(core),
@@ -147,8 +313,11 @@ def _status(core: Any = None) -> Dict[str, Any]:
         "live_trade_authority": "none",
         "ml_authority": "shadow_only",
         "authority_changed": False,
-        "repair_needed": broken,
+        "repair_needed": repair_needed,
+        "alias_repair_needed": alias_needed,
+        "stale_risk_repair_needed": stale_risk_needed,
         "detected_position": spy,
+        "risk_controls": risk,
         "cash": round(cash, 4),
         "equity": round(equity, 4),
         "repair_plan": {
@@ -156,9 +325,12 @@ def _status(core: Any = None) -> Dict[str, Any]:
             "entry": SPY_REPAIR["entry"],
             "shares": SPY_REPAIR["shares"],
             "cash_action": "no_cash_change",
+            "risk_action": (
+                "clear_stale_8pct_drawdown_flags_only_if_spy_is_complete_and_realized_today_is_nonnegative"
+            ),
             "reason": (
                 "Cash was already deducted by the prior paper surge executor run; "
-                "complete the malformed position only."
+                "complete malformed aliases and clear stale risk flags only when the account reality is clean."
             ),
         },
         "guardrails": {
@@ -166,6 +338,7 @@ def _status(core: Any = None) -> Dict[str, Any]:
             "does_not_change_cash": True,
             "does_not_change_ml_authority": True,
             "does_not_enable_live_trading": True,
+            "does_not_bypass_hard_blocks": True,
         },
     }
 
@@ -180,87 +353,44 @@ def apply_repair(core: Any = None, confirm: bool = False) -> Dict[str, Any]:
 
     if not status.get("repair_needed"):
         status["executed"] = False
-        status["message"] = "No matching broken SPY paper position found."
+        status["message"] = "No repair needed."
         return status
 
     pf = _portfolio(core)
     state = _load_state(core)
     positions = _positions(pf, state)
+    spy = _spy_position(positions)
 
-    spy = positions.get("SPY")
-    if not isinstance(spy, dict):
-        spy = {}
+    actions = []
 
-    entry = float(SPY_REPAIR["entry"])
-    shares = float(SPY_REPAIR["shares"])
+    if status.get("alias_repair_needed") and spy is not None:
+        repaired_spy = _repair_spy_aliases(spy)
+        positions["SPY"] = repaired_spy
+        pf["positions"] = positions
+        actions.append("repaired_spy_position_aliases")
 
-    last_price = _safe_float(spy.get("last_price"), entry)
-    if last_price <= 0:
-        last_price = entry
+    if status.get("stale_risk_repair_needed"):
+        risk = _risk_controls(pf, state)
+        risk["daily_loss_pct"] = 0.0
+        risk["daily_drawdown_pct"] = 0.0
+        risk["intraday_drawdown_pct"] = 0.0
+        risk["self_defense_active"] = False
+        risk["self_defense_reason"] = "feedback loop clear"
+        risk["surge_state_repair_version"] = VERSION
+        risk["surge_state_repair_time"] = _now(core)
+        pf["risk_controls"] = risk
+        actions.append("cleared_stale_risk_drawdown_flags")
 
-    pnl = _compute_pnl(entry, last_price, shares)
-
-    repaired = dict(spy)
-    repaired.update(
-        {
-            "entry": round(entry, 4),
-            "shares": round(shares, 6),
-            "last_price": round(last_price, 4),
-            "side": "long",
-            "sector": "SPY",
-            "score": _safe_float(spy.get("score"), 0.0),
-            "adds": _safe_int(spy.get("adds"), 0),
-            "entry_time": spy.get("entry_time") or int(dt.datetime.now().timestamp()),
-            "pnl_dollars": pnl["pnl_dollars"],
-            "pnl_pct": pnl["pnl_pct"],
-            "entry_tag": repaired.get("entry_tag") or "paper_surge_entry_repaired",
-            "trade_authority": "paper_only_state_entry",
-            "ml_authority": "shadow_only",
-            "repair_version": VERSION,
-        }
-    )
-
-    positions["SPY"] = repaired
-    pf["positions"] = positions
-
-    cash = _safe_float(pf.get("cash", state.get("cash", 0.0)))
-    market_value = 0.0
-    unrealized = 0.0
-
-    for pos in positions.values():
-        if not isinstance(pos, dict):
-            continue
-
-        qty = _safe_float(pos.get("shares"))
-        lp = _safe_float(pos.get("last_price"), _safe_float(pos.get("entry")))
-        ent = _safe_float(pos.get("entry"), lp)
-
-        market_value += qty * lp
-
-        if qty and ent:
-            unrealized += (lp - ent) * qty
-        else:
-            unrealized += _safe_float(pos.get("pnl_dollars"), 0.0)
-
-    if cash:
-        pf["equity"] = round(cash + market_value, 4)
-
-    perf = pf.get("performance")
-    if not isinstance(perf, dict):
-        perf = {}
-
-    perf["open_positions"] = positions
-    perf["unrealized_pnl"] = round(unrealized, 4)
-    pf["performance"] = perf
-
+    totals = _recompute_portfolio_totals(pf, state)
     save_result = _save(core, pf)
 
     after = _status(core)
     after.update(
         {
             "executed": True,
-            "message": "Repaired malformed SPY paper surge position. Cash was not changed.",
-            "repaired_position": repaired,
+            "message": "Applied surge state repair. Cash was not changed.",
+            "actions": actions,
+            "post_repair_totals": totals,
             "persistence": save_result,
         }
     )
