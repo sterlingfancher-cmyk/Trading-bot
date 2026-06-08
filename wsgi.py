@@ -108,6 +108,7 @@ AUX_MODULES = (
     ("runtime_module_registry", (("apply", (core,)), ("register_routes", (app, core)))),
     ("expansion_impact_monitor", (("apply", (core,)), ("register_routes", (app, core)))),
     ("missed_mover_audit", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("market_surge_aggression", (("apply", (core,)), ("register_routes", (app, core)))),
     ("live_volatility", (("apply", (core,)), ("register_routes", (app, core)))),
     ("classic_signal_mode", (("apply", (core,)), ("register_routes", (app, core)))),
     ("intraday_timing", (("apply", (core,)), ("register_routes", (app, core)))),
