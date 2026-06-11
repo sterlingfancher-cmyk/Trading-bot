@@ -110,6 +110,7 @@ AUX_MODULES = (
     ("missed_mover_audit", (("apply", (core,)), ("register_routes", (app, core)))),
     ("market_surge_aggression", (("apply", (core,)), ("register_routes", (app, core)))),
     ("market_surge_queue_executor", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("market_surge_deployment_mode", (("apply", (core,)), ("register_routes", (app, core)))),
     ("surge_state_repair", (("apply", (core,)), ("register_routes", (app, core)))),
     ("live_volatility", (("apply", (core,)), ("register_routes", (app, core)))),
     ("classic_signal_mode", (("apply", (core,)), ("register_routes", (app, core)))),
