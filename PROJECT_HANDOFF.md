@@ -1,343 +1,229 @@
-# Automated Trading Bot Project Handoff
+Automated Trading Project Handoff — Updated June 11, 2026
 
-Last updated: 2026-06-04
+Current System Status
 
-Continuity source for future chats. New sessions should read this file, inspect recent commits, preserve the one-test workflow, and continue without asking the operator to reconstruct prior work.
+Base app URL:
 
-## Repository and routine test
+https://trading-bot-clean.up.railway.app
 
-- Repository: `sterlingfancher-cmyk/Trading-bot`
-- Railway base URL: `https://trading-bot-clean.up.railway.app`
-- Main app file: `app.py`
-- Startup file: `wsgi.py`
-- Persistent state: `/data/state.json`
-- Routine test link: `https://trading-bot-clean.up.railway.app/paper/self-check`
+GitHub repo:
 
-Routine post-push rule: run only `/paper/self-check`. Extra diagnostic routes are optional and only for debugging.
+sterlingfancher-cmyk/Trading-bot
 
-## Current guardrails
+Current operating mode:
 
-- Preserve one-test workflow.
-- Keep ML shadow-only until promotion gates pass and the operator approves.
-- Do not lower risk controls or entry-quality discipline without explicit approval.
-- Manual `/paper/run` stays protected by `RUN_KEY`.
-- Keep this handoff updated after meaningful code changes or test results.
+* Paper trading only.
+* Live trade authority: none.
+* ML authority: shadow-only.
+* Routine test link: https://trading-bot-clean.up.railway.app/paper/self-check
+* Do not use heavy diagnostic routes unless intentionally debugging.
+* Do not run repair routes unless a specific state issue appears.
+* Do not run execution routes after hours.
 
-## Latest known status
+Latest after-hours self-check showed:
 
-Most recent self-check before the newest expansion push was 2026-06-04 15:26 CDT:
+* Overall: pass.
+* Status: ok.
+* Warnings: none.
+* Cash: 10960.96.
+* Equity: 10960.96.
+* Open positions: 0.
+* Realized today: 0.00.
+* Realized total: +960.98.
+* Daily loss pct: 0.0.
+* Intraday drawdown pct: 0.0.
+* Self-defense active: false.
+* Scanner signals found: 39.
+* Blocked entries: 0.
+* Execution rows: 87 / 150.
+* ML remains shadow-only.
+* Phase 3A is not ready yet.
 
-- Overall: `pass`
-- Status: `ok`
-- Warnings: `[]`
-- Equity: about `$11,001.76`
-- Cash: about `$9,672.49`
-- Open positions: `3`
-- Positions: `DELL`, `QQQ`, `SNDK`
-- Realized total: `$857.68`
-- Unrealized P&L: about `$144.10`
-- Losses today: `0`
-- Execution rows: `82 / 150`
-- ML rows: `6000`
-- Labeled outcome rows: about `1823`
-- Observed outcomes: `49`
-- Latest predictions: `25`
-- Phase 3A ready: `false`
-- State size: `14,499,209` bytes after retention, down from about `16.86 MB`
+Recent Critical Fixes
 
-## Active modules
+SPY malformed paper position repair
 
-### Shadow speculative momentum discovery
+A prior market surge queue executor entry deducted cash for SPY but stored the position in a malformed format. SPY showed entry_price and qty, but the normal status route expected legacy fields entry and shares.
 
-File:
+This caused equity and risk controls to appear wrong.
 
-- `missed_mover_audit.py`
+Fixed with:
+
+* surge_state_repair.py
+* Version: surge-state-repair-2026-06-08-v4-clear-stale-halt-flag
+
+Confirmed fixed:
+
+* SPY entry: 739.22.
+* SPY shares: 1.182638.
+* Equity recalculated correctly.
+* Stale 8% drawdown flags cleared.
+* Stale halt flags cleared.
+* Self-check returned pass afterward.
+
+Do not run the repair endpoint again unless the state becomes malformed again.
+
+Repair routes:
+
+* /paper/surge-state-repair-status
+* /paper/surge-state-repair?confirm=1
+
+Current Concern
+
+The bot is too passive on broad market surge days.
+
+Recent examples:
+
+* QQQ had a strong surge day.
+* S&P 500 had a strong surge day.
+* Bot stayed 100% in cash.
+* Scanner saw activity, but post-harvest redeployment did not qualify any entries.
+* This protected capital, but it missed broad market participation.
+
+The user does not want tiny starter-only allocation during obvious broad market surge conditions. The preferred design is larger surge participation with strict hard stops and trailing stops.
+
+New Module Added / Being Added
+
+New file:
+
+market_surge_deployment_mode.py
+
+Purpose:
+
+Aggressive paper-only market surge deployment mode.
 
 Routes:
 
-- `/paper/missed-mover-audit?symbol=MNTS`
-- `/paper/missed-mover-audit-status`
-- `/paper/speculative-momentum-status`
-- `/paper/speculative-movers`
+* /paper/market-surge-deployment-status
+* /paper/market-surge-deployment-plan
+* /paper/market-surge-deployment-execute?confirm=1
 
-Purpose:
+Core design:
 
-- Add small-cap ETF context using IWM, IWO, IJR, XBI, ARKK, and UFO.
-- Add shadow-only speculative buckets for space momentum, small-cap momentum, bitcoin/AI compute, AI software momentum, and speculative biotech.
-- Add dynamic missed-mover discovery tags.
-- Report top shadow-only speculative movers seen.
-- Distinguish universe gaps from rejected, blocked, or candidate-not-entered symbols.
+* Paper-only.
+* No live trade authority.
+* ML remains shadow-only.
+* Requires clean risk controls.
+* Requires regular market window.
+* Requires high cash percentage.
+* Requires surge confirmation.
+* Uses larger allocations during broad market surge days.
+* Uses hard stop loss and trailing stop metadata.
+* Does not average down.
+* Does not execute without confirm=1.
 
-Guardrails:
+Planned deployment logic:
 
-- Advisory-only.
-- No trading authority.
-- ML remains shadow-only.
-- Does not change risk controls.
-- Does not lower score thresholds.
-- Does not bypass self-defense or final-close protection.
-- One-test workflow preserved.
+Tier 2 surge:
 
-### Missed Mover Audit
+* QQQ up to 20%.
+* SPY up to 10%.
+* SMH up to 5%.
+* Max total deployment: 35%.
 
-File:
+Tier 3 surge:
 
-- `missed_mover_audit.py`
+* QQQ up to 20%.
+* SPY up to 15%.
+* SMH up to 10%.
+* IWM up to 7.5%.
+* Max total deployment: 55%.
 
-Routes:
+Risk cap:
 
-- `/paper/missed-mover-audit?symbol=MNTS`
-- `/paper/missed-mover-audit-status`
+* Max account risk per entry: 0.80%.
+* Default stop loss: 3.5%.
+* Default trailing stop: 2.25%.
+* Profit activation: 1.5%.
+* Profit lock: 0.75%.
 
-Purpose:
+Important wsgi.py Wiring Correction
 
-- Explain why a fast-moving symbol was missed.
-- Determine whether a symbol was in the watchlist/universe, open positions, recent trades, scanner/decision sections, candidate symbols, or blocked symbols.
-- Classify known speculative/microcap buckets such as space and small-cap momentum.
-- Recommend whether the miss looks like a universe gap, rejection/block, or timing/quality-gate issue.
+The repo’s wsgi.py does not use a plain string list for modules. It uses tuple wiring.
 
-Guardrails:
+Do not add:
 
-- Advisory-only.
-- Does not trade.
-- Does not change risk controls.
-- Does not change ML authority.
-- Does not lower thresholds.
-- Does not change the one-test workflow.
+"market_surge_deployment_mode",
 
-### Paper-only controlled expansion
+Correct line to add inside the module tuple list:
 
-Files:
+("market_surge_deployment_mode", (("apply", (core,)), ("register_routes", (app, core)))),
 
-- `paper_controlled_expansion.py`
-- `wsgi.py`
+Place it directly after:
 
-Expected version:
+("market_surge_queue_executor", (("apply", (core,)), ("register_routes", (app, core)))),
 
-```text
-paper-controlled-expansion-2026-06-04-v1
-```
+The section should look like:
 
-Purpose:
+("market_surge_aggression", (("apply", (core,)), ("register_routes", (app, core)))),
+("market_surge_queue_executor", (("apply", (core,)), ("register_routes", (app, core)))),
+("market_surge_deployment_mode", (("apply", (core,)), ("register_routes", (app, core)))),
+("surge_state_repair", (("apply", (core,)), ("register_routes", (app, core)))),
 
-- Paper-only controlled capacity expansion to collect execution observations faster.
-- Effective clean-market max positions: `16`.
-- Post-harvest target open positions: `8`.
-- Post-harvest underdeployment threshold: `6` open positions.
-- Max new entries per cycle: `2`.
-- Starter allocation factor: `0.45`.
-- Max active paper research slots: `2`.
-- Adds `paper_learning` metadata to successful entries and positions.
-- Research-slot trades are marked as excluded from core strategy score but included in ML observation data.
-- ML authority remains `shadow_only`.
-- Normal entry quality checks, cooldowns, stop rules, self-defense, and final-close protections still apply.
+Suggested commit message:
 
-Optional route:
+Wire aggressive market surge deployment mode
 
-```text
-/paper/paper-controlled-expansion-status
-```
-### Runtime module registry and expansion impact monitor
+Post-Deploy Test
 
-Files:
+After Railway redeploys, test:
 
-- `runtime_module_registry.py`
-- `expansion_impact_monitor.py`
-- `wsgi.py`
+https://trading-bot-clean.up.railway.app/paper/market-surge-deployment-status
 
-Purpose:
+Then run normal self-check:
 
-- Verify important runtime overlays are loaded.
-- Confirm optional diagnostic routes are registered.
-- Monitor the paper-only controlled expansion after the 14 → 16 max-position change.
-- Track execution rows, observed outcomes, open positions versus target, paper-learning tag quality, state-size growth, drawdown, losses, and ML authority.
-- Keep both modules advisory-only.
+https://trading-bot-clean.up.railway.app/paper/self-check
 
-Routes:
+Do not run the execute endpoint after hours.
 
-- `/paper/runtime-module-registry-status`
-- `/paper/startup-patch-status`
-- `/paper/expansion-impact-status`
-- `/paper/expansion-impact-monitor`
+Only during regular market hours, and only if status shows deployment_allowed: true and planned_entries is not empty, run:
 
-Guardrails:
+https://trading-bot-clean.up.railway.app/paper/market-surge-deployment-execute?confirm=1
 
-- No trading authority changed.
-- No ML authority changed.
-- No risk controls changed.
-- No entry thresholds lowered.
-- No self-defense/final-close bypass.
-- One-test workflow preserved.
+Then immediately run:
 
-### Post-harvest redeployment
+https://trading-bot-clean.up.railway.app/paper/self-check
 
-Files:
+Current GitHub Workflow Problem
 
-- `post_harvest_redeployment_controller.py`
-- `post_harvest_entry_fallback.py`
+The ChatGPT GitHub connector has recently become unreliable in this thread.
 
-Purpose: controlled starter redeployment after harvesting, without forcing entries or bypassing normal quality/risk gates. With paper-controlled expansion, target open positions are now `8` and underdeployment threshold is `6`.
+Observed issue:
 
-### Decision audit and advisory coaches
+* Assistant repeatedly tried to access GitHub.
+* Connector returned tool-discovery responses instead of moving into actual repo file operations.
+* This caused a loop/freeze behavior.
+* Retry did not solve it.
 
-File: `decision_audit_consolidation.py`
-
-Expected version:
-
-```text
-decision-audit-consolidation-2026-06-04-v6-chief-advisory-coach
-```
-
-Includes Trade Quality Coach, Risk Coach, Post-Harvest Coach, and Chief Advisory Coach. All are advisory-only.
-
-### ML shadow/readiness stack
-
-Files:
-
-- `ml_phase2_shadow.py`
-- `ml_phase25_readiness.py`
-- `ml_feature_journal_quality.py`
-- `intratrade_path_capture.py`
-- `mae_mfe_integration.py`
-
-Status: ML remains shadow-only. Current bottlenecks are execution rows, observed outcomes, regime coverage, MAE/MFE maturity, and formal walk-forward maturity.
-
-### State-size retention
-
-File: `state_size_watchdog.py`
-
-Expected version:
-
-```text
-state-size-watchdog-2026-06-04-v2-retention-policy
-```
-
-Purpose: cap or thin derived telemetry while preserving trades, positions, cash/equity, risk controls, summaries, and execution history. Latest self-check showed state size reduced to `14,499,209` bytes.
-
-## Optional diagnostic routes
-
-Use only when needed:
-
-```text
-/paper/paper-controlled-expansion-status
-/paper/state-size-watchdog
-/paper/telemetry-retention-status
-/paper/ml2-status
-/paper/ml-readiness-status
-/paper/ml-phase25-status
-/paper/ml-feature-journal-status
-/paper/regime-tagging-status
-/paper/mae-mfe-integration-status
-/paper/intratrade-path-status
-/paper/decision-audit-status
-/paper/no-entry-diagnostic
-```
-
-## Update ledger
-
-### 2026-06-05 — Shadow speculative momentum discovery added
-
-- Files changed: `missed_mover_audit.py`, optionally `wsgi.py`, `PROJECT_HANDOFF.md`.
-- Reason: MNTS was confirmed as a scanner-universe gap. Add shadow-only small-cap/speculative discovery so future movers are observed and tagged without being traded.
-- Added small-cap ETF context scanner.
-- Added speculative momentum shadow bucket.
-- Added dynamic missed-mover discovery tags.
-- Added `/paper/speculative-movers` route.
-- Trading authority changed: no.
-- ML authority changed: no.
-- Risk controls changed: no.
-- Entry thresholds changed: no.
-- One-test workflow changed: no.
-
-### 2026-06-04 — Missed Mover Audit added
-
-- Files changed: `missed_mover_audit.py`, `wsgi.py`, `PROJECT_HANDOFF.md`.
-- Reason: MNTS made a large move and was not visible in open positions, candidates, or blocked symbols. Add a diagnostic route to distinguish scanner-universe gaps from rejected/blocked/timing issues.
-- Route: `/paper/missed-mover-audit?symbol=MNTS`.
-- Trading authority changed: no.
-- ML authority changed: no.
-- Risk controls changed: no.
-- Entry thresholds changed: no.
-- One-test workflow changed: no.
-
-### 2026-06-04 — Runtime registry and expansion impact monitor added manually
-
-- Files changed: `runtime_module_registry.py`, `expansion_impact_monitor.py`, `wsgi.py`, `PROJECT_HANDOFF.md`.
-- Reason: after paper-only controlled expansion, add observability before adding more trading features.
-- Runtime registry checks whether critical overlays and optional diagnostic routes are present.
-- Expansion impact monitor tracks execution-row growth, observed outcomes, position count versus target, paper-learning tag quality, state-size growth, drawdown, losses, and ML authority after the expansion.
-- Trading authority changed: no.
-- ML authority changed: no; ML remains shadow-only.
-- Risk controls changed: no.
-- One-test workflow changed: no.
-- Next step: run only `/paper/self-check` after Railway redeploy.
-
-### 2026-06-04 — Paper-only controlled expansion added
-
-- Commit `a1f983daec8118f9eb8e9d12ca8ddb235f66d5e3` — created `paper_controlled_expansion.py`.
-- Commit `1006ae94523019831470ab047e7691f67fdd792c` — wired the module into `wsgi.py` and added optional route registration.
-- Files changed: `paper_controlled_expansion.py`, `wsgi.py`, `PROJECT_HANDOFF.md`.
-- Reason: operator wanted slightly more paper-mode aggressiveness to scale execution observations faster.
-- Capacity changed: clean paper-mode max positions to `16`; post-harvest target to `8`; max entries/cycle remains `2`; starter allocation `0.45`.
-- ML authority changed: no.
-- Risk controls changed: no.
-- One-test workflow changed: no.
-- Next step: run `/paper/self-check` after Railway redeploy and verify clean pass.
-
-### 2026-06-04 — End-of-day self-check passed after state-size retention
-
-- Commit `437204508a4a85fd5ada07c1f46c1f138b8b84e7` — logged successful EOD self-check.
-- Result: `overall: pass`, `status: ok`, `warnings: []`; state size dropped to `14,499,209` bytes.
-
-### 2026-06-04 — Conservative state-size retention policy added
-
-- Commit `501f47566495e5e4e08c72b9c62cb74ebb9ca09a` — retention policy in `state_size_watchdog.py`.
-- Commit `7f50badf70baca8b6d7a27a92bd234cdfd6d0b7a` — handoff update.
-
-### 2026-06-04 — Feature journal quality and regime tagging added
-
-- Commit `726dd35bb9a6b9bf8b0d3ce43f45a978845b4403` — created `ml_feature_journal_quality.py`.
-- Commit `df2ee8e3938e0323028d548200c8f33c2a98cdb6` — hardened enrichment after ML2 row refresh.
-- Commit `cfb151b244fe093a933ce45e2e1229d0e1424abe` — wired diagnostics.
-
-### 2026-06-04 — MAE/MFE telemetry and formal walk-forward validation upgraded
-
-- Commit `00b25cb8f8927ff545f29821c2430e56b9c80e95` — readiness validation.
-- Commit `f405c2a0582e779a9722fcf73b131632b3c3db2a` — MAE/MFE bridge.
-
-### 2026-06-04 — Chief Advisory Coach added
-
-- Commit `49ede794ad1de0cd2a16ae487fb28ace103913b0` — Chief Advisory Coach.
-- Commit `51a9cd2f6912af04a65650157c89757dde594a25` — handoff update.
-
-## Current upgrade plan
-
-1. Run `/paper/self-check` after the paper-controlled expansion push.
-2. Confirm `overall: pass`, `status: ok`, and `warnings: []`.
-3. Keep ML shadow-only.
-4. Continue collecting execution outcomes toward `150` execution rows.
-5. Monitor drawdown, state size, and whether execution rows increase faster.
-6. Add data-fetch retry/backoff only if ticker SSL failures persist.
-
-## New-chat startup prompt
-
-```text
-Please continue my automated trading bot project.
-
-Repo: sterlingfancher-cmyk/Trading-bot
-Railway base URL: https://trading-bot-clean.up.railway.app
-Routine test rule: only use /paper/self-check after normal pushes.
-
-Before making changes:
-1. Review PROJECT_HANDOFF.md.
-2. Review recent GitHub commits.
-3. Preserve the one-test workflow.
-4. Keep ML shadow-only unless promotion gates pass and I approve.
-5. Do not lower risk controls without explicit approval.
-6. Proactively recommend safe observability/readiness/state-stability updates.
-
-Current direction:
-- Paper-only controlled expansion is active: max positions 16, target positions 8, max 2 entries/cycle, starter allocation 0.45, research slots max 2.
-- ML remains shadow-only.
-- Continue collecting execution rows toward 150.
-```
+Temporary workflow:
+
+* Use downloadable files.
+* Use copy/paste-formatted .txt files when GitHub mobile is sensitive to formatting.
+* Do not depend on the GitHub connector until the workflow is debugged.
+
+User preference:
+
+* Full replacement files.
+* Downloadable file packages.
+* Clear instructions.
+* No partial patches unless absolutely necessary.
+* No smart quotes.
+* No incomplete code snippets.
+* No writing-style formatting for Python code.
+* Plain code blocks or downloadable .txt files are preferred.
+
+Next assistant priority after this module:
+
+Figure out why GitHub tool workflow is failing compared with how it worked a week ago. Do not continue building new trading modules until the GitHub update/push workflow is reliable again, unless the user explicitly asks.
+
+Current Trading Development Priorities
+
+1. Finish wiring and testing market_surge_deployment_mode.py.
+2. Confirm route loads:
+    * /paper/market-surge-deployment-status
+3. Confirm no after-hours execution.
+4. Next market surge day, check whether it plans QQQ/SPY/SMH entries correctly.
+5. Keep ML shadow-only until Phase 3A readiness improves.
+6. Continue collecting execution rows toward 150.
+7. Maintain paper-only guardrails.
+8. Fix GitHub workflow reliability before major future updates.
