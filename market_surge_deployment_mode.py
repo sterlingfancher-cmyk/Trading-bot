@@ -4,11 +4,21 @@ Routes:
 - /paper/market-surge-deployment-status
 - /paper/market-surge-deployment-plan
 - /paper/market-surge-deployment-execute?confirm=1
+- /paper/market-surge-deployment-auto-fire
+- /paper/market-surge-deployment-autofire
 
 This module does not execute live trades, does not change ML authority, and
 does not bypass risk controls. It allows larger paper-only deployment during
 confirmed broad market surge conditions while requiring hard stops, trailing
-stops, clean risk controls, and explicit confirm=1 execution.
+stops, clean risk controls, and explicit execution controls.
+
+Auto-fire is paper-only and intentionally narrow:
+- regular market entry window only
+- clean risk controls only
+- confirmed broad market surge only
+- high cash percentage only
+- one successful auto-fire event per local trading day
+- no averaging down and no live broker calls
 """
 from __future__ import annotations
 
@@ -21,7 +31,7 @@ except Exception:
     ZoneInfo = None  # type: ignore
 
 
-VERSION = "market-surge-deployment-mode-2026-06-11-v1-aggressive-paper-basket"
+VERSION = "market-surge-deployment-mode-2026-06-15-v2-paper-auto-fire"
 REGISTERED_APP_IDS: set[int] = set()
 
 MAX_ACCOUNT_RISK_PER_ENTRY_PCT = 0.80
@@ -35,6 +45,11 @@ DEFAULT_STOP_LOSS_PCT = 3.5
 DEFAULT_TRAILING_STOP_PCT = 2.25
 DEFAULT_PROFIT_ACTIVATION_PCT = 1.5
 DEFAULT_PROFIT_LOCK_PCT = 0.75
+
+AUTO_FIRE_ENABLED = True
+AUTO_FIRE_MAX_SUCCESSFUL_FIRES_PER_DAY = 1
+AUTO_FIRE_ROUTE = "/paper/market-surge-deployment-auto-fire"
+AUTO_FIRE_ALIAS_ROUTE = "/paper/market-surge-deployment-autofire"
 
 CENTRAL_TZ_NAME = "America/Chicago"
 
@@ -50,6 +65,13 @@ def _now_text(core: Any = None) -> str:
         return str(core.local_ts_text())
     except Exception:
         return _central_now().strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def _today(core: Any = None) -> str:
+    text = _now_text(core)
+    if text:
+        return str(text).split(" ")[0]
+    return _central_now().strftime("%Y-%m-%d")
 
 
 def _is_regular_market_window(now: Optional[dt.datetime] = None) -> bool:
@@ -101,10 +123,20 @@ def _safe_bool(value: Any, default: bool = False) -> bool:
 
 def _portfolio(core: Any = None) -> Dict[str, Any]:
     try:
-        pf = getattr(core, "portfolio", {})
-        return pf if isinstance(pf, dict) else {}
+        pf = getattr(core, "portfolio", None)
+        if isinstance(pf, dict):
+            return pf
     except Exception:
-        return {}
+        pass
+
+    try:
+        state = core.load_state()
+        if isinstance(state, dict):
+            return state
+    except Exception:
+        pass
+
+    return {}
 
 
 def _load_state(core: Any = None) -> Dict[str, Any]:
@@ -158,6 +190,8 @@ def _market_surge_state(pf: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, 
         state.get("market_surge_aggression"),
         pf.get("paper_market_surge_aggression"),
         state.get("paper_market_surge_aggression"),
+        pf.get("market_surge"),
+        state.get("market_surge"),
     ]
     for obj in candidates:
         if isinstance(obj, dict):
@@ -306,6 +340,12 @@ def _infer_surge_level(pf: Dict[str, Any], state: Dict[str, Any]) -> Tuple[int, 
         surge.get("surge_level", surge.get("level", surge.get("market_surge_level", 0))),
         0,
     )
+    eligible_mode = _safe_bool(surge.get("eligible_mode"), False)
+
+    if explicit_level >= 2 and eligible_mode:
+        reasons.append(f"explicit_surge_level:{explicit_level}")
+        reasons.append("eligible_mode:true")
+        return min(explicit_level, 3), reasons
     if explicit_level >= 2:
         reasons.append(f"explicit_surge_level:{explicit_level}")
         return min(explicit_level, 3), reasons
@@ -317,8 +357,14 @@ def _infer_surge_level(pf: Dict[str, Any], state: Dict[str, Any]) -> Tuple[int, 
         reasons.append(f"market_mode:{market_mode or regime}")
         return 2, reasons
 
-    signals_found = _safe_int(scanner.get("signals_found"), 0)
-    blocked_entries = _safe_int(scanner.get("blocked_entries_count"), 0)
+    signals_found = _safe_int(
+        scanner.get("signals_found", scanner.get("total_signals", scanner.get("signals", 0))),
+        0,
+    )
+    blocked_entries = _safe_int(
+        scanner.get("blocked_entries_count", scanner.get("blocked_entries", 0)),
+        0,
+    )
 
     if signals_found >= 35 and blocked_entries == 0:
         reasons.append(f"scanner_activity:{signals_found}")
@@ -400,6 +446,30 @@ def _planned_entry(
         "capped_by_risk": capped_by_risk,
         "eligible": price > 0.0 and qty > 0.0 and allocation_dollars > 0.0,
     }
+
+
+def _auto_fire_ledger(pf: Dict[str, Any]) -> Dict[str, Any]:
+    ledger = pf.get("market_surge_deployment_auto_fire_ledger")
+    if not isinstance(ledger, dict):
+        ledger = {}
+    pf["market_surge_deployment_auto_fire_ledger"] = ledger
+    return ledger
+
+
+def _auto_fire_today_row(pf: Dict[str, Any], today: str) -> Dict[str, Any]:
+    ledger = _auto_fire_ledger(pf)
+    row = ledger.get(today)
+    if not isinstance(row, dict):
+        row = {
+            "date": today,
+            "successful_fires": 0,
+            "attempts": 0,
+            "fired_symbols": [],
+            "last_attempt_local": None,
+            "last_success_local": None,
+        }
+    ledger[today] = row
+    return row
 
 
 def _build_plan(core: Any = None) -> Dict[str, Any]:
@@ -490,8 +560,18 @@ def _build_plan(core: Any = None) -> Dict[str, Any]:
         "max_total_deployment_pct": max_total_pct,
         "planned_total_deployment_pct": planned_total_pct,
         "planned_entries": planned_entries,
+        "auto_fire": {
+            "enabled": AUTO_FIRE_ENABLED,
+            "route": AUTO_FIRE_ROUTE,
+            "alias_route": AUTO_FIRE_ALIAS_ROUTE,
+            "max_successful_fires_per_day": AUTO_FIRE_MAX_SUCCESSFUL_FIRES_PER_DAY,
+            "requires_confirm_query_param": False,
+            "paper_only": True,
+        },
         "guardrails": {
             "does_not_execute_without_confirm": True,
+            "auto_fire_has_separate_daily_ledger": True,
+            "auto_fire_regular_market_only": True,
             "does_not_enable_live_trading": True,
             "does_not_change_ml_authority": True,
             "does_not_bypass_risk_controls": True,
@@ -564,8 +644,38 @@ def _position_from_entry(entry: Dict[str, Any], now_text: str) -> Dict[str, Any]
         "pnl_pct": 0.0,
         "unrealized_pnl": 0.0,
         "unrealized_pnl_pct": 0.0,
+        "auto_fire_eligible": True,
         "version": VERSION,
     }
+
+
+def _append_trade_rows(pf: Dict[str, Any], executed_entries: List[Dict[str, Any]], now_text: str) -> None:
+    if not executed_entries:
+        return
+
+    trades = pf.get("trades")
+    if not isinstance(trades, list):
+        trades = []
+
+    for row in executed_entries:
+        trades.append(
+            {
+                "time": now_text,
+                "symbol": row.get("symbol"),
+                "side": "buy",
+                "type": "paper_market_surge_deployment",
+                "source": "market_surge_deployment_mode",
+                "entry": row.get("entry"),
+                "shares": row.get("shares"),
+                "allocation_dollars": row.get("allocation_dollars"),
+                "allocation_pct": row.get("allocation_pct"),
+                "live_trade_authority": "none",
+                "ml_authority": "shadow_only",
+                "version": VERSION,
+            }
+        )
+
+    pf["trades"] = trades[-1000:]
 
 
 def _recompute_portfolio_totals(pf: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
@@ -604,17 +714,17 @@ def _recompute_portfolio_totals(pf: Dict[str, Any], state: Dict[str, Any]) -> Di
     }
 
 
-def _execute(core: Any = None, confirm: bool = False) -> Dict[str, Any]:
-    plan = _build_plan(core)
-
-    if not confirm:
-        plan["executed"] = False
-        plan["message"] = "Preview only. Add confirm=1 to execute paper-only surge deployment."
-        return plan
-
+def _execute_confirmed(
+    core: Any,
+    plan: Dict[str, Any],
+    *,
+    auto_fire: bool = False,
+    trigger: str = "manual_confirm",
+) -> Dict[str, Any]:
     if not plan.get("deployment_allowed"):
         plan["executed"] = False
         plan["message"] = "No execution. Deployment is not allowed by current guardrails."
+        plan["auto_fire_trigger"] = trigger if auto_fire else None
         return plan
 
     pf = _portfolio(core)
@@ -646,6 +756,8 @@ def _execute(core: Any = None, confirm: bool = False) -> Dict[str, Any]:
             continue
 
         position = _position_from_entry(entry, now_text)
+        position["auto_fire"] = bool(auto_fire)
+        position["auto_fire_trigger"] = trigger if auto_fire else None
         positions[symbol] = position
         cash = round(cash - allocation, 4)
 
@@ -659,11 +771,14 @@ def _execute(core: Any = None, confirm: bool = False) -> Dict[str, Any]:
                 "account_risk_pct": entry.get("account_risk_pct"),
                 "planned_stop": position["planned_stop"],
                 "trailing_stop": position["trailing_stop"],
+                "auto_fire": bool(auto_fire),
             }
         )
 
     pf["positions"] = positions
     pf["cash"] = round(cash, 4)
+
+    _append_trade_rows(pf, executed_entries, now_text)
 
     deployment_journal = pf.get("market_surge_deployment_journal")
     if not isinstance(deployment_journal, list):
@@ -672,6 +787,8 @@ def _execute(core: Any = None, confirm: bool = False) -> Dict[str, Any]:
     journal_row = {
         "time": now_text,
         "version": VERSION,
+        "auto_fire": bool(auto_fire),
+        "auto_fire_trigger": trigger if auto_fire else None,
         "executed_entries": executed_entries,
         "skipped_entries": skipped_entries,
         "surge_level": plan.get("surge_level"),
@@ -681,6 +798,24 @@ def _execute(core: Any = None, confirm: bool = False) -> Dict[str, Any]:
     }
     deployment_journal.append(journal_row)
     pf["market_surge_deployment_journal"] = deployment_journal[-100:]
+
+    if auto_fire:
+        today = _today(core)
+        row = _auto_fire_today_row(pf, today)
+        row["attempts"] = _safe_int(row.get("attempts"), 0) + 1
+        row["last_attempt_local"] = now_text
+        if executed_entries:
+            row["successful_fires"] = _safe_int(row.get("successful_fires"), 0) + 1
+            row["last_success_local"] = now_text
+            fired_symbols = row.get("fired_symbols")
+            if not isinstance(fired_symbols, list):
+                fired_symbols = []
+            for item in executed_entries:
+                symbol = str(item.get("symbol", "")).upper()
+                if symbol and symbol not in fired_symbols:
+                    fired_symbols.append(symbol)
+            row["fired_symbols"] = fired_symbols
+        _auto_fire_ledger(pf)[today] = row
 
     totals = _recompute_portfolio_totals(pf, state)
     save_result = _save(core, pf)
@@ -696,6 +831,8 @@ def _execute(core: Any = None, confirm: bool = False) -> Dict[str, Any]:
         "live_trade_authority": "none",
         "ml_authority": "shadow_only",
         "authority_changed": False,
+        "auto_fire": bool(auto_fire),
+        "auto_fire_trigger": trigger if auto_fire else None,
         "executed": bool(executed_entries),
         "message": (
             "Executed paper-only aggressive market surge deployment."
@@ -710,8 +847,78 @@ def _execute(core: Any = None, confirm: bool = False) -> Dict[str, Any]:
     }
 
 
+def _execute(core: Any = None, confirm: bool = False) -> Dict[str, Any]:
+    plan = _build_plan(core)
+
+    if not confirm:
+        plan["executed"] = False
+        plan["message"] = "Preview only. Add confirm=1 to execute paper-only surge deployment."
+        return plan
+
+    return _execute_confirmed(core, plan, auto_fire=False, trigger="manual_confirm")
+
+
+def _auto_fire(core: Any = None, trigger: str = "auto_fire_route") -> Dict[str, Any]:
+    plan = _build_plan(core)
+    pf = _portfolio(core)
+    state = _load_state(core)
+    today = _today(core)
+    now_text = _now_text(core)
+
+    plan["auto_fire_trigger"] = trigger
+    plan["auto_fire_requested_local"] = now_text
+
+    if not AUTO_FIRE_ENABLED:
+        plan["executed"] = False
+        plan["auto_fire_blocked"] = True
+        plan["blockers"] = list(plan.get("blockers", [])) + ["auto_fire_disabled"]
+        plan["overall"] = "stand_down"
+        plan["message"] = "Auto-fire is disabled."
+        return plan
+
+    row = _auto_fire_today_row(pf, today)
+    successful_fires = _safe_int(row.get("successful_fires"), 0)
+
+    if successful_fires >= AUTO_FIRE_MAX_SUCCESSFUL_FIRES_PER_DAY:
+        plan["executed"] = False
+        plan["auto_fire_blocked"] = True
+        plan["blockers"] = list(plan.get("blockers", [])) + ["auto_fire_daily_limit_reached"]
+        plan["overall"] = "stand_down"
+        plan["message"] = "Auto-fire daily limit already reached."
+        return plan
+
+    if not plan.get("deployment_allowed"):
+        row["attempts"] = _safe_int(row.get("attempts"), 0) + 1
+        row["last_attempt_local"] = now_text
+        _auto_fire_ledger(pf)[today] = row
+        _save(core, pf)
+
+        plan["executed"] = False
+        plan["auto_fire_blocked"] = True
+        plan["message"] = "Auto-fire stood down because deployment guardrails are not clear."
+        return plan
+
+    existing_symbols = {str(symbol).upper() for symbol in _positions(pf, state).keys()}
+    planned_symbols = [str(item.get("symbol", "")).upper() for item in plan.get("planned_entries", [])]
+    new_symbols = [symbol for symbol in planned_symbols if symbol and symbol not in existing_symbols]
+
+    if not new_symbols:
+        plan["executed"] = False
+        plan["auto_fire_blocked"] = True
+        plan["blockers"] = list(plan.get("blockers", [])) + ["auto_fire_no_new_symbols"]
+        plan["overall"] = "stand_down"
+        plan["message"] = "Auto-fire found no new symbols to deploy."
+        return plan
+
+    return _execute_confirmed(core, plan, auto_fire=True, trigger=trigger)
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     return _build_plan(core)
+
+
+def auto_fire(core: Any = None) -> Dict[str, Any]:
+    return _auto_fire(core, trigger="module_auto_fire")
 
 
 def register_routes(flask_app: Any, core: Any = None) -> None:
@@ -753,6 +960,28 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
             "/paper/market-surge-deployment-execute",
             "market_surge_deployment_execute",
             execute_route,
+        )
+
+    if AUTO_FIRE_ROUTE not in existing:
+
+        def auto_fire_route():
+            return jsonify(_auto_fire(core, trigger="route:auto-fire"))
+
+        flask_app.add_url_rule(
+            AUTO_FIRE_ROUTE,
+            "market_surge_deployment_auto_fire",
+            auto_fire_route,
+        )
+
+    if AUTO_FIRE_ALIAS_ROUTE not in existing:
+
+        def autofire_route():
+            return jsonify(_auto_fire(core, trigger="route:autofire"))
+
+        flask_app.add_url_rule(
+            AUTO_FIRE_ALIAS_ROUTE,
+            "market_surge_deployment_autofire",
+            autofire_route,
         )
 
     REGISTERED_APP_IDS.add(id(flask_app))
