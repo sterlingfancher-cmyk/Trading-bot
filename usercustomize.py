@@ -7,7 +7,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-space-stock-basket-2026-06-16-v4"
+VERSION = "usercustomize-spacex-direct-overlay-2026-06-16-v5"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -49,6 +49,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/post-harvest-entry-fallback-status", "category": "governance", "required": False, "after": "/paper/post-harvest-redeployment-status"},
             {"path": "/paper/post-harvest-opportunity-governor-status", "category": "governance", "required": False, "after": "/paper/post-harvest-entry-fallback-status"},
             {"path": "/paper/space-stock-basket-status", "category": "governance", "required": False, "after": "/paper/post-harvest-opportunity-governor-status"},
+            {"path": "/paper/spacex-direct-overlay-status", "category": "governance", "required": False, "after": "/paper/space-stock-basket-status"},
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
         for endpoint in wanted:
@@ -104,6 +105,7 @@ def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
         ("post_harvest_entry_fallback", "app_and_module"),
         ("post_harvest_opportunity_governor", "app_and_module"),
         ("space_stock_basket", "app_and_module"),
+        ("spacex_direct_overlay", "app_and_module"),
     ):
         _register_module(flask_app, m, module_name, route_args=route_args)
     _REGISTERED_APP_IDS.add(id(flask_app))
@@ -121,6 +123,7 @@ def _watchdog() -> None:
                 _register_module(flask_app, m, "post_harvest_entry_fallback", route_args="app_and_module")
                 _register_module(flask_app, m, "post_harvest_opportunity_governor", route_args="app_and_module")
                 _register_module(flask_app, m, "space_stock_basket", route_args="app_and_module")
+                _register_module(flask_app, m, "spacex_direct_overlay", route_args="app_and_module")
         except Exception:
             pass
         time.sleep(0.1)
