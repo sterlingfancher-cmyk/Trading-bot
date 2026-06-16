@@ -1,4 +1,4 @@
-"""Aggressive paper-only market surge deployment mode.
+"""Hybrid paper-only market surge deployment mode.
 
 Routes:
 - /paper/market-surge-deployment-status
@@ -11,6 +11,12 @@ This module does not execute live trades, does not change ML authority, and
 does not bypass risk controls. It allows larger paper-only deployment during
 confirmed broad market surge conditions while requiring hard stops, trailing
 stops, clean risk controls, and explicit execution controls.
+
+The surge model is hybrid:
+- individual stock leaders from the scanner get priority during surge windows
+- ETFs remain as a broad-market anchor and fallback
+- if no stock leader clears quality/price filters, the module falls back to
+  the ETF surge basket instead of forcing weak single-name entries
 
 Auto-fire is paper-only and intentionally narrow:
 - regular market entry window only
@@ -31,12 +37,23 @@ except Exception:
     ZoneInfo = None  # type: ignore
 
 
-VERSION = "market-surge-deployment-mode-2026-06-15-v2-paper-auto-fire"
+VERSION = "market-surge-deployment-mode-2026-06-16-v3-hybrid-stock-leaders"
 REGISTERED_APP_IDS: set[int] = set()
 
 MAX_ACCOUNT_RISK_PER_ENTRY_PCT = 0.80
 MAX_TOTAL_SURGE_DEPLOYMENT_TIER_2_PCT = 35.0
 MAX_TOTAL_SURGE_DEPLOYMENT_TIER_3_PCT = 55.0
+
+# Surge deployment now uses a stock-leader sleeve first, then an ETF anchor.
+# If no stock leaders clear the filters, ETFs can still use the full surge cap
+# as the safe broad-market fallback.
+TIER_2_STOCK_LEADER_SHARE = 0.60
+TIER_3_STOCK_LEADER_SHARE = 0.70
+MAX_STOCK_LEADERS_TIER_2 = 4
+MAX_STOCK_LEADERS_TIER_3 = 5
+MIN_STOCK_LEADER_PRICE = 3.00
+MIN_STOCK_LEADER_SCORE = 0.038
+MIN_STOCK_LEADER_FALLBACK_SCORE = 0.032
 
 MIN_CASH_PCT_FOR_SURGE_DEPLOYMENT = 55.0
 MAX_OPEN_POSITIONS_AFTER_SURGE = 5
@@ -52,6 +69,35 @@ AUTO_FIRE_ROUTE = "/paper/market-surge-deployment-auto-fire"
 AUTO_FIRE_ALIAS_ROUTE = "/paper/market-surge-deployment-autofire"
 
 CENTRAL_TZ_NAME = "America/Chicago"
+
+SURGE_ETF_SYMBOLS = {"QQQ", "SPY", "SMH", "IWM", "IWO"}
+ETF_EXCLUSION_UNIVERSE = {
+    "SPY",
+    "QQQ",
+    "SMH",
+    "IWM",
+    "IWO",
+    "DIA",
+    "VTI",
+    "VOO",
+    "XLK",
+    "XLF",
+    "XLE",
+    "XLI",
+    "XLV",
+    "XLY",
+    "XLP",
+    "XLC",
+    "XLU",
+    "XLB",
+    "XLRE",
+    "ARKK",
+    "SOXX",
+    "IBB",
+    "GLD",
+    "SLV",
+    "TLT",
+}
 
 
 def _central_now() -> dt.datetime:
@@ -382,6 +428,22 @@ def _max_total_deployment_pct(surge_level: int) -> float:
     return 0.0
 
 
+def _stock_leader_share(surge_level: int) -> float:
+    if surge_level >= 3:
+        return TIER_3_STOCK_LEADER_SHARE
+    if surge_level >= 2:
+        return TIER_2_STOCK_LEADER_SHARE
+    return 0.0
+
+
+def _max_stock_leaders(surge_level: int) -> int:
+    if surge_level >= 3:
+        return MAX_STOCK_LEADERS_TIER_3
+    if surge_level >= 2:
+        return MAX_STOCK_LEADERS_TIER_2
+    return 0
+
+
 def _base_symbol_weights(surge_level: int) -> List[Tuple[str, float]]:
     if surge_level >= 3:
         return [
@@ -401,6 +463,282 @@ def _base_symbol_weights(surge_level: int) -> List[Tuple[str, float]]:
     return []
 
 
+def _scaled_etf_anchor_weights(surge_level: int, stock_leaders_available: bool) -> List[Tuple[str, float]]:
+    base = _base_symbol_weights(surge_level)
+    if not base:
+        return []
+
+    max_total = _max_total_deployment_pct(surge_level)
+    if max_total <= 0.0:
+        return []
+
+    # If no individual stock leader clears filters, ETFs can use the original
+    # surge basket as a fallback. Otherwise ETFs are intentionally smaller.
+    if not stock_leaders_available:
+        return base
+
+    stock_share = _stock_leader_share(surge_level)
+    anchor_target = max_total * max(0.0, min(1.0, 1.0 - stock_share))
+    base_total = sum(weight for _, weight in base)
+    if base_total <= 0.0:
+        return []
+
+    scale = anchor_target / base_total
+    return [(symbol, round(weight * scale, 4)) for symbol, weight in base]
+
+
+def _signal_symbol(signal: Dict[str, Any]) -> str:
+    for key in ("symbol", "ticker", "asset", "name"):
+        value = str(signal.get(key, "") or "").upper().strip()
+        if value:
+            return value
+    return ""
+
+
+def _signal_score(signal: Dict[str, Any]) -> float:
+    keys = (
+        "score",
+        "signal_score",
+        "quality_score",
+        "rank_score",
+        "composite_score",
+        "momentum_score",
+        "relative_strength_score",
+        "rs_score",
+    )
+    return max(_safe_float(signal.get(key), 0.0) for key in keys)
+
+
+def _signal_flag(signal: Dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        if _safe_bool(signal.get(key), False):
+            return True
+    return False
+
+
+def _normalise_signal_item(item: Any, source: str) -> Dict[str, Any] | None:
+    if isinstance(item, dict):
+        signal = dict(item)
+    elif isinstance(item, str):
+        signal = {"symbol": item}
+    else:
+        return None
+
+    symbol = _signal_symbol(signal)
+    if not symbol:
+        return None
+    signal["symbol"] = symbol
+    signal.setdefault("source", source)
+    return signal
+
+
+def _extend_signal_pool(pool: List[Dict[str, Any]], obj: Any, source: str) -> None:
+    if isinstance(obj, list):
+        for item in obj:
+            signal = _normalise_signal_item(item, source)
+            if signal:
+                pool.append(signal)
+        return
+
+    if isinstance(obj, tuple):
+        for item in obj:
+            signal = _normalise_signal_item(item, source)
+            if signal:
+                pool.append(signal)
+        return
+
+    if isinstance(obj, dict):
+        # Some containers are symbol->metadata maps.
+        for key, value in obj.items():
+            if isinstance(value, dict):
+                signal = dict(value)
+                signal.setdefault("symbol", key)
+                signal.setdefault("source", source)
+                normalised = _normalise_signal_item(signal, source)
+                if normalised:
+                    pool.append(normalised)
+
+
+def _scanner_signal_pool(pf: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    pool: List[Dict[str, Any]] = []
+    scanner = _scanner_audit(pf, state)
+    surge = _market_surge_state(pf, state)
+
+    containers = [
+        ("portfolio", pf),
+        ("state", state),
+        ("scanner_audit", scanner),
+        ("market_surge", surge),
+    ]
+
+    keys = (
+        "long_signals",
+        "short_signals",
+        "scanner_signals",
+        "signals",
+        "ranked_signals",
+        "candidate_signals",
+        "candidates",
+        "top_candidates",
+        "top_scanner_candidates",
+        "top_blocked_candidates",
+        "blocked_candidates",
+        "blocked_entries",
+        "top_blocked_symbols",
+        "candidate_symbols",
+        "leader_symbols",
+        "surge_leaders",
+        "relative_strength_leaders",
+        "breakout_candidates",
+    )
+
+    for source, container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            _extend_signal_pool(pool, container.get(key), f"{source}.{key}")
+
+    # Dedupe by symbol, keeping the highest-score version when possible.
+    deduped: Dict[str, Dict[str, Any]] = {}
+    for signal in pool:
+        symbol = _signal_symbol(signal)
+        if not symbol:
+            continue
+        prev = deduped.get(symbol)
+        if prev is None or _signal_score(signal) > _signal_score(prev):
+            deduped[symbol] = signal
+
+    return list(deduped.values())
+
+
+def _compact_signal(signal: Dict[str, Any]) -> Dict[str, Any]:
+    keys = (
+        "symbol",
+        "source",
+        "score",
+        "signal_score",
+        "quality_score",
+        "momentum_score",
+        "relative_strength_score",
+        "rs_score",
+        "volume_ratio",
+        "relative_volume",
+        "change_pct",
+        "pct_change",
+        "sector",
+        "reason",
+    )
+    return {key: signal.get(key) for key in keys if key in signal}
+
+
+def _rank_stock_leaders(
+    core: Any,
+    pf: Dict[str, Any],
+    state: Dict[str, Any],
+    existing_symbols: set[str],
+    surge_level: int,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    reviewed: List[Dict[str, Any]] = []
+    leaders: List[Dict[str, Any]] = []
+
+    for signal in _scanner_signal_pool(pf, state):
+        symbol = _signal_symbol(signal)
+        if not symbol:
+            continue
+
+        reason = ""
+        if symbol in existing_symbols:
+            reason = "already_open"
+        elif symbol in ETF_EXCLUSION_UNIVERSE:
+            reason = "etf_anchor_or_etf_excluded_from_stock_leaders"
+        elif not symbol.replace(".", "").replace("-", "").isalnum():
+            reason = "invalid_symbol_format"
+
+        price, price_source = _get_price(core, pf, state, symbol)
+        score = _signal_score(signal)
+        relative_strength = _signal_flag(
+            signal,
+            "relative_strength",
+            "rs_leader",
+            "relative_strength_leader",
+            "is_relative_strength",
+        )
+        breakout = _signal_flag(
+            signal,
+            "breakout",
+            "is_breakout",
+            "breakout_signal",
+            "is_breakout_signal",
+        )
+        volume_confirmed = _signal_flag(
+            signal,
+            "volume_confirmed",
+            "relative_volume_confirmed",
+            "volume_surge",
+            "volume_breakout",
+        )
+
+        if not reason and price <= 0.0:
+            reason = "missing_price"
+        if not reason and price < MIN_STOCK_LEADER_PRICE:
+            reason = f"price_below_minimum:{price}"
+
+        quality_ok = (
+            score >= MIN_STOCK_LEADER_SCORE
+            or (
+                score >= MIN_STOCK_LEADER_FALLBACK_SCORE
+                and (relative_strength or breakout or volume_confirmed)
+            )
+            or (
+                surge_level >= 3
+                and score >= MIN_STOCK_LEADER_FALLBACK_SCORE
+                and (relative_strength or breakout)
+            )
+        )
+
+        if not reason and not quality_ok:
+            reason = "stock_leader_quality_not_confirmed"
+
+        row = {
+            "symbol": symbol,
+            "price": round(price, 6),
+            "price_source": price_source,
+            "score": round(score, 6),
+            "relative_strength": relative_strength,
+            "breakout": breakout,
+            "volume_confirmed": volume_confirmed,
+            "source": signal.get("source"),
+            "reason": "selected_stock_surge_leader" if not reason else reason,
+            "signal": _compact_signal(signal),
+        }
+        reviewed.append(row)
+
+        if not reason:
+            leaders.append(row)
+
+    leaders = sorted(
+        leaders,
+        key=lambda row: (
+            _safe_float(row.get("score")),
+            1 if row.get("relative_strength") else 0,
+            1 if row.get("breakout") else 0,
+            1 if row.get("volume_confirmed") else 0,
+        ),
+        reverse=True,
+    )
+
+    reviewed = sorted(
+        reviewed,
+        key=lambda row: (
+            1 if row.get("reason") == "selected_stock_surge_leader" else 0,
+            _safe_float(row.get("score")),
+        ),
+        reverse=True,
+    )
+
+    return leaders, reviewed[:20]
+
+
 def _planned_entry(
     core: Any,
     pf: Dict[str, Any],
@@ -409,6 +747,11 @@ def _planned_entry(
     allocation_pct: float,
     total_equity: float,
     remaining_cash: float,
+    *,
+    bucket: str,
+    selection_reason: str,
+    score: float = 0.0,
+    source_signal: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     price, price_source = _get_price(core, pf, state, symbol)
     stop_loss_pct = DEFAULT_STOP_LOSS_PCT
@@ -433,6 +776,10 @@ def _planned_entry(
     return {
         "symbol": symbol,
         "side": "long",
+        "bucket": bucket,
+        "selection_reason": selection_reason,
+        "score": round(score, 6),
+        "source_signal": source_signal or {},
         "allocation_pct": round(allocation_pct, 4),
         "allocation_dollars": allocation_dollars,
         "price": round(price, 6),
@@ -472,6 +819,19 @@ def _auto_fire_today_row(pf: Dict[str, Any], today: str) -> Dict[str, Any]:
     return row
 
 
+def _append_planned_entry(
+    planned_entries: List[Dict[str, Any]],
+    entry: Dict[str, Any],
+    remaining_cash: float,
+    planned_total_pct: float,
+) -> Tuple[float, float]:
+    if entry["eligible"]:
+        planned_entries.append(entry)
+        remaining_cash = round(remaining_cash - _safe_float(entry.get("allocation_dollars")), 4)
+        planned_total_pct = round(planned_total_pct + _safe_float(entry.get("allocation_pct")), 4)
+    return remaining_cash, planned_total_pct
+
+
 def _build_plan(core: Any = None) -> Dict[str, Any]:
     pf = _portfolio(core)
     state = _load_state(core)
@@ -502,35 +862,96 @@ def _build_plan(core: Any = None) -> Dict[str, Any]:
     deployment_allowed = len(blockers) == 0
 
     planned_entries: List[Dict[str, Any]] = []
+    stock_leader_entries: List[Dict[str, Any]] = []
+    etf_anchor_entries: List[Dict[str, Any]] = []
     remaining_cash = cash
     planned_total_pct = 0.0
 
-    for symbol, desired_pct in _base_symbol_weights(surge_level):
-        if symbol.upper() in existing_symbols:
-            continue
+    stock_leaders, stock_leaders_reviewed = _rank_stock_leaders(core, pf, state, existing_symbols, surge_level)
+    max_leaders = _max_stock_leaders(surge_level)
+    stock_target_pct = round(max_total_pct * _stock_leader_share(surge_level), 4)
+    stock_leader_slots = max(0, min(max_leaders, MAX_OPEN_POSITIONS_AFTER_SURGE - len(existing_symbols)))
 
-        if len(existing_symbols) + len(planned_entries) >= MAX_OPEN_POSITIONS_AFTER_SURGE:
-            break
+    if deployment_allowed and stock_target_pct > 0.0 and stock_leader_slots > 0:
+        leaders_to_consider = stock_leaders[:stock_leader_slots]
+        per_leader_pct = round(stock_target_pct / max(1, len(leaders_to_consider)), 4) if leaders_to_consider else 0.0
 
-        remaining_pct_capacity = max_total_pct - planned_total_pct
-        if remaining_pct_capacity <= 0.0:
-            break
+        for leader in leaders_to_consider:
+            if len(existing_symbols) + len(planned_entries) >= MAX_OPEN_POSITIONS_AFTER_SURGE:
+                break
 
-        alloc_pct = min(desired_pct, remaining_pct_capacity)
-        entry = _planned_entry(
-            core=core,
-            pf=pf,
-            state=state,
-            symbol=symbol,
-            allocation_pct=alloc_pct,
-            total_equity=equity,
-            remaining_cash=remaining_cash,
-        )
+            remaining_pct_capacity = max_total_pct - planned_total_pct
+            if remaining_pct_capacity <= 0.0:
+                break
 
-        if entry["eligible"]:
-            planned_entries.append(entry)
-            remaining_cash = round(remaining_cash - entry["allocation_dollars"], 4)
-            planned_total_pct = round(planned_total_pct + entry["allocation_pct"], 4)
+            symbol = str(leader.get("symbol", "")).upper()
+            alloc_pct = min(per_leader_pct, remaining_pct_capacity)
+            entry = _planned_entry(
+                core=core,
+                pf=pf,
+                state=state,
+                symbol=symbol,
+                allocation_pct=alloc_pct,
+                total_equity=equity,
+                remaining_cash=remaining_cash,
+                bucket="surge_stock_leader",
+                selection_reason="ranked_scanner_leader_during_market_surge",
+                score=_safe_float(leader.get("score")),
+                source_signal=leader,
+            )
+
+            before_count = len(planned_entries)
+            remaining_cash, planned_total_pct = _append_planned_entry(
+                planned_entries,
+                entry,
+                remaining_cash,
+                planned_total_pct,
+            )
+            if len(planned_entries) > before_count:
+                stock_leader_entries.append(entry)
+
+    stock_leaders_available = len(stock_leader_entries) > 0
+    etf_weights = _scaled_etf_anchor_weights(surge_level, stock_leaders_available)
+
+    if deployment_allowed:
+        for symbol, desired_pct in etf_weights:
+            if symbol.upper() in existing_symbols:
+                continue
+
+            if len(existing_symbols) + len(planned_entries) >= MAX_OPEN_POSITIONS_AFTER_SURGE:
+                break
+
+            remaining_pct_capacity = max_total_pct - planned_total_pct
+            if remaining_pct_capacity <= 0.0:
+                break
+
+            alloc_pct = min(desired_pct, remaining_pct_capacity)
+            bucket = "benchmark_etf" if symbol in {"QQQ", "SPY", "IWM", "IWO"} else "surge_sector_etf"
+            entry = _planned_entry(
+                core=core,
+                pf=pf,
+                state=state,
+                symbol=symbol,
+                allocation_pct=alloc_pct,
+                total_equity=equity,
+                remaining_cash=remaining_cash,
+                bucket=bucket,
+                selection_reason=(
+                    "etf_anchor_after_stock_leaders"
+                    if stock_leaders_available
+                    else "etf_fallback_no_stock_leader_qualified"
+                ),
+            )
+
+            before_count = len(planned_entries)
+            remaining_cash, planned_total_pct = _append_planned_entry(
+                planned_entries,
+                entry,
+                remaining_cash,
+                planned_total_pct,
+            )
+            if len(planned_entries) > before_count:
+                etf_anchor_entries.append(entry)
 
     if deployment_allowed and not planned_entries:
         blockers.append("no_price_backed_eligible_entries")
@@ -560,6 +981,21 @@ def _build_plan(core: Any = None) -> Dict[str, Any]:
         "max_total_deployment_pct": max_total_pct,
         "planned_total_deployment_pct": planned_total_pct,
         "planned_entries": planned_entries,
+        "surge_model": {
+            "mode": "hybrid_etf_anchor_plus_stock_leaders",
+            "stock_leaders_prioritized": True,
+            "etfs_are_anchor_and_fallback": True,
+            "stock_leader_share": _stock_leader_share(surge_level),
+            "stock_target_deployment_pct": stock_target_pct,
+            "max_stock_leaders": max_leaders,
+            "stock_leaders_selected_count": len(stock_leader_entries),
+            "etf_anchor_selected_count": len(etf_anchor_entries),
+            "stock_entries": stock_leader_entries,
+            "etf_anchor_entries": etf_anchor_entries,
+            "stock_leaders_reviewed": stock_leaders_reviewed,
+            "etf_weights_used": etf_weights,
+            "fallback_rule": "if_no_stock_leader_qualifies_use_price_backed_etf_surge_basket",
+        },
         "auto_fire": {
             "enabled": AUTO_FIRE_ENABLED,
             "route": AUTO_FIRE_ROUTE,
@@ -578,6 +1014,8 @@ def _build_plan(core: Any = None) -> Dict[str, Any]:
             "hard_stop_required": True,
             "trailing_stop_required": True,
             "no_averaging_down": True,
+            "stock_leaders_must_clear_quality_filters": True,
+            "etf_only_is_fallback_not_ceiling": True,
         },
     }
 
@@ -599,7 +1037,8 @@ def _position_from_entry(entry: Dict[str, Any], now_text: str) -> Dict[str, Any]
     planned_stop = round(price * (1.0 - stop_loss_pct / 100.0), 4)
     initial_trailing_stop = round(price * (1.0 - trailing_stop_pct / 100.0), 4)
 
-    bucket = "benchmark_etf" if symbol in {"QQQ", "SPY", "IWM", "IWO"} else "surge_sector_etf"
+    bucket = str(entry.get("bucket") or ("benchmark_etf" if symbol in {"QQQ", "SPY", "IWM", "IWO"} else "surge_stock_leader"))
+    setup_family = "hybrid_market_surge_stock_leader" if bucket == "surge_stock_leader" else "hybrid_market_surge_etf_anchor"
 
     return {
         "symbol": symbol,
@@ -607,15 +1046,17 @@ def _position_from_entry(entry: Dict[str, Any], now_text: str) -> Dict[str, Any]
         "bucket": bucket,
         "sector": symbol,
         "source": "market_surge_deployment_mode",
-        "entry_tag": "aggressive_market_surge_deployment",
+        "entry_tag": "hybrid_market_surge_deployment",
         "entry_context": "broad_market_surge",
         "entry_model": "market_surge_deployment_mode",
         "exit_model": "hard_stop_trailing_profit_lock",
-        "risk_model": "account_risk_capped_surge_basket",
-        "setup_family": "aggressive_market_surge_basket",
+        "risk_model": "account_risk_capped_hybrid_surge_basket",
+        "setup_family": setup_family,
         "trade_authority": "paper_only_state_entry",
         "live_trade_authority": "none",
         "ml_authority": "shadow_only",
+        "selection_reason": entry.get("selection_reason"),
+        "source_signal": entry.get("source_signal", {}),
         "entry": round(price, 4),
         "entry_price": round(price, 4),
         "last_price": round(price, 4),
@@ -636,7 +1077,7 @@ def _position_from_entry(entry: Dict[str, Any], now_text: str) -> Dict[str, Any]
         "take_profit_pct": 8.0,
         "partial_taken": False,
         "adds": 0,
-        "score": 0.0,
+        "score": _safe_float(entry.get("score")),
         "entry_time": int(dt.datetime.now().timestamp()),
         "opened_at": now_text,
         "peak": round(price, 4),
@@ -665,6 +1106,8 @@ def _append_trade_rows(pf: Dict[str, Any], executed_entries: List[Dict[str, Any]
                 "side": "buy",
                 "type": "paper_market_surge_deployment",
                 "source": "market_surge_deployment_mode",
+                "bucket": row.get("bucket"),
+                "selection_reason": row.get("selection_reason"),
                 "entry": row.get("entry"),
                 "shares": row.get("shares"),
                 "allocation_dollars": row.get("allocation_dollars"),
@@ -764,6 +1207,8 @@ def _execute_confirmed(
         executed_entries.append(
             {
                 "symbol": symbol,
+                "bucket": entry.get("bucket"),
+                "selection_reason": entry.get("selection_reason"),
                 "allocation_dollars": allocation,
                 "allocation_pct": entry.get("allocation_pct"),
                 "entry": round(price, 4),
@@ -792,6 +1237,7 @@ def _execute_confirmed(
         "executed_entries": executed_entries,
         "skipped_entries": skipped_entries,
         "surge_level": plan.get("surge_level"),
+        "surge_model": plan.get("surge_model"),
         "planned_total_deployment_pct": plan.get("planned_total_deployment_pct"),
         "live_trade_authority": "none",
         "ml_authority": "shadow_only",
@@ -835,7 +1281,7 @@ def _execute_confirmed(
         "auto_fire_trigger": trigger if auto_fire else None,
         "executed": bool(executed_entries),
         "message": (
-            "Executed paper-only aggressive market surge deployment."
+            "Executed paper-only hybrid market surge deployment."
             if executed_entries
             else "No eligible entries were executed."
         ),
