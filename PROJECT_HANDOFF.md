@@ -253,15 +253,21 @@ File:
 
 market_surge_deployment_mode.py
 
+Current version:
+
+market-surge-deployment-mode-2026-06-16-v3-hybrid-stock-leaders
+
 Purpose:
 
-Aggressive paper-only market surge deployment mode.
+Hybrid paper-only market surge deployment mode that prioritizes high-quality individual stock leaders from the scanner while keeping ETFs as a broad-market anchor and fallback.
 
 Routes:
 
 * /paper/market-surge-deployment-status
 * /paper/market-surge-deployment-plan
 * /paper/market-surge-deployment-execute?confirm=1
+* /paper/market-surge-deployment-auto-fire
+* /paper/market-surge-deployment-autofire
 
 Core design:
 
@@ -272,27 +278,72 @@ Core design:
 * Requires regular market window.
 * Requires high cash percentage.
 * Requires surge confirmation.
-* Uses larger allocations during broad market surge days.
+* Uses scanner-ranked individual stock leaders first during broad market surges.
+* Uses ETFs as an anchor and fallback, not the ceiling.
 * Uses hard stop loss and trailing stop metadata.
 * Does not average down.
-* Does not execute without confirm=1.
+* Does not execute without confirm=1 on the manual execution route.
+* Auto-fire remains paper-only, regular-market-only, risk-clean-only, and limited to one successful fire per local trading day.
 
-Planned deployment logic:
+Hybrid surge allocation logic:
 
 Tier 2 surge:
 
-* QQQ up to 20%.
-* SPY up to 10%.
-* SMH up to 5%.
 * Max total deployment: 35%.
+* Stock leader sleeve: 60% of surge deployment target.
+* ETF anchor sleeve: 40% of surge deployment target.
+* Max stock leaders: 4.
+* ETF fallback basket if no stock leader qualifies:
+  * QQQ up to 20%.
+  * SPY up to 10%.
+  * SMH up to 5%.
 
 Tier 3 surge:
 
-* QQQ up to 20%.
-* SPY up to 15%.
-* SMH up to 10%.
-* IWM up to 7.5%.
 * Max total deployment: 55%.
+* Stock leader sleeve: 70% of surge deployment target.
+* ETF anchor sleeve: 30% of surge deployment target.
+* Max stock leaders: 5.
+* ETF fallback basket if no stock leader qualifies:
+  * QQQ up to 20%.
+  * SPY up to 15%.
+  * SMH up to 10%.
+  * IWM up to 7.5%.
+
+Stock leader selection:
+
+* Pulls potential leaders from scanner/surge state containers such as:
+  * long_signals
+  * short_signals
+  * scanner_signals
+  * ranked_signals
+  * candidate_signals
+  * top_candidates
+  * top_scanner_candidates
+  * top_blocked_candidates
+  * blocked_candidates
+  * blocked_entries
+  * top_blocked_symbols
+  * candidate_symbols
+  * leader_symbols
+  * surge_leaders
+  * relative_strength_leaders
+  * breakout_candidates
+* Dedupe by symbol.
+* Exclude already-open symbols.
+* Exclude ETFs from the individual stock leader sleeve.
+* Require usable price data.
+* Require price of at least 3.00.
+* Require score >= 0.038, or score >= 0.032 with relative-strength, breakout, or volume confirmation.
+* Tier 3 also allows score >= 0.032 with relative-strength or breakout confirmation.
+* Rank leaders by score, then relative strength, breakout, and volume confirmation.
+
+ETF role:
+
+* ETFs are no longer the entire market surge strategy.
+* If stock leaders qualify, ETFs are reduced to the anchor sleeve.
+* If no stock leader qualifies, ETFs can use the original surge fallback basket.
+* ETF-only mode should now be interpreted as fallback behavior, not the intended upside engine.
 
 Risk cap:
 
@@ -301,6 +352,12 @@ Risk cap:
 * Default trailing stop: 2.25%.
 * Profit activation: 1.5%.
 * Profit lock: 0.75%.
+
+Latest market surge update commit:
+
+* 83206d3d2262a26a782ad0a16ad132fb3b69fdac
+  * Converted market_surge_deployment_mode.py from ETF-only to hybrid ETF anchor plus stock leaders.
+  * market_surge_deployment_mode.py SHA after this commit: 7ee874474a7ee605c7fdedf2a158a088a3bd2fa4.
 
 Important wsgi.py Wiring Correction
 
@@ -331,9 +388,11 @@ Routine test after normal pushes:
 
 https://trading-bot-clean.up.railway.app/paper/self-check
 
-Optional diagnostic route only if intentionally debugging this governor:
+Optional diagnostic routes only if intentionally debugging:
 
 https://trading-bot-clean.up.railway.app/paper/post-harvest-opportunity-governor-status
+
+https://trading-bot-clean.up.railway.app/paper/market-surge-deployment-status
 
 Heavy routes and execution routes are not part of routine post-push testing.
 
@@ -342,13 +401,15 @@ Current Trading Development Priorities
 1. Confirm the next self-check after Railway redeploy shows post-harvest opportunity governor active.
 2. Verify losses_today_not_clean is no longer a hard redeployment blocker.
 3. Verify cash_pct_below_post_harvest_threshold is no longer a hard blocker when the active throttle band allows the current cash percentage.
-4. Keep collecting execution rows toward 150.
-5. Keep ML shadow-only until Phase 3A readiness improves.
-6. Maintain paper-only guardrails.
-7. Do not enable live trading.
-8. Do not bypass self-defense or risk halts.
-9. On the next broad market surge day, confirm market_surge_deployment_mode plans QQQ/SPY/SMH entries correctly without forcing trades.
-10. Continue favoring full replacement files or direct GitHub connector updates with clear commit/file SHA confirmation.
+4. Confirm market_surge_deployment_mode reports mode: hybrid_etf_anchor_plus_stock_leaders.
+5. On the next broad market surge day, confirm the surge plan prioritizes scanner-qualified individual stock leaders before ETF anchors.
+6. Confirm ETFs appear as anchor/fallback entries, not as the only surge engine when stock leaders qualify.
+7. Keep collecting execution rows toward 150.
+8. Keep ML shadow-only until Phase 3A readiness improves.
+9. Maintain paper-only guardrails.
+10. Do not enable live trading.
+11. Do not bypass self-defense or risk halts.
+12. Continue favoring full replacement files or direct GitHub connector updates with clear commit/file SHA confirmation.
 
 User Preference / Workflow Notes
 
