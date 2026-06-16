@@ -12,8 +12,9 @@ preserves hard stops:
 - missing price/data checks
 - cooldown checks
 
-It also prevents profit-taking from becoming a reason to sit idle when cash is
-available and high-quality candidates are present.
+It also prevents profit-taking or a slightly-below-target cash percentage from
+becoming a reason to sit idle when risk is clean and high-quality candidates are
+present.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ import os
 import sys
 from typing import Any, Dict, Tuple
 
-VERSION = "post-harvest-opportunity-governor-2026-06-16-v2-startup-wired-throttle"
+VERSION = "post-harvest-opportunity-governor-2026-06-16-v3-cash-gate-throttle"
 REGISTERED_APP_IDS: set[int] = set()
 
 ENABLED = os.environ.get("POST_HARVEST_OPPORTUNITY_GOVERNOR_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
@@ -32,6 +33,11 @@ NORMAL_DRAWDOWN_PCT = float(os.environ.get("POST_HARVEST_OPPORTUNITY_NORMAL_DD_P
 CAUTIOUS_DRAWDOWN_PCT = float(os.environ.get("POST_HARVEST_OPPORTUNITY_CAUTIOUS_DD_PCT", "1.00"))
 DEFENSIVE_DRAWDOWN_PCT = float(os.environ.get("POST_HARVEST_OPPORTUNITY_DEFENSIVE_DD_PCT", "2.00"))
 HARD_DRAWDOWN_PCT = float(os.environ.get("POST_HARVEST_OPPORTUNITY_HARD_DD_PCT", "2.75"))
+
+NORMAL_MIN_CASH_PCT = float(os.environ.get("POST_HARVEST_OPPORTUNITY_NORMAL_MIN_CASH_PCT", "0.50"))
+CAUTIOUS_MIN_CASH_PCT = float(os.environ.get("POST_HARVEST_OPPORTUNITY_CAUTIOUS_MIN_CASH_PCT", "0.55"))
+DEFENSIVE_MIN_CASH_PCT = float(os.environ.get("POST_HARVEST_OPPORTUNITY_DEFENSIVE_MIN_CASH_PCT", "0.60"))
+NEAR_LIMIT_MIN_CASH_PCT = float(os.environ.get("POST_HARVEST_OPPORTUNITY_NEAR_LIMIT_MIN_CASH_PCT", "0.65"))
 
 LOSS_BLOCK_TOKENS = (
     "losses_today_not_clean",
@@ -189,6 +195,7 @@ def _throttle_band(drawdown_pct: float) -> Dict[str, Any]:
         return {
             "mode": "normal_opportunity",
             "entry_size_factor": 1.0,
+            "min_cash_pct": NORMAL_MIN_CASH_PCT,
             "quality_requirement": "normal_post_harvest_quality",
             "reason": "losses_do_not_block_when_drawdown_is_small",
         }
@@ -196,6 +203,7 @@ def _throttle_band(drawdown_pct: float) -> Dict[str, Any]:
         return {
             "mode": "cautious_opportunity",
             "entry_size_factor": 0.75,
+            "min_cash_pct": CAUTIOUS_MIN_CASH_PCT,
             "quality_requirement": "high_quality_only",
             "reason": "minor_drawdown_use_cautious_size",
         }
@@ -203,12 +211,14 @@ def _throttle_band(drawdown_pct: float) -> Dict[str, Any]:
         return {
             "mode": "defensive_opportunity",
             "entry_size_factor": 0.50,
+            "min_cash_pct": DEFENSIVE_MIN_CASH_PCT,
             "quality_requirement": "exceptional_or_relative_strength_only",
             "reason": "moderate_drawdown_reduce_size_not_full_halt",
         }
     return {
         "mode": "near_limit_opportunity",
         "entry_size_factor": 0.35,
+        "min_cash_pct": NEAR_LIMIT_MIN_CASH_PCT,
         "quality_requirement": "best_only_until_hard_limit",
         "reason": "near_daily_limit_allow_only_best_small_starters",
     }
@@ -234,6 +244,7 @@ def _opportunity_risk_ok(m: Any | None, source: str) -> Tuple[bool, Dict[str, An
         "halt_reason": halt_reason,
         "losses_today_policy": "throttle_not_hard_block",
         "profit_taking_policy": "frees_capital_if_quality_and_risk_are_clean",
+        "cash_pct_policy": "graduated_soft_gate_not_fixed_hard_block",
         "opportunity_throttle": band,
     }
 
@@ -245,6 +256,13 @@ def _opportunity_risk_ok(m: Any | None, source: str) -> Tuple[bool, Dict[str, An
         return False, {**payload, "reason": "hard_drawdown_limit_reached"}
 
     return True, {**payload, "reason": "opportunity_throttle_clean"}
+
+
+def _active_min_cash_pct(controller: Any, risk_info: Dict[str, Any]) -> float:
+    controller_min = _f(getattr(controller, "MIN_CASH_PCT", 0.60), 0.60)
+    band = risk_info.get("opportunity_throttle") if isinstance(risk_info.get("opportunity_throttle"), dict) else {}
+    band_min = _f(band.get("min_cash_pct"), controller_min)
+    return max(0.0, min(controller_min, band_min))
 
 
 def _opportunity_entry_block_safe(original_fn: Any, new_entries_allowed: bool, entry_block_reason: Any) -> Tuple[bool, str]:
@@ -283,7 +301,7 @@ def _opportunity_harvest_ok(original_fn: Any, controller: Any, m: Any | None, en
     reason_text = str(entry_block_reason or "").lower()
     risk_ok, risk_info = _opportunity_risk_ok(m, "post_harvest_profit_gate")
     cash, equity, cash_pct = _cash_equity_pct(m)
-    min_cash_pct = _f(getattr(controller, "MIN_CASH_PCT", 0.60), 0.60)
+    min_cash_pct = _active_min_cash_pct(controller, risk_info)
     opportunity_reason = any(token in reason_text for token in OPPORTUNITY_BLOCK_TOKENS) or cash_pct >= min_cash_pct
 
     if risk_ok and cash_pct >= min_cash_pct and opportunity_reason:
@@ -297,6 +315,7 @@ def _opportunity_harvest_ok(original_fn: Any, controller: Any, m: Any | None, en
             "min_cash_pct": min_cash_pct,
             "risk_controls": risk_info,
             "policy": "profit_harvest_not_required_when_cash_is_available_and_risk_is_clean",
+            "cash_pct_policy": "graduated_soft_gate_not_fixed_hard_block",
             "version": VERSION,
         }
 
@@ -309,6 +328,7 @@ def _opportunity_harvest_ok(original_fn: Any, controller: Any, m: Any | None, en
         "cash_pct": round(cash_pct, 4),
         "min_cash_pct": min_cash_pct,
         "risk_controls": risk_info,
+        "cash_pct_policy": "graduated_soft_gate_not_fixed_hard_block",
         "version": VERSION,
     }
 
@@ -383,11 +403,38 @@ def _opportunity_starter_signal(original_fn: Any, m: Any | None, signal: Dict[st
         "version": VERSION,
         "losses_today_policy": "throttle_not_hard_block",
         "profit_taking_policy": "frees_capital_if_quality_and_risk_are_clean",
+        "cash_pct_policy": "graduated_soft_gate_not_fixed_hard_block",
         "throttle_mode": band.get("mode", "normal_opportunity"),
         "entry_size_factor": size_factor,
+        "min_cash_pct": band.get("min_cash_pct"),
         "quality_requirement": band.get("quality_requirement", "normal_post_harvest_quality"),
     }
     return starter
+
+
+def _opportunity_select_redeployment_candidates(original_fn: Any, controller: Any, app_module: Any | None, *args: Any, **kwargs: Any):
+    if not callable(original_fn):
+        return [], {"allowed": False, "reason": "original_select_redeployment_candidates_unavailable", "version": VERSION}
+
+    runtime_module = app_module or (args[0] if args else None) or _mod()
+    risk_ok, risk_info = _opportunity_risk_ok(runtime_module, "post_harvest_cash_gate")
+    active_min_cash_pct = _active_min_cash_pct(controller, risk_info)
+    original_min_cash_pct = _f(getattr(controller, "MIN_CASH_PCT", 0.60), 0.60)
+
+    try:
+        controller.MIN_CASH_PCT = active_min_cash_pct  # type: ignore[attr-defined]
+        selected, info = original_fn(*args, **kwargs)
+    finally:
+        controller.MIN_CASH_PCT = original_min_cash_pct  # type: ignore[attr-defined]
+
+    if isinstance(info, dict):
+        info = dict(info)
+        info["cash_pct_policy"] = "graduated_soft_gate_not_fixed_hard_block"
+        info["original_min_cash_pct"] = original_min_cash_pct
+        info["active_min_cash_pct"] = active_min_cash_pct
+        info["cash_gate_source"] = "post_harvest_opportunity_governor"
+        info["opportunity_throttle"] = risk_info.get("opportunity_throttle")
+    return selected, info
 
 
 def _patch_redeployment_controller(m: Any | None = None) -> Dict[str, Any]:
@@ -408,6 +455,7 @@ def _patch_redeployment_controller(m: Any | None = None) -> Dict[str, Any]:
     original_profit_harvest_ok = getattr(controller, "_profit_harvest_ok", None)
     original_quality_ok = getattr(controller, "_quality_ok", None)
     original_starter_signal = getattr(controller, "_starter_signal", None)
+    original_select_redeployment_candidates = getattr(controller, "select_redeployment_candidates", None)
 
     def patched_risk_ok(app_module: Any | None = None):
         return _opportunity_risk_ok(app_module or m or _mod(), "post_harvest_redeployment")
@@ -424,11 +472,16 @@ def _patch_redeployment_controller(m: Any | None = None) -> Dict[str, Any]:
     def patched_starter_signal(signal: Dict[str, Any]):
         return _opportunity_starter_signal(original_starter_signal, m or _mod(), signal)
 
+    def patched_select_redeployment_candidates(*args: Any, **kwargs: Any):
+        runtime_module = args[0] if args else m or _mod()
+        return _opportunity_select_redeployment_candidates(original_select_redeployment_candidates, controller, runtime_module, *args, **kwargs)
+
     controller._risk_ok = patched_risk_ok  # type: ignore[attr-defined]
     controller._entry_block_safe = patched_entry_block_safe  # type: ignore[attr-defined]
     controller._profit_harvest_ok = patched_profit_harvest_ok  # type: ignore[attr-defined]
     controller._quality_ok = patched_quality_ok  # type: ignore[attr-defined]
     controller._starter_signal = patched_starter_signal  # type: ignore[attr-defined]
+    controller.select_redeployment_candidates = patched_select_redeployment_candidates  # type: ignore[attr-defined]
     controller.MAX_LOSSES_TODAY = max(_i(getattr(controller, "MAX_LOSSES_TODAY", 0), 0), 99)  # type: ignore[attr-defined]
     controller._opportunity_governor_patched = True  # type: ignore[attr-defined]
     controller._opportunity_governor_version = VERSION  # type: ignore[attr-defined]
@@ -436,11 +489,13 @@ def _patch_redeployment_controller(m: Any | None = None) -> Dict[str, Any]:
     return {
         "patched": True,
         "module": "post_harvest_redeployment_controller",
-        "patched_functions": ["_risk_ok", "_entry_block_safe", "_profit_harvest_ok", "_quality_ok", "_starter_signal"],
+        "patched_functions": ["_risk_ok", "_entry_block_safe", "_profit_harvest_ok", "_quality_ok", "_starter_signal", "select_redeployment_candidates"],
         "losses_today_policy": "throttle_not_hard_block",
         "profit_taking_policy": "frees_capital_if_quality_and_risk_are_clean",
+        "cash_pct_policy": "graduated_soft_gate_not_fixed_hard_block",
         "quality_throttle_active": True,
         "size_throttle_active": True,
+        "cash_gate_throttle_active": True,
         "version": VERSION,
     }
 
@@ -504,6 +559,7 @@ def apply_runtime_overrides(m: Any | None = None) -> Dict[str, Any]:
         "policy": {
             "losses_today": "throttle_not_hard_block",
             "profit_taking": "frees_capital_if_quality_and_risk_are_clean",
+            "cash_pct": "graduated_soft_gate_not_fixed_hard_block",
             "hard_blocks_preserved": [
                 "risk_halt_active",
                 "self_defense_active",
@@ -515,11 +571,11 @@ def apply_runtime_overrides(m: Any | None = None) -> Dict[str, Any]:
                 "cooldown",
             ],
             "throttle_bands": [
-                {"drawdown_pct": "<0.50", "mode": "normal_opportunity", "entry_size_factor": 1.0, "quality_requirement": "normal_post_harvest_quality"},
-                {"drawdown_pct": "0.50-1.00", "mode": "cautious_opportunity", "entry_size_factor": 0.75, "quality_requirement": "high_quality_only"},
-                {"drawdown_pct": "1.00-2.00", "mode": "defensive_opportunity", "entry_size_factor": 0.50, "quality_requirement": "exceptional_or_relative_strength_only"},
-                {"drawdown_pct": "2.00-2.75", "mode": "near_limit_opportunity", "entry_size_factor": 0.35, "quality_requirement": "best_only_small_starters"},
-                {"drawdown_pct": ">=2.75", "mode": "hard_block", "entry_size_factor": 0.0, "quality_requirement": "blocked"},
+                {"drawdown_pct": "<0.50", "mode": "normal_opportunity", "entry_size_factor": 1.0, "min_cash_pct": NORMAL_MIN_CASH_PCT, "quality_requirement": "normal_post_harvest_quality"},
+                {"drawdown_pct": "0.50-1.00", "mode": "cautious_opportunity", "entry_size_factor": 0.75, "min_cash_pct": CAUTIOUS_MIN_CASH_PCT, "quality_requirement": "high_quality_only"},
+                {"drawdown_pct": "1.00-2.00", "mode": "defensive_opportunity", "entry_size_factor": 0.50, "min_cash_pct": DEFENSIVE_MIN_CASH_PCT, "quality_requirement": "exceptional_or_relative_strength_only"},
+                {"drawdown_pct": "2.00-2.75", "mode": "near_limit_opportunity", "entry_size_factor": 0.35, "min_cash_pct": NEAR_LIMIT_MIN_CASH_PCT, "quality_requirement": "best_only_small_starters"},
+                {"drawdown_pct": ">=2.75", "mode": "hard_block", "entry_size_factor": 0.0, "min_cash_pct": None, "quality_requirement": "blocked"},
             ],
             "normal_drawdown_pct": NORMAL_DRAWDOWN_PCT,
             "cautious_drawdown_pct": CAUTIOUS_DRAWDOWN_PCT,
