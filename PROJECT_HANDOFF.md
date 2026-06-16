@@ -1,4 +1,4 @@
-Automated Trading Project Handoff — Updated June 11, 2026
+Automated Trading Project Handoff — Updated June 16, 2026
 
 Current System Status
 
@@ -19,27 +19,206 @@ Current operating mode:
 * Do not use heavy diagnostic routes unless intentionally debugging.
 * Do not run repair routes unless a specific state issue appears.
 * Do not run execution routes after hours.
+* Do not run mutating Railway endpoints during routine post-push checks.
 
-Latest after-hours self-check showed:
+Latest routine self-check supplied by operator on June 16, 2026 showed:
 
 * Overall: pass.
 * Status: ok.
 * Warnings: none.
-* Cash: 10960.96.
-* Equity: 10960.96.
-* Open positions: 0.
-* Realized today: 0.00.
-* Realized total: +960.98.
-* Daily loss pct: 0.0.
-* Intraday drawdown pct: 0.0.
+* Checked internal paths: /health and /paper/status.
+* Cash: 6296.67.
+* Equity: 10924.45.
+* Cash percentage: 57.64%.
+* Open positions: 3.
+* Positions: QQQ, SPY, IWM.
+* Realized today: -2.09.
+* Realized total: +952.28.
+* Unrealized PnL: -27.82.
+* Losses today: 1.
+* Daily loss pct: 0.465.
+* Intraday drawdown pct: 0.51.
 * Self-defense active: false.
-* Scanner signals found: 39.
-* Blocked entries: 0.
-* Execution rows: 87 / 150.
+* Self-defense reason: feedback loop clear.
+* Scanner signals found: 53.
+* Blocked entries: 15.
+* Execution rows: 90 / 150.
 * ML remains shadow-only.
 * Phase 3A is not ready yet.
 
+Important note from the June 16 self-check:
+
+* The old bad blocker losses_today_not_clean did not appear as the active reason.
+* The remaining blocker before the last follow-up patch was cash_pct_below_post_harvest_threshold.
+* That cash gate has now been converted to a graduated opportunity throttle by post_harvest_opportunity_governor.py.
+
 Recent Critical Fixes
+
+Post-harvest redeployment opportunity governor
+
+Problem observed:
+
+* The post-harvest controller was too blunt after profit-taking or one small controlled loss.
+* In post_harvest_redeployment_controller.py, MAX_LOSSES_TODAY defaulted to 0.
+* _risk_ok blocked when losses_today > MAX_LOSSES_TODAY.
+* This created the bad behavior seen in the midday test:
+  * post_harvest_reason: losses_today_not_clean
+* The fallback module had the same pattern and could independently block after one small loss.
+
+Goal:
+
+* One small loss today should not block redeployment by itself.
+* Profit-taking should not block redeployment by itself.
+* Slightly-below-old-threshold cash after an exit should not block redeployment by itself when risk is clean and quality is high.
+* Losses, profit-taking, and cash percentage should create a graduated throttle, not a full stop.
+* Hard safety blocks must remain intact.
+
+Files involved:
+
+* post_harvest_opportunity_governor.py
+* post_harvest_redeployment_controller.py
+* post_harvest_entry_fallback.py
+* usercustomize.py
+* sitecustomize.py
+* wsgi.py
+
+New/updated module:
+
+post_harvest_opportunity_governor.py
+
+Current version:
+
+post-harvest-opportunity-governor-2026-06-16-v3-cash-gate-throttle
+
+Route:
+
+* /paper/post-harvest-opportunity-governor-status
+
+Startup wiring:
+
+* usercustomize.py now registers post_harvest_opportunity_governor in _register_auxiliary_routes.
+* usercustomize.py now includes /paper/post-harvest-opportunity-governor-status in optional self-check endpoint metadata.
+* usercustomize.py watchdog now re-registers post_harvest_opportunity_governor beside:
+  * post_harvest_redeployment_controller
+  * post_harvest_entry_fallback
+* sitecustomize.py already imports/registers usercustomize, so this is the preferred clean wiring path.
+* wsgi.py did not need a direct change for this update.
+
+Runtime patches applied by the governor:
+
+* post_harvest_redeployment_controller._risk_ok
+* post_harvest_redeployment_controller._entry_block_safe
+* post_harvest_redeployment_controller._profit_harvest_ok
+* post_harvest_redeployment_controller._quality_ok
+* post_harvest_redeployment_controller._starter_signal
+* post_harvest_redeployment_controller.select_redeployment_candidates
+* post_harvest_entry_fallback._risk_ok
+
+Policy now active:
+
+* losses_today_policy: throttle_not_hard_block
+* profit_taking_policy: frees_capital_if_quality_and_risk_are_clean
+* cash_pct_policy: graduated_soft_gate_not_fixed_hard_block
+* live_trade_authority remains none.
+* ml_authority remains shadow_only.
+* authority_changed remains false.
+
+Throttle bands:
+
+* Under 0.50% drawdown:
+  * Mode: normal_opportunity.
+  * Size factor: 1.00.
+  * Cash floor: 50%.
+  * Quality: normal post-harvest quality.
+* 0.50% to 1.00% drawdown:
+  * Mode: cautious_opportunity.
+  * Size factor: 0.75.
+  * Cash floor: 55%.
+  * Quality: higher quality only.
+* 1.00% to 2.00% drawdown:
+  * Mode: defensive_opportunity.
+  * Size factor: 0.50.
+  * Cash floor: 60%.
+  * Quality: exceptional or relative-strength only.
+* 2.00% to 2.75% drawdown:
+  * Mode: near_limit_opportunity.
+  * Size factor: 0.35.
+  * Cash floor: 65%.
+  * Quality: best-only small starters.
+* 2.75%+ drawdown:
+  * Mode: hard_block.
+  * No new post-harvest redeployment.
+
+Hard blocks still preserved:
+
+* Risk halt active.
+* Self-defense active.
+* Hard drawdown limit reached.
+* Bear/risk-off market block.
+* Normal entry quality failure.
+* Max positions full.
+* Missing price/data.
+* Cooldown.
+* No forced trades.
+* No bypass of risk halts.
+* No bypass of self-defense.
+* No live trading.
+* No ML authority promotion.
+
+Important interpretation of the latest self-check:
+
+* losses_today was 1.
+* self_defense_active was false.
+* intraday_drawdown_pct was 0.51.
+* cash percentage was 57.64%.
+* Before the final cash-gate patch, the system stood down because cash was below the old fixed 60% post-harvest threshold.
+* With the final governor patch, 0.51% drawdown maps to cautious_opportunity mode.
+* In cautious_opportunity mode, the active cash floor is 55%, not the old fixed 60%.
+* Therefore, cash at 57.64% should not be the sole hard blocker after redeploy.
+* New entries are still allowed only if risk is clean, the market is not bear/risk-off, there is room under max positions, cooldown/data checks pass, and candidates clear the higher cautious-quality requirement.
+
+Commits for this update sequence:
+
+* 7a6fb8e018df1368f4c814bb8c9f8b03b9513664
+  * Added post_harvest_opportunity_governor.py.
+  * File SHA at that point: f4ff29138f46b3bc61417eee8265fa0b0596ec83.
+* cb15363495f33aa1b2133e24caf991e67d5d4e20
+  * Wired post_harvest_opportunity_governor into usercustomize.py startup.
+  * usercustomize.py SHA after this commit: ef653f49c08f35c8c06e0c514ac31002c5c11cf1.
+* dee509d0f91cd19606ebea5ccd2a0272a329e6ea
+  * Tightened post-harvest opportunity throttle logic.
+  * post_harvest_opportunity_governor.py SHA after this commit: 284c9189597664adbe2a43cec1cd664a0ff772a5.
+* e662d40a5c6483462c0b1f4ff96a4230450b60da
+  * Converted post-harvest cash gate from fixed hard threshold to graduated throttle.
+  * post_harvest_opportunity_governor.py SHA after this commit: 2c39c96815ef27f19fd352ba78b339a40ffdb7fe.
+
+Post-deploy routine test rule:
+
+* Use only: https://trading-bot-clean.up.railway.app/paper/self-check
+* Do not run mutating endpoints.
+* Do not run repair endpoints unless intentionally repairing malformed state.
+* Do not run execution endpoints unless intentionally executing during regular market hours and the user explicitly asks.
+
+What to look for in the next self-check:
+
+* overall: pass.
+* status: ok.
+* self_defense_active: false.
+* ML still shadow-only.
+* live trade authority still none.
+* No post-harvest hard block solely due to losses_today_not_clean.
+* No post-harvest hard block solely due to profit-taking.
+* No post-harvest hard block solely because cash is slightly below the old 60% threshold when the active throttle band allows a lower cash floor.
+* If no entries occur, acceptable reasons include:
+  * no candidate qualified.
+  * normal entry quality failure.
+  * max positions full.
+  * market risk-off/bear block.
+  * missing data or price.
+  * cooldown.
+  * hard drawdown limit.
+  * risk halt.
+  * self-defense active.
 
 SPY malformed paper position repair
 
@@ -68,23 +247,9 @@ Repair routes:
 * /paper/surge-state-repair-status
 * /paper/surge-state-repair?confirm=1
 
-Current Concern
+Market Surge Deployment Mode
 
-The bot is too passive on broad market surge days.
-
-Recent examples:
-
-* QQQ had a strong surge day.
-* S&P 500 had a strong surge day.
-* Bot stayed 100% in cash.
-* Scanner saw activity, but post-harvest redeployment did not qualify any entries.
-* This protected capital, but it missed broad market participation.
-
-The user does not want tiny starter-only allocation during obvious broad market surge conditions. The preferred design is larger surge participation with strict hard stops and trailing stops.
-
-New Module Added / Being Added
-
-New file:
+File:
 
 market_surge_deployment_mode.py
 
@@ -145,7 +310,7 @@ Do not add:
 
 "market_surge_deployment_mode",
 
-Correct line to add inside the module tuple list:
+Correct line inside the module tuple list:
 
 ("market_surge_deployment_mode", (("apply", (core,)), ("register_routes", (app, core)))),
 
@@ -160,70 +325,37 @@ The section should look like:
 ("market_surge_deployment_mode", (("apply", (core,)), ("register_routes", (app, core)))),
 ("surge_state_repair", (("apply", (core,)), ("register_routes", (app, core)))),
 
-Suggested commit message:
+Post-Deploy Testing Guidance
 
-Wire aggressive market surge deployment mode
-
-Post-Deploy Test
-
-After Railway redeploys, test:
-
-https://trading-bot-clean.up.railway.app/paper/market-surge-deployment-status
-
-Then run normal self-check:
+Routine test after normal pushes:
 
 https://trading-bot-clean.up.railway.app/paper/self-check
 
-Do not run the execute endpoint after hours.
+Optional diagnostic route only if intentionally debugging this governor:
 
-Only during regular market hours, and only if status shows deployment_allowed: true and planned_entries is not empty, run:
+https://trading-bot-clean.up.railway.app/paper/post-harvest-opportunity-governor-status
 
-https://trading-bot-clean.up.railway.app/paper/market-surge-deployment-execute?confirm=1
-
-Then immediately run:
-
-https://trading-bot-clean.up.railway.app/paper/self-check
-
-Current GitHub Workflow Problem
-
-The ChatGPT GitHub connector has recently become unreliable in this thread.
-
-Observed issue:
-
-* Assistant repeatedly tried to access GitHub.
-* Connector returned tool-discovery responses instead of moving into actual repo file operations.
-* This caused a loop/freeze behavior.
-* Retry did not solve it.
-
-Temporary workflow:
-
-* Use downloadable files.
-* Use copy/paste-formatted .txt files when GitHub mobile is sensitive to formatting.
-* Do not depend on the GitHub connector until the workflow is debugged.
-
-User preference:
-
-* Full replacement files.
-* Downloadable file packages.
-* Clear instructions.
-* No partial patches unless absolutely necessary.
-* No smart quotes.
-* No incomplete code snippets.
-* No writing-style formatting for Python code.
-* Plain code blocks or downloadable .txt files are preferred.
-
-Next assistant priority after this module:
-
-Figure out why GitHub tool workflow is failing compared with how it worked a week ago. Do not continue building new trading modules until the GitHub update/push workflow is reliable again, unless the user explicitly asks.
+Heavy routes and execution routes are not part of routine post-push testing.
 
 Current Trading Development Priorities
 
-1. Finish wiring and testing market_surge_deployment_mode.py.
-2. Confirm route loads:
-    * /paper/market-surge-deployment-status
-3. Confirm no after-hours execution.
-4. Next market surge day, check whether it plans QQQ/SPY/SMH entries correctly.
+1. Confirm the next self-check after Railway redeploy shows post-harvest opportunity governor active.
+2. Verify losses_today_not_clean is no longer a hard redeployment blocker.
+3. Verify cash_pct_below_post_harvest_threshold is no longer a hard blocker when the active throttle band allows the current cash percentage.
+4. Keep collecting execution rows toward 150.
 5. Keep ML shadow-only until Phase 3A readiness improves.
-6. Continue collecting execution rows toward 150.
-7. Maintain paper-only guardrails.
-8. Fix GitHub workflow reliability before major future updates.
+6. Maintain paper-only guardrails.
+7. Do not enable live trading.
+8. Do not bypass self-defense or risk halts.
+9. On the next broad market surge day, confirm market_surge_deployment_mode plans QQQ/SPY/SMH entries correctly without forcing trades.
+10. Continue favoring full replacement files or direct GitHub connector updates with clear commit/file SHA confirmation.
+
+User Preference / Workflow Notes
+
+* User prefers full replacement files over partial patches.
+* Downloadable files or direct GitHub updates are preferred.
+* No smart quotes in code.
+* No incomplete code snippets.
+* Plain code blocks or downloadable .txt files are preferred when not using the GitHub connector.
+* After a push, give commit SHA and changed file SHAs.
+* Routine testing should stay lightweight and mobile-safe.
