@@ -46,45 +46,9 @@ Latest routine self-check supplied by operator on June 16, 2026 showed:
 * ML remains shadow-only.
 * Phase 3A is not ready yet.
 
-Important note from the June 16 self-check:
-
-* The old bad blocker losses_today_not_clean did not appear as the active reason.
-* The remaining blocker before the last follow-up patch was cash_pct_below_post_harvest_threshold.
-* That cash gate has now been converted to a graduated opportunity throttle by post_harvest_opportunity_governor.py.
-
 Recent Critical Fixes
 
 Post-harvest redeployment opportunity governor
-
-Problem observed:
-
-* The post-harvest controller was too blunt after profit-taking or one small controlled loss.
-* In post_harvest_redeployment_controller.py, MAX_LOSSES_TODAY defaulted to 0.
-* _risk_ok blocked when losses_today > MAX_LOSSES_TODAY.
-* This created the bad behavior seen in the midday test:
-  * post_harvest_reason: losses_today_not_clean
-* The fallback module had the same pattern and could independently block after one small loss.
-
-Goal:
-
-* One small loss today should not block redeployment by itself.
-* Profit-taking should not block redeployment by itself.
-* Slightly-below-old-threshold cash after an exit should not block redeployment by itself when risk is clean and quality is high.
-* Losses, profit-taking, and cash percentage should create a graduated throttle, not a full stop.
-* Hard safety blocks must remain intact.
-
-Files involved:
-
-* post_harvest_opportunity_governor.py
-* post_harvest_redeployment_controller.py
-* post_harvest_entry_fallback.py
-* usercustomize.py
-* sitecustomize.py
-* wsgi.py
-
-New/updated module:
-
-post_harvest_opportunity_governor.py
 
 Current version:
 
@@ -94,15 +58,11 @@ Route:
 
 * /paper/post-harvest-opportunity-governor-status
 
-Startup wiring:
+Purpose:
 
-* usercustomize.py now registers post_harvest_opportunity_governor in _register_auxiliary_routes.
-* usercustomize.py now includes /paper/post-harvest-opportunity-governor-status in optional self-check endpoint metadata.
-* usercustomize.py watchdog now re-registers post_harvest_opportunity_governor beside:
-  * post_harvest_redeployment_controller
-  * post_harvest_entry_fallback
-* sitecustomize.py already imports/registers usercustomize, so this is the preferred clean wiring path.
-* wsgi.py did not need a direct change for this update.
+* Converts the prior blunt losses_today_not_clean behavior into a graduated opportunity throttle.
+* Converts the old fixed 60% post-harvest cash threshold into a graduated soft gate.
+* Keeps risk halt, self-defense, hard drawdown, market risk-off, max-position, missing-data, cooldown, and quality gates intact.
 
 Runtime patches applied by the governor:
 
@@ -125,45 +85,11 @@ Policy now active:
 
 Throttle bands:
 
-* Under 0.50% drawdown:
-  * Mode: normal_opportunity.
-  * Size factor: 1.00.
-  * Cash floor: 50%.
-  * Quality: normal post-harvest quality.
-* 0.50% to 1.00% drawdown:
-  * Mode: cautious_opportunity.
-  * Size factor: 0.75.
-  * Cash floor: 55%.
-  * Quality: higher quality only.
-* 1.00% to 2.00% drawdown:
-  * Mode: defensive_opportunity.
-  * Size factor: 0.50.
-  * Cash floor: 60%.
-  * Quality: exceptional or relative-strength only.
-* 2.00% to 2.75% drawdown:
-  * Mode: near_limit_opportunity.
-  * Size factor: 0.35.
-  * Cash floor: 65%.
-  * Quality: best-only small starters.
-* 2.75%+ drawdown:
-  * Mode: hard_block.
-  * No new post-harvest redeployment.
-
-Hard blocks still preserved:
-
-* Risk halt active.
-* Self-defense active.
-* Hard drawdown limit reached.
-* Bear/risk-off market block.
-* Normal entry quality failure.
-* Max positions full.
-* Missing price/data.
-* Cooldown.
-* No forced trades.
-* No bypass of risk halts.
-* No bypass of self-defense.
-* No live trading.
-* No ML authority promotion.
+* Under 0.50% drawdown: normal_opportunity, 1.00 size factor, 50% cash floor.
+* 0.50% to 1.00% drawdown: cautious_opportunity, 0.75 size factor, 55% cash floor.
+* 1.00% to 2.00% drawdown: defensive_opportunity, 0.50 size factor, 60% cash floor.
+* 2.00% to 2.75% drawdown: near_limit_opportunity, 0.35 size factor, 65% cash floor.
+* 2.75%+ drawdown: hard_block.
 
 Important interpretation of the latest self-check:
 
@@ -175,9 +101,8 @@ Important interpretation of the latest self-check:
 * With the final governor patch, 0.51% drawdown maps to cautious_opportunity mode.
 * In cautious_opportunity mode, the active cash floor is 55%, not the old fixed 60%.
 * Therefore, cash at 57.64% should not be the sole hard blocker after redeploy.
-* New entries are still allowed only if risk is clean, the market is not bear/risk-off, there is room under max positions, cooldown/data checks pass, and candidates clear the higher cautious-quality requirement.
 
-Commits for this update sequence:
+Commits for the post-harvest update sequence:
 
 * 7a6fb8e018df1368f4c814bb8c9f8b03b9513664
   * Added post_harvest_opportunity_governor.py.
@@ -192,53 +117,107 @@ Commits for this update sequence:
   * Converted post-harvest cash gate from fixed hard threshold to graduated throttle.
   * post_harvest_opportunity_governor.py SHA after this commit: 2c39c96815ef27f19fd352ba78b339a40ffdb7fe.
 
-Post-deploy routine test rule:
+Space Stock Basket Overlay
 
-* Use only: https://trading-bot-clean.up.railway.app/paper/self-check
-* Do not run mutating endpoints.
-* Do not run repair endpoints unless intentionally repairing malformed state.
-* Do not run execution endpoints unless intentionally executing during regular market hours and the user explicitly asks.
+File:
 
-What to look for in the next self-check:
+space_stock_basket.py
 
-* overall: pass.
-* status: ok.
-* self_defense_active: false.
-* ML still shadow-only.
-* live trade authority still none.
-* No post-harvest hard block solely due to losses_today_not_clean.
-* No post-harvest hard block solely due to profit-taking.
-* No post-harvest hard block solely because cash is slightly below the old 60% threshold when the active throttle band allows a lower cash floor.
-* If no entries occur, acceptable reasons include:
-  * no candidate qualified.
-  * normal entry quality failure.
-  * max positions full.
-  * market risk-off/bear block.
-  * missing data or price.
-  * cooldown.
-  * hard drawdown limit.
-  * risk halt.
-  * self-defense active.
+Current version:
+
+space-stock-basket-2026-06-16-v1
+
+Route:
+
+* /paper/space-stock-basket-status
+
+Purpose:
+
+Adds a focused space / space-infrastructure theme to the active scanner universe without rewriting app.py. This is a metadata and universe overlay only. It does not place trades, change ML authority, bypass risk controls, or force entries.
+
+Why it was added:
+
+* A new space-stock trend is emerging.
+* The bot had RKLB already inside SMALL_CAP_MOMENTUM, but it did not have a broader space basket.
+* The market surge module was recently changed to prioritize scanner-ranked individual stock leaders.
+* Adding a space basket lets qualifying space leaders compete in the normal scanner and hybrid surge stock-leader path.
+
+Symbols added:
+
+Launch / lunar:
+
+* RKLB
+* LUNR
+* SPCE
+
+Satellite connectivity:
+
+* ASTS
+* IRDM
+* GSAT
+* VSAT
+* SATS
+
+Earth observation / space data:
+
+* PL
+* BKSY
+* SATL
+* SPIR
+
+Space infrastructure:
+
+* RDW
+
+Bucket:
+
+* Bucket name: space_stocks.
+* Default alloc factor: 0.70.
+* Default max exposure pct: 0.30.
+* Default max positions: 3.
+* Environment overrides:
+  * SPACE_STOCKS_ALLOC_FACTOR
+  * SPACE_STOCKS_MAX_EXPOSURE_PCT
+  * SPACE_STOCKS_MAX_POSITIONS
+
+Sector mapping:
+
+* RKLB, LUNR, SPCE, RDW -> XLI.
+* ASTS, PL, BKSY, SATL, SPIR -> XLK.
+* IRDM, GSAT, VSAT, SATS -> XLC.
+
+Startup wiring:
+
+* usercustomize.py now registers space_stock_basket.
+* usercustomize.py watchdog now re-registers space_stock_basket.
+* /paper/space-stock-basket-status is included as optional self-check metadata.
+
+Important behavior:
+
+* These stocks are now available to the scanner universe.
+* They still have to pass the normal scanner ranking, risk, quality, price, cooldown, sector/bucket exposure, and max-position rules.
+* They can become hybrid market-surge stock leaders only if the scanner/state surfaces them as qualifying leaders.
+* No forced trades.
+* No live trading.
+* No ML authority change.
+
+Commits for the space basket update:
+
+* 5fea442ff21ce828e7cacca0f22b00f2ec3f17f4
+  * Added space_stock_basket.py.
+  * space_stock_basket.py SHA after creation: d101385c07a27cb215cde4d8d41d85e26a0638f2.
+* 73cfd23b4826e69811c32c1244e5d8634400f3b5
+  * Wired space_stock_basket into usercustomize.py startup and watchdog.
+  * usercustomize.py SHA after this commit: a0bf8c20197c749fc7967b303a34214e80948385.
 
 SPY malformed paper position repair
 
 A prior market surge queue executor entry deducted cash for SPY but stored the position in a malformed format. SPY showed entry_price and qty, but the normal status route expected legacy fields entry and shares.
 
-This caused equity and risk controls to appear wrong.
-
 Fixed with:
 
 * surge_state_repair.py
 * Version: surge-state-repair-2026-06-08-v4-clear-stale-halt-flag
-
-Confirmed fixed:
-
-* SPY entry: 739.22.
-* SPY shares: 1.182638.
-* Equity recalculated correctly.
-* Stale 8% drawdown flags cleared.
-* Stale halt flags cleared.
-* Self-check returned pass afterward.
 
 Do not run the repair endpoint again unless the state becomes malformed again.
 
@@ -293,10 +272,7 @@ Tier 2 surge:
 * Stock leader sleeve: 60% of surge deployment target.
 * ETF anchor sleeve: 40% of surge deployment target.
 * Max stock leaders: 4.
-* ETF fallback basket if no stock leader qualifies:
-  * QQQ up to 20%.
-  * SPY up to 10%.
-  * SMH up to 5%.
+* ETF fallback basket if no stock leader qualifies: QQQ, SPY, SMH.
 
 Tier 3 surge:
 
@@ -304,31 +280,11 @@ Tier 3 surge:
 * Stock leader sleeve: 70% of surge deployment target.
 * ETF anchor sleeve: 30% of surge deployment target.
 * Max stock leaders: 5.
-* ETF fallback basket if no stock leader qualifies:
-  * QQQ up to 20%.
-  * SPY up to 15%.
-  * SMH up to 10%.
-  * IWM up to 7.5%.
+* ETF fallback basket if no stock leader qualifies: QQQ, SPY, SMH, IWM.
 
 Stock leader selection:
 
-* Pulls potential leaders from scanner/surge state containers such as:
-  * long_signals
-  * short_signals
-  * scanner_signals
-  * ranked_signals
-  * candidate_signals
-  * top_candidates
-  * top_scanner_candidates
-  * top_blocked_candidates
-  * blocked_candidates
-  * blocked_entries
-  * top_blocked_symbols
-  * candidate_symbols
-  * leader_symbols
-  * surge_leaders
-  * relative_strength_leaders
-  * breakout_candidates
+* Pulls potential leaders from scanner/surge state containers.
 * Dedupe by symbol.
 * Exclude already-open symbols.
 * Exclude ETFs from the individual stock leader sleeve.
@@ -337,21 +293,6 @@ Stock leader selection:
 * Require score >= 0.038, or score >= 0.032 with relative-strength, breakout, or volume confirmation.
 * Tier 3 also allows score >= 0.032 with relative-strength or breakout confirmation.
 * Rank leaders by score, then relative strength, breakout, and volume confirmation.
-
-ETF role:
-
-* ETFs are no longer the entire market surge strategy.
-* If stock leaders qualify, ETFs are reduced to the anchor sleeve.
-* If no stock leader qualifies, ETFs can use the original surge fallback basket.
-* ETF-only mode should now be interpreted as fallback behavior, not the intended upside engine.
-
-Risk cap:
-
-* Max account risk per entry: 0.80%.
-* Default stop loss: 3.5%.
-* Default trailing stop: 2.25%.
-* Profit activation: 1.5%.
-* Profit lock: 0.75%.
 
 Latest market surge update commit:
 
@@ -363,10 +304,6 @@ Important wsgi.py Wiring Correction
 
 The repo’s wsgi.py does not use a plain string list for modules. It uses tuple wiring.
 
-Do not add:
-
-"market_surge_deployment_mode",
-
 Correct line inside the module tuple list:
 
 ("market_surge_deployment_mode", (("apply", (core,)), ("register_routes", (app, core)))),
@@ -374,13 +311,6 @@ Correct line inside the module tuple list:
 Place it directly after:
 
 ("market_surge_queue_executor", (("apply", (core,)), ("register_routes", (app, core)))),
-
-The section should look like:
-
-("market_surge_aggression", (("apply", (core,)), ("register_routes", (app, core)))),
-("market_surge_queue_executor", (("apply", (core,)), ("register_routes", (app, core)))),
-("market_surge_deployment_mode", (("apply", (core,)), ("register_routes", (app, core)))),
-("surge_state_repair", (("apply", (core,)), ("register_routes", (app, core)))),
 
 Post-Deploy Testing Guidance
 
@@ -394,6 +324,8 @@ https://trading-bot-clean.up.railway.app/paper/post-harvest-opportunity-governor
 
 https://trading-bot-clean.up.railway.app/paper/market-surge-deployment-status
 
+https://trading-bot-clean.up.railway.app/paper/space-stock-basket-status
+
 Heavy routes and execution routes are not part of routine post-push testing.
 
 Current Trading Development Priorities
@@ -402,14 +334,16 @@ Current Trading Development Priorities
 2. Verify losses_today_not_clean is no longer a hard redeployment blocker.
 3. Verify cash_pct_below_post_harvest_threshold is no longer a hard blocker when the active throttle band allows the current cash percentage.
 4. Confirm market_surge_deployment_mode reports mode: hybrid_etf_anchor_plus_stock_leaders.
-5. On the next broad market surge day, confirm the surge plan prioritizes scanner-qualified individual stock leaders before ETF anchors.
-6. Confirm ETFs appear as anchor/fallback entries, not as the only surge engine when stock leaders qualify.
-7. Keep collecting execution rows toward 150.
-8. Keep ML shadow-only until Phase 3A readiness improves.
-9. Maintain paper-only guardrails.
-10. Do not enable live trading.
-11. Do not bypass self-defense or risk halts.
-12. Continue favoring full replacement files or direct GitHub connector updates with clear commit/file SHA confirmation.
+5. Confirm space_stock_basket reports status ok and includes the new space stocks.
+6. On the next broad market surge day, confirm the surge plan prioritizes scanner-qualified individual stock leaders before ETF anchors.
+7. Confirm ETFs appear as anchor/fallback entries, not as the only surge engine when stock leaders qualify.
+8. Watch whether space names appear in scanner audit/top candidates during the current space-stock trend.
+9. Keep collecting execution rows toward 150.
+10. Keep ML shadow-only until Phase 3A readiness improves.
+11. Maintain paper-only guardrails.
+12. Do not enable live trading.
+13. Do not bypass self-defense or risk halts.
+14. Continue favoring full replacement files or direct GitHub connector updates with clear commit/file SHA confirmation.
 
 User Preference / Workflow Notes
 
