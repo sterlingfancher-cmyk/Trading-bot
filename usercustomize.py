@@ -7,7 +7,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-best-of-cycle-arbitration-2026-06-17-v7"
+VERSION = "usercustomize-theme-starter-exception-2026-06-17-v8"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -52,7 +52,8 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/spacex-direct-overlay-status", "category": "governance", "required": False, "after": "/paper/space-stock-basket-status"},
             {"path": "/paper/blocked-entry-reason-audit-status", "category": "governance", "required": False, "after": "/paper/spacex-direct-overlay-status"},
             {"path": "/paper/blocked-entry-reason-selfcheck-overlay-status", "category": "governance", "required": False, "after": "/paper/blocked-entry-reason-audit-status"},
-            {"path": "/paper/best-of-cycle-entry-arbitration-status", "category": "governance", "required": False, "after": "/paper/blocked-entry-reason-selfcheck-overlay-status"},
+            {"path": "/paper/theme-starter-exception-status", "category": "governance", "required": False, "after": "/paper/blocked-entry-reason-selfcheck-overlay-status"},
+            {"path": "/paper/best-of-cycle-entry-arbitration-status", "category": "governance", "required": False, "after": "/paper/theme-starter-exception-status"},
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
         for endpoint in wanted:
@@ -111,6 +112,7 @@ def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
         ("spacex_direct_overlay", "app_and_module"),
         ("blocked_entry_reason_audit", "app_and_module"),
         ("blocked_entry_reason_selfcheck_overlay", "app_and_module"),
+        ("theme_starter_exception", "app_and_module"),
         ("best_of_cycle_entry_arbitration", "app_and_module"),
     ):
         _register_module(flask_app, m, module_name, route_args=route_args)
@@ -132,6 +134,7 @@ def _watchdog() -> None:
                 _register_module(flask_app, m, "spacex_direct_overlay", route_args="app_and_module")
                 _register_module(flask_app, m, "blocked_entry_reason_audit", route_args="app_and_module")
                 _register_module(flask_app, m, "blocked_entry_reason_selfcheck_overlay", route_args="app_and_module")
+                _register_module(flask_app, m, "theme_starter_exception", route_args="app_and_module")
                 _register_module(flask_app, m, "best_of_cycle_entry_arbitration", route_args="app_and_module")
         except Exception:
             pass
