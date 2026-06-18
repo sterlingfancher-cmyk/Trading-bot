@@ -1,4 +1,4 @@
-"""Dynamic Universe Builder v2 for the Railway paper-trading bot.
+"""Dynamic Universe Builder v3 for the Railway paper-trading bot.
 
 Purpose:
 - Move beyond a tiny hand-built ticker list without attempting to scan every
@@ -7,6 +7,8 @@ Purpose:
   shadow/missed-mover observations, and configured extra symbols.
 - Promote only liquid, valid, active, intraday-scannable candidates into the core
   scanner for the current session.
+- Use a session-aware intraday gate so early-morning opportunity is not choked
+  by a fixed 35-bar requirement.
 
 Guardrails:
 - Paper scanner expansion only.
@@ -24,7 +26,12 @@ import sys
 import time
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
-VERSION = "dynamic-universe-builder-2026-06-18-v2-intraday-quality"
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
+
+VERSION = "dynamic-universe-builder-2026-06-18-v3-adaptive-intraday-gate"
 ENABLED = os.environ.get("DYNAMIC_UNIVERSE_BUILDER_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 PAPER_ONLY = os.environ.get("DYNAMIC_UNIVERSE_BUILDER_PAPER_ONLY", "true").lower() not in {"0", "false", "no", "off"}
 CACHE_TTL_SECONDS = int(os.environ.get("DYNAMIC_UNIVERSE_CACHE_TTL_SECONDS", "900"))
@@ -40,6 +47,16 @@ MIN_MOVE_PCT = float(os.environ.get("DYNAMIC_UNIVERSE_MIN_MOVE_PCT", "1.25"))
 MIN_VOLUME_RATIO = float(os.environ.get("DYNAMIC_UNIVERSE_MIN_VOLUME_RATIO", "1.15"))
 REQUIRE_INTRADAY_DATA = os.environ.get("DYNAMIC_UNIVERSE_REQUIRE_INTRADAY_DATA", "true").lower() not in {"0", "false", "no", "off"}
 MIN_INTRADAY_BARS = int(os.environ.get("DYNAMIC_UNIVERSE_MIN_INTRADAY_BARS", "35"))
+ADAPTIVE_INTRADAY_GATE_ENABLED = os.environ.get("DYNAMIC_UNIVERSE_ADAPTIVE_INTRADAY_GATE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
+MARKET_TIMEZONE = os.environ.get("DYNAMIC_UNIVERSE_MARKET_TIMEZONE", "America/Chicago")
+MARKET_OPEN_HOUR = int(os.environ.get("DYNAMIC_UNIVERSE_MARKET_OPEN_HOUR", "8"))
+MARKET_OPEN_MINUTE = int(os.environ.get("DYNAMIC_UNIVERSE_MARKET_OPEN_MINUTE", "30"))
+OPENING_OBSERVATION_MINUTES = int(os.environ.get("DYNAMIC_UNIVERSE_OPENING_OBSERVATION_MINUTES", "15"))
+EARLY_STARTER_UNTIL_MINUTES = int(os.environ.get("DYNAMIC_UNIVERSE_EARLY_STARTER_UNTIL_MINUTES", "45"))
+MID_SESSION_UNTIL_MINUTES = int(os.environ.get("DYNAMIC_UNIVERSE_MID_SESSION_UNTIL_MINUTES", "90"))
+EARLY_MIN_INTRADAY_BARS = int(os.environ.get("DYNAMIC_UNIVERSE_EARLY_MIN_INTRADAY_BARS", "8"))
+MID_MIN_INTRADAY_BARS = int(os.environ.get("DYNAMIC_UNIVERSE_MID_MIN_INTRADAY_BARS", "20"))
+EARLY_STARTER_ALLOC_FACTOR = float(os.environ.get("DYNAMIC_UNIVERSE_EARLY_STARTER_ALLOC_FACTOR", "0.35"))
 ALLOW_LEVERAGED_ETFS = os.environ.get("DYNAMIC_UNIVERSE_ALLOW_LEVERAGED_ETFS", "true").lower() not in {"0", "false", "no", "off"}
 LEVERAGED_MAX_PROMOTED = int(os.environ.get("DYNAMIC_UNIVERSE_LEVERAGED_MAX_PROMOTED", "2"))
 
@@ -397,12 +414,47 @@ def _eligible_for_daily_promotion(row: Dict[str, Any]) -> Tuple[bool, str]:
     return True, "daily_liquidity_move_promoted"
 
 
-def _intraday_from_df(core: Any, symbol: str, df: Any) -> Dict[str, Any]:
+def _session_gate_policy() -> Dict[str, Any]:
+    base = {
+        "adaptive": bool(ADAPTIVE_INTRADAY_GATE_ENABLED),
+        "market_timezone": MARKET_TIMEZONE,
+        "minutes_since_open": None,
+        "phase": "standard",
+        "allow_dynamic_promotion": True,
+        "early_starter": False,
+        "required_bars": MIN_INTRADAY_BARS,
+        "reason": "standard_full_intraday_gate",
+    }
+    if not ADAPTIVE_INTRADAY_GATE_ENABLED:
+        return base
+    try:
+        tz = ZoneInfo(MARKET_TIMEZONE) if ZoneInfo is not None else None
+        now_local = dt.datetime.now(tz) if tz is not None else dt.datetime.now()
+        open_dt = now_local.replace(hour=MARKET_OPEN_HOUR, minute=MARKET_OPEN_MINUTE, second=0, microsecond=0)
+        minutes = int((now_local - open_dt).total_seconds() // 60)
+        base["minutes_since_open"] = minutes
+        base["now_local"] = now_local.strftime("%Y-%m-%d %H:%M:%S %Z")
+        if minutes < 0:
+            base.update({"phase": "pre_market", "allow_dynamic_promotion": False, "early_starter": False, "required_bars": MIN_INTRADAY_BARS, "reason": "pre_market_observation_only"})
+        elif minutes < OPENING_OBSERVATION_MINUTES:
+            base.update({"phase": "opening_observation", "allow_dynamic_promotion": False, "early_starter": False, "required_bars": EARLY_MIN_INTRADAY_BARS, "reason": "first_minutes_observation_only_for_dynamic_symbols"})
+        elif minutes < EARLY_STARTER_UNTIL_MINUTES:
+            base.update({"phase": "early_starter", "allow_dynamic_promotion": True, "early_starter": True, "required_bars": EARLY_MIN_INTRADAY_BARS, "reason": "adaptive_early_starter_intraday_gate"})
+        elif minutes < MID_SESSION_UNTIL_MINUTES:
+            base.update({"phase": "mid_session_buildout", "allow_dynamic_promotion": True, "early_starter": False, "required_bars": MID_MIN_INTRADAY_BARS, "reason": "adaptive_mid_session_intraday_gate"})
+        else:
+            base.update({"phase": "standard", "allow_dynamic_promotion": True, "early_starter": False, "required_bars": MIN_INTRADAY_BARS, "reason": "standard_full_intraday_gate"})
+    except Exception as exc:
+        base.update({"reason": f"adaptive_gate_fallback:{type(exc).__name__}", "required_bars": MIN_INTRADAY_BARS})
+    return base
+
+
+def _intraday_from_df(core: Any, symbol: str, df: Any, required_bars: int) -> Dict[str, Any]:
     if df is None:
-        return {"scannable": False, "reason": "no_intraday_data", "bars": 0}
+        return {"scannable": False, "reason": "no_intraday_data", "bars": 0, "required_bars": required_bars}
     try:
         if getattr(df, "empty", False):
-            return {"scannable": False, "reason": "no_intraday_data", "bars": 0}
+            return {"scannable": False, "reason": "no_intraday_data", "bars": 0, "required_bars": required_bars}
     except Exception:
         pass
     closes: List[float] = []
@@ -426,26 +478,31 @@ def _intraday_from_df(core: Any, symbol: str, df: Any) -> Dict[str, Any]:
         except Exception:
             closes = []
     bars = len(closes)
-    if bars < MIN_INTRADAY_BARS:
-        return {"scannable": False, "reason": "not_enough_intraday_bars", "bars": bars, "min_bars": MIN_INTRADAY_BARS}
+    if bars < required_bars:
+        return {"scannable": False, "reason": "not_enough_intraday_bars", "bars": bars, "required_bars": required_bars}
     last_price = closes[-1] if closes else None
     if last_price is None or last_price <= 0:
-        return {"scannable": False, "reason": "bad_intraday_last_price", "bars": bars}
-    return {"scannable": True, "reason": "intraday_data_ok", "bars": bars, "last_price": round(float(last_price), 4), "min_bars": MIN_INTRADAY_BARS}
+        return {"scannable": False, "reason": "bad_intraday_last_price", "bars": bars, "required_bars": required_bars}
+    return {"scannable": True, "reason": "intraday_data_ok", "bars": bars, "last_price": round(float(last_price), 4), "required_bars": required_bars}
 
 
-def _intraday_check(core: Any, symbol: str) -> Dict[str, Any]:
+def _intraday_check(core: Any, symbol: str, is_base_symbol: bool = False) -> Dict[str, Any]:
     symbol = _symbol(symbol)
+    policy = _session_gate_policy()
     if not REQUIRE_INTRADAY_DATA:
-        return {"scannable": True, "reason": "intraday_gate_disabled", "bars": None}
+        return {"scannable": True, "reason": "intraday_gate_disabled", "bars": None, "adaptive_session_gate": policy}
+    if not is_base_symbol and not policy.get("allow_dynamic_promotion", True):
+        return {"scannable": False, "reason": policy.get("reason", "dynamic_promotion_not_allowed_in_this_session_phase"), "bars": None, "adaptive_session_gate": policy}
     try:
         fetch = getattr(core, "fetch_intraday", None)
         if not callable(fetch):
-            return {"scannable": False, "reason": "fetch_intraday_unavailable", "bars": 0}
+            return {"scannable": False, "reason": "fetch_intraday_unavailable", "bars": 0, "adaptive_session_gate": policy}
         df = fetch(symbol)
-        return _intraday_from_df(core, symbol, df)
+        intraday = _intraday_from_df(core, symbol, df, int(policy.get("required_bars") or MIN_INTRADAY_BARS))
+        intraday["adaptive_session_gate"] = policy
+        return intraday
     except Exception as exc:
-        return {"scannable": False, "reason": f"intraday_check_failed:{type(exc).__name__}", "bars": 0}
+        return {"scannable": False, "reason": f"intraday_check_failed:{type(exc).__name__}", "bars": 0, "adaptive_session_gate": policy}
 
 
 def _apply_dynamic_maps(core: Any, promoted: List[Dict[str, Any]]) -> None:
@@ -489,10 +546,14 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
     not_scannable: List[Dict[str, Any]] = []
     intraday_checked = 0
     leveraged_promoted = 0
+    base = _base_universe(core)
+    base_set = set(base)
+    session_policy = _session_gate_policy()
 
     for symbol in seeds:
         row = _snapshot_from_data(core, data, symbol) if data_error is None else {"symbol": symbol, "data_available": False, "reason": data_error}
         row["promotion_score"] = _promotion_score(row)
+        row["in_base_universe"] = str(row.get("symbol")) in base_set
         ok, reason = _eligible_for_daily_promotion(row)
         row["daily_promotion_reason"] = reason
         rows.append(row)
@@ -506,13 +567,13 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
 
     for row in daily_candidates:
         if intraday_checked >= MAX_INTRADAY_CHECKS:
-            row["intraday"] = {"scannable": False, "reason": "intraday_check_cap", "bars": None}
+            row["intraday"] = {"scannable": False, "reason": "intraday_check_cap", "bars": None, "adaptive_session_gate": session_policy}
             row["promotion_reason"] = "intraday_check_cap"
             not_scannable.append(row)
             rejected.append(row)
             continue
         intraday_checked += 1
-        intraday = _intraday_check(core, str(row.get("symbol")))
+        intraday = _intraday_check(core, str(row.get("symbol")), bool(row.get("in_base_universe")))
         row["intraday"] = intraday
         if not intraday.get("scannable"):
             row["promotion_reason"] = intraday.get("reason", "intraday_not_scannable")
@@ -525,7 +586,9 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
                 rejected.append(row)
                 continue
             leveraged_promoted += 1
-        row["promotion_reason"] = "promoted_and_intraday_scannable"
+        gate = intraday.get("adaptive_session_gate", {}) if isinstance(intraday.get("adaptive_session_gate"), dict) else {}
+        row["early_starter"] = bool(gate.get("early_starter")) and not bool(row.get("in_base_universe"))
+        row["promotion_reason"] = "promoted_adaptive_early_starter" if row.get("early_starter") else "promoted_and_intraday_scannable"
         row["scannable"] = True
         promoted.append(row)
         if len(promoted) >= MAX_PROMOTED_SYMBOLS:
@@ -533,9 +596,9 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
 
     promoted.sort(key=lambda r: (bool(r.get("scannable")), _safe_float(r.get("promotion_score"), 0.0) or 0.0, _safe_float(r.get("pct_change_1d"), 0.0) or 0.0, _safe_float(r.get("volume_ratio"), 0.0) or 0.0), reverse=True)
 
-    base = _base_universe(core)
     final_universe = _unique(base + [r["symbol"] for r in promoted])[:MAX_TOTAL_UNIVERSE]
     promoted_symbols = [s for s in [r["symbol"] for r in promoted] if s in final_universe]
+    early_starter_symbols = [str(r.get("symbol")) for r in promoted if r.get("early_starter") and str(r.get("symbol")) in final_universe]
 
     try:
         core.UNIVERSE = final_universe
@@ -546,13 +609,16 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
                 pf["dynamic_universe_builder"] = {
                     "version": VERSION,
                     "generated_local": _now(core),
+                    "session_gate": session_policy,
                     "seed_count": len(seeds),
                     "base_universe_count": len(base),
                     "daily_candidate_count": len(daily_candidates),
                     "intraday_checked_count": intraday_checked,
                     "promoted_count": len(promoted_symbols),
+                    "early_starter_count": len(early_starter_symbols),
                     "final_universe_count": len(final_universe),
                     "promoted_symbols": promoted_symbols[:MAX_PROMOTED_SYMBOLS],
+                    "early_starter_symbols": early_starter_symbols[:25],
                     "promoted_and_scannable": promoted[:25],
                     "daily_qualified_but_not_scannable": not_scannable[:25],
                     "top_rejected": sorted(rejected, key=lambda r: _safe_float(r.get("promotion_score"), 0.0) or 0.0, reverse=True)[:25],
@@ -570,6 +636,7 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
     no_intraday_count = sum(1 for row in not_scannable if str((row.get("intraday") or {}).get("reason")) == "no_intraday_data")
     not_enough_bars_count = sum(1 for row in not_scannable if str((row.get("intraday") or {}).get("reason")) == "not_enough_intraday_bars")
     stale_or_bad_price_count = sum(1 for row in not_scannable if "price" in str((row.get("intraday") or {}).get("reason")))
+    observation_only_count = sum(1 for row in not_scannable if "observation" in str((row.get("intraday") or {}).get("reason")))
 
     payload = {
         "status": "ok" if promotion_applied else "warn",
@@ -582,18 +649,21 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
         "cache_hit": False,
         "promotion_applied": bool(promotion_applied),
         "data_error": data_error,
+        "session_gate": session_policy,
         "seed_meta": seed_meta,
         "base_universe_count": len(base),
         "seed_count": len(seeds),
         "daily_candidate_count": len(daily_candidates),
         "intraday_checked_count": intraday_checked,
         "promoted_count": len(promoted_symbols),
+        "early_starter_count": len(early_starter_symbols),
         "final_universe_count": len(final_universe),
         "promoted_symbols": promoted_symbols[:MAX_PROMOTED_SYMBOLS],
+        "early_starter_symbols": early_starter_symbols[:25],
         "promoted_and_scannable": promoted[:25],
         "daily_qualified_but_not_scannable": not_scannable[:25],
         "top_rejected": sorted(rejected, key=lambda r: _safe_float(r.get("promotion_score"), 0.0) or 0.0, reverse=True)[:25],
-        "diagnostics": {"not_scannable_count": len(not_scannable), "no_intraday_data_count": no_intraday_count, "not_enough_intraday_bars_count": not_enough_bars_count, "bad_intraday_price_count": stale_or_bad_price_count, "intraday_gate_required": bool(REQUIRE_INTRADAY_DATA)},
+        "diagnostics": {"not_scannable_count": len(not_scannable), "no_intraday_data_count": no_intraday_count, "not_enough_intraday_bars_count": not_enough_bars_count, "bad_intraday_price_count": stale_or_bad_price_count, "opening_observation_only_count": observation_only_count, "intraday_gate_required": bool(REQUIRE_INTRADAY_DATA), "adaptive_intraday_gate_enabled": bool(ADAPTIVE_INTRADAY_GATE_ENABLED)},
         "policy": {
             "max_seed_symbols": MAX_SEED_SYMBOLS,
             "max_promoted_symbols": MAX_PROMOTED_SYMBOLS,
@@ -606,7 +676,14 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
             "min_volume_ratio": MIN_VOLUME_RATIO,
             "min_promotion_score": MIN_PROMOTION_SCORE,
             "require_intraday_data": bool(REQUIRE_INTRADAY_DATA),
+            "adaptive_intraday_gate_enabled": bool(ADAPTIVE_INTRADAY_GATE_ENABLED),
+            "opening_observation_minutes": OPENING_OBSERVATION_MINUTES,
+            "early_starter_until_minutes": EARLY_STARTER_UNTIL_MINUTES,
+            "mid_session_until_minutes": MID_SESSION_UNTIL_MINUTES,
+            "early_min_intraday_bars": EARLY_MIN_INTRADAY_BARS,
+            "mid_min_intraday_bars": MID_MIN_INTRADAY_BARS,
             "min_intraday_bars": MIN_INTRADAY_BARS,
+            "early_starter_alloc_factor": EARLY_STARTER_ALLOC_FACTOR,
             "allow_leveraged_etfs": bool(ALLOW_LEVERAGED_ETFS),
             "leveraged_max_promoted": LEVERAGED_MAX_PROMOTED,
             "cache_ttl_seconds": CACHE_TTL_SECONDS,
@@ -621,6 +698,36 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
     return payload
 
 
+def _tag_early_starter_signals(result: Any, payload: Dict[str, Any]) -> Any:
+    early_symbols = set(_symbol(s) for s in (payload.get("early_starter_symbols") or []))
+    if not early_symbols:
+        return result
+    try:
+        long_signals = result[0] if isinstance(result, tuple) and len(result) >= 1 else []
+        if not isinstance(long_signals, list):
+            return result
+        for signal in long_signals:
+            if not isinstance(signal, dict):
+                continue
+            sym = _symbol(signal.get("symbol"))
+            if sym not in early_symbols:
+                continue
+            current_alloc = _safe_float(signal.get("alloc_factor"), 1.0) or 1.0
+            signal["alloc_factor"] = min(float(current_alloc), EARLY_STARTER_ALLOC_FACTOR)
+            signal["entry_context"] = signal.get("entry_context") or "dynamic_universe_adaptive_early_starter"
+            signal["trade_class"] = signal.get("trade_class") or "dynamic_universe_starter"
+            signal["dynamic_universe_early_starter"] = True
+            signal["dynamic_universe_builder"] = {
+                "version": VERSION,
+                "reason": "adaptive_early_starter_sizing",
+                "alloc_factor": EARLY_STARTER_ALLOC_FACTOR,
+                "session_gate": payload.get("session_gate"),
+            }
+    except Exception:
+        return result
+    return result
+
+
 def _patch_scan_signals(core: Any) -> bool:
     current = getattr(core, "scan_signals", None)
     if not callable(current) or getattr(current, "_dynamic_universe_builder_patched", False):
@@ -628,11 +735,13 @@ def _patch_scan_signals(core: Any) -> bool:
     original = current
 
     def patched_scan_signals(market):
+        payload = {}
         try:
-            build_dynamic_universe(core, force=False)
+            payload = build_dynamic_universe(core, force=False)
         except Exception:
-            pass
-        return original(market)
+            payload = {}
+        result = original(market)
+        return _tag_early_starter_signals(result, payload if isinstance(payload, dict) else {})
 
     patched_scan_signals._dynamic_universe_builder_patched = True  # type: ignore[attr-defined]
     patched_scan_signals._dynamic_universe_builder_original = original  # type: ignore[attr-defined]
