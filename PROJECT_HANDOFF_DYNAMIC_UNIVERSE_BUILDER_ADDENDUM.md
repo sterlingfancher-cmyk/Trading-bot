@@ -12,7 +12,7 @@ dynamic_universe_builder.py
 
 Current version
 
-dynamic-universe-builder-2026-06-18-v2-intraday-quality
+dynamic-universe-builder-2026-06-18-v3-adaptive-intraday-gate
 
 Routes
 
@@ -31,9 +31,10 @@ Core behavior
 * Downloads 30-day daily price/volume data through yfinance.
 * Requires valid price/volume/liquidity before daily promotion.
 * Scores candidates using 1-day move, 5-day move, relative volume, dollar volume, and theme priority.
-* Performs an intraday scannability check before active scanner promotion.
+* Performs a session-aware intraday scannability check before active scanner promotion.
 * Promotes only candidates with usable intraday bars into core.UNIVERSE.
 * Keeps daily-qualified but intraday-bad symbols in diagnostics/observation only.
+* Tags adaptive early-starter dynamic signals with a capped allocation factor when the session is in the early-starter window.
 * Updates SYMBOL_SECTOR, SYMBOL_BUCKET, and BUCKET_CONFIG for promoted dynamic candidates.
 * Stores diagnostics in portfolio.dynamic_universe_builder.
 
@@ -51,7 +52,30 @@ Default caps and filters
 * Minimum relative volume ratio: 1.15.
 * Minimum promotion score: 0.28.
 * Require intraday data: true.
-* Minimum intraday bars: 35.
+* Standard minimum intraday bars: 35.
+
+Adaptive intraday gate
+
+V3 changed the fixed 35-bar rule into a session-aware gate so dynamic discovery does not unnecessarily choke early-morning opportunity.
+
+Default phases:
+
+* Pre-market: dynamic promotion observation-only.
+* First 15 minutes after regular open: dynamic promotion observation-only, while original core universe symbols remain available through the normal scanner.
+* 15 to 45 minutes after regular open: dynamic candidates can be promoted with 8 clean intraday bars and are tagged as adaptive early-starter candidates.
+* 45 to 90 minutes after regular open: dynamic candidates require 20 clean intraday bars.
+* After 90 minutes: dynamic candidates require the standard 35 clean intraday bars.
+
+Adaptive early-starter handling
+
+When a dynamic candidate is promoted during the early-starter window, the patched scanner tags its long signal with:
+
+* entry_context: dynamic_universe_adaptive_early_starter
+* trade_class: dynamic_universe_starter
+* dynamic_universe_early_starter: true
+* alloc_factor capped at 0.35 by default.
+
+This does not force an entry. Existing score, quality, cooldown, exposure, self-defense, market-regime, theme-starter, regime-flip, and best-of-cycle arbitration layers remain downstream.
 
 Intraday quality gate
 
@@ -60,11 +84,14 @@ V2 added the intraday quality gate after the afternoon test showed dynamically d
 The builder now separates:
 
 * promoted_and_scannable
+* early_starter_symbols
 * daily_qualified_but_not_scannable
 * top_rejected
 
 Common dynamic universe rejection reasons include:
 
+* pre_market_observation_only
+* first_minutes_observation_only_for_dynamic_symbols
 * no_intraday_data
 * not_enough_intraday_bars
 * bad_intraday_last_price
@@ -168,18 +195,25 @@ Commits
   * Added v2 intraday quality/scannability gate.
   * dynamic_universe_builder.py SHA: 1269fef77e74565ff0e0186db7466c003725da41.
 
+* 848b6dffc29db005d938fd683e1c7039751354aa
+  * Added v3 adaptive session-aware intraday gate and early-starter signal tagging.
+  * dynamic_universe_builder.py SHA: 3003b20a49a549c55d4c949e4d4ae17897b11bac.
+
 Expected status fields
 
 /paper/dynamic-universe-builder-status should show:
 
 * patched_scan_signals
+* session_gate
 * seed_count
 * base_universe_count
 * daily_candidate_count
 * intraday_checked_count
 * promoted_count
+* early_starter_count
 * final_universe_count
 * promoted_symbols
+* early_starter_symbols
 * promoted_and_scannable
 * daily_qualified_but_not_scannable
 * top_rejected
@@ -187,7 +221,9 @@ Expected status fields
 * diagnostics.no_intraday_data_count
 * diagnostics.not_enough_intraday_bars_count
 * diagnostics.bad_intraday_price_count
+* diagnostics.opening_observation_only_count
 * diagnostics.intraday_gate_required
+* diagnostics.adaptive_intraday_gate_enabled
 * policy.max_seed_symbols
 * policy.max_promoted_symbols
 * policy.max_total_universe
@@ -199,7 +235,14 @@ Expected status fields
 * policy.min_volume_ratio
 * policy.min_promotion_score
 * policy.require_intraday_data
+* policy.adaptive_intraday_gate_enabled
+* policy.opening_observation_minutes
+* policy.early_starter_until_minutes
+* policy.mid_session_until_minutes
+* policy.early_min_intraday_bars
+* policy.mid_min_intraday_bars
 * policy.min_intraday_bars
+* policy.early_starter_alloc_factor
 * policy.allow_leveraged_etfs
 * policy.leveraged_max_promoted
 * policy.cache_ttl_seconds
