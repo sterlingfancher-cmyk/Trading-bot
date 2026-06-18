@@ -1,12 +1,12 @@
-"""Dynamic Universe Builder v1 for the Railway paper-trading bot.
+"""Dynamic Universe Builder v2 for the Railway paper-trading bot.
 
 Purpose:
 - Move beyond a tiny hand-built ticker list without attempting to scan every
   public symbol.
 - Build a broad but capped candidate pool from theme baskets, existing universe,
   shadow/missed-mover observations, and configured extra symbols.
-- Promote only liquid/valid/active candidates into the core scanner for the
-  current session.
+- Promote only liquid, valid, active, intraday-scannable candidates into the core
+  scanner for the current session.
 
 Guardrails:
 - Paper scanner expansion only.
@@ -24,19 +24,22 @@ import sys
 import time
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
-VERSION = "dynamic-universe-builder-2026-06-18-v1"
+VERSION = "dynamic-universe-builder-2026-06-18-v2-intraday-quality"
 ENABLED = os.environ.get("DYNAMIC_UNIVERSE_BUILDER_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 PAPER_ONLY = os.environ.get("DYNAMIC_UNIVERSE_BUILDER_PAPER_ONLY", "true").lower() not in {"0", "false", "no", "off"}
 CACHE_TTL_SECONDS = int(os.environ.get("DYNAMIC_UNIVERSE_CACHE_TTL_SECONDS", "900"))
 MAX_SEED_SYMBOLS = int(os.environ.get("DYNAMIC_UNIVERSE_MAX_SEED_SYMBOLS", "260"))
 MAX_PROMOTED_SYMBOLS = int(os.environ.get("DYNAMIC_UNIVERSE_MAX_PROMOTED_SYMBOLS", "75"))
 MAX_TOTAL_UNIVERSE = int(os.environ.get("DYNAMIC_UNIVERSE_MAX_TOTAL_UNIVERSE", "180"))
+MAX_INTRADAY_CHECKS = int(os.environ.get("DYNAMIC_UNIVERSE_MAX_INTRADAY_CHECKS", "90"))
 MIN_PRICE = float(os.environ.get("DYNAMIC_UNIVERSE_MIN_PRICE", "3.00"))
 MIN_AVG_VOLUME = float(os.environ.get("DYNAMIC_UNIVERSE_MIN_AVG_VOLUME", "350000"))
 MIN_DOLLAR_VOLUME = float(os.environ.get("DYNAMIC_UNIVERSE_MIN_DOLLAR_VOLUME", "5000000"))
 MIN_PROMOTION_SCORE = float(os.environ.get("DYNAMIC_UNIVERSE_MIN_PROMOTION_SCORE", "0.28"))
 MIN_MOVE_PCT = float(os.environ.get("DYNAMIC_UNIVERSE_MIN_MOVE_PCT", "1.25"))
 MIN_VOLUME_RATIO = float(os.environ.get("DYNAMIC_UNIVERSE_MIN_VOLUME_RATIO", "1.15"))
+REQUIRE_INTRADAY_DATA = os.environ.get("DYNAMIC_UNIVERSE_REQUIRE_INTRADAY_DATA", "true").lower() not in {"0", "false", "no", "off"}
+MIN_INTRADAY_BARS = int(os.environ.get("DYNAMIC_UNIVERSE_MIN_INTRADAY_BARS", "35"))
 ALLOW_LEVERAGED_ETFS = os.environ.get("DYNAMIC_UNIVERSE_ALLOW_LEVERAGED_ETFS", "true").lower() not in {"0", "false", "no", "off"}
 LEVERAGED_MAX_PROMOTED = int(os.environ.get("DYNAMIC_UNIVERSE_LEVERAGED_MAX_PROMOTED", "2"))
 
@@ -45,9 +48,6 @@ PATCHED_MODULE_IDS: set[int] = set()
 _CACHE: Dict[str, Any] = {"ts": 0.0, "payload": None}
 _BASE_UNIVERSE: Dict[int, List[str]] = {}
 
-# Broad baskets are intentionally capped. The point is not to scan every symbol;
-# it is to stop missing obvious theme leaders just because they were never typed
-# into app.py.
 THEME_BASKETS: Dict[str, List[str]] = {
     "semi_leaders": [
         "NVDA", "AMD", "AVGO", "TSM", "MU", "ARM", "MRVL", "LRCX", "AMAT", "KLAC", "ASML",
@@ -62,7 +62,7 @@ THEME_BASKETS: Dict[str, List[str]] = {
     ],
     "bitcoin_ai_compute": [
         "HIVE", "HUT", "IREN", "CIFR", "WULF", "CLSK", "MARA", "RIOT", "BTDR", "CORZ", "APLD",
-        "COIN", "MSTR", "GLXY", "IREN", "CAN", "BITF", "SDIG", "CIFRW",
+        "COIN", "MSTR", "GLXY", "CAN", "BITF", "SDIG", "CIFRW",
     ],
     "ai_software_momentum": ["PLTR", "AI", "SOUN", "BBAI", "PATH", "DDOG", "APP", "DUOL", "SNOW", "NET", "CRWD", "PANW"],
     "space_stocks": ["RKLB", "LUNR", "ASTS", "RDW", "PL", "BKSY", "SATL", "SPIR", "SPCE", "IRDM", "GSAT", "VSAT", "SATS", "SPCX"],
@@ -246,7 +246,6 @@ def _seed_symbols(core: Any) -> Tuple[List[str], Dict[str, Any]]:
     seeds = _unique(seeds)
     if len(seeds) > MAX_SEED_SYMBOLS:
         base_set = set(base)
-        # Preserve base names and then cap extra discovery symbols.
         base_part = [s for s in seeds if s in base_set]
         extra_part = [s for s in seeds if s not in base_set]
         seeds = _unique(base_part + extra_part[: max(0, MAX_SEED_SYMBOLS - len(base_part))])
@@ -268,7 +267,6 @@ def _series_from_download(data: Any, symbol: str, column: str):
         if cols is None:
             return None
         if hasattr(cols, "nlevels") and cols.nlevels > 1:
-            # yfinance may return either (ticker, field) or (field, ticker).
             for col in cols:
                 try:
                     if len(col) >= 2 and _symbol(col[0]) == symbol and str(col[1]).lower() == column.lower():
@@ -379,7 +377,7 @@ def _promotion_score(row: Dict[str, Any]) -> float:
     return round(float(score), 6)
 
 
-def _eligible_for_promotion(row: Dict[str, Any]) -> Tuple[bool, str]:
+def _eligible_for_daily_promotion(row: Dict[str, Any]) -> Tuple[bool, str]:
     if not row.get("data_available"):
         return False, str(row.get("reason") or "data_unavailable")
     if not row.get("data_ok"):
@@ -396,7 +394,76 @@ def _eligible_for_promotion(row: Dict[str, Any]) -> Tuple[bool, str]:
         return False, "no_active_move_or_volume_confirmation"
     if score < MIN_PROMOTION_SCORE:
         return False, "promotion_score_below_floor"
-    return True, "promoted_dynamic_candidate"
+    return True, "daily_liquidity_move_promoted"
+
+
+def _intraday_from_df(core: Any, symbol: str, df: Any) -> Dict[str, Any]:
+    if df is None:
+        return {"scannable": False, "reason": "no_intraday_data", "bars": 0}
+    try:
+        if getattr(df, "empty", False):
+            return {"scannable": False, "reason": "no_intraday_data", "bars": 0}
+    except Exception:
+        pass
+    closes: List[float] = []
+    try:
+        arrays_fn = getattr(core, "intraday_arrays", None)
+        if callable(arrays_fn):
+            arrays = arrays_fn(df)
+            if isinstance(arrays, dict):
+                raw = arrays.get("close")
+                if raw is not None:
+                    closes = [float(x) for x in list(raw) if x == x]
+    except Exception:
+        closes = []
+    if not closes:
+        try:
+            if "Close" in df:
+                series = df["Close"]
+                if hasattr(series, "columns"):
+                    series = series.iloc[:, 0]
+                closes = [float(x) for x in list(series) if x == x]
+        except Exception:
+            closes = []
+    bars = len(closes)
+    if bars < MIN_INTRADAY_BARS:
+        return {"scannable": False, "reason": "not_enough_intraday_bars", "bars": bars, "min_bars": MIN_INTRADAY_BARS}
+    last_price = closes[-1] if closes else None
+    if last_price is None or last_price <= 0:
+        return {"scannable": False, "reason": "bad_intraday_last_price", "bars": bars}
+    return {"scannable": True, "reason": "intraday_data_ok", "bars": bars, "last_price": round(float(last_price), 4), "min_bars": MIN_INTRADAY_BARS}
+
+
+def _intraday_check(core: Any, symbol: str) -> Dict[str, Any]:
+    symbol = _symbol(symbol)
+    if not REQUIRE_INTRADAY_DATA:
+        return {"scannable": True, "reason": "intraday_gate_disabled", "bars": None}
+    try:
+        fetch = getattr(core, "fetch_intraday", None)
+        if not callable(fetch):
+            return {"scannable": False, "reason": "fetch_intraday_unavailable", "bars": 0}
+        df = fetch(symbol)
+        return _intraday_from_df(core, symbol, df)
+    except Exception as exc:
+        return {"scannable": False, "reason": f"intraday_check_failed:{type(exc).__name__}", "bars": 0}
+
+
+def _apply_dynamic_maps(core: Any, promoted: List[Dict[str, Any]]) -> None:
+    sector_map = getattr(core, "SYMBOL_SECTOR", {})
+    bucket_map = getattr(core, "SYMBOL_BUCKET", {})
+    bucket_cfg = getattr(core, "BUCKET_CONFIG", {})
+    if isinstance(sector_map, dict) and isinstance(bucket_map, dict):
+        for row in promoted:
+            symbol = row.get("symbol")
+            bucket = row.get("bucket") or _bucket_for_symbol(core, symbol)
+            sector = row.get("sector") or _sector_for_symbol(core, symbol, bucket)
+            if symbol:
+                sector_map.setdefault(symbol, sector)
+                bucket_map.setdefault(symbol, bucket)
+    if isinstance(bucket_cfg, dict):
+        for bucket, cfg in BUCKET_CONFIG_DEFAULTS.items():
+            bucket_cfg.setdefault(bucket, dict(cfg))
+        bucket_cfg.setdefault("dynamic_discovery", {"alloc_factor": 0.40, "max_exposure_pct": 0.15, "max_positions": 2})
 
 
 def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, Any]:
@@ -409,54 +476,62 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
         cached["cache_hit"] = True
         return cached
     if not (ENABLED and _paper_context()):
-        payload = {
-            "status": "ok",
-            "overall": "pass",
-            "type": "dynamic_universe_builder_status",
-            "version": VERSION,
-            "enabled": bool(ENABLED),
-            "paper_context": bool(_paper_context()),
-            "promotion_applied": False,
-            "reason": "disabled_or_not_paper",
-            "authority_changed": False,
-        }
+        payload = {"status": "ok", "overall": "pass", "type": "dynamic_universe_builder_status", "version": VERSION, "enabled": bool(ENABLED), "paper_context": bool(_paper_context()), "promotion_applied": False, "reason": "disabled_or_not_paper", "authority_changed": False}
         _CACHE.update({"ts": now, "payload": payload})
         return payload
 
     seeds, seed_meta = _seed_symbols(core)
     data, data_error = _download_daily(seeds)
     rows: List[Dict[str, Any]] = []
+    daily_candidates: List[Dict[str, Any]] = []
     rejected: List[Dict[str, Any]] = []
     promoted: List[Dict[str, Any]] = []
+    not_scannable: List[Dict[str, Any]] = []
+    intraday_checked = 0
     leveraged_promoted = 0
 
     for symbol in seeds:
         row = _snapshot_from_data(core, data, symbol) if data_error is None else {"symbol": symbol, "data_available": False, "reason": data_error}
         row["promotion_score"] = _promotion_score(row)
-        ok, reason = _eligible_for_promotion(row)
-        row["promotion_reason"] = reason
+        ok, reason = _eligible_for_daily_promotion(row)
+        row["daily_promotion_reason"] = reason
         rows.append(row)
         if ok:
-            if bool(row.get("leveraged_etf")):
-                if leveraged_promoted >= LEVERAGED_MAX_PROMOTED:
-                    row["promotion_reason"] = "leveraged_etf_promotion_cap"
-                    rejected.append(row)
-                    continue
-                leveraged_promoted += 1
-            promoted.append(row)
+            daily_candidates.append(row)
         else:
+            row["promotion_reason"] = reason
             rejected.append(row)
 
-    promoted.sort(
-        key=lambda r: (
-            bool(r.get("data_ok")),
-            _safe_float(r.get("promotion_score"), 0.0) or 0.0,
-            _safe_float(r.get("pct_change_1d"), 0.0) or 0.0,
-            _safe_float(r.get("volume_ratio"), 0.0) or 0.0,
-        ),
-        reverse=True,
-    )
-    promoted = promoted[:MAX_PROMOTED_SYMBOLS]
+    daily_candidates.sort(key=lambda r: (_safe_float(r.get("promotion_score"), 0.0) or 0.0, _safe_float(r.get("pct_change_1d"), 0.0) or 0.0, _safe_float(r.get("volume_ratio"), 0.0) or 0.0), reverse=True)
+
+    for row in daily_candidates:
+        if intraday_checked >= MAX_INTRADAY_CHECKS:
+            row["intraday"] = {"scannable": False, "reason": "intraday_check_cap", "bars": None}
+            row["promotion_reason"] = "intraday_check_cap"
+            not_scannable.append(row)
+            rejected.append(row)
+            continue
+        intraday_checked += 1
+        intraday = _intraday_check(core, str(row.get("symbol")))
+        row["intraday"] = intraday
+        if not intraday.get("scannable"):
+            row["promotion_reason"] = intraday.get("reason", "intraday_not_scannable")
+            not_scannable.append(row)
+            rejected.append(row)
+            continue
+        if bool(row.get("leveraged_etf")):
+            if leveraged_promoted >= LEVERAGED_MAX_PROMOTED:
+                row["promotion_reason"] = "leveraged_etf_promotion_cap"
+                rejected.append(row)
+                continue
+            leveraged_promoted += 1
+        row["promotion_reason"] = "promoted_and_intraday_scannable"
+        row["scannable"] = True
+        promoted.append(row)
+        if len(promoted) >= MAX_PROMOTED_SYMBOLS:
+            break
+
+    promoted.sort(key=lambda r: (bool(r.get("scannable")), _safe_float(r.get("promotion_score"), 0.0) or 0.0, _safe_float(r.get("pct_change_1d"), 0.0) or 0.0, _safe_float(r.get("volume_ratio"), 0.0) or 0.0), reverse=True)
 
     base = _base_universe(core)
     final_universe = _unique(base + [r["symbol"] for r in promoted])[:MAX_TOTAL_UNIVERSE]
@@ -464,21 +539,7 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
 
     try:
         core.UNIVERSE = final_universe
-        sector_map = getattr(core, "SYMBOL_SECTOR", {})
-        bucket_map = getattr(core, "SYMBOL_BUCKET", {})
-        bucket_cfg = getattr(core, "BUCKET_CONFIG", {})
-        if isinstance(sector_map, dict) and isinstance(bucket_map, dict):
-            for row in promoted:
-                symbol = row.get("symbol")
-                bucket = row.get("bucket") or _bucket_for_symbol(core, symbol)
-                sector = row.get("sector") or _sector_for_symbol(core, symbol, bucket)
-                if symbol:
-                    sector_map.setdefault(symbol, sector)
-                    bucket_map.setdefault(symbol, bucket)
-        if isinstance(bucket_cfg, dict):
-            for bucket, cfg in BUCKET_CONFIG_DEFAULTS.items():
-                bucket_cfg.setdefault(bucket, dict(cfg))
-            bucket_cfg.setdefault("dynamic_discovery", {"alloc_factor": 0.40, "max_exposure_pct": 0.15, "max_positions": 2})
+        _apply_dynamic_maps(core, promoted)
         try:
             pf = getattr(core, "portfolio", {})
             if isinstance(pf, dict):
@@ -487,10 +548,13 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
                     "generated_local": _now(core),
                     "seed_count": len(seeds),
                     "base_universe_count": len(base),
+                    "daily_candidate_count": len(daily_candidates),
+                    "intraday_checked_count": intraday_checked,
                     "promoted_count": len(promoted_symbols),
                     "final_universe_count": len(final_universe),
                     "promoted_symbols": promoted_symbols[:MAX_PROMOTED_SYMBOLS],
-                    "top_promoted": promoted[:25],
+                    "promoted_and_scannable": promoted[:25],
+                    "daily_qualified_but_not_scannable": not_scannable[:25],
                     "top_rejected": sorted(rejected, key=lambda r: _safe_float(r.get("promotion_score"), 0.0) or 0.0, reverse=True)[:25],
                     "authority_changed": False,
                     "trade_authority": "scanner_only_existing_entry_pipeline",
@@ -502,6 +566,10 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
     except Exception as exc:
         promotion_applied = False
         data_error = f"promotion_apply_failed:{type(exc).__name__}: {exc}"
+
+    no_intraday_count = sum(1 for row in not_scannable if str((row.get("intraday") or {}).get("reason")) == "no_intraday_data")
+    not_enough_bars_count = sum(1 for row in not_scannable if str((row.get("intraday") or {}).get("reason")) == "not_enough_intraday_bars")
+    stale_or_bad_price_count = sum(1 for row in not_scannable if "price" in str((row.get("intraday") or {}).get("reason")))
 
     payload = {
         "status": "ok" if promotion_applied else "warn",
@@ -517,21 +585,28 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
         "seed_meta": seed_meta,
         "base_universe_count": len(base),
         "seed_count": len(seeds),
+        "daily_candidate_count": len(daily_candidates),
+        "intraday_checked_count": intraday_checked,
         "promoted_count": len(promoted_symbols),
         "final_universe_count": len(final_universe),
         "promoted_symbols": promoted_symbols[:MAX_PROMOTED_SYMBOLS],
-        "top_promoted": promoted[:25],
+        "promoted_and_scannable": promoted[:25],
+        "daily_qualified_but_not_scannable": not_scannable[:25],
         "top_rejected": sorted(rejected, key=lambda r: _safe_float(r.get("promotion_score"), 0.0) or 0.0, reverse=True)[:25],
+        "diagnostics": {"not_scannable_count": len(not_scannable), "no_intraday_data_count": no_intraday_count, "not_enough_intraday_bars_count": not_enough_bars_count, "bad_intraday_price_count": stale_or_bad_price_count, "intraday_gate_required": bool(REQUIRE_INTRADAY_DATA)},
         "policy": {
             "max_seed_symbols": MAX_SEED_SYMBOLS,
             "max_promoted_symbols": MAX_PROMOTED_SYMBOLS,
             "max_total_universe": MAX_TOTAL_UNIVERSE,
+            "max_intraday_checks": MAX_INTRADAY_CHECKS,
             "min_price": MIN_PRICE,
             "min_avg_volume": MIN_AVG_VOLUME,
             "min_dollar_volume": MIN_DOLLAR_VOLUME,
             "min_move_pct": MIN_MOVE_PCT,
             "min_volume_ratio": MIN_VOLUME_RATIO,
             "min_promotion_score": MIN_PROMOTION_SCORE,
+            "require_intraday_data": bool(REQUIRE_INTRADAY_DATA),
+            "min_intraday_bars": MIN_INTRADAY_BARS,
             "allow_leveraged_etfs": bool(ALLOW_LEVERAGED_ETFS),
             "leveraged_max_promoted": LEVERAGED_MAX_PROMOTED,
             "cache_ttl_seconds": CACHE_TTL_SECONDS,
