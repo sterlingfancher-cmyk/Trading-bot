@@ -7,7 +7,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-regime-flip-entry-guard-2026-06-17-v9"
+VERSION = "usercustomize-dynamic-universe-builder-2026-06-18-v10"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -52,7 +52,8 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/spacex-direct-overlay-status", "category": "governance", "required": False, "after": "/paper/space-stock-basket-status"},
             {"path": "/paper/blocked-entry-reason-audit-status", "category": "governance", "required": False, "after": "/paper/spacex-direct-overlay-status"},
             {"path": "/paper/blocked-entry-reason-selfcheck-overlay-status", "category": "governance", "required": False, "after": "/paper/blocked-entry-reason-audit-status"},
-            {"path": "/paper/theme-starter-exception-status", "category": "governance", "required": False, "after": "/paper/blocked-entry-reason-selfcheck-overlay-status"},
+            {"path": "/paper/dynamic-universe-builder-status", "category": "governance", "required": False, "after": "/paper/blocked-entry-reason-selfcheck-overlay-status"},
+            {"path": "/paper/theme-starter-exception-status", "category": "governance", "required": False, "after": "/paper/dynamic-universe-builder-status"},
             {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False, "after": "/paper/theme-starter-exception-status"},
             {"path": "/paper/best-of-cycle-entry-arbitration-status", "category": "governance", "required": False, "after": "/paper/regime-flip-entry-guard-status"},
         ]
@@ -113,6 +114,7 @@ def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
         ("spacex_direct_overlay", "app_and_module"),
         ("blocked_entry_reason_audit", "app_and_module"),
         ("blocked_entry_reason_selfcheck_overlay", "app_and_module"),
+        ("dynamic_universe_builder", "app_and_module"),
         ("theme_starter_exception", "app_and_module"),
         ("regime_flip_entry_guard", "app_and_module"),
         ("best_of_cycle_entry_arbitration", "app_and_module"),
@@ -136,6 +138,7 @@ def _watchdog() -> None:
                 _register_module(flask_app, m, "spacex_direct_overlay", route_args="app_and_module")
                 _register_module(flask_app, m, "blocked_entry_reason_audit", route_args="app_and_module")
                 _register_module(flask_app, m, "blocked_entry_reason_selfcheck_overlay", route_args="app_and_module")
+                _register_module(flask_app, m, "dynamic_universe_builder", route_args="app_and_module")
                 _register_module(flask_app, m, "theme_starter_exception", route_args="app_and_module")
                 _register_module(flask_app, m, "regime_flip_entry_guard", route_args="app_and_module")
                 _register_module(flask_app, m, "best_of_cycle_entry_arbitration", route_args="app_and_module")
