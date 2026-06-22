@@ -7,7 +7,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-dynamic-universe-builder-2026-06-18-v10"
+VERSION = "usercustomize-profit-guard-redeployment-sleeve-2026-06-22-v11"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -56,6 +56,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/theme-starter-exception-status", "category": "governance", "required": False, "after": "/paper/dynamic-universe-builder-status"},
             {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False, "after": "/paper/theme-starter-exception-status"},
             {"path": "/paper/best-of-cycle-entry-arbitration-status", "category": "governance", "required": False, "after": "/paper/regime-flip-entry-guard-status"},
+            {"path": "/paper/profit-guard-redeployment-sleeve-status", "category": "governance", "required": False, "after": "/paper/best-of-cycle-entry-arbitration-status"},
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
         for endpoint in wanted:
@@ -118,6 +119,7 @@ def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
         ("theme_starter_exception", "app_and_module"),
         ("regime_flip_entry_guard", "app_and_module"),
         ("best_of_cycle_entry_arbitration", "app_and_module"),
+        ("profit_guard_redeployment_sleeve", "app_and_module"),
     ):
         _register_module(flask_app, m, module_name, route_args=route_args)
     _REGISTERED_APP_IDS.add(id(flask_app))
@@ -142,6 +144,7 @@ def _watchdog() -> None:
                 _register_module(flask_app, m, "theme_starter_exception", route_args="app_and_module")
                 _register_module(flask_app, m, "regime_flip_entry_guard", route_args="app_and_module")
                 _register_module(flask_app, m, "best_of_cycle_entry_arbitration", route_args="app_and_module")
+                _register_module(flask_app, m, "profit_guard_redeployment_sleeve", route_args="app_and_module")
         except Exception:
             pass
         time.sleep(0.1)
