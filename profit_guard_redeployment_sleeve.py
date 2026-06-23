@@ -1,19 +1,17 @@
-"""Profit Guard Redeployment Sleeve v1.
+"""Profit Guard Redeployment Sleeve v2.
 
 Purpose:
-- Replace an overly binary profit-guard entry shutdown with a controlled,
-  profit-protected participation valve.
-- A normal day-profit pause may allow one small, high-quality starter candidate.
-- True hard locks, giveback locks, risk halts, self-defense, opening warmup, and
-  late-day cutoffs remain hard entry blocks.
+- Convert normal profit-guard pauses from a binary global entry shutdown into a
+  controlled, profit-protected participation valve.
+- Prevent wrapper-order recursion with best-of-cycle arbitration and other
+  try_entries_and_rotations overlays.
 
 Guardrails:
 - Paper-only by default.
-- Does not place trades by itself; it only re-opens the existing entry pipeline
-  for a single capped candidate when profit guard is in a soft-pause state.
+- Does not place trades by itself.
 - Does not lower score floors.
 - Does not bypass entry_quality_check, regime_flip_entry_guard, cooldowns,
-  exposure caps, self-defense, or best-of-cycle ranking.
+  exposure caps, self-defense, late-day cutoff, or hard profit locks.
 - Does not change ML authority or grant live authority.
 """
 from __future__ import annotations
@@ -23,7 +21,7 @@ import os
 import sys
 from typing import Any, Dict, Iterable, List, Tuple
 
-VERSION = "profit-guard-redeployment-sleeve-2026-06-22-v1"
+VERSION = "profit-guard-redeployment-sleeve-2026-06-23-v2-recursion-guard"
 ENABLED = os.environ.get("PROFIT_GUARD_REDEPLOYMENT_SLEEVE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 PAPER_ONLY = os.environ.get("PROFIT_GUARD_REDEPLOYMENT_SLEEVE_PAPER_ONLY", "true").lower() not in {"0", "false", "no", "off"}
 MAX_REVIEWED = int(os.environ.get("PROFIT_GUARD_SLEEVE_MAX_REVIEWED", "30"))
@@ -40,16 +38,8 @@ MAX_REALIZED_LOSS_TODAY = float(os.environ.get("PROFIT_GUARD_SLEEVE_MAX_REALIZED
 
 REGISTERED_APP_IDS: set[int] = set()
 PATCHED_MODULE_IDS: set[int] = set()
-
-HARD_ENTRY_BLOCKERS = {
-    "risk_halted",
-    "opening_warmup_active",
-    "self_defense_feedback_loop",
-    "late_day_entry_cutoff",
-}
 HARD_PROFIT_GUARD_MARKERS = {"hard lock", "giveback", "lock triggered"}
 LEVERAGED_BUCKETS = {"leveraged_etf", "leveraged_etf_watch", "leveraged"}
-
 THEME_PRIORITY = {
     "semi_leaders": 0.006,
     "memory_storage": 0.0055,
@@ -61,10 +51,7 @@ THEME_PRIORITY = {
     "cloud_cyber_software": 0.0025,
     "mega_cap_ai": 0.002,
 }
-PREFERRED_SYMBOLS = {
-    "MU", "MRVL", "LRCX", "QCOM", "WDC", "GEV", "BE", "CIFR", "HIVE", "HUT", "WULF", "IREN", "CORZ",
-    "ASTS", "RKLB", "PL", "DELL", "GLW", "SNDK", "TSM", "TXN", "ALAB", "ARM", "AMD", "AVGO",
-}
+PREFERRED_SYMBOLS = {"MU", "MRVL", "LRCX", "QCOM", "WDC", "GEV", "BE", "CIFR", "HIVE", "HUT", "WULF", "IREN", "CORZ", "ASTS", "RKLB", "PL", "DELL", "GLW", "SNDK", "TSM", "TXN", "ALAB", "ARM", "AMD", "AVGO"}
 
 
 def _mod() -> Any | None:
@@ -100,17 +87,6 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         if hasattr(value, "item"):
             value = value.item()
         return float(value)
-    except Exception:
-        return default
-
-
-def _safe_int(value: Any, default: int = 0) -> int:
-    try:
-        if value is None:
-            return default
-        if hasattr(value, "item"):
-            value = value.item()
-        return int(float(value))
     except Exception:
         return default
 
@@ -330,6 +306,8 @@ def _quality_preview(core: Any, signal: Dict[str, Any], params: Dict[str, Any], 
         if callable(quality_fn):
             ok, info = quality_fn(preview, params or {}, market or {})
             return bool(ok), info if isinstance(info, dict) else {"reason": str(info)}, preview
+    except RecursionError:
+        return False, {"reason": "entry_quality_preview_recursion_guard"}, preview
     except Exception as exc:
         return False, {"reason": f"entry_quality_preview_error:{type(exc).__name__}"}, preview
     return False, {"reason": "entry_quality_check_unavailable"}, preview
@@ -348,8 +326,7 @@ def _candidate_score(core: Any, signal: Dict[str, Any], quality_info: Dict[str, 
         score += 0.004
     if _theme_confirmed(signal):
         score += 0.003
-    quality_reason = str((quality_info or {}).get("reason") or "")
-    if quality_reason == "entry_quality_ok":
+    if str((quality_info or {}).get("reason") or "") == "entry_quality_ok":
         score += 0.006
     text = _signal_text(signal, quality_info)
     if "extended" in text or "chase" in text or "near_high" in text:
@@ -381,43 +358,27 @@ def _review_candidates(core: Any, long_signals: Iterable[Any], short_signals: It
     for signal in raw:
         symbol = _symbol(signal)
         side = _side(signal)
-        row = {
-            "symbol": symbol,
-            "side": side,
-            "score": round(_safe_float(signal.get("score"), 0.0), 6),
-            "bucket": _bucket(core, symbol, signal),
-            "sector": _sector(core, symbol, signal),
-            "reason": "reviewed",
-        }
+        row = {"symbol": symbol, "side": side, "score": round(_safe_float(signal.get("score"), 0.0), 6), "bucket": _bucket(core, symbol, signal), "sector": _sector(core, symbol, signal), "reason": "reviewed"}
         if not symbol:
-            row["reason"] = "missing_symbol"
-            rejected.append(row); reviewed.append(row); continue
+            row["reason"] = "missing_symbol"; rejected.append(row); reviewed.append(row); continue
         if symbol in positions:
-            row["reason"] = "already_held"
-            rejected.append(row); reviewed.append(row); continue
+            row["reason"] = "already_held"; rejected.append(row); reviewed.append(row); continue
         if side != "long" and not ALLOW_SHORTS:
-            row["reason"] = "shorts_disabled_for_profit_guard_sleeve"
-            rejected.append(row); reviewed.append(row); continue
+            row["reason"] = "shorts_disabled_for_profit_guard_sleeve"; rejected.append(row); reviewed.append(row); continue
         try:
             cooldown_fn = getattr(core, "is_in_cooldown", None)
             if callable(cooldown_fn) and cooldown_fn(symbol):
-                row["reason"] = "cooldown"
-                rejected.append(row); reviewed.append(row); continue
+                row["reason"] = "cooldown"; rejected.append(row); reviewed.append(row); continue
         except Exception:
             pass
         raw_score = _safe_float(signal.get("score"), 0.0)
         leveraged = _is_leveraged(core, symbol, signal)
         if leveraged and not ALLOW_LEVERAGED_ETFS:
-            row["reason"] = "leveraged_etf_disabled_for_profit_guard_sleeve"
-            rejected.append(row); reviewed.append(row); continue
+            row["reason"] = "leveraged_etf_disabled_for_profit_guard_sleeve"; rejected.append(row); reviewed.append(row); continue
         if leveraged and raw_score < LEVERAGED_MIN_SCORE:
-            row["reason"] = "leveraged_etf_score_below_exceptional_floor"
-            row["required_score"] = LEVERAGED_MIN_SCORE
-            rejected.append(row); reviewed.append(row); continue
+            row["reason"] = "leveraged_etf_score_below_exceptional_floor"; row["required_score"] = LEVERAGED_MIN_SCORE; rejected.append(row); reviewed.append(row); continue
         if raw_score < MIN_SCORE:
-            row["reason"] = "score_below_profit_guard_sleeve_floor"
-            row["required_score"] = MIN_SCORE
-            rejected.append(row); reviewed.append(row); continue
+            row["reason"] = "score_below_profit_guard_sleeve_floor"; row["required_score"] = MIN_SCORE; rejected.append(row); reviewed.append(row); continue
 
         ok, quality_info, preview = _quality_preview(core, signal, params, market)
         row["quality_reason"] = str((quality_info or {}).get("reason") or "unknown")
@@ -426,25 +387,14 @@ def _review_candidates(core: Any, long_signals: Iterable[Any], short_signals: It
         row["breakout"] = _is_breakout(preview)
         row["theme_confirmed"] = _theme_confirmed(preview)
         if not ok:
-            row["reason"] = "entry_quality_block"
-            row["quality_info"] = quality_info
-            rejected.append(row); reviewed.append(row); continue
-
+            row["reason"] = "entry_quality_block"; row["quality_info"] = quality_info; rejected.append(row); reviewed.append(row); continue
         rank = _candidate_score(core, preview, quality_info, market)
-        preview["profit_guard_redeployment_sleeve"] = {
-            "version": VERSION,
-            "rank_score": rank,
-            "alloc_factor": ALLOC_FACTOR,
-            "profit_guard_state": "soft_pause",
-            "quality_reason": row["quality_reason"],
-        }
+        preview["profit_guard_redeployment_sleeve"] = {"version": VERSION, "rank_score": rank, "alloc_factor": ALLOC_FACTOR, "profit_guard_state": "soft_pause", "quality_reason": row["quality_reason"]}
         row["reason"] = "eligible_profit_guard_redeployment_sleeve"
         row["rank_score"] = rank
         eligible.append({"signal": preview, "summary": row, "rank_score": rank})
         reviewed.append(row)
-
-    eligible = sorted(eligible, key=lambda r: _safe_float(r.get("rank_score"), 0.0), reverse=True)
-    return reviewed, eligible, rejected
+    return reviewed, sorted(eligible, key=lambda r: _safe_float(r.get("rank_score"), 0.0), reverse=True), rejected
 
 
 def _split_selected(signals: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -465,82 +415,91 @@ def _record(core: Any, payload: Dict[str, Any]) -> None:
         pass
 
 
+def _blocked_response(long_signals: Iterable[Any], short_signals: Iterable[Any], reason: str, max_rows: int = 10):
+    rows: List[Dict[str, Any]] = []
+    for signal in list(long_signals or []) + list(short_signals or []):
+        if not isinstance(signal, dict):
+            continue
+        rows.append({"symbol": _symbol(signal), "side": _side(signal), "score": signal.get("score"), "reason": reason, "version": VERSION})
+        if len(rows) >= max_rows:
+            break
+    return [], [], rows
+
+
 def _patch_try_entries(core: Any) -> bool:
     current = getattr(core, "try_entries_and_rotations", None)
-    if not callable(current) or getattr(current, "_profit_guard_redeployment_sleeve_patched", False):
+    if not callable(current):
+        return False
+    if getattr(current, "_profit_guard_redeployment_sleeve_patched", False):
         return False
     original = current
 
     def patched_try_entries_and_rotations(long_signals, short_signals, params, market, new_entries_allowed=True, entry_block_reason=None):
+        if getattr(patched_try_entries_and_rotations, "_profit_guard_sleeve_in_progress", False):
+            return _blocked_response(long_signals, short_signals, "profit_guard_sleeve_recursion_guard")
         if not (ENABLED and _paper_context()):
-            return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
+            try:
+                patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = True  # type: ignore[attr-defined]
+                return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
+            finally:
+                patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = False  # type: ignore[attr-defined]
         if bool(new_entries_allowed):
-            return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
+            try:
+                patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = True  # type: ignore[attr-defined]
+                return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
+            except RecursionError:
+                payload = {"status": "recursion_guard", "version": VERSION, "generated_local": _now(core), "reason": "recursion_during_new_entries_allowed_passthrough", "authority_changed": False}
+                _record(core, payload)
+                return _blocked_response(long_signals, short_signals, "profit_guard_sleeve_recursion_guard")
+            finally:
+                patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = False  # type: ignore[attr-defined]
 
         blockers = _entry_blockers(entry_block_reason)
         profit_state = _profit_guard_state(core)
-        base_payload = {
-            "status": "checked",
-            "version": VERSION,
-            "generated_local": _now(core),
-            "entry_block_reason": entry_block_reason,
-            "entry_blockers": sorted(blockers),
-            "profit_guard": {k: v for k, v in profit_state.items() if k != "risk_controls"},
-            "authority_changed": False,
-            "live_trade_authority": "none",
-            "ml_authority": "shadow_only",
-        }
+        base_payload = {"status": "checked", "version": VERSION, "generated_local": _now(core), "entry_block_reason": entry_block_reason, "entry_blockers": sorted(blockers), "profit_guard": {k: v for k, v in profit_state.items() if k != "risk_controls"}, "authority_changed": False, "live_trade_authority": "none", "ml_authority": "shadow_only"}
+
+        def finish_block(status: str, reason: str, extra: Dict[str, Any] | None = None):
+            payload = {**base_payload, "status": status, "reason": reason}
+            if extra:
+                payload.update(extra)
+            _record(core, payload)
+            return _blocked_response(long_signals, short_signals, reason)
 
         if "profit_guard_active" not in blockers or not profit_state.get("active"):
-            base_payload.update({"status": "inactive", "reason": "profit_guard_not_the_active_blocker"})
-            _record(core, base_payload)
-            return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
+            return finish_block("inactive", "profit_guard_not_the_active_blocker")
         if profit_state.get("state") != "soft_pause":
-            base_payload.update({"status": "hard_block", "reason": "profit_guard_state_not_soft_pause"})
-            _record(core, base_payload)
-            return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
-
+            return finish_block("hard_block", "profit_guard_state_not_soft_pause")
         risk_ok, risk_info = _hard_risk_ok(core, entry_block_reason, market or {})
         if not risk_ok:
-            base_payload.update({"status": "blocked", "reason": risk_info.get("reason"), "risk_context": risk_info})
-            _record(core, base_payload)
-            return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
-
+            return finish_block("blocked", str(risk_info.get("reason") or "profit_guard_sleeve_risk_context_block"), {"risk_context": risk_info})
         used_today = _sleeve_entries_today(core)
         if used_today >= MAX_ENTRIES_PER_DAY:
-            base_payload.update({"status": "blocked", "reason": "profit_guard_sleeve_daily_limit", "entries_today": used_today, "max_entries_per_day": MAX_ENTRIES_PER_DAY})
-            _record(core, base_payload)
-            return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
+            return finish_block("blocked", "profit_guard_sleeve_daily_limit", {"entries_today": used_today, "max_entries_per_day": MAX_ENTRIES_PER_DAY})
 
         params_dict = dict(params or {})
         params_dict["long_alloc_pct"] = _safe_float(params_dict.get("long_alloc_pct"), 0.0)
         params_dict["short_alloc_pct"] = _safe_float(params_dict.get("short_alloc_pct"), 0.0)
         reviewed, eligible, rejected = _review_candidates(core, long_signals or [], short_signals or [], params_dict, market or {})
         if not eligible:
-            base_payload.update({
-                "status": "no_eligible_candidate",
-                "reason": "profit_guard_sleeve_no_candidate_passed_quality",
-                "reviewed_count": len(reviewed),
-                "eligible_count": 0,
-                "rejected_preview": rejected[:15],
-                "risk_context": risk_info,
-            })
-            _record(core, base_payload)
-            return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
+            return finish_block("no_eligible_candidate", "profit_guard_sleeve_no_candidate_passed_quality", {"reviewed_count": len(reviewed), "eligible_count": 0, "rejected_preview": rejected[:15], "risk_context": risk_info})
 
         selected = eligible[:1]
         selected_signals = [row["signal"] for row in selected]
         call_longs, call_shorts = _split_selected(selected_signals)
-        entries, rotations, blocked_entries = original(call_longs, call_shorts, params_dict, market, new_entries_allowed=True, entry_block_reason=None)
+        try:
+            patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = True  # type: ignore[attr-defined]
+            entries, rotations, blocked_entries = original(call_longs, call_shorts, params_dict, market, new_entries_allowed=True, entry_block_reason=None)
+        except RecursionError:
+            payload = {**base_payload, "status": "recursion_guard", "reason": "recursion_during_profit_guard_sleeve_attempt", "reviewed_count": len(reviewed), "eligible_count": len(eligible), "selected_candidates": [row.get("summary") for row in selected], "authority_changed": False}
+            _record(core, payload)
+            return _blocked_response(call_longs, call_shorts, "profit_guard_sleeve_recursion_guard")
+        finally:
+            patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = False  # type: ignore[attr-defined]
 
         extra_blocked = []
         for row in eligible[1:11]:
             summary = dict(row.get("summary") or {})
-            summary.update({
-                "reason": "profit_guard_sleeve_not_selected",
-                "selected_symbols": [_symbol(s) for s in selected_signals],
-                "version": VERSION,
-            })
+            summary.update({"reason": "profit_guard_sleeve_not_selected", "selected_symbols": [_symbol(s) for s in selected_signals], "version": VERSION})
             extra_blocked.append(summary)
         try:
             if isinstance(blocked_entries, list):
@@ -548,33 +507,7 @@ def _patch_try_entries(core: Any) -> bool:
         except Exception:
             pass
 
-        payload = {
-            **base_payload,
-            "status": "allowed" if entries or rotations else "attempted_no_entry",
-            "reason": "profit_guard_soft_pause_sleeve_opened",
-            "risk_context": risk_info,
-            "reviewed_count": len(reviewed),
-            "eligible_count": len(eligible),
-            "selected_candidates": [row.get("summary") for row in selected],
-            "not_selected_count": max(0, len(eligible) - len(selected)),
-            "rejected_preview": rejected[:15],
-            "entries_returned_count": len(entries or []),
-            "rotations_returned_count": len(rotations or []),
-            "policy": {
-                "max_entries_per_day": MAX_ENTRIES_PER_DAY,
-                "alloc_factor": ALLOC_FACTOR,
-                "min_score": MIN_SCORE,
-                "allowed_market_modes": sorted(ALLOWED_MARKET_MODES),
-                "allow_shorts": bool(ALLOW_SHORTS),
-                "allow_leveraged_etfs": bool(ALLOW_LEVERAGED_ETFS),
-                "leveraged_min_score": LEVERAGED_MIN_SCORE,
-                "does_not_lower_score_thresholds": True,
-                "normal_entry_quality_check_required": True,
-                "hard_profit_lock_still_blocks": True,
-                "giveback_lock_still_blocks": True,
-                "risk_halt_self_defense_late_day_still_block": True,
-            },
-        }
+        payload = {**base_payload, "status": "allowed" if entries or rotations else "attempted_no_entry", "reason": "profit_guard_soft_pause_sleeve_opened", "risk_context": risk_info, "reviewed_count": len(reviewed), "eligible_count": len(eligible), "selected_candidates": [row.get("summary") for row in selected], "not_selected_count": max(0, len(eligible) - len(selected)), "rejected_preview": rejected[:15], "entries_returned_count": len(entries or []), "rotations_returned_count": len(rotations or []), "policy": _policy()}
         _record(core, payload)
         return entries, rotations, blocked_entries
 
@@ -582,10 +515,24 @@ def _patch_try_entries(core: Any) -> bool:
     patched_try_entries_and_rotations._profit_guard_redeployment_sleeve_original = original  # type: ignore[attr-defined]
     if getattr(original, "_best_of_cycle_arbitration_patched", False):
         patched_try_entries_and_rotations._best_of_cycle_arbitration_patched = True  # type: ignore[attr-defined]
-    if getattr(original, "_regime_flip_entry_guard_patched", False):
-        patched_try_entries_and_rotations._regime_flip_entry_guard_patched = True  # type: ignore[attr-defined]
     core.try_entries_and_rotations = patched_try_entries_and_rotations
     return True
+
+
+def _policy() -> Dict[str, Any]:
+    return {"max_reviewed": MAX_REVIEWED, "max_entries_per_day": MAX_ENTRIES_PER_DAY, "alloc_factor": ALLOC_FACTOR, "min_score": MIN_SCORE, "allowed_market_modes": sorted(ALLOWED_MARKET_MODES), "allow_shorts": bool(ALLOW_SHORTS), "allow_leveraged_etfs": bool(ALLOW_LEVERAGED_ETFS), "leveraged_min_score": LEVERAGED_MIN_SCORE, "max_daily_loss_pct": MAX_DAILY_LOSS_PCT, "max_intraday_drawdown_pct": MAX_INTRADAY_DRAWDOWN_PCT, "does_not_raise_max_positions": True, "does_not_bypass_entry_quality_check": True, "does_not_bypass_regime_flip_guard": True, "does_not_bypass_self_defense": True, "does_not_bypass_cooldowns": True, "does_not_lower_score_thresholds": True, "hard_profit_lock_still_blocks": True, "giveback_lock_still_blocks": True, "live_trade_authority": "none", "ml_authority": "shadow_only", "authority_changed": False}
+
+
+def _is_effectively_patched(current: Any) -> bool:
+    if getattr(current, "_profit_guard_redeployment_sleeve_patched", False):
+        return True
+    try:
+        inner = getattr(current, "_best_of_cycle_original", None)
+        if getattr(inner, "_profit_guard_redeployment_sleeve_patched", False):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
@@ -597,40 +544,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         except Exception:
             latest = {}
     current = getattr(core, "try_entries_and_rotations", None) if core is not None else None
-    return {
-        "status": "ok" if core is not None else "pending",
-        "overall": "pass" if core is not None else "pending",
-        "type": "profit_guard_redeployment_sleeve_status",
-        "version": VERSION,
-        "generated_local": _now(core),
-        "enabled": bool(ENABLED),
-        "paper_context": bool(_paper_context()),
-        "patched_try_entries": bool(getattr(current, "_profit_guard_redeployment_sleeve_patched", False)),
-        "latest": latest,
-        "policy": {
-            "max_reviewed": MAX_REVIEWED,
-            "max_entries_per_day": MAX_ENTRIES_PER_DAY,
-            "alloc_factor": ALLOC_FACTOR,
-            "min_score": MIN_SCORE,
-            "allowed_market_modes": sorted(ALLOWED_MARKET_MODES),
-            "allow_shorts": bool(ALLOW_SHORTS),
-            "allow_leveraged_etfs": bool(ALLOW_LEVERAGED_ETFS),
-            "leveraged_min_score": LEVERAGED_MIN_SCORE,
-            "max_daily_loss_pct": MAX_DAILY_LOSS_PCT,
-            "max_intraday_drawdown_pct": MAX_INTRADAY_DRAWDOWN_PCT,
-            "does_not_raise_max_positions": True,
-            "does_not_bypass_entry_quality_check": True,
-            "does_not_bypass_regime_flip_guard": True,
-            "does_not_bypass_self_defense": True,
-            "does_not_bypass_cooldowns": True,
-            "does_not_lower_score_thresholds": True,
-            "hard_profit_lock_still_blocks": True,
-            "giveback_lock_still_blocks": True,
-            "live_trade_authority": "none",
-            "ml_authority": "shadow_only",
-            "authority_changed": False,
-        },
-    }
+    return {"status": "ok" if core is not None else "pending", "overall": "pass" if core is not None else "pending", "type": "profit_guard_redeployment_sleeve_status", "version": VERSION, "generated_local": _now(core), "enabled": bool(ENABLED), "paper_context": bool(_paper_context()), "patched_try_entries": bool(_is_effectively_patched(current)), "latest": latest, "policy": _policy()}
 
 
 def apply(core: Any = None) -> Dict[str, Any]:
@@ -658,7 +572,7 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
         existing = set()
 
     def status_route():
-        return jsonify(status_payload(core or _mod()))
+        return jsonify(apply(core or _mod()))
 
     if "/paper/profit-guard-redeployment-sleeve-status" not in existing:
         flask_app.add_url_rule("/paper/profit-guard-redeployment-sleeve-status", "profit_guard_redeployment_sleeve_status", status_route)
