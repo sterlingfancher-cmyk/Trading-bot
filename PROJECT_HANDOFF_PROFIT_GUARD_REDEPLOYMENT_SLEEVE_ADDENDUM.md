@@ -1,4 +1,4 @@
-Profit Guard Redeployment Sleeve Addendum — June 22, 2026
+Profit Guard Redeployment Sleeve Addendum — June 22-23, 2026
 
 Purpose
 
@@ -8,13 +8,25 @@ The prior behavior made profit_guard_active a hard entry block in run_cycle. Tha
 
 This addendum documents the new sleeve. A normal day-profit pause can allow one small, high-quality starter candidate through the existing entry pipeline. True hard profit locks, giveback locks, risk halts, self-defense, opening warmup, and late-day cutoffs still block entries.
 
-File added
+June 23 hotfix
+
+A runner freshness check showed:
+
+* last_error: maximum recursion depth exceeded
+* stale_during_market: true
+* profit guard sleeve status route was present, but patched_try_entries was false
+
+The likely failure mode was wrapper-order recursion between profit_guard_redeployment_sleeve and best_of_cycle_entry_arbitration around try_entries_and_rotations.
+
+V2 adds explicit recursion protection and conservative blocked responses so a wrapper-order problem cannot keep the auto-runner failing repeatedly. In hard-block profit states, the sleeve no longer delegates back into the wrapper chain just to produce blocked rows.
+
+File added / updated
 
 profit_guard_redeployment_sleeve.py
 
 Current version
 
-profit-guard-redeployment-sleeve-2026-06-22-v1
+profit-guard-redeployment-sleeve-2026-06-23-v2-recursion-guard
 
 Route
 
@@ -22,12 +34,13 @@ Route
 
 Core behavior
 
-* Patches try_entries_and_rotations after best_of_cycle_entry_arbitration.
+* Patches try_entries_and_rotations.
 * Only activates when new_entries_allowed is false because profit_guard_active is the active blocker.
 * Does not activate when risk_halted, opening_warmup_active, self_defense_feedback_loop, or late_day_entry_cutoff is also present.
 * Classifies the profit guard state from risk_controls.profit_guard_reason.
 * Allows sleeve only for soft day-profit pause.
 * Keeps day profit hard lock and profit giveback guard as hard blocks.
+* For hard-block states, returns conservative blocked rows directly instead of delegating back into the wrapper chain.
 * Requires market_mode to be risk_on or constructive by default.
 * Blocks when bear_confirmed is true or market_mode is risk_off, crash_warning, defensive_rotation, or bear.
 * Blocks if futures action is block_opening_longs.
@@ -38,9 +51,18 @@ Core behavior
 * Selects at most one candidate.
 * Applies a 0.35 allocation factor by default.
 * Requires the candidate to pass the normal entry_quality_check.
-* Leaves best-of-cycle ranking, regime flip guard, cooldowns, exposure caps, and core entry logic downstream.
 * Does not grant live authority.
 * Does not change ML authority.
+
+Recursion guard behavior
+
+V2 adds:
+
+* in-progress guard around passthrough calls.
+* RecursionError catch during normal passthrough.
+* RecursionError catch during sleeve attempts.
+* Direct conservative blocked response when a hard block is already active.
+* Status detection that can recognize the sleeve when it is wrapped inside best-of-cycle arbitration.
 
 Default policy
 
@@ -88,7 +110,6 @@ A candidate must:
 * Pass normal entry_quality_check.
 * Pass regime_flip_entry_guard through the patched entry quality pipeline.
 * Pass all normal sector and bucket exposure controls.
-* Pass best-of-cycle selection downstream.
 
 Leveraged ETF handling
 
@@ -111,7 +132,7 @@ Guardrails preserved
 
 Startup wiring
 
-usercustomize.py now registers profit_guard_redeployment_sleeve after:
+usercustomize.py registers profit_guard_redeployment_sleeve after:
 
 * dynamic_universe_builder
 * theme_starter_exception
@@ -129,17 +150,22 @@ This order matters:
 Commits
 
 * 3bbf2855695fe169d634ce69a0948db208c8f5c8
-  * Added profit_guard_redeployment_sleeve.py.
+  * Added profit_guard_redeployment_sleeve.py v1.
   * File SHA: b9b355aec92be772f1b3aef383e2db1c3fbef3f1.
 
 * 6c16481628f7f7c766f42f329568f69ecb1fc6a6
   * Wired profit_guard_redeployment_sleeve into usercustomize.py startup, watchdog, and optional self-check metadata.
   * usercustomize.py SHA: ef59feaa041bdcccdccd1acebc25e6b9d29d7027.
 
+* 77174fa6a6d2c23f2701960b95a5a65e73d8dcd7
+  * Added v2 recursion guard and direct hard-block responses.
+  * profit_guard_redeployment_sleeve.py SHA: 2b3ff5d702e35b257150a7859635e0a3b2306aeb.
+
 Expected status fields
 
 /paper/profit-guard-redeployment-sleeve-status should show:
 
+* version: profit-guard-redeployment-sleeve-2026-06-23-v2-recursion-guard
 * patched_try_entries
 * latest.status
 * latest.reason
@@ -170,6 +196,17 @@ Routine post-deploy check
 Use only:
 
 https://trading-bot-clean.up.railway.app/paper/self-check
+
+Required follow-up after this hotfix
+
+After Railway redeploy, check:
+
+https://trading-bot-clean.up.railway.app/paper/runner-freshness
+
+Expected improvement:
+
+* last_error should clear on the next successful run, or at minimum no longer show maximum recursion depth exceeded after the next auto cycle.
+* stale_during_market should become false after the next successful auto cycle.
 
 Optional diagnostic only when intentionally reviewing this update
 
