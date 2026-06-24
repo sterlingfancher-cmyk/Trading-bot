@@ -4,212 +4,121 @@ Purpose
 
 Convert profit guard from a binary global new-entry shutdown into a controlled profit-protected participation mode.
 
-The prior behavior made profit_guard_active a hard entry block in run_cycle. That protected profitable days but could also block clean dynamic-universe opportunities simply because the bot had already made money.
+Current production decision
 
-This addendum documents the sleeve. A normal day-profit pause can allow one small, high-quality starter candidate through the existing entry pipeline. True hard profit locks, giveback locks, risk halts, self-defense, opening warmup, and late-day cutoffs still block entries.
+The wrapper-based profit guard sleeve is disabled in safe mode. The diagnostic route remains available, but the module no longer patches try_entries_and_rotations by default.
 
-June 24 hotfix
+Why disabled
 
-A June 24 self-check showed normal midday cycles were still producing:
+Live runner freshness checks continued to show:
 
-* profit_guard_sleeve_recursion_guard
-* 100% cash
-* no active self-defense
-* no active profit today
+* last_error: maximum recursion depth exceeded
+* stale_during_market: true
 
-That means the sleeve was still polluting the blocked-entry stack outside the intended profit-guard condition.
+This persisted after v2 recursion guards and v3 inert-unless-active behavior. The failure mode was tied to wrapper chaining around try_entries_and_rotations, likely involving best_of_cycle_entry_arbitration and the startup watchdog re-registration pattern.
 
-V3 makes the sleeve truly inert unless all of the following are true:
+The correct near-term safety action is to remove the sleeve from the live entry path and restore auto-runner stability. Future profit-guard participation should be implemented inside the core entry pipeline or via a non-wrapper hook, not with another try_entries_and_rotations wrapper.
 
-* new_entries_allowed is false.
-* entry_block_reason contains profit_guard_active.
-* profit guard is actually active in risk_controls.
-* profit_guard_reason is a soft day-profit pause, not hard lock or giveback.
-
-Normal cycles now pass through without setting a recursion flag and without generating blocked rows.
-
-File added / updated
+File
 
 profit_guard_redeployment_sleeve.py
 
 Current version
 
-profit-guard-redeployment-sleeve-2026-06-24-v3-inert-unless-active
+profit-guard-redeployment-sleeve-2026-06-24-v4-disabled-safe-mode
 
 Route
 
 /paper/profit-guard-redeployment-sleeve-status
 
-Core behavior
+Current behavior
 
-* Patches try_entries_and_rotations.
-* Remains completely inert during normal new-entry cycles.
-* Does not create blocked rows unless profit guard is the active blocker.
-* Only activates when new_entries_allowed is false because profit_guard_active is the active blocker.
-* Does not activate when risk_halted, opening_warmup_active, self_defense_feedback_loop, or late_day_entry_cutoff is also present.
-* Classifies the profit guard state from risk_controls.profit_guard_reason.
-* Allows sleeve only for soft day-profit pause.
-* Keeps day profit hard lock and profit giveback guard as hard blocks.
-* Requires market_mode to be risk_on or constructive by default.
-* Blocks when bear_confirmed is true or market_mode is risk_off, crash_warning, defensive_rotation, or bear.
-* Blocks if futures action is block_opening_longs.
-* Requires daily loss and intraday drawdown to be clean.
-* Requires no realized loss today by default.
-* Reviews up to 30 candidates.
-* Allows at most one sleeve entry per day by default.
-* Selects at most one candidate.
-* Applies a 0.35 allocation factor by default.
-* Requires the candidate to pass the normal entry_quality_check.
-* Does not grant live authority.
+* Does not patch try_entries_and_rotations by default.
+* Does not change live trade authority.
 * Does not change ML authority.
+* Keeps diagnostic route available.
+* Reports safe_mode=true.
+* Reports patch_enabled=false by default.
+* Reports enabled=false.
+* Preserves policy documentation for the desired future sleeve behavior.
 
-Wrapper-order behavior
+Critical safe-mode default
 
-V3 adds chain detection so the sleeve will not be wrapped repeatedly if it already exists inside another try_entries_and_rotations wrapper.
+PROFIT_GUARD_REDEPLOYMENT_SLEEVE_PATCH_ENABLED=false
 
-V3 also preserves the best-of-cycle marker when wrapping an already-patched best-of-cycle function so watchdog startup checks do not repeatedly re-wrap the chain.
+Do not enable this in Railway unless a non-recursive implementation has been tested. The old wrapper approach caused auto-runner recursion failures.
 
-Default policy
+History
 
-* PROFIT_GUARD_REDEPLOYMENT_SLEEVE_ENABLED=true
-* PROFIT_GUARD_REDEPLOYMENT_SLEEVE_PAPER_ONLY=true
-* PROFIT_GUARD_SLEEVE_MAX_REVIEWED=30
-* PROFIT_GUARD_SLEEVE_MAX_ENTRIES_PER_DAY=1
-* PROFIT_GUARD_SLEEVE_ALLOC_FACTOR=0.35
-* PROFIT_GUARD_SLEEVE_MIN_SCORE=0.018
-* PROFIT_GUARD_SLEEVE_ALLOWED_MARKET_MODES=risk_on,constructive
-* PROFIT_GUARD_SLEEVE_ALLOW_SHORTS=false
-* PROFIT_GUARD_SLEEVE_ALLOW_LEVERAGED_ETFS=false
-* PROFIT_GUARD_SLEEVE_LEVERAGED_MIN_SCORE=0.040
-* PROFIT_GUARD_SLEEVE_MAX_DAILY_LOSS_PCT=0.15
-* PROFIT_GUARD_SLEEVE_MAX_INTRADAY_DRAWDOWN_PCT=0.35
-* PROFIT_GUARD_SLEEVE_MAX_REALIZED_LOSS_TODAY=0.0
+V1 added a profit-guard participation sleeve.
 
-Important interpretation
+* Commit: 3bbf2855695fe169d634ce69a0948db208c8f5c8
+* File SHA: b9b355aec92be772f1b3aef383e2db1c3fbef3f1
 
-The max daily loss and intraday drawdown settings are read in the same units used by risk_controls in state.json, where values are dashboard percentage numbers. For example, 0.35 means 0.35%, not 35%.
+V2 added recursion guards.
 
-Allowed profit guard state
+* Commit: 77174fa6a6d2c23f2701960b95a5a65e73d8dcd7
+* File SHA: 2b3ff5d702e35b257150a7859635e0a3b2306aeb
 
-The sleeve can activate only when profit_guard_reason indicates a soft pause such as:
+V3 made the sleeve inert unless profit guard was the active blocker.
 
-* day profit pause reached
-* pause reached
+* Commit: b6329d6729b976e8eb1b1e69ec22419e23ad157e
+* File SHA: 7fda5605a82b90b64d4676b75a75675600c25a5d
 
-Hard-blocked profit guard states
+V4 disabled the runtime wrapper by default to restore auto-runner stability.
 
-The sleeve remains blocked when profit_guard_reason contains:
-
-* hard lock
-* giveback
-* lock triggered
-
-Candidate rules
-
-A candidate must:
-
-* Not already be held.
-* Not be in cooldown.
-* Be long-only by default.
-* Meet PROFIT_GUARD_SLEEVE_MIN_SCORE.
-* Pass normal entry_quality_check.
-* Pass regime_flip_entry_guard through the patched entry quality pipeline.
-* Pass all normal sector and bucket exposure controls.
-
-Leveraged ETF handling
-
-Leveraged ETFs are blocked by the sleeve by default even if the dynamic universe can discover them. To allow them, set PROFIT_GUARD_SLEEVE_ALLOW_LEVERAGED_ETFS=true and keep the exceptional score floor at or above 0.040.
-
-Guardrails preserved
-
-* Does not raise max positions.
-* Does not lower score thresholds.
-* Does not bypass entry_quality_check.
-* Does not bypass regime_flip_entry_guard.
-* Does not bypass self-defense.
-* Does not bypass cooldown.
-* Does not bypass sector or bucket exposure caps.
-* Does not bypass hard profit lock.
-* Does not bypass profit giveback lock.
-* Does not bypass late-day cutoff.
-* Does not change ML authority.
-* Does not grant live authority.
-
-Startup wiring
-
-usercustomize.py registers profit_guard_redeployment_sleeve after:
-
-* dynamic_universe_builder
-* theme_starter_exception
-* regime_flip_entry_guard
-* best_of_cycle_entry_arbitration
-
-This order matters:
-
-1. dynamic_universe_builder expands and validates the symbol universe.
-2. theme_starter_exception can create small starter eligibility.
-3. regime_flip_entry_guard blocks hostile regime/futures entries.
-4. best_of_cycle_entry_arbitration ranks normally eligible candidates.
-5. profit_guard_redeployment_sleeve only re-opens one capped candidate path when profit guard is a soft day-profit pause.
-
-Commits
-
-* 3bbf2855695fe169d634ce69a0948db208c8f5c8
-  * Added profit_guard_redeployment_sleeve.py v1.
-  * File SHA: b9b355aec92be772f1b3aef383e2db1c3fbef3f1.
-
-* 6c16481628f7f7c766f42f329568f69ecb1fc6a6
-  * Wired profit_guard_redeployment_sleeve into usercustomize.py startup, watchdog, and optional self-check metadata.
-  * usercustomize.py SHA: ef59feaa041bdcccdccd1acebc25e6b9d29d7027.
-
-* 77174fa6a6d2c23f2701960b95a5a65e73d8dcd7
-  * Added v2 recursion guard and direct hard-block responses.
-  * profit_guard_redeployment_sleeve.py SHA: 2b3ff5d702e35b257150a7859635e0a3b2306aeb.
-
-* b6329d6729b976e8eb1b1e69ec22419e23ad157e
-  * Added v3 inert-unless-active behavior and wrapper chain detection.
-  * profit_guard_redeployment_sleeve.py SHA: 7fda5605a82b90b64d4676b75a75675600c25a5d.
+* Commit: ab424ed573afff5dc348646fd915423c8629e1e8
+* File SHA: b633ae5ba274cd757d0c029a387f0fd824fc59cf
 
 Expected status fields
 
 /paper/profit-guard-redeployment-sleeve-status should show:
 
-* version: profit-guard-redeployment-sleeve-2026-06-24-v3-inert-unless-active
-* patched_try_entries
-* latest.status
-* latest.reason
-* latest.entry_block_reason
-* latest.entry_blockers
-* latest.profit_guard
-* latest.risk_context
-* latest.reviewed_count
-* latest.eligible_count
-* latest.selected_candidates
-* latest.not_selected_count
-* latest.rejected_preview
-* latest.entries_returned_count
-* latest.rotations_returned_count
-* policy.inert_unless_profit_guard_active_blocker
-* policy.normal_cycles_passthrough_without_recursion_flag
+* version: profit-guard-redeployment-sleeve-2026-06-24-v4-disabled-safe-mode
+* enabled: false
+* patch_enabled: false
+* safe_mode: true
+* patched_this_call.try_entries_and_rotations: false
+* policy.wrapper_disabled_by_default: true
+* policy.does_not_patch_try_entries_by_default: true
+* policy.future_fix_required: implement_inside_core_entry_pipeline_or_non_wrapper_hook
 
 Routine post-deploy check
 
-Use only:
-
-https://trading-bot-clean.up.railway.app/paper/self-check
-
-Required follow-up after this hotfix
-
-After Railway redeploy, check:
+Use:
 
 https://trading-bot-clean.up.railway.app/paper/runner-freshness
 
-Expected improvement:
+Expected improvement after Railway redeploy and next auto cycle:
 
 * last_error should not show maximum recursion depth exceeded.
 * stale_during_market should become false after the next successful auto cycle.
-* normal non-profit-guard cycles should no longer show profit_guard_sleeve_recursion_guard.
+* last_successful_run_local should update.
 
-Optional diagnostic only when intentionally reviewing this update
+Then use:
 
-https://trading-bot-clean.up.railway.app/paper/profit-guard-redeployment-sleeve-status
+https://trading-bot-clean.up.railway.app/paper/self-check
+
+Expected self-check improvement:
+
+* no profit_guard_sleeve_recursion_guard rows.
+* normal entry blockers should show cooldown, extension, market quality, risk controls, or other real blockers.
+
+Future implementation recommendation
+
+Do not revive the wrapper. Build one of these instead:
+
+1. Core pipeline implementation: adjust run_cycle so profit_guard_active distinguishes soft pause, hard lock, and giveback lock before new_entries_allowed is set.
+2. Non-wrapper pre-entry hook: produce a filtered candidate list before try_entries_and_rotations is called, without wrapping the function.
+3. Configuration-only fallback: raise the hard lock threshold or convert only the soft day-profit pause threshold to a sizing reduction inside app.py.
+
+Guardrails for future implementation
+
+* Keep hard profit lock and giveback lock as hard blocks.
+* Keep self-defense, risk halt, opening warmup, and late-day cutoff as hard blocks.
+* Do not lower score floors.
+* Do not bypass entry_quality_check.
+* Do not bypass regime_flip_entry_guard.
+* Do not bypass cooldown.
+* Do not increase max positions without separate risk review.
+* Keep ML shadow-only.
