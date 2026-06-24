@@ -1,10 +1,11 @@
-"""Profit Guard Redeployment Sleeve v2.
+"""Profit Guard Redeployment Sleeve v3.
 
 Purpose:
-- Convert normal profit-guard pauses from a binary global entry shutdown into a
-  controlled, profit-protected participation valve.
-- Prevent wrapper-order recursion with best-of-cycle arbitration and other
-  try_entries_and_rotations overlays.
+- Convert a normal day-profit pause from a global entry shutdown into one small,
+  high-quality participation sleeve.
+- Stay completely inert during normal entry cycles and whenever profit guard is
+  not the active blocker.
+- Avoid wrapper-order recursion with best-of-cycle arbitration.
 
 Guardrails:
 - Paper-only by default.
@@ -21,7 +22,7 @@ import os
 import sys
 from typing import Any, Dict, Iterable, List, Tuple
 
-VERSION = "profit-guard-redeployment-sleeve-2026-06-23-v2-recursion-guard"
+VERSION = "profit-guard-redeployment-sleeve-2026-06-24-v3-inert-unless-active"
 ENABLED = os.environ.get("PROFIT_GUARD_REDEPLOYMENT_SLEEVE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 PAPER_ONLY = os.environ.get("PROFIT_GUARD_REDEPLOYMENT_SLEEVE_PAPER_ONLY", "true").lower() not in {"0", "false", "no", "off"}
 MAX_REVIEWED = int(os.environ.get("PROFIT_GUARD_SLEEVE_MAX_REVIEWED", "30"))
@@ -40,6 +41,8 @@ REGISTERED_APP_IDS: set[int] = set()
 PATCHED_MODULE_IDS: set[int] = set()
 HARD_PROFIT_GUARD_MARKERS = {"hard lock", "giveback", "lock triggered"}
 LEVERAGED_BUCKETS = {"leveraged_etf", "leveraged_etf_watch", "leveraged"}
+ORIGINAL_ATTRS = ("_profit_guard_redeployment_sleeve_original", "_best_of_cycle_original")
+
 THEME_PRIORITY = {
     "semi_leaders": 0.006,
     "memory_storage": 0.0055,
@@ -426,35 +429,45 @@ def _blocked_response(long_signals: Iterable[Any], short_signals: Iterable[Any],
     return [], [], rows
 
 
+def _chain_has_attr(fn: Any, attr: str, max_depth: int = 8) -> bool:
+    seen: set[int] = set()
+    cur = fn
+    for _ in range(max_depth):
+        if cur is None or id(cur) in seen:
+            return False
+        seen.add(id(cur))
+        if getattr(cur, attr, False):
+            return True
+        nxt = None
+        for original_attr in ORIGINAL_ATTRS:
+            candidate = getattr(cur, original_attr, None)
+            if candidate is not None:
+                nxt = candidate
+                break
+        cur = nxt
+    return False
+
+
 def _patch_try_entries(core: Any) -> bool:
     current = getattr(core, "try_entries_and_rotations", None)
     if not callable(current):
         return False
-    if getattr(current, "_profit_guard_redeployment_sleeve_patched", False):
+    if _chain_has_attr(current, "_profit_guard_redeployment_sleeve_patched"):
         return False
     original = current
 
     def patched_try_entries_and_rotations(long_signals, short_signals, params, market, new_entries_allowed=True, entry_block_reason=None):
-        if getattr(patched_try_entries_and_rotations, "_profit_guard_sleeve_in_progress", False):
-            return _blocked_response(long_signals, short_signals, "profit_guard_sleeve_recursion_guard")
-        if not (ENABLED and _paper_context()):
-            try:
-                patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = True  # type: ignore[attr-defined]
-                return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
-            finally:
-                patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = False  # type: ignore[attr-defined]
-        if bool(new_entries_allowed):
-            try:
-                patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = True  # type: ignore[attr-defined]
-                return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
-            except RecursionError:
-                payload = {"status": "recursion_guard", "version": VERSION, "generated_local": _now(core), "reason": "recursion_during_new_entries_allowed_passthrough", "authority_changed": False}
-                _record(core, payload)
-                return _blocked_response(long_signals, short_signals, "profit_guard_sleeve_recursion_guard")
-            finally:
-                patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = False  # type: ignore[attr-defined]
-
+        # Critical v3 behavior: this overlay is completely inert unless profit guard
+        # is the active reason normal entries were blocked. Normal cycles are passed
+        # through without setting recursion flags or generating blocked rows.
         blockers = _entry_blockers(entry_block_reason)
+        profit_guard_is_active_blocker = (not bool(new_entries_allowed)) and ("profit_guard_active" in blockers)
+        if not (ENABLED and _paper_context() and profit_guard_is_active_blocker):
+            return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
+
+        if getattr(patched_try_entries_and_rotations, "_profit_guard_sleeve_attempt_in_progress", False):
+            return _blocked_response(long_signals, short_signals, "profit_guard_sleeve_recursion_guard")
+
         profit_state = _profit_guard_state(core)
         base_payload = {"status": "checked", "version": VERSION, "generated_local": _now(core), "entry_block_reason": entry_block_reason, "entry_blockers": sorted(blockers), "profit_guard": {k: v for k, v in profit_state.items() if k != "risk_controls"}, "authority_changed": False, "live_trade_authority": "none", "ml_authority": "shadow_only"}
 
@@ -465,8 +478,8 @@ def _patch_try_entries(core: Any) -> bool:
             _record(core, payload)
             return _blocked_response(long_signals, short_signals, reason)
 
-        if "profit_guard_active" not in blockers or not profit_state.get("active"):
-            return finish_block("inactive", "profit_guard_not_the_active_blocker")
+        if not profit_state.get("active"):
+            return original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
         if profit_state.get("state") != "soft_pause":
             return finish_block("hard_block", "profit_guard_state_not_soft_pause")
         risk_ok, risk_info = _hard_risk_ok(core, entry_block_reason, market or {})
@@ -487,14 +500,14 @@ def _patch_try_entries(core: Any) -> bool:
         selected_signals = [row["signal"] for row in selected]
         call_longs, call_shorts = _split_selected(selected_signals)
         try:
-            patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = True  # type: ignore[attr-defined]
+            patched_try_entries_and_rotations._profit_guard_sleeve_attempt_in_progress = True  # type: ignore[attr-defined]
             entries, rotations, blocked_entries = original(call_longs, call_shorts, params_dict, market, new_entries_allowed=True, entry_block_reason=None)
         except RecursionError:
             payload = {**base_payload, "status": "recursion_guard", "reason": "recursion_during_profit_guard_sleeve_attempt", "reviewed_count": len(reviewed), "eligible_count": len(eligible), "selected_candidates": [row.get("summary") for row in selected], "authority_changed": False}
             _record(core, payload)
             return _blocked_response(call_longs, call_shorts, "profit_guard_sleeve_recursion_guard")
         finally:
-            patched_try_entries_and_rotations._profit_guard_sleeve_in_progress = False  # type: ignore[attr-defined]
+            patched_try_entries_and_rotations._profit_guard_sleeve_attempt_in_progress = False  # type: ignore[attr-defined]
 
         extra_blocked = []
         for row in eligible[1:11]:
@@ -520,19 +533,7 @@ def _patch_try_entries(core: Any) -> bool:
 
 
 def _policy() -> Dict[str, Any]:
-    return {"max_reviewed": MAX_REVIEWED, "max_entries_per_day": MAX_ENTRIES_PER_DAY, "alloc_factor": ALLOC_FACTOR, "min_score": MIN_SCORE, "allowed_market_modes": sorted(ALLOWED_MARKET_MODES), "allow_shorts": bool(ALLOW_SHORTS), "allow_leveraged_etfs": bool(ALLOW_LEVERAGED_ETFS), "leveraged_min_score": LEVERAGED_MIN_SCORE, "max_daily_loss_pct": MAX_DAILY_LOSS_PCT, "max_intraday_drawdown_pct": MAX_INTRADAY_DRAWDOWN_PCT, "does_not_raise_max_positions": True, "does_not_bypass_entry_quality_check": True, "does_not_bypass_regime_flip_guard": True, "does_not_bypass_self_defense": True, "does_not_bypass_cooldowns": True, "does_not_lower_score_thresholds": True, "hard_profit_lock_still_blocks": True, "giveback_lock_still_blocks": True, "live_trade_authority": "none", "ml_authority": "shadow_only", "authority_changed": False}
-
-
-def _is_effectively_patched(current: Any) -> bool:
-    if getattr(current, "_profit_guard_redeployment_sleeve_patched", False):
-        return True
-    try:
-        inner = getattr(current, "_best_of_cycle_original", None)
-        if getattr(inner, "_profit_guard_redeployment_sleeve_patched", False):
-            return True
-    except Exception:
-        pass
-    return False
+    return {"max_reviewed": MAX_REVIEWED, "max_entries_per_day": MAX_ENTRIES_PER_DAY, "alloc_factor": ALLOC_FACTOR, "min_score": MIN_SCORE, "allowed_market_modes": sorted(ALLOWED_MARKET_MODES), "allow_shorts": bool(ALLOW_SHORTS), "allow_leveraged_etfs": bool(ALLOW_LEVERAGED_ETFS), "leveraged_min_score": LEVERAGED_MIN_SCORE, "max_daily_loss_pct": MAX_DAILY_LOSS_PCT, "max_intraday_drawdown_pct": MAX_INTRADAY_DRAWDOWN_PCT, "does_not_raise_max_positions": True, "does_not_bypass_entry_quality_check": True, "does_not_bypass_regime_flip_guard": True, "does_not_bypass_self_defense": True, "does_not_bypass_cooldowns": True, "does_not_lower_score_thresholds": True, "hard_profit_lock_still_blocks": True, "giveback_lock_still_blocks": True, "inert_unless_profit_guard_active_blocker": True, "normal_cycles_passthrough_without_recursion_flag": True, "live_trade_authority": "none", "ml_authority": "shadow_only", "authority_changed": False}
 
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
@@ -544,7 +545,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         except Exception:
             latest = {}
     current = getattr(core, "try_entries_and_rotations", None) if core is not None else None
-    return {"status": "ok" if core is not None else "pending", "overall": "pass" if core is not None else "pending", "type": "profit_guard_redeployment_sleeve_status", "version": VERSION, "generated_local": _now(core), "enabled": bool(ENABLED), "paper_context": bool(_paper_context()), "patched_try_entries": bool(_is_effectively_patched(current)), "latest": latest, "policy": _policy()}
+    return {"status": "ok" if core is not None else "pending", "overall": "pass" if core is not None else "pending", "type": "profit_guard_redeployment_sleeve_status", "version": VERSION, "generated_local": _now(core), "enabled": bool(ENABLED), "paper_context": bool(_paper_context()), "patched_try_entries": bool(_chain_has_attr(current, "_profit_guard_redeployment_sleeve_patched")), "latest": latest, "policy": _policy()}
 
 
 def apply(core: Any = None) -> Dict[str, Any]:
