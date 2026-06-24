@@ -1,4 +1,4 @@
-Profit Guard Redeployment Sleeve Addendum — June 22-23, 2026
+Profit Guard Redeployment Sleeve Addendum — June 22-24, 2026
 
 Purpose
 
@@ -6,19 +6,27 @@ Convert profit guard from a binary global new-entry shutdown into a controlled p
 
 The prior behavior made profit_guard_active a hard entry block in run_cycle. That protected profitable days but could also block clean dynamic-universe opportunities simply because the bot had already made money.
 
-This addendum documents the new sleeve. A normal day-profit pause can allow one small, high-quality starter candidate through the existing entry pipeline. True hard profit locks, giveback locks, risk halts, self-defense, opening warmup, and late-day cutoffs still block entries.
+This addendum documents the sleeve. A normal day-profit pause can allow one small, high-quality starter candidate through the existing entry pipeline. True hard profit locks, giveback locks, risk halts, self-defense, opening warmup, and late-day cutoffs still block entries.
 
-June 23 hotfix
+June 24 hotfix
 
-A runner freshness check showed:
+A June 24 self-check showed normal midday cycles were still producing:
 
-* last_error: maximum recursion depth exceeded
-* stale_during_market: true
-* profit guard sleeve status route was present, but patched_try_entries was false
+* profit_guard_sleeve_recursion_guard
+* 100% cash
+* no active self-defense
+* no active profit today
 
-The likely failure mode was wrapper-order recursion between profit_guard_redeployment_sleeve and best_of_cycle_entry_arbitration around try_entries_and_rotations.
+That means the sleeve was still polluting the blocked-entry stack outside the intended profit-guard condition.
 
-V2 adds explicit recursion protection and conservative blocked responses so a wrapper-order problem cannot keep the auto-runner failing repeatedly. In hard-block profit states, the sleeve no longer delegates back into the wrapper chain just to produce blocked rows.
+V3 makes the sleeve truly inert unless all of the following are true:
+
+* new_entries_allowed is false.
+* entry_block_reason contains profit_guard_active.
+* profit guard is actually active in risk_controls.
+* profit_guard_reason is a soft day-profit pause, not hard lock or giveback.
+
+Normal cycles now pass through without setting a recursion flag and without generating blocked rows.
 
 File added / updated
 
@@ -26,7 +34,7 @@ profit_guard_redeployment_sleeve.py
 
 Current version
 
-profit-guard-redeployment-sleeve-2026-06-23-v2-recursion-guard
+profit-guard-redeployment-sleeve-2026-06-24-v3-inert-unless-active
 
 Route
 
@@ -35,12 +43,13 @@ Route
 Core behavior
 
 * Patches try_entries_and_rotations.
+* Remains completely inert during normal new-entry cycles.
+* Does not create blocked rows unless profit guard is the active blocker.
 * Only activates when new_entries_allowed is false because profit_guard_active is the active blocker.
 * Does not activate when risk_halted, opening_warmup_active, self_defense_feedback_loop, or late_day_entry_cutoff is also present.
 * Classifies the profit guard state from risk_controls.profit_guard_reason.
 * Allows sleeve only for soft day-profit pause.
 * Keeps day profit hard lock and profit giveback guard as hard blocks.
-* For hard-block states, returns conservative blocked rows directly instead of delegating back into the wrapper chain.
 * Requires market_mode to be risk_on or constructive by default.
 * Blocks when bear_confirmed is true or market_mode is risk_off, crash_warning, defensive_rotation, or bear.
 * Blocks if futures action is block_opening_longs.
@@ -54,15 +63,11 @@ Core behavior
 * Does not grant live authority.
 * Does not change ML authority.
 
-Recursion guard behavior
+Wrapper-order behavior
 
-V2 adds:
+V3 adds chain detection so the sleeve will not be wrapped repeatedly if it already exists inside another try_entries_and_rotations wrapper.
 
-* in-progress guard around passthrough calls.
-* RecursionError catch during normal passthrough.
-* RecursionError catch during sleeve attempts.
-* Direct conservative blocked response when a hard block is already active.
-* Status detection that can recognize the sleeve when it is wrapped inside best-of-cycle arbitration.
+V3 also preserves the best-of-cycle marker when wrapping an already-patched best-of-cycle function so watchdog startup checks do not repeatedly re-wrap the chain.
 
 Default policy
 
@@ -161,11 +166,15 @@ Commits
   * Added v2 recursion guard and direct hard-block responses.
   * profit_guard_redeployment_sleeve.py SHA: 2b3ff5d702e35b257150a7859635e0a3b2306aeb.
 
+* b6329d6729b976e8eb1b1e69ec22419e23ad157e
+  * Added v3 inert-unless-active behavior and wrapper chain detection.
+  * profit_guard_redeployment_sleeve.py SHA: 7fda5605a82b90b64d4676b75a75675600c25a5d.
+
 Expected status fields
 
 /paper/profit-guard-redeployment-sleeve-status should show:
 
-* version: profit-guard-redeployment-sleeve-2026-06-23-v2-recursion-guard
+* version: profit-guard-redeployment-sleeve-2026-06-24-v3-inert-unless-active
 * patched_try_entries
 * latest.status
 * latest.reason
@@ -180,16 +189,8 @@ Expected status fields
 * latest.rejected_preview
 * latest.entries_returned_count
 * latest.rotations_returned_count
-* policy.max_reviewed
-* policy.max_entries_per_day
-* policy.alloc_factor
-* policy.min_score
-* policy.allowed_market_modes
-* policy.allow_shorts
-* policy.allow_leveraged_etfs
-* policy.leveraged_min_score
-* policy.hard_profit_lock_still_blocks
-* policy.giveback_lock_still_blocks
+* policy.inert_unless_profit_guard_active_blocker
+* policy.normal_cycles_passthrough_without_recursion_flag
 
 Routine post-deploy check
 
@@ -205,8 +206,9 @@ https://trading-bot-clean.up.railway.app/paper/runner-freshness
 
 Expected improvement:
 
-* last_error should clear on the next successful run, or at minimum no longer show maximum recursion depth exceeded after the next auto cycle.
+* last_error should not show maximum recursion depth exceeded.
 * stale_during_market should become false after the next successful auto cycle.
+* normal non-profit-guard cycles should no longer show profit_guard_sleeve_recursion_guard.
 
 Optional diagnostic only when intentionally reviewing this update
 
