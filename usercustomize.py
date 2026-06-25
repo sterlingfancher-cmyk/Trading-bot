@@ -1,13 +1,11 @@
-"""Auxiliary startup fallback for monitoring and advisory guard routes."""
 from __future__ import annotations
 
-import datetime as dt
 import sys
 import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-core-entry-pipeline-2026-06-24-v12"
+VERSION = "usercustomize-core-entry-only-2026-06-25-v13"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -22,17 +20,6 @@ def _mod() -> Any | None:
     return None
 
 
-def _now_text() -> str:
-    return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _existing_rules(flask_app: Any) -> set[str]:
-    try:
-        return {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
-    except Exception:
-        return set()
-
-
 def _patch_self_check_endpoints() -> None:
     try:
         import one_link_check
@@ -40,24 +27,11 @@ def _patch_self_check_endpoints() -> None:
         if not isinstance(endpoints, list):
             return
         wanted = [
-            {"path": "/paper/breakout-participation-status", "category": "governance", "required": False, "after": "/paper/market-participation-accelerator-status"},
-            {"path": "/paper/breakout-leaders", "category": "governance", "required": False, "after": "/paper/breakout-participation-status"},
-            {"path": "/paper/fmp-limited-access-guard-status", "category": "governance", "required": False, "after": "/paper/analyst-valuation-risk-status"},
-            {"path": "/paper/fmp-cached-profile-label-guard-status", "category": "governance", "required": False, "after": "/paper/fmp-limited-access-guard-status"},
-            {"path": "/paper/profit-maturity-rotation-status", "category": "governance", "required": False, "after": "/paper/fmp-cached-profile-label-guard-status"},
-            {"path": "/paper/post-harvest-redeployment-status", "category": "governance", "required": False, "after": "/paper/profit-maturity-rotation-status"},
-            {"path": "/paper/post-harvest-entry-fallback-status", "category": "governance", "required": False, "after": "/paper/post-harvest-redeployment-status"},
-            {"path": "/paper/post-harvest-opportunity-governor-status", "category": "governance", "required": False, "after": "/paper/post-harvest-entry-fallback-status"},
-            {"path": "/paper/space-stock-basket-status", "category": "governance", "required": False, "after": "/paper/post-harvest-opportunity-governor-status"},
-            {"path": "/paper/spacex-direct-overlay-status", "category": "governance", "required": False, "after": "/paper/space-stock-basket-status"},
-            {"path": "/paper/blocked-entry-reason-audit-status", "category": "governance", "required": False, "after": "/paper/spacex-direct-overlay-status"},
-            {"path": "/paper/blocked-entry-reason-selfcheck-overlay-status", "category": "governance", "required": False, "after": "/paper/blocked-entry-reason-audit-status"},
-            {"path": "/paper/dynamic-universe-builder-status", "category": "governance", "required": False, "after": "/paper/blocked-entry-reason-selfcheck-overlay-status"},
-            {"path": "/paper/theme-starter-exception-status", "category": "governance", "required": False, "after": "/paper/dynamic-universe-builder-status"},
-            {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False, "after": "/paper/theme-starter-exception-status"},
-            {"path": "/paper/best-of-cycle-entry-arbitration-status", "category": "governance", "required": False, "after": "/paper/regime-flip-entry-guard-status"},
-            {"path": "/paper/profit-guard-redeployment-sleeve-status", "category": "governance", "required": False, "after": "/paper/best-of-cycle-entry-arbitration-status"},
-            {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False, "after": "/paper/profit-guard-redeployment-sleeve-status"},
+            {"path": "/paper/blocked-entry-reason-audit-status", "category": "governance", "required": False},
+            {"path": "/paper/blocked-entry-reason-selfcheck-overlay-status", "category": "governance", "required": False},
+            {"path": "/paper/dynamic-universe-builder-status", "category": "governance", "required": False},
+            {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False},
+            {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False},
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
         for endpoint in wanted:
@@ -92,37 +66,29 @@ def _register_module(flask_app: Any, m: Any | None, module_name: str, route_args
         pass
 
 
-def _register_breakout_participation(flask_app: Any, m: Any | None = None) -> None:
-    _register_module(flask_app, m, "breakout_participation_layer", route_args="app_only")
+MODULES = (
+    ("runner_safety", "app_and_module"),
+    ("journal_truth", "app_and_module"),
+    ("live_volatility", "app_and_module"),
+    ("self_check", "app_and_module"),
+    ("breakout_participation_layer", "app_only"),
+    ("fmp_limited_access_guard", "app_and_module"),
+    ("fmp_cached_profile_label_guard", "app_and_module"),
+    ("space_stock_basket", "app_and_module"),
+    ("spacex_direct_overlay", "app_and_module"),
+    ("blocked_entry_reason_audit", "app_and_module"),
+    ("blocked_entry_reason_selfcheck_overlay", "app_and_module"),
+    ("dynamic_universe_builder", "app_and_module"),
+    ("regime_flip_entry_guard", "app_and_module"),
+    ("core_entry_pipeline", "app_and_module"),
+)
 
 
 def _register_auxiliary_routes(flask_app: Any, m: Any | None = None) -> None:
     if flask_app is None or id(flask_app) in _REGISTERED_APP_IDS:
         return
     _patch_self_check_endpoints()
-    for module_name, route_args in (
-        ("runner_safety", "app_and_module"),
-        ("journal_truth", "app_and_module"),
-        ("live_volatility", "app_and_module"),
-        ("self_check", "app_and_module"),
-        ("breakout_participation_layer", "app_only"),
-        ("fmp_limited_access_guard", "app_and_module"),
-        ("fmp_cached_profile_label_guard", "app_and_module"),
-        ("profit_maturity_rotation_layer", "app_and_module"),
-        ("post_harvest_redeployment_controller", "app_and_module"),
-        ("post_harvest_entry_fallback", "app_and_module"),
-        ("post_harvest_opportunity_governor", "app_and_module"),
-        ("space_stock_basket", "app_and_module"),
-        ("spacex_direct_overlay", "app_and_module"),
-        ("blocked_entry_reason_audit", "app_and_module"),
-        ("blocked_entry_reason_selfcheck_overlay", "app_and_module"),
-        ("dynamic_universe_builder", "app_and_module"),
-        ("theme_starter_exception", "app_and_module"),
-        ("regime_flip_entry_guard", "app_and_module"),
-        ("best_of_cycle_entry_arbitration", "app_and_module"),
-        ("profit_guard_redeployment_sleeve", "app_and_module"),
-        ("core_entry_pipeline", "app_and_module"),
-    ):
+    for module_name, route_args in MODULES:
         _register_module(flask_app, m, module_name, route_args=route_args)
     _REGISTERED_APP_IDS.add(id(flask_app))
 
@@ -135,18 +101,6 @@ def _watchdog() -> None:
             flask_app = getattr(m, "app", None) if m is not None else None
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, m)
-                _register_module(flask_app, m, "post_harvest_redeployment_controller", route_args="app_and_module")
-                _register_module(flask_app, m, "post_harvest_entry_fallback", route_args="app_and_module")
-                _register_module(flask_app, m, "post_harvest_opportunity_governor", route_args="app_and_module")
-                _register_module(flask_app, m, "space_stock_basket", route_args="app_and_module")
-                _register_module(flask_app, m, "spacex_direct_overlay", route_args="app_and_module")
-                _register_module(flask_app, m, "blocked_entry_reason_audit", route_args="app_and_module")
-                _register_module(flask_app, m, "blocked_entry_reason_selfcheck_overlay", route_args="app_and_module")
-                _register_module(flask_app, m, "dynamic_universe_builder", route_args="app_and_module")
-                _register_module(flask_app, m, "theme_starter_exception", route_args="app_and_module")
-                _register_module(flask_app, m, "regime_flip_entry_guard", route_args="app_and_module")
-                _register_module(flask_app, m, "best_of_cycle_entry_arbitration", route_args="app_and_module")
-                _register_module(flask_app, m, "profit_guard_redeployment_sleeve", route_args="app_and_module")
                 _register_module(flask_app, m, "core_entry_pipeline", route_args="app_and_module")
         except Exception:
             pass
