@@ -1,8 +1,9 @@
-"""Core entry pipeline v1 — non-wrapper replacement.
+"""Core entry pipeline v2 — non-wrapper replacement with participation valve.
 
 This module replaces app.try_entries_and_rotations with a complete implementation
 instead of wrapping the existing function. It restores best-of-cycle candidate
-ranking and a profit-guard soft-pause sleeve without recursive wrapper chaining.
+ranking, a profit-guard soft-pause sleeve, and a tightly capped participation
+valve for top-ranked candidates that are barely below score floor.
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import os
 import sys
 from typing import Any, Dict, Iterable, List, Tuple
 
-VERSION = "core-entry-pipeline-2026-06-24-v1-non-wrapper"
+VERSION = "core-entry-pipeline-2026-06-26-v2-participation-valve"
 ENABLED = os.environ.get("CORE_ENTRY_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 PAPER_ONLY = os.environ.get("CORE_ENTRY_PIPELINE_PAPER_ONLY", "true").lower() not in {"0", "false", "no", "off"}
 PATCH_ENABLED = os.environ.get("CORE_ENTRY_PIPELINE_PATCH_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
@@ -27,10 +28,31 @@ PROFIT_GUARD_SLEEVE_ALLOWED_MODES = {s.strip().lower() for s in os.environ.get("
 PROFIT_GUARD_SLEEVE_MAX_DAILY_LOSS_PCT = float(os.environ.get("CORE_ENTRY_PROFIT_GUARD_SLEEVE_MAX_DAILY_LOSS_PCT", "0.15"))
 PROFIT_GUARD_SLEEVE_MAX_INTRADAY_DRAWDOWN_PCT = float(os.environ.get("CORE_ENTRY_PROFIT_GUARD_SLEEVE_MAX_INTRADAY_DRAWDOWN_PCT", "0.35"))
 
+PARTICIPATION_VALVE_ENABLED = os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
+PARTICIPATION_VALVE_MAX_ENTRIES_PER_DAY = int(os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_MAX_ENTRIES_PER_DAY", "1"))
+PARTICIPATION_VALVE_MAX_ENTRIES_PER_CYCLE = int(os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_MAX_ENTRIES_PER_CYCLE", "1"))
+PARTICIPATION_VALVE_MAX_REVIEWED_RANK = int(os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_MAX_REVIEWED_RANK", "3"))
+PARTICIPATION_VALVE_ALLOC_FACTOR = float(os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_ALLOC_FACTOR", "0.30"))
+PARTICIPATION_VALVE_MIN_RAW_SCORE = float(os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_MIN_RAW_SCORE", "0.0105"))
+PARTICIPATION_VALVE_MIN_RANK_SCORE = float(os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_MIN_RANK_SCORE", "0.0150"))
+PARTICIPATION_VALVE_MAX_SCORE_GAP = float(os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_MAX_SCORE_GAP", "0.0020"))
+PARTICIPATION_VALVE_ALLOWED_MODES = {s.strip().lower() for s in os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_ALLOWED_MODES", "risk_on,constructive").split(",") if s.strip()}
+PARTICIPATION_VALVE_MAX_DAILY_LOSS_PCT = float(os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_MAX_DAILY_LOSS_PCT", "0.00"))
+PARTICIPATION_VALVE_MAX_INTRADAY_DRAWDOWN_PCT = float(os.environ.get("CORE_ENTRY_PARTICIPATION_VALVE_MAX_INTRADAY_DRAWDOWN_PCT", "0.10"))
+PARTICIPATION_VALVE_ALLOWED_QUALITY_REASONS = {
+    s.strip()
+    for s in os.environ.get(
+        "CORE_ENTRY_PARTICIPATION_VALVE_ALLOWED_QUALITY_REASONS",
+        "entry_score_below_minimum,score_below_post_harvest_floor,relative_strength_leader_exception_block",
+    ).split(",")
+    if s.strip()
+}
+
 REGISTERED_APP_IDS: set[int] = set()
 PATCHED_MODULE_IDS: set[int] = set()
 
 HARD_PROFIT_GUARD_MARKERS = {"hard lock", "giveback", "lock triggered"}
+EXTENSION_BLOCK_TOKENS = ("extended", "extension", "chase", "near_high", "overstretched", "too_close_to_intraday_high")
 THEME_PRIORITY = {
     "space_stocks": 0.006,
     "bitcoin_ai_compute": 0.005,
@@ -45,7 +67,7 @@ THEME_PRIORITY = {
 }
 PREFERRED_SYMBOLS = {
     "RKLB", "RDW", "LUNR", "ASTS", "SPCX", "SATL",
-    "AMD", "AVGO", "MU", "LRCX", "NVTS", "NBIS", "GEV", "STX", "WDC", "DELL", "HPE", "GLW", "SNDK",
+    "AMD", "AVGO", "MU", "LRCX", "NVTS", "NBIS", "GEV", "STX", "WDC", "DELL", "HPE", "GLW", "SNDK", "ON",
     "CIFR", "CLSK", "RIOT", "HIVE", "HUT", "BTDR", "WULF", "CORZ", "IREN", "MARA",
 }
 
@@ -182,6 +204,23 @@ def _sector(core: Any, symbol: str, signal: Dict[str, Any]) -> str:
         return "UNKNOWN"
 
 
+def _walk_values(obj: Any, depth: int = 0) -> List[str]:
+    if depth > 4:
+        return []
+    out: List[str] = []
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in {"reason", "entry_context", "trade_class", "signal_type", "selection_reason", "quality_reason", "status"} and value:
+                out.append(str(value).lower())
+            out.extend(_walk_values(value, depth + 1))
+    elif isinstance(obj, (list, tuple)):
+        for value in obj:
+            out.extend(_walk_values(value, depth + 1))
+    elif isinstance(obj, str):
+        out.append(obj.lower())
+    return out
+
+
 def _text(signal: Dict[str, Any]) -> str:
     parts: List[str] = []
     for key in ("entry_context", "trade_class", "reason", "signal_type", "selection_reason"):
@@ -193,6 +232,32 @@ def _text(signal: Dict[str, Any]) -> str:
         if isinstance(value, dict) and value.get("active"):
             parts.append(key)
     return " ".join(parts)
+
+
+def _quality_reason(info: Any) -> str:
+    if isinstance(info, dict):
+        for key in ("reason", "quality_reason", "status"):
+            if info.get(key):
+                return str(info.get(key))
+        controlled = info.get("controlled_pullback_info")
+        if isinstance(controlled, dict) and controlled.get("reason"):
+            return str(controlled.get("reason"))
+    return str(info or "unknown")
+
+
+def _has_extension_warning(signal: Dict[str, Any], info: Any) -> bool:
+    text = " ".join(_walk_values(signal) + _walk_values(info))
+    return any(token in text for token in EXTENSION_BLOCK_TOKENS)
+
+
+def _normal_entry_floor(core: Any, market: Dict[str, Any], side: str, fallback: float = 0.0) -> float:
+    try:
+        fn = getattr(core, "min_entry_score_for_market", None)
+        if callable(fn):
+            return _safe_float(fn(market or {}, side), fallback)
+    except Exception:
+        pass
+    return fallback
 
 
 def _is_relative_strength(signal: Dict[str, Any]) -> bool:
@@ -259,20 +324,14 @@ def _prepare_candidates(core: Any, long_signals: Iterable[Any], short_signals: I
 def _block_rows(candidates: Iterable[Dict[str, Any]], reason: str, max_rows: int = 10, extra: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for signal in list(candidates or [])[:max_rows]:
-        row = {
-            "symbol": signal.get("symbol"),
-            "side": signal.get("side"),
-            "score": signal.get("score"),
-            "rank_score": signal.get("core_entry_rank_score"),
-            "reason": reason,
-        }
+        row = {"symbol": signal.get("symbol"), "side": signal.get("side"), "score": signal.get("score"), "rank_score": signal.get("core_entry_rank_score"), "reason": reason}
         if extra:
             row.update(extra)
         rows.append(row)
     return rows
 
 
-def _profit_guard_sleeve_entries_today(core: Any) -> int:
+def _entries_today_with_context(core: Any, context_token: str) -> int:
     try:
         today = getattr(core, "today_key", lambda: "")()
         trades = getattr(core, "trades_for_date", lambda _d: [])(today)
@@ -283,9 +342,88 @@ def _profit_guard_sleeve_entries_today(core: Any) -> int:
         if not isinstance(trade, dict) or str(trade.get("action") or "") != "entry":
             continue
         text = " ".join(str(trade.get(k) or "") for k in ("entry_context", "trade_class", "reason")).lower()
-        if "profit_guard_core_sleeve" in text:
+        if context_token.lower() in text:
             count += 1
     return count
+
+
+def _profit_guard_sleeve_entries_today(core: Any) -> int:
+    return _entries_today_with_context(core, "profit_guard_core_sleeve")
+
+
+def _participation_valve_entries_today(core: Any) -> int:
+    return _entries_today_with_context(core, "core_participation_valve")
+
+
+def _risk_clean_for_participation(core: Any, market: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    rc = _risk_controls(core)
+    mode = str((market or {}).get("market_mode") or "").lower()
+    if mode not in PARTICIPATION_VALVE_ALLOWED_MODES:
+        return False, {"reason": "participation_valve_market_mode_not_allowed", "market_mode": mode, "allowed_modes": sorted(PARTICIPATION_VALVE_ALLOWED_MODES)}
+    if bool((market or {}).get("bear_confirmed")) or mode in {"risk_off", "crash_warning", "defensive_rotation", "bear"}:
+        return False, {"reason": "participation_valve_market_regime_block", "market_mode": mode, "bear_confirmed": bool((market or {}).get("bear_confirmed"))}
+    futures = (market or {}).get("futures_bias", {}) or {}
+    if str(futures.get("action") or "").lower() == "block_opening_longs":
+        return False, {"reason": "participation_valve_futures_block_opening_longs", "futures_bias": futures}
+    if bool(rc.get("halted", False)):
+        return False, {"reason": "participation_valve_risk_halted", "risk_controls": rc}
+    if bool(rc.get("self_defense_active", False)):
+        return False, {"reason": "participation_valve_self_defense_active", "risk_controls": rc}
+    daily_loss = _safe_float(rc.get("daily_loss_pct"), 0.0)
+    intraday_dd = _safe_float(rc.get("intraday_drawdown_pct"), 0.0)
+    if daily_loss > PARTICIPATION_VALVE_MAX_DAILY_LOSS_PCT:
+        return False, {"reason": "participation_valve_daily_loss_not_clean", "daily_loss_pct": daily_loss, "max_daily_loss_pct": PARTICIPATION_VALVE_MAX_DAILY_LOSS_PCT}
+    if intraday_dd > PARTICIPATION_VALVE_MAX_INTRADAY_DRAWDOWN_PCT:
+        return False, {"reason": "participation_valve_intraday_drawdown_too_high", "intraday_drawdown_pct": intraday_dd, "max_intraday_drawdown_pct": PARTICIPATION_VALVE_MAX_INTRADAY_DRAWDOWN_PCT}
+    return True, {"reason": "participation_valve_risk_clean", "risk_controls": rc}
+
+
+def _participation_valve_ok(core: Any, signal: Dict[str, Any], params: Dict[str, Any], market: Dict[str, Any], quality_info: Any, rank_index: int, entries_this_cycle: int, valve_entries_this_cycle: int) -> Tuple[bool, Dict[str, Any]]:
+    if not (PARTICIPATION_VALVE_ENABLED and _paper_context()):
+        return False, {"reason": "participation_valve_disabled_or_not_paper"}
+    symbol = _symbol(signal)
+    side = _side(signal)
+    score = _safe_float(signal.get("score"), 0.0)
+    rank_score = _safe_float(signal.get("core_entry_rank_score"), score)
+    quality_reason = _quality_reason(quality_info)
+    required_score = _safe_float(quality_info.get("required_score") if isinstance(quality_info, dict) else None, 0.0)
+    if required_score <= 0:
+        required_score = _normal_entry_floor(core, market, side, 0.0)
+    score_gap = max(0.0, required_score - score) if required_score > 0 else 999.0
+
+    base = {
+        "version": VERSION,
+        "symbol": symbol,
+        "side": side,
+        "rank_index": rank_index,
+        "score": round(score, 6),
+        "rank_score": round(rank_score, 6),
+        "required_score": round(required_score, 6),
+        "score_gap": round(score_gap, 6),
+        "quality_reason": quality_reason,
+    }
+    if side != "long":
+        return False, {**base, "reason": "participation_valve_long_only"}
+    if rank_index > PARTICIPATION_VALVE_MAX_REVIEWED_RANK:
+        return False, {**base, "reason": "participation_valve_rank_too_low", "max_rank": PARTICIPATION_VALVE_MAX_REVIEWED_RANK}
+    if valve_entries_this_cycle >= PARTICIPATION_VALVE_MAX_ENTRIES_PER_CYCLE:
+        return False, {**base, "reason": "participation_valve_cycle_limit", "max_entries_per_cycle": PARTICIPATION_VALVE_MAX_ENTRIES_PER_CYCLE}
+    if _participation_valve_entries_today(core) >= PARTICIPATION_VALVE_MAX_ENTRIES_PER_DAY:
+        return False, {**base, "reason": "participation_valve_daily_limit", "max_entries_per_day": PARTICIPATION_VALVE_MAX_ENTRIES_PER_DAY}
+    if quality_reason not in PARTICIPATION_VALVE_ALLOWED_QUALITY_REASONS:
+        return False, {**base, "reason": "participation_valve_quality_reason_not_allowed", "allowed_reasons": sorted(PARTICIPATION_VALVE_ALLOWED_QUALITY_REASONS)}
+    if score < PARTICIPATION_VALVE_MIN_RAW_SCORE:
+        return False, {**base, "reason": "participation_valve_raw_score_too_low", "min_raw_score": PARTICIPATION_VALVE_MIN_RAW_SCORE}
+    if rank_score < PARTICIPATION_VALVE_MIN_RANK_SCORE:
+        return False, {**base, "reason": "participation_valve_rank_score_too_low", "min_rank_score": PARTICIPATION_VALVE_MIN_RANK_SCORE}
+    if score_gap > PARTICIPATION_VALVE_MAX_SCORE_GAP:
+        return False, {**base, "reason": "participation_valve_score_gap_too_wide", "max_score_gap": PARTICIPATION_VALVE_MAX_SCORE_GAP}
+    if _has_extension_warning(signal, quality_info):
+        return False, {**base, "reason": "participation_valve_extension_or_chase_block"}
+    risk_ok, risk_info = _risk_clean_for_participation(core, market)
+    if not risk_ok:
+        return False, {**base, **risk_info}
+    return True, {**base, "reason": "participation_valve_ok", "alloc_factor": PARTICIPATION_VALVE_ALLOC_FACTOR, "risk": risk_info}
 
 
 def _profit_guard_sleeve_context_ok(core: Any, blockers: set[str], market: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -331,7 +469,6 @@ def _try_profit_guard_core_sleeve(core: Any, candidates: List[Dict[str, Any]], p
     if not ok:
         payload.update({"status": "blocked", "reason": context.get("reason", "profit_guard_core_sleeve_blocked")})
         return entries, rotations, _block_rows(candidates, payload["reason"]), payload
-
     selected: List[Dict[str, Any]] = []
     rejected: List[Dict[str, Any]] = []
     params_dict = dict(params or {})
@@ -369,14 +506,12 @@ def _try_profit_guard_core_sleeve(core: Any, candidates: List[Dict[str, Any]], p
             continue
         selected.append({"signal": candidate, "summary": {**row, "reason": "selected_profit_guard_core_sleeve", "quality_info": quality_info}})
         break
-
     payload["eligible_count"] = len(selected)
     payload["selected_candidates"] = [s.get("summary") for s in selected]
     payload["rejected_preview"] = rejected[:15]
     if not selected:
         payload.update({"status": "no_eligible_candidate", "reason": "profit_guard_core_sleeve_no_candidate_passed_quality"})
         return entries, rotations, rejected[:10] or _block_rows(candidates, payload["reason"]), payload
-
     candidate = selected[0]["signal"]
     quality_info = selected[0]["summary"].get("quality_info", {})
     entry = core.enter_position(candidate, params_dict, market_mode=(market or {}).get("market_mode", "neutral"))
@@ -396,6 +531,8 @@ def _core_try_entries_and_rotations(core: Any, long_signals, short_signals, para
     entries: List[Dict[str, Any]] = []
     rotations: List[Dict[str, Any]] = []
     blocked_entries: List[Dict[str, Any]] = []
+    participation_attempts: List[Dict[str, Any]] = []
+    participation_entries: List[Dict[str, Any]] = []
     params = dict(params or {})
     market = dict(market or {})
     mode = market.get("market_mode", "neutral")
@@ -422,8 +559,9 @@ def _core_try_entries_and_rotations(core: Any, long_signals, short_signals, para
         return entries, rotations, _block_rows(candidates, block_reason)
 
     entries_this_cycle = 0
+    participation_this_cycle = 0
     not_selected_rows = 0
-    for signal in candidates:
+    for rank_index, signal in enumerate(candidates, start=1):
         symbol = _symbol(signal)
         side = _side(signal)
         if not symbol:
@@ -452,7 +590,26 @@ def _core_try_entries_and_rotations(core: Any, long_signals, short_signals, para
                 blocked_entries.append({"symbol": symbol, "side": side, "score": signal.get("score"), "rank_score": signal.get("core_entry_rank_score"), "reason": "entry_quality_check_error", "error": str(exc)})
                 continue
             if not ok:
-                blocked_entries.append({"symbol": symbol, "side": side, "score": signal.get("score"), "rank_score": signal.get("core_entry_rank_score"), "reason": "entry_quality_block", "quality_info": quality_info})
+                valve_ok, valve_info = _participation_valve_ok(core, signal, params, market, quality_info, rank_index, entries_this_cycle, participation_this_cycle)
+                participation_attempts.append(valve_info)
+                if valve_ok:
+                    starter = dict(signal)
+                    starter["alloc_factor"] = min(_safe_float(starter.get("alloc_factor"), 1.0), PARTICIPATION_VALVE_ALLOC_FACTOR)
+                    starter["entry_context"] = "core_participation_valve"
+                    starter["trade_class"] = "core_participation_valve"
+                    starter["core_participation_valve"] = valve_info
+                    entry = core.enter_position(starter, params, market_mode=mode)
+                    if entry and not entry.get("blocked"):
+                        entry["quality_info"] = quality_info
+                        entry["core_entry_pipeline"] = {"version": VERSION, "mode": "core_participation_valve", "rank_score": starter.get("core_entry_rank_score"), "best_of_cycle": bool(BEST_OF_CYCLE_ENABLED), "participation_valve": valve_info}
+                        entries.append(entry)
+                        participation_entries.append(entry)
+                        entries_this_cycle += 1
+                        participation_this_cycle += 1
+                    else:
+                        blocked_entries.append(entry or {"symbol": symbol, "side": side, "reason": "participation_valve_enter_position_returned_empty", "participation_valve": valve_info})
+                    continue
+                blocked_entries.append({"symbol": symbol, "side": side, "score": signal.get("score"), "rank_score": signal.get("core_entry_rank_score"), "reason": "entry_quality_block", "quality_info": quality_info, "participation_valve": valve_info})
                 continue
             entry = core.enter_position(signal, params, market_mode=mode)
             if entry and not entry.get("blocked"):
@@ -498,6 +655,10 @@ def _core_try_entries_and_rotations(core: Any, long_signals, short_signals, para
             "rotations_count": len(rotations),
             "blocked_count": len(blocked_entries),
             "best_of_cycle_enabled": bool(BEST_OF_CYCLE_ENABLED),
+            "participation_valve_enabled": bool(PARTICIPATION_VALVE_ENABLED),
+            "participation_valve_attempts": participation_attempts[:10],
+            "participation_valve_entries": participation_entries,
+            "participation_valve_entries_count": len(participation_entries),
             "top_candidates": [{"symbol": c.get("symbol"), "score": c.get("score"), "rank_score": c.get("core_entry_rank_score")} for c in candidates[:10]],
         }
     except Exception:
@@ -509,7 +670,7 @@ def _patch(core: Any) -> bool:
     if core is None or not (ENABLED and PATCH_ENABLED and _paper_context()):
         return False
     current = getattr(core, "try_entries_and_rotations", None)
-    if callable(current) and getattr(current, "_core_entry_pipeline_non_wrapper_patched", False):
+    if callable(current) and getattr(current, "_core_entry_pipeline_version", None) == VERSION:
         return False
 
     def try_entries_and_rotations(long_signals, short_signals, params, market, new_entries_allowed=True, entry_block_reason=None):
@@ -517,8 +678,6 @@ def _patch(core: Any) -> bool:
 
     try_entries_and_rotations._core_entry_pipeline_non_wrapper_patched = True  # type: ignore[attr-defined]
     try_entries_and_rotations._core_entry_pipeline_version = VERSION  # type: ignore[attr-defined]
-    # Intentionally do not keep or call the prior function; this is a replacement,
-    # not a wrapper. This prevents recursive wrapper chains.
     core.try_entries_and_rotations = try_entries_and_rotations
     PATCHED_MODULE_IDS.add(id(core))
     return True
@@ -540,6 +699,19 @@ def _policy() -> Dict[str, Any]:
         "calls_prior_try_entries": False,
         "best_of_cycle_enabled": bool(BEST_OF_CYCLE_ENABLED),
         "max_not_selected_rows": MAX_NOT_SELECTED_ROWS,
+        "participation_valve_enabled": bool(PARTICIPATION_VALVE_ENABLED),
+        "participation_valve_max_entries_per_day": PARTICIPATION_VALVE_MAX_ENTRIES_PER_DAY,
+        "participation_valve_max_entries_per_cycle": PARTICIPATION_VALVE_MAX_ENTRIES_PER_CYCLE,
+        "participation_valve_max_reviewed_rank": PARTICIPATION_VALVE_MAX_REVIEWED_RANK,
+        "participation_valve_alloc_factor": PARTICIPATION_VALVE_ALLOC_FACTOR,
+        "participation_valve_min_raw_score": PARTICIPATION_VALVE_MIN_RAW_SCORE,
+        "participation_valve_min_rank_score": PARTICIPATION_VALVE_MIN_RANK_SCORE,
+        "participation_valve_max_score_gap": PARTICIPATION_VALVE_MAX_SCORE_GAP,
+        "participation_valve_allowed_modes": sorted(PARTICIPATION_VALVE_ALLOWED_MODES),
+        "participation_valve_allowed_quality_reasons": sorted(PARTICIPATION_VALVE_ALLOWED_QUALITY_REASONS),
+        "participation_valve_blocks_extension_or_chase": True,
+        "participation_valve_calls_entry_quality_check_first": True,
+        "participation_valve_limited_score_floor_exception": True,
         "profit_guard_sleeve_enabled": bool(PROFIT_GUARD_SLEEVE_ENABLED),
         "profit_guard_sleeve_max_entries_per_day": PROFIT_GUARD_SLEEVE_MAX_ENTRIES_PER_DAY,
         "profit_guard_sleeve_alloc_factor": PROFIT_GUARD_SLEEVE_ALLOC_FACTOR,
@@ -548,10 +720,10 @@ def _policy() -> Dict[str, Any]:
         "hard_profit_lock_still_blocks": True,
         "giveback_lock_still_blocks": True,
         "does_not_raise_max_positions": True,
-        "does_not_bypass_entry_quality_check": True,
         "does_not_bypass_cooldowns": True,
         "does_not_bypass_self_defense_or_risk_halt": True,
-        "does_not_lower_score_thresholds": True,
+        "does_not_bypass_extension_guard": True,
+        "does_not_lower_global_score_thresholds": True,
         "live_trade_authority": "none",
         "ml_authority": "shadow_only",
         "authority_changed": False,
