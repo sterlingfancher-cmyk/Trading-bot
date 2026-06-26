@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-core-entry-only-2026-06-25-v13"
+VERSION = "usercustomize-core-entry-ml-pre3a-2026-06-26-v14"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -32,6 +32,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/dynamic-universe-builder-status", "category": "governance", "required": False},
             {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False},
             {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False},
+            {"path": "/paper/ml-pre3a-shadow-status", "category": "governance", "required": False},
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
         for endpoint in wanted:
@@ -81,6 +82,7 @@ MODULES = (
     ("dynamic_universe_builder", "app_and_module"),
     ("regime_flip_entry_guard", "app_and_module"),
     ("core_entry_pipeline", "app_and_module"),
+    ("ml_pre3a_shadow_validation", "app_and_module"),
 )
 
 
@@ -102,6 +104,7 @@ def _watchdog() -> None:
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, m)
                 _register_module(flask_app, m, "core_entry_pipeline", route_args="app_and_module")
+                _register_module(flask_app, m, "ml_pre3a_shadow_validation", route_args="app_and_module")
         except Exception:
             pass
         time.sleep(0.1)
