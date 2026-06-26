@@ -1,8 +1,13 @@
-"""ML-vs-rules shadow comparison log.
+"""ML-vs-rules shadow comparison log v2.
 
 Advisory telemetry only. This module records cases where ML2 shadow rankings
 preferred a current candidate that rules blocked or rejected, then labels those
 comparison events from later realized outcomes when available.
+
+V2 adds:
+- same-cycle de-duplication by symbol/side/rule reason/source
+- explicit outcome label quality: proxy_outcome vs executed_outcome
+- rule-reason scoreboard for costly blocks vs protective blocks
 
 It does not patch trade functions, place trades, change sizing, override risk,
 or grant ML authority.
@@ -18,7 +23,7 @@ import sys
 import threading
 from typing import Any, Dict, Iterable, List, Tuple
 
-VERSION = "ml-vs-rules-shadow-log-2026-06-26-v1"
+VERSION = "ml-vs-rules-shadow-log-2026-06-26-v2-evidence-quality"
 PHASE = "phase_2_5_ml_vs_rules_shadow_evidence"
 ENABLED = os.environ.get("ML_VS_RULES_SHADOW_LOG_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 MIN_ML_PROBABILITY = float(os.environ.get("ML_VS_RULES_MIN_PROBABILITY", "0.60"))
@@ -26,6 +31,8 @@ MIN_ML_EDGE = float(os.environ.get("ML_VS_RULES_MIN_EDGE", "0.08"))
 MAX_EVENTS = int(os.environ.get("ML_VS_RULES_MAX_EVENTS", "1000"))
 MAX_NEW_EVENTS_PER_SAVE = int(os.environ.get("ML_VS_RULES_MAX_NEW_EVENTS_PER_SAVE", "25"))
 SCORECARD_MIN_ROWS = int(os.environ.get("ML_VS_RULES_SCORECARD_MIN_ROWS", "3"))
+PROTECTIVE_LOSS_PNL_DOLLARS = float(os.environ.get("ML_VS_RULES_PROTECTIVE_LOSS_PNL_DOLLARS", "0.0"))
+COSTLY_WIN_PNL_DOLLARS = float(os.environ.get("ML_VS_RULES_COSTLY_WIN_PNL_DOLLARS", "0.0"))
 
 REGISTERED_APP_IDS: set[int] = set()
 PATCHED_MODULE_IDS: set[int] = set()
@@ -149,6 +156,15 @@ def _exit_rows(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
+def _entry_rows(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = []
+    for row in _trades(state):
+        action = str(row.get("action") or row.get("type") or "").lower()
+        if action in {"entry", "buy", "open"}:
+            rows.append(row)
+    return rows
+
+
 def _pnl_dollars(row: Dict[str, Any]) -> float:
     return _f(row.get("pnl_dollars"), _f(row.get("pnl"), 0.0))
 
@@ -230,6 +246,33 @@ def _ml_prefers(prediction: Dict[str, Any]) -> bool:
     return prob >= MIN_ML_PROBABILITY or edge >= MIN_ML_EDGE or action == "rank_higher"
 
 
+def _cycle_key(event: Dict[str, Any]) -> Tuple[str, str, str, str, str]:
+    return (
+        str(event.get("event_date") or ""),
+        str(event.get("symbol") or ""),
+        str(event.get("side") or ""),
+        str(event.get("rule_reason") or ""),
+        str(event.get("source") or ""),
+    )
+
+
+def _dedupe_cycle_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    best: Dict[Tuple[str, str, str, str, str], Dict[str, Any]] = {}
+    for event in events:
+        key = _cycle_key(event)
+        current = best.get(key)
+        if current is None:
+            best[key] = event
+            continue
+        cur_score = (_f(current.get("ml_probability")), _f(current.get("ml_edge")), _f(current.get("rule_score")))
+        new_score = (_f(event.get("ml_probability")), _f(event.get("ml_edge")), _f(event.get("rule_score")))
+        if new_score > cur_score:
+            best[key] = event
+    values = list(best.values())
+    values.sort(key=lambda r: (_f(r.get("ml_probability")), _f(r.get("ml_edge")), _f(r.get("rule_score"))), reverse=True)
+    return values
+
+
 def _build_new_events(state: Dict[str, Any], mod: Any = None) -> List[Dict[str, Any]]:
     prediction_by_key = _prediction_index(state)
     today = _today(mod)
@@ -262,22 +305,36 @@ def _build_new_events(state: Dict[str, Any], mod: Any = None) -> List[Dict[str, 
             "regime": pred.get("regime") or row.get("regime"),
             "outcome_pending": True,
             "outcome_source": None,
+            "outcome_label_quality": "unlabeled",
             "future_pnl_dollars": None,
             "future_pnl_pct": None,
             "future_win": None,
+            "would_have_helped": None,
+            "block_classification": "pending",
         }
         event["event_id"] = _hash({
             "date": event.get("event_date"),
             "symbol": symbol,
             "side": side,
             "rule_reason": event.get("rule_reason"),
-            "ml_probability": round(_f(event.get("ml_probability")), 4),
             "source": event.get("source"),
         })
         events.append(event)
-        if len(events) >= MAX_NEW_EVENTS_PER_SAVE:
-            break
-    return events
+    return _dedupe_cycle_events(events)[:MAX_NEW_EVENTS_PER_SAVE]
+
+
+def _matching_entry_exists(state: Dict[str, Any], event: Dict[str, Any]) -> bool:
+    symbol = _symbol(event)
+    side = _side(event)
+    event_date = _event_date(event)
+    for trade in _entry_rows(state):
+        if _symbol(trade) != symbol or _side(trade) != side:
+            continue
+        trade_date = _trade_date(trade)
+        if event_date and trade_date and trade_date < event_date:
+            continue
+        return True
+    return False
 
 
 def _matching_outcomes(state: Dict[str, Any], event: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -296,6 +353,21 @@ def _matching_outcomes(state: Dict[str, Any], event: Dict[str, Any]) -> List[Dic
     return rows
 
 
+def _classify_labeled_event(item: Dict[str, Any]) -> Dict[str, Any]:
+    pnl = _f(item.get("future_pnl_dollars"), 0.0)
+    win = bool(item.get("future_win"))
+    if win and pnl >= COSTLY_WIN_PNL_DOLLARS:
+        item["would_have_helped"] = True
+        item["block_classification"] = "costly_block_candidate"
+    elif (not win) and pnl <= PROTECTIVE_LOSS_PNL_DOLLARS:
+        item["would_have_helped"] = False
+        item["block_classification"] = "protective_block_candidate"
+    else:
+        item["would_have_helped"] = None
+        item["block_classification"] = "neutral_or_too_small"
+    return item
+
+
 def _label_events(state: Dict[str, Any], events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     labeled = []
     for event in events:
@@ -303,15 +375,21 @@ def _label_events(state: Dict[str, Any], events: List[Dict[str, Any]]) -> List[D
         outcomes = _matching_outcomes(state, item)
         if outcomes:
             first = outcomes[0]
+            executed = _matching_entry_exists(state, item)
             item.update({
                 "outcome_pending": False,
-                "outcome_source": "later_symbol_side_realized_exit",
+                "outcome_source": "same_symbol_side_realized_exit",
+                "outcome_label_quality": "executed_outcome" if executed else "proxy_outcome",
                 "outcome_date": _trade_date(first),
                 "future_pnl_dollars": round(_pnl_dollars(first), 4),
                 "future_pnl_pct": round(_pnl_pct(first), 5),
                 "future_win": bool(_pnl_dollars(first) > 0 or _pnl_pct(first) > 0),
                 "matched_outcome_count": len(outcomes),
             })
+            item = _classify_labeled_event(item)
+        else:
+            item.setdefault("outcome_label_quality", "unlabeled")
+            item.setdefault("block_classification", "pending")
         labeled.append(item)
     return labeled
 
@@ -325,8 +403,19 @@ def _merge_events(existing: List[Dict[str, Any]], new_events: List[Dict[str, Any
         row = dict(row)
         row["event_id"] = event_id
         old = by_id.get(event_id)
-        if old is None or (old.get("outcome_pending") and not row.get("outcome_pending")):
+        if old is None:
             by_id[event_id] = row
+            continue
+        old_pending = bool(old.get("outcome_pending", True))
+        new_pending = bool(row.get("outcome_pending", True))
+        if old_pending and not new_pending:
+            by_id[event_id] = row
+            continue
+        if old_pending == new_pending:
+            old_score = (_f(old.get("ml_probability")), _f(old.get("ml_edge")), _f(old.get("rule_score")))
+            new_score = (_f(row.get("ml_probability")), _f(row.get("ml_edge")), _f(row.get("rule_score")))
+            if new_score > old_score:
+                by_id[event_id] = row
     events = list(by_id.values())
     events.sort(key=lambda r: str(r.get("event_local") or r.get("event_date") or ""))
     return events[-MAX_EVENTS:]
@@ -335,6 +424,11 @@ def _merge_events(existing: List[Dict[str, Any]], new_events: List[Dict[str, Any
 def _event_metrics(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     rows = [r for r in rows if isinstance(r, dict)]
     labeled = [r for r in rows if not r.get("outcome_pending")]
+    proxy = [r for r in labeled if r.get("outcome_label_quality") == "proxy_outcome"]
+    executed = [r for r in labeled if r.get("outcome_label_quality") == "executed_outcome"]
+    costly = [r for r in labeled if r.get("block_classification") == "costly_block_candidate"]
+    protective = [r for r in labeled if r.get("block_classification") == "protective_block_candidate"]
+    neutral = [r for r in labeled if r.get("block_classification") == "neutral_or_too_small"]
     wins = sum(1 for r in labeled if bool(r.get("future_win")))
     losses = max(0, len(labeled) - wins)
     avg_pnl = sum(_f(r.get("future_pnl_dollars"), 0.0) for r in labeled) / max(1, len(labeled))
@@ -343,11 +437,17 @@ def _event_metrics(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "events": len(rows),
         "labeled_events": len(labeled),
         "pending_events": max(0, len(rows) - len(labeled)),
+        "proxy_labeled_events": len(proxy),
+        "executed_labeled_events": len(executed),
         "wins": wins,
         "losses": losses,
         "win_rate": round(wins / max(1, len(labeled)), 4) if labeled else 0.0,
         "avg_pnl_dollars": round(avg_pnl, 4),
         "avg_pnl_pct": round(avg_pct, 5),
+        "costly_block_candidates": len(costly),
+        "protective_block_candidates": len(protective),
+        "neutral_or_too_small": len(neutral),
+        "costly_minus_protective": len(costly) - len(protective),
     }
 
 
@@ -362,8 +462,26 @@ def _scorecard(events: List[Dict[str, Any]], field: str) -> List[Dict[str, Any]]
     for key, rows in groups.items():
         metrics = _event_metrics(rows)
         cards.append({"name": key, **metrics, "usable": bool(metrics.get("labeled_events", 0) >= SCORECARD_MIN_ROWS)})
-    cards.sort(key=lambda r: (_i(r.get("labeled_events")), _f(r.get("win_rate")), _f(r.get("avg_pnl_pct"))), reverse=True)
+    cards.sort(key=lambda r: (_i(r.get("costly_minus_protective")), _i(r.get("labeled_events")), _f(r.get("avg_pnl_pct"))), reverse=True)
     return cards[:25]
+
+
+def _rule_reason_evidence(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cards = _scorecard(events, "rule_reason")
+    evidence = []
+    for card in cards:
+        net = _i(card.get("costly_minus_protective"), 0)
+        if net > 0:
+            verdict = "possibly_over_restrictive"
+        elif net < 0:
+            verdict = "possibly_protective"
+        else:
+            verdict = "inconclusive"
+        item = dict(card)
+        item["verdict"] = verdict
+        item["needs_more_data"] = not bool(card.get("usable"))
+        evidence.append(item)
+    return evidence
 
 
 def _summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -376,6 +494,12 @@ def _summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             "by_regime": _scorecard(events, "regime"),
             "by_rule_reason": _scorecard(events, "rule_reason"),
         },
+        "rule_reason_evidence": _rule_reason_evidence(events),
+        "evidence_notes": [
+            "proxy_outcome labels are useful for hypothesis generation only.",
+            "executed_outcome labels are stronger but still require adequate sample size.",
+            "Rule changes should wait for repeated costly_block_candidate evidence by rule reason.",
+        ],
     }
 
 
@@ -397,6 +521,9 @@ def _ensure(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
             "does_not_override_risk_controls": True,
             "live_trade_authority": "none",
             "ml_authority": "shadow_only",
+            "dedupes_same_cycle_events": True,
+            "labels_proxy_vs_executed_outcomes": True,
+            "tracks_costly_vs_protective_blocks": True,
         },
     })
     return section
@@ -416,7 +543,7 @@ def update_state(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
         "summary": summary,
         "last_updated_local": _now(mod),
         "new_events_last_update": len(new_events),
-        "thresholds": {"min_ml_probability": MIN_ML_PROBABILITY, "min_ml_edge": MIN_ML_EDGE, "max_events": MAX_EVENTS},
+        "thresholds": {"min_ml_probability": MIN_ML_PROBABILITY, "min_ml_edge": MIN_ML_EDGE, "max_events": MAX_EVENTS, "scorecard_min_rows": SCORECARD_MIN_ROWS},
     })
     return state
 
@@ -443,8 +570,9 @@ def status_payload(state: Dict[str, Any] | None = None, mod: Any = None) -> Dict
         "policy": section.get("policy"),
         "next_actions": [
             "Review labeled ML-preferred/rules-blocked events before changing weighting.",
+            "Treat proxy_outcome as weaker evidence than executed_outcome.",
+            "Use rule_reason_evidence to identify costly blocks versus protective blocks.",
             "Keep ML shadow-only until comparison events prove repeatable outperformance.",
-            "Use the scorecard to identify which blocked reasons were actually costly versus protective.",
         ],
     }
 
