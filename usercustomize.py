@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-core-entry-ml-pre3a-2026-06-26-v14"
+VERSION = "usercustomize-core-entry-ml-pre3a-compare-2026-06-26-v15"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -83,6 +83,7 @@ MODULES = (
     ("regime_flip_entry_guard", "app_and_module"),
     ("core_entry_pipeline", "app_and_module"),
     ("ml_pre3a_shadow_validation", "app_and_module"),
+    ("ml_vs_rules_shadow_log", "app_and_module"),
 )
 
 
@@ -105,6 +106,7 @@ def _watchdog() -> None:
                 _register_auxiliary_routes(flask_app, m)
                 _register_module(flask_app, m, "core_entry_pipeline", route_args="app_and_module")
                 _register_module(flask_app, m, "ml_pre3a_shadow_validation", route_args="app_and_module")
+                _register_module(flask_app, m, "ml_vs_rules_shadow_log", route_args="app_and_module")
         except Exception:
             pass
         time.sleep(0.1)
