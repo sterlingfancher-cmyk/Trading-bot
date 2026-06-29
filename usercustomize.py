@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-controlled-redeployment-starter-2026-06-29-v17"
+VERSION = "usercustomize-quality-blocker-diagnostics-2026-06-29-v18"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -34,6 +34,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False},
             {"path": "/paper/extended-leader-starter-valve-status", "category": "governance", "required": False},
             {"path": "/paper/controlled-redeployment-starter-sleeve-status", "category": "governance", "required": False},
+            {"path": "/paper/quality-blocker-diagnostics-status", "category": "governance", "required": False},
             {"path": "/paper/ml-pre3a-shadow-status", "category": "governance", "required": False},
         ]
         existing = {endpoint.get("path") for endpoint in endpoints if isinstance(endpoint, dict)}
@@ -86,6 +87,7 @@ MODULES = (
     ("core_entry_pipeline", "app_and_module"),
     ("extended_leader_starter_valve", "app_and_module"),
     ("controlled_redeployment_starter_sleeve", "app_and_module"),
+    ("quality_blocker_diagnostics", "app_and_module"),
     ("ml_pre3a_shadow_validation", "app_and_module"),
     ("ml_vs_rules_shadow_log", "app_and_module"),
 )
@@ -111,6 +113,7 @@ def _watchdog() -> None:
                 _register_module(flask_app, m, "core_entry_pipeline", route_args="app_and_module")
                 _register_module(flask_app, m, "extended_leader_starter_valve", route_args="app_and_module")
                 _register_module(flask_app, m, "controlled_redeployment_starter_sleeve", route_args="app_and_module")
+                _register_module(flask_app, m, "quality_blocker_diagnostics", route_args="app_and_module")
                 _register_module(flask_app, m, "ml_pre3a_shadow_validation", route_args="app_and_module")
                 _register_module(flask_app, m, "ml_vs_rules_shadow_log", route_args="app_and_module")
         except Exception:
