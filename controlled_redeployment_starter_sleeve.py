@@ -5,7 +5,7 @@ import os
 import sys
 from typing import Any, Dict, List, Tuple
 
-VERSION = "controlled-redeployment-starter-sleeve-2026-06-29-v1"
+VERSION = "controlled-redeployment-starter-sleeve-2026-06-30-v2-borderline-quality-review"
 ENABLED = os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 MAX_REVIEWED_RANK = int(os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_MAX_REVIEWED_RANK", "5"))
 MAX_REVIEWED = int(os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_MAX_REVIEWED", "30"))
@@ -14,6 +14,7 @@ MIN_CASH_PCT = float(os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_MIN_CASH_PC
 ALLOC_FACTOR = float(os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_ALLOC_FACTOR", "0.22"))
 MIN_RAW_SCORE = float(os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_MIN_RAW_SCORE", "0.0135"))
 MIN_RANK_SCORE = float(os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_MIN_RANK_SCORE", "0.0190"))
+BORDERLINE_SCORE_BAND_PCT = float(os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_BORDERLINE_SCORE_BAND_PCT", "5.0"))
 MAX_DAILY_LOSS_PCT = float(os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_MAX_DAILY_LOSS_PCT", "0.00"))
 MAX_INTRADAY_DRAWDOWN_PCT = float(os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_MAX_INTRADAY_DRAWDOWN_PCT", "0.10"))
 ALLOWED_MODES = {s.strip().lower() for s in os.environ.get("CONTROLLED_REDEPLOYMENT_STARTER_ALLOWED_MODES", "risk_on,constructive").split(",") if s.strip()}
@@ -152,6 +153,32 @@ def _context_ok(core: Any, market: Dict[str, Any], entry_block_reason: Any) -> T
     return True, {"reason": "controlled_redeployment_context_ok", "cash_pct": cash_pct, "entry_block_reason": entry_block_reason, "blockers": sorted(blockers), "entries_today": used}
 
 
+def _score_gate(score: float, rank_score: float) -> Tuple[bool, Dict[str, Any]]:
+    raw_gap = max(0.0, MIN_RAW_SCORE - score)
+    rank_gap = max(0.0, MIN_RANK_SCORE - rank_score)
+    raw_gap_pct = (raw_gap / MIN_RAW_SCORE) * 100.0 if MIN_RAW_SCORE > 0 else 0.0
+    rank_gap_pct = (rank_gap / MIN_RANK_SCORE) * 100.0 if MIN_RANK_SCORE > 0 else 0.0
+    failed_floors: List[str] = []
+    if raw_gap > 0.0:
+        failed_floors.append("raw_score")
+    if rank_gap > 0.0:
+        failed_floors.append("rank_score")
+    passed = not failed_floors
+    borderline = bool(failed_floors) and raw_gap_pct <= BORDERLINE_SCORE_BAND_PCT and rank_gap_pct <= BORDERLINE_SCORE_BAND_PCT
+    return passed or borderline, {
+        "score_gate_passed": passed,
+        "borderline_quality_review": borderline,
+        "borderline_band_pct": BORDERLINE_SCORE_BAND_PCT,
+        "failed_floors": failed_floors,
+        "required_raw_score": MIN_RAW_SCORE,
+        "required_rank_score": MIN_RANK_SCORE,
+        "raw_score_gap": round(raw_gap, 6),
+        "raw_score_gap_pct": round(raw_gap_pct, 3),
+        "rank_score_gap": round(rank_gap, 6),
+        "rank_score_gap_pct": round(rank_gap_pct, 3),
+    }
+
+
 def _block_rows(candidates: List[Dict[str, Any]], reason: str, max_rows: int = 10) -> List[Dict[str, Any]]:
     return [{"symbol": c.get("symbol"), "side": c.get("side"), "score": c.get("score"), "rank_score": c.get("core_entry_rank_score"), "reason": reason} for c in list(candidates or [])[:max_rows]]
 
@@ -160,7 +187,7 @@ def _try_starter(core: Any, candidates: List[Dict[str, Any]], params: Dict[str, 
     entries: List[Dict[str, Any]] = []
     rotations: List[Dict[str, Any]] = []
     ok, context = _context_ok(core, market, entry_block_reason)
-    payload: Dict[str, Any] = {"version": VERSION, "mode": "controlled_redeployment_starter", "status": "checked", "context": context, "candidate_count": len(candidates), "reviewed_count": 0, "eligible_count": 0}
+    payload: Dict[str, Any] = {"version": VERSION, "mode": "controlled_redeployment_starter", "status": "checked", "context": context, "candidate_count": len(candidates), "reviewed_count": 0, "eligible_count": 0, "borderline_review_count": 0}
     if not ok:
         payload.update({"status": "blocked", "reason": context.get("reason")})
         return entries, rotations, _block_rows(candidates, payload["reason"]), payload
@@ -189,13 +216,19 @@ def _try_starter(core: Any, candidates: List[Dict[str, Any]], params: Dict[str, 
                 continue
         except Exception:
             pass
-        if score < MIN_RAW_SCORE or rank_score < MIN_RANK_SCORE:
-            rejected.append({**row, "reason": "controlled_redeployment_score_too_low", "min_raw_score": MIN_RAW_SCORE, "min_rank_score": MIN_RANK_SCORE})
+        score_ok, score_info = _score_gate(score, rank_score)
+        if not score_ok:
+            rejected.append({**row, "reason": "controlled_redeployment_score_too_low", **score_info})
             continue
         candidate = dict(signal)
         candidate["alloc_factor"] = min(_safe_float(candidate.get("alloc_factor"), 1.0), ALLOC_FACTOR)
         candidate["entry_context"] = "controlled_redeployment_starter"
         candidate["trade_class"] = "controlled_redeployment_starter"
+        candidate["controlled_redeployment_score_gate"] = score_info
+        if bool(score_info.get("borderline_quality_review")):
+            payload["borderline_review_count"] += 1
+            candidate["entry_context"] = "controlled_redeployment_borderline_quality_review"
+            candidate["trade_class"] = "controlled_redeployment_borderline_quality_review"
         try:
             quality_ok, quality_info = core.entry_quality_check(candidate, dict(params or {}), market)
         except Exception as exc:
@@ -211,13 +244,13 @@ def _try_starter(core: Any, candidates: List[Dict[str, Any]], params: Dict[str, 
                 except Exception as exc:
                     valve_info = {"reason": "participation_valve_error", "error": str(exc)}
             if not valve_ok:
-                rejected.append({**row, "reason": "entry_quality_block", "quality_info": quality_info, "participation_valve": valve_info})
+                rejected.append({**row, "reason": "entry_quality_block", "quality_info": quality_info, "participation_valve": valve_info, "score_gate": score_info})
                 continue
             candidate["core_participation_valve"] = valve_info
             candidate["alloc_factor"] = min(_safe_float(candidate.get("alloc_factor"), 1.0), _safe_float(valve_info.get("alloc_factor"), ALLOC_FACTOR))
             valve_entries += 1
         selected = candidate
-        payload["selected_candidate"] = {**row, "reason": "selected_controlled_redeployment_starter"}
+        payload["selected_candidate"] = {**row, "reason": "selected_controlled_redeployment_starter", "score_gate": score_info}
         break
     payload["rejected_preview"] = rejected[:15]
     if selected is None:
@@ -226,7 +259,7 @@ def _try_starter(core: Any, candidates: List[Dict[str, Any]], params: Dict[str, 
     entry = core.enter_position(selected, dict(params or {}), market_mode=(market or {}).get("market_mode", "neutral"))
     if entry and not entry.get("blocked"):
         entry["quality_info"] = quality_info
-        entry["core_entry_pipeline"] = {"version": VERSION, "mode": "controlled_redeployment_starter", "alloc_factor": selected.get("alloc_factor")}
+        entry["core_entry_pipeline"] = {"version": VERSION, "mode": selected.get("entry_context", "controlled_redeployment_starter"), "alloc_factor": selected.get("alloc_factor"), "score_gate": selected.get("controlled_redeployment_score_gate")}
         entries.append(entry)
         payload.update({"status": "allowed", "reason": "controlled_redeployment_starter_opened", "eligible_count": 1, "entries_returned_count": 1})
     else:
@@ -289,7 +322,7 @@ def apply_runtime_overrides(core: Any = None) -> Dict[str, Any]:
 
 
 def policy() -> Dict[str, Any]:
-    return {"enabled": bool(ENABLED), "patches_core_function_pointer_only": True, "does_not_wrap_app_try_entries": True, "sits_after_post_harvest_before_entry_quality": True, "hands_candidate_to_existing_entry_quality_check": True, "hands_failed_quality_to_existing_participation_valve": True, "max_entries_per_day": MAX_ENTRIES_PER_DAY, "max_reviewed_rank": MAX_REVIEWED_RANK, "alloc_factor": ALLOC_FACTOR, "min_cash_pct": MIN_CASH_PCT, "min_raw_score": MIN_RAW_SCORE, "min_rank_score": MIN_RANK_SCORE, "allowed_modes": sorted(ALLOWED_MODES), "does_not_bypass_cooldowns": True, "does_not_bypass_self_defense": True, "does_not_bypass_risk_halts": True, "live_trade_authority": "none", "ml_authority": "shadow_only", "authority_changed": False}
+    return {"enabled": bool(ENABLED), "patches_core_function_pointer_only": True, "does_not_wrap_app_try_entries": True, "sits_after_post_harvest_before_entry_quality": True, "hands_candidate_to_existing_entry_quality_check": True, "hands_failed_quality_to_existing_participation_valve": True, "max_entries_per_day": MAX_ENTRIES_PER_DAY, "max_reviewed_rank": MAX_REVIEWED_RANK, "alloc_factor": ALLOC_FACTOR, "min_cash_pct": MIN_CASH_PCT, "min_raw_score": MIN_RAW_SCORE, "min_rank_score": MIN_RANK_SCORE, "borderline_score_band_pct": BORDERLINE_SCORE_BAND_PCT, "borderline_review_enabled": True, "allowed_modes": sorted(ALLOWED_MODES), "does_not_bypass_cooldowns": True, "does_not_bypass_self_defense": True, "does_not_bypass_risk_halts": True, "does_not_change_live_authority": True, "does_not_change_ml_authority": True, "live_trade_authority": "none", "ml_authority": "shadow_only", "authority_changed": False}
 
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
