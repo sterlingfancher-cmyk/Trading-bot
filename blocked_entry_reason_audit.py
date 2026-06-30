@@ -13,12 +13,19 @@ import datetime as dt
 import sys
 from typing import Any, Dict, Iterable, List, Tuple
 
-VERSION = "blocked-entry-reason-audit-2026-06-17-v1"
+VERSION = "blocked-entry-reason-audit-2026-06-30-v2-reason-coverage"
 REGISTERED_APP_IDS: set[int] = set()
 
 MAX_ROWS = 80
 MAX_TOP_SYMBOLS = 20
 MAX_TOP_REASONS = 12
+MAX_SYMBOL_ROLLUP = 15
+
+MISSING_REASON_MARKERS = {
+    "reason_not_available_in_state_snapshot",
+    "top_blocked_symbol_reason_not_in_mobile_snapshot",
+    "reason_missing_after_row_compaction",
+}
 
 MOMENTUM_WATCH_SYMBOLS = [
     "RKLB", "RDW", "LUNR", "MNTS", "ASTS", "SPCX", "SPCE", "PL", "BKSY", "SATL", "SPIR",
@@ -157,6 +164,8 @@ def _candidate_sections(state: Dict[str, Any], pf: Dict[str, Any]) -> List[Tuple
             "entry_decision_visibility",
             "paper_controlled_expansion",
             "market_surge_deployment",
+            "controlled_redeployment_starter_sleeve",
+            "core_entry_pipeline",
         ):
             section = container.get(key)
             if isinstance(section, dict):
@@ -176,6 +185,8 @@ def _extract_rows_from_section(source: str, section: Dict[str, Any]) -> List[Dic
         "top_blocked_candidates",
         "blocked_candidates",
         "blocked_symbols_detail",
+        "rejected_preview",
+        "selected_candidate",
     )
     for key in keys:
         value = section.get(key)
@@ -189,15 +200,21 @@ def _extract_rows_from_section(source: str, section: Dict[str, Any]) -> List[Dic
                 row.setdefault("source_key", key)
                 rows.append(row)
         elif isinstance(value, dict):
-            for sym, item in value.items():
-                if isinstance(item, dict):
-                    row = dict(item)
-                else:
-                    row = {"detail": item}
-                row.setdefault("symbol", sym)
+            if key == "selected_candidate":
+                row = dict(value)
                 row.setdefault("source", f"{source}.{key}")
                 row.setdefault("source_key", key)
                 rows.append(row)
+            else:
+                for sym, item in value.items():
+                    if isinstance(item, dict):
+                        row = dict(item)
+                    else:
+                        row = {"detail": item}
+                    row.setdefault("symbol", sym)
+                    row.setdefault("source", f"{source}.{key}")
+                    row.setdefault("source_key", key)
+                    rows.append(row)
 
     # top_blocked_symbols is often symbol-only. Preserve it as evidence even without row-level reasons.
     top_blocked = section.get("top_blocked_symbols")
@@ -214,7 +231,26 @@ def _extract_rows_from_section(source: str, section: Dict[str, Any]) -> List[Dic
     return rows
 
 
+def _nested_reason(row: Dict[str, Any]) -> str:
+    nested_keys = ("quality_info", "participation_valve", "score_gate", "rotation_info", "core_participation_valve")
+    parts: List[str] = []
+    for key in nested_keys:
+        obj = row.get(key)
+        if not isinstance(obj, dict):
+            continue
+        for reason_key in ("reason", "status", "decision", "message", "action"):
+            value = obj.get(reason_key)
+            if isinstance(value, str) and value.strip():
+                parts.append(f"{key}.{reason_key}={value.strip()}")
+                break
+        failed = obj.get("failed_floors")
+        if isinstance(failed, list) and failed:
+            parts.append(f"{key}.failed_floors=" + ",".join(str(x) for x in failed if x))
+    return ";".join(parts)
+
+
 def _reason_from_row(row: Dict[str, Any]) -> str:
+    base = ""
     for key in (
         "block_reason",
         "blocked_reason",
@@ -230,25 +266,47 @@ def _reason_from_row(row: Dict[str, Any]) -> str:
     ):
         value = row.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            base = value.strip()
+            break
         if isinstance(value, list) and value:
-            return ",".join(str(v) for v in value if v)
-    reasons = row.get("reasons") or row.get("block_reasons") or row.get("warnings")
-    if isinstance(reasons, list) and reasons:
-        return ",".join(str(v) for v in reasons if v)
+            base = ",".join(str(v) for v in value if v)
+            break
+    if not base:
+        reasons = row.get("reasons") or row.get("block_reasons") or row.get("warnings")
+        if isinstance(reasons, list) and reasons:
+            base = ",".join(str(v) for v in reasons if v)
+    nested = _nested_reason(row)
+    if base and nested and base not in MISSING_REASON_MARKERS:
+        return f"{base};{nested}"
+    if base:
+        return base
+    if nested:
+        return nested
     return "reason_not_available_in_state_snapshot"
+
+
+def _is_missing_reason(reason: str) -> bool:
+    text = str(reason or "").strip().lower()
+    return (
+        text in MISSING_REASON_MARKERS
+        or "reason_not_available" in text
+        or "reason_not_in_mobile_snapshot" in text
+        or "reason_missing" in text
+    )
 
 
 def _category(reason: str) -> str:
     text = str(reason or "").lower()
+    if _is_missing_reason(text):
+        return "reason_detail_missing"
     checks = [
         ("extension_chase", ("extend", "chase", "above_day_open", "near_high", "gap", "overstretched")),
-        ("quality_score", ("quality", "score", "threshold", "not_confirmed", "weak", "candidate")),
+        ("missing_or_stale_price", ("missing_price", "stale", "no_data", "not_enough_bars", "quote", "empty_price")),
+        ("risk_control", ("risk", "halt", "drawdown", "self_defense", "daily_loss", "loss_streak")),
+        ("quality_score", ("quality", "score", "threshold", "not_confirmed", "weak", "floor", "candidate")),
         ("max_positions", ("max_position", "positions_full", "max positions", "open_positions")),
         ("sector_or_bucket_exposure", ("sector", "bucket", "exposure", "concentration")),
         ("cooldown", ("cooldown", "recent", "ttl")),
-        ("missing_or_stale_price", ("missing_price", "price", "quote", "stale", "data")),
-        ("risk_control", ("risk", "halt", "drawdown", "self_defense", "daily_loss")),
         ("cash_gate", ("cash", "buying_power", "allocation")),
         ("market_context", ("bear", "risk_off", "market", "regime", "breadth", "vix", "rates")),
         ("already_open", ("already", "open position", "held")),
@@ -274,15 +332,86 @@ def _compact_row(row: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
         "symbol": symbol or "UNKNOWN",
         "reason": reason,
         "category": _category(reason),
+        "reason_detail_available": not _is_missing_reason(reason),
         "source": row.get("source"),
         "source_key": row.get("source_key"),
-        "score": row.get("score") or row.get("signal_score") or row.get("quality_score"),
+        "score": row.get("score") or row.get("signal_score") or row.get("quality_score") or row.get("rank_score"),
+        "rank_score": row.get("rank_score") or row.get("core_entry_rank_score"),
         "price": row.get("price") or row.get("last_price") or row.get("entry_price"),
         "pct_change": row.get("pct_change") or row.get("change_pct") or row.get("day_change_pct"),
         "bucket": bucket,
         "sector": row.get("sector"),
         "side": row.get("side"),
     }
+
+
+def _count_visible_rows(section: Dict[str, Any]) -> int | None:
+    if not isinstance(section, dict):
+        return None
+    candidates: List[int] = []
+    for key in ("blocked_entries", "blocked_candidates", "top_blocked_candidates", "blocked_symbols_detail"):
+        obj = section.get(key)
+        if isinstance(obj, list) or isinstance(obj, dict):
+            candidates.append(len(obj))
+    for key in ("blocked_entries_count", "blocked_count", "blocked_candidates_count"):
+        value = _safe_int(section.get(key), -1)
+        if value >= 0:
+            candidates.append(value)
+    return max(candidates) if candidates else None
+
+
+def _reason_coverage(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    total = len(rows)
+    missing = sum(1 for row in rows if not bool(row.get("reason_detail_available")))
+    available = total - missing
+    return {
+        "visible_rows": total,
+        "rows_with_actionable_reason": available,
+        "rows_missing_reason_detail": missing,
+        "actionable_reason_coverage_pct": round((available / total) * 100.0, 2) if total else 0.0,
+    }
+
+
+def _symbol_reason_rollup(rows: List[Dict[str, Any]], top_symbols: List[str]) -> List[Dict[str, Any]]:
+    wanted = [s for s in top_symbols if s]
+    if not wanted:
+        counts: Dict[str, int] = {}
+        for row in rows:
+            _add_count(counts, row.get("symbol") or "UNKNOWN")
+        wanted = [row["value"] for row in _top_counts(counts, MAX_SYMBOL_ROLLUP)]
+    out: List[Dict[str, Any]] = []
+    for symbol in wanted[:MAX_SYMBOL_ROLLUP]:
+        symbol_rows = [row for row in rows if row.get("symbol") == symbol]
+        if not symbol_rows:
+            out.append({
+                "symbol": symbol,
+                "rows": 0,
+                "top_reason": "reason_detail_missing",
+                "top_category": "reason_detail_missing",
+                "reason_detail_available": False,
+            })
+            continue
+        reason_counts: Dict[str, int] = {}
+        category_counts: Dict[str, int] = {}
+        for row in symbol_rows:
+            _add_count(reason_counts, row.get("reason") or "unknown")
+            _add_count(category_counts, row.get("category") or "unknown")
+        top_reason = _top_counts(reason_counts, 1)[0]["value"] if reason_counts else "unknown"
+        top_category = _top_counts(category_counts, 1)[0]["value"] if category_counts else "unknown"
+        best_score = None
+        for row in symbol_rows:
+            score = _safe_float(row.get("score"), None)
+            if score is not None:
+                best_score = score if best_score is None else max(best_score, score)
+        out.append({
+            "symbol": symbol,
+            "rows": len(symbol_rows),
+            "top_reason": top_reason,
+            "top_category": top_category,
+            "reason_detail_available": any(bool(row.get("reason_detail_available")) for row in symbol_rows),
+            "best_visible_score": round(best_score, 6) if best_score is not None else None,
+        })
+    return out
 
 
 def build_payload(core: Any = None, state: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -335,13 +464,39 @@ def build_payload(core: Any = None, state: Dict[str, Any] | None = None) -> Dict
     watched_seen = sorted({s for s in MOMENTUM_WATCH_SYMBOLS if s in scanner_symbols or s in decision_symbols or s in symbol_counts})
     watched_blocked = sorted({s for s in MOMENTUM_WATCH_SYMBOLS if s in symbol_counts or s in top_blocked_symbols})
 
+    blocked_count = scanner.get("blocked_entries_count") or decision.get("blocked_entries_count")
+    if blocked_count is None:
+        blocked_count = _count_visible_rows(scanner)
+    if blocked_count is None:
+        blocked_count = _count_visible_rows(decision)
+    if blocked_count is None and compact_rows:
+        blocked_count = len([row for row in compact_rows if row.get("source_key") not in {"rejected_signals", "rejected_candidates", "rejected_preview"}])
+
+    coverage = _reason_coverage(compact_rows)
+    symbol_rollup = _symbol_reason_rollup(compact_rows, top_blocked_symbols)
+    missing_reason_symbols = [row["symbol"] for row in symbol_rollup if not row.get("reason_detail_available")]
+    unclassified_sample = [row for row in compact_rows if row.get("category") == "other_or_unclassified"][:10]
+
     no_trade_read = "No blocked-entry rows were available in the mobile state snapshot."
     if compact_rows:
         top_category = _top_counts(category_counts, 1)
         if top_category:
             no_trade_read = f"Most visible blocker category: {top_category[0]['value']} ({top_category[0]['count']} rows)."
+        if coverage.get("rows_missing_reason_detail"):
+            no_trade_read += f" Reason-detail coverage {coverage.get('actionable_reason_coverage_pct')}%."
     elif top_blocked_symbols:
         no_trade_read = "Top blocked symbols are visible, but row-level reasons were not available in the mobile state snapshot."
+
+    next_actions = [
+        "Use this summary to identify whether green movers were blocked by extension, quality, exposure, cooldown, missing price, or risk controls.",
+        "Do not loosen risk blindly; only adjust the specific blocker if it repeats across clean outcomes.",
+    ]
+    if coverage.get("rows_missing_reason_detail"):
+        next_actions.append("Improve scanner audit persistence for rows marked reason_detail_missing so top blocked symbols keep their exact blocker.")
+    if category_counts.get("quality_score"):
+        next_actions.append("Quality-score blocks should be reviewed against later MAE/MFE outcomes before lowering floors.")
+    if category_counts.get("missing_or_stale_price"):
+        next_actions.append("Missing/stale price blocks should be fixed through data availability, not by weakening entry gates.")
 
     payload = {
         "status": "ok",
@@ -356,25 +511,26 @@ def build_payload(core: Any = None, state: Dict[str, Any] | None = None) -> Dict
         "does_not_place_trades": True,
         "does_not_lower_thresholds": True,
         "signals_found": scanner.get("signals_found") or decision.get("signals_found"),
-        "blocked_entries_count": scanner.get("blocked_entries_count") or decision.get("blocked_entries_count"),
+        "blocked_entries_count": blocked_count,
         "rejected_signals_count": decision.get("rejected_signals_count") or scanner.get("rejected_signals_count"),
         "entries_count": decision.get("entries_count"),
         "open_positions_count": len(open_symbols),
         "top_blocked_symbols": top_blocked_symbols[:MAX_TOP_SYMBOLS],
         "visible_blocked_rows_count": len(compact_rows),
+        "reason_coverage": coverage,
+        "missing_reason_detail_count": coverage.get("rows_missing_reason_detail"),
+        "missing_reason_detail_symbols": missing_reason_symbols[:MAX_TOP_SYMBOLS],
         "top_symbols_by_rows": _top_counts(symbol_counts, MAX_TOP_SYMBOLS),
         "top_reasons": _top_counts(reason_counts, MAX_TOP_REASONS),
         "top_categories": _top_counts(category_counts, MAX_TOP_REASONS),
         "top_buckets": _top_counts(bucket_counts, MAX_TOP_REASONS),
+        "symbol_reason_rollup": symbol_rollup,
+        "unclassified_rows_sample": unclassified_sample,
         "watched_momentum_symbols_seen": watched_seen,
         "watched_momentum_symbols_blocked": watched_blocked,
         "blocked_rows_sample": compact_rows[:25],
         "no_trade_read": no_trade_read,
-        "next_actions": [
-            "Use this summary to identify whether green movers were blocked by extension, quality, exposure, cooldown, missing price, or risk controls.",
-            "Do not loosen risk blindly; only adjust the specific blocker if it repeats across clean outcomes.",
-            "If row-level reasons are unavailable, inspect the optional diagnostic route or improve scanner audit persistence.",
-        ],
+        "next_actions": next_actions,
     }
     return payload
 
@@ -390,6 +546,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
         "routes": ["/paper/blocked-entry-reason-audit-status"],
         "trading_authority": "none",
         "ml_authority": "shadow_only",
+        "improves_reason_coverage": True,
     }
 
 
