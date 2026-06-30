@@ -10,7 +10,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, List
 
-VERSION = "blocked-entry-reason-selfcheck-overlay-2026-06-30-v2-reason-coverage"
+VERSION = "blocked-entry-reason-selfcheck-overlay-2026-06-30-v3-placeholder-cleanup"
 PATCHED_SELF_CHECK_IDS: set[int] = set()
 REGISTERED_APP_IDS: set[int] = set()
 
@@ -42,6 +42,7 @@ def _list(obj: Any) -> List[Any]:
 
 
 def _compact_audit(audit: Dict[str, Any]) -> Dict[str, Any]:
+    symbol_details = audit.get("top_blocked_symbol_details") or audit.get("symbol_reason_rollup") or []
     return {
         "status": audit.get("status"),
         "overall": audit.get("overall"),
@@ -56,11 +57,13 @@ def _compact_audit(audit: Dict[str, Any]) -> Dict[str, Any]:
         "reason_coverage": audit.get("reason_coverage") or {},
         "missing_reason_detail_count": audit.get("missing_reason_detail_count"),
         "missing_reason_detail_symbols": audit.get("missing_reason_detail_symbols") or [],
+        "missing_reason_rows_sample": audit.get("missing_reason_rows_sample") or [],
         "top_blocked_symbols": audit.get("top_blocked_symbols") or [],
         "top_categories": audit.get("top_categories") or [],
         "top_reasons": audit.get("top_reasons") or [],
         "top_buckets": audit.get("top_buckets") or [],
         "symbol_reason_rollup": audit.get("symbol_reason_rollup") or [],
+        "top_blocked_symbol_details": symbol_details,
         "watched_momentum_symbols_seen": audit.get("watched_momentum_symbols_seen") or [],
         "watched_momentum_symbols_blocked": audit.get("watched_momentum_symbols_blocked") or [],
         "no_trade_read": audit.get("no_trade_read"),
@@ -109,9 +112,11 @@ def inject(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
         "blocked_entry_top_reasons": audit.get("top_reasons") or [],
         "blocked_entry_top_symbols": audit.get("top_blocked_symbols") or [],
         "blocked_entry_symbol_reason_rollup": audit.get("symbol_reason_rollup") or [],
+        "blocked_entry_top_symbol_details": audit.get("top_blocked_symbol_details") or [],
         "blocked_entry_reason_coverage_pct": coverage.get("actionable_reason_coverage_pct"),
         "blocked_entry_rows_missing_reason_detail": coverage.get("rows_missing_reason_detail"),
         "blocked_entry_missing_reason_symbols": audit.get("missing_reason_detail_symbols") or [],
+        "blocked_entry_missing_reason_rows_sample": audit.get("missing_reason_rows_sample") or [],
         "watched_momentum_symbols_seen": audit.get("watched_momentum_symbols_seen") or [],
         "watched_momentum_symbols_blocked": audit.get("watched_momentum_symbols_blocked") or [],
     })
@@ -168,9 +173,11 @@ def apply(self_check_module: Any = None, core: Any = None) -> Dict[str, Any]:
                 "blocked_entry_top_reasons",
                 "blocked_entry_top_symbols",
                 "blocked_entry_symbol_reason_rollup",
+                "blocked_entry_top_symbol_details",
                 "blocked_entry_reason_coverage_pct",
                 "blocked_entry_rows_missing_reason_detail",
                 "blocked_entry_missing_reason_symbols",
+                "blocked_entry_missing_reason_rows_sample",
                 "watched_momentum_symbols_seen",
                 "watched_momentum_symbols_blocked",
             ],
