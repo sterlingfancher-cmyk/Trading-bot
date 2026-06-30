@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import datetime as dt
 import sys
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, List, Tuple
 
-VERSION = "blocked-entry-reason-audit-2026-06-30-v2-reason-coverage"
+VERSION = "blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup"
 REGISTERED_APP_IDS: set[int] = set()
 
 MAX_ROWS = 80
@@ -72,10 +72,6 @@ def _portfolio(core: Any = None) -> Dict[str, Any]:
 
 def _dict(obj: Any) -> Dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
-
-
-def _list(obj: Any) -> List[Any]:
-    return obj if isinstance(obj, list) else []
 
 
 def _symbol(value: Any) -> str:
@@ -215,20 +211,29 @@ def _extract_rows_from_section(source: str, section: Dict[str, Any]) -> List[Dic
                     row.setdefault("source", f"{source}.{key}")
                     row.setdefault("source_key", key)
                     rows.append(row)
-
-    # top_blocked_symbols is often symbol-only. Preserve it as evidence even without row-level reasons.
-    top_blocked = section.get("top_blocked_symbols")
-    if isinstance(top_blocked, list):
-        for item in top_blocked:
-            if isinstance(item, dict):
-                row = dict(item)
-            else:
-                row = {"symbol": item, "reason": "top_blocked_symbol_reason_not_in_mobile_snapshot"}
-            row.setdefault("source", f"{source}.top_blocked_symbols")
-            row.setdefault("source_key", "top_blocked_symbols")
-            rows.append(row)
-
     return rows
+
+
+def _collect_top_blocked_symbols(scanner: Dict[str, Any], sections: List[Tuple[str, Dict[str, Any]]]) -> List[str]:
+    out: List[str] = []
+
+    def add(sym: Any) -> None:
+        symbol = _symbol(sym)
+        if symbol and symbol not in out:
+            out.append(symbol)
+
+    raw_top_blocked = scanner.get("top_blocked_symbols")
+    if isinstance(raw_top_blocked, list):
+        for item in raw_top_blocked:
+            add(item.get("symbol") if isinstance(item, dict) else item)
+
+    for _, section in sections:
+        top_blocked = section.get("top_blocked_symbols")
+        if isinstance(top_blocked, list):
+            for item in top_blocked:
+                add(item.get("symbol") if isinstance(item, dict) else item)
+
+    return out[:MAX_TOP_SYMBOLS]
 
 
 def _nested_reason(row: Dict[str, Any]) -> str:
@@ -300,7 +305,7 @@ def _category(reason: str) -> str:
     if _is_missing_reason(text):
         return "reason_detail_missing"
     checks = [
-        ("extension_chase", ("extend", "chase", "above_day_open", "near_high", "gap", "overstretched")),
+        ("extension_chase", ("extend", "chase", "above_day_open", "near_high", "gap", "overstretched", "extended_")),
         ("missing_or_stale_price", ("missing_price", "stale", "no_data", "not_enough_bars", "quote", "empty_price")),
         ("risk_control", ("risk", "halt", "drawdown", "self_defense", "daily_loss", "loss_streak")),
         ("quality_score", ("quality", "score", "threshold", "not_confirmed", "weak", "floor", "candidate")),
@@ -308,7 +313,7 @@ def _category(reason: str) -> str:
         ("sector_or_bucket_exposure", ("sector", "bucket", "exposure", "concentration")),
         ("cooldown", ("cooldown", "recent", "ttl")),
         ("cash_gate", ("cash", "buying_power", "allocation")),
-        ("market_context", ("bear", "risk_off", "market", "regime", "breadth", "vix", "rates")),
+        ("market_context", ("bear", "risk_off", "market", "regime", "breadth", "vix", "rates", "futures_bias")),
         ("already_open", ("already", "open position", "held")),
     ]
     for label, needles in checks:
@@ -393,11 +398,18 @@ def _symbol_reason_rollup(rows: List[Dict[str, Any]], top_symbols: List[str]) ->
             continue
         reason_counts: Dict[str, int] = {}
         category_counts: Dict[str, int] = {}
+        actionable_reason_counts: Dict[str, int] = {}
+        actionable_category_counts: Dict[str, int] = {}
         for row in symbol_rows:
-            _add_count(reason_counts, row.get("reason") or "unknown")
-            _add_count(category_counts, row.get("category") or "unknown")
-        top_reason = _top_counts(reason_counts, 1)[0]["value"] if reason_counts else "unknown"
-        top_category = _top_counts(category_counts, 1)[0]["value"] if category_counts else "unknown"
+            reason = row.get("reason") or "unknown"
+            category = row.get("category") or "unknown"
+            _add_count(reason_counts, reason)
+            _add_count(category_counts, category)
+            if row.get("reason_detail_available"):
+                _add_count(actionable_reason_counts, reason)
+                _add_count(actionable_category_counts, category)
+        top_reason = _top_counts(actionable_reason_counts or reason_counts, 1)[0]["value"]
+        top_category = _top_counts(actionable_category_counts or category_counts, 1)[0]["value"]
         best_score = None
         for row in symbol_rows:
             score = _safe_float(row.get("score"), None)
@@ -422,9 +434,10 @@ def build_payload(core: Any = None, state: Dict[str, Any] | None = None) -> Dict
     scanner = _dict(state.get("scanner_audit") or pf.get("scanner_audit"))
     decision = _dict(state.get("decision_audit") or pf.get("decision_audit") or state.get("decision_audit_summary"))
     positions = _dict(state.get("positions") or pf.get("positions"))
+    sections = _candidate_sections(state, pf)
 
     rows: List[Dict[str, Any]] = []
-    for source, section in _candidate_sections(state, pf):
+    for source, section in sections:
         rows.extend(_extract_rows_from_section(source, section))
 
     compact_rows: List[Dict[str, Any]] = []
@@ -438,6 +451,26 @@ def build_payload(core: Any = None, state: Dict[str, Any] | None = None) -> Dict
         compact_rows.append(compact)
         if len(compact_rows) >= MAX_ROWS:
             break
+
+    top_blocked_symbols = _collect_top_blocked_symbols(scanner, sections)
+    detailed_symbols = {row.get("symbol") for row in compact_rows if row.get("symbol")}
+    for symbol in top_blocked_symbols:
+        if symbol not in detailed_symbols and len(compact_rows) < MAX_ROWS:
+            compact_rows.append({
+                "symbol": symbol,
+                "reason": "top_blocked_symbol_reason_not_in_mobile_snapshot",
+                "category": "reason_detail_missing",
+                "reason_detail_available": False,
+                "source": "scanner_audit.top_blocked_symbols",
+                "source_key": "top_blocked_symbols",
+                "score": None,
+                "rank_score": None,
+                "price": None,
+                "pct_change": None,
+                "bucket": None,
+                "sector": None,
+                "side": None,
+            })
 
     symbol_counts: Dict[str, int] = {}
     reason_counts: Dict[str, int] = {}
@@ -453,11 +486,6 @@ def build_payload(core: Any = None, state: Dict[str, Any] | None = None) -> Dict
     scanner_symbols = _flatten_symbols(scanner)
     decision_symbols = _flatten_symbols(decision)
     open_symbols = {_symbol(symbol) for symbol in positions.keys()}
-    top_blocked_symbols = []
-    raw_top_blocked = scanner.get("top_blocked_symbols")
-    if isinstance(raw_top_blocked, list):
-        top_blocked_symbols = [_symbol(item.get("symbol") if isinstance(item, dict) else item) for item in raw_top_blocked]
-        top_blocked_symbols = [s for s in top_blocked_symbols if s]
     if not top_blocked_symbols:
         top_blocked_symbols = [row["value"] for row in _top_counts(symbol_counts, MAX_TOP_SYMBOLS)]
 
@@ -475,6 +503,7 @@ def build_payload(core: Any = None, state: Dict[str, Any] | None = None) -> Dict
     coverage = _reason_coverage(compact_rows)
     symbol_rollup = _symbol_reason_rollup(compact_rows, top_blocked_symbols)
     missing_reason_symbols = [row["symbol"] for row in symbol_rollup if not row.get("reason_detail_available")]
+    missing_reason_rows_sample = [row for row in compact_rows if not row.get("reason_detail_available")][:10]
     unclassified_sample = [row for row in compact_rows if row.get("category") == "other_or_unclassified"][:10]
 
     no_trade_read = "No blocked-entry rows were available in the mobile state snapshot."
@@ -492,7 +521,9 @@ def build_payload(core: Any = None, state: Dict[str, Any] | None = None) -> Dict
         "Do not loosen risk blindly; only adjust the specific blocker if it repeats across clean outcomes.",
     ]
     if coverage.get("rows_missing_reason_detail"):
-        next_actions.append("Improve scanner audit persistence for rows marked reason_detail_missing so top blocked symbols keep their exact blocker.")
+        next_actions.append("Persist full blocker rows before symbol-only top blocked rollups when reason_detail_missing appears.")
+    if category_counts.get("extension_chase"):
+        next_actions.append("Extension/chase blocks mean the bot is avoiding late green candles; wait for pullback/reclaim evidence before loosening.")
     if category_counts.get("quality_score"):
         next_actions.append("Quality-score blocks should be reviewed against later MAE/MFE outcomes before lowering floors.")
     if category_counts.get("missing_or_stale_price"):
@@ -520,11 +551,13 @@ def build_payload(core: Any = None, state: Dict[str, Any] | None = None) -> Dict
         "reason_coverage": coverage,
         "missing_reason_detail_count": coverage.get("rows_missing_reason_detail"),
         "missing_reason_detail_symbols": missing_reason_symbols[:MAX_TOP_SYMBOLS],
+        "missing_reason_rows_sample": missing_reason_rows_sample,
         "top_symbols_by_rows": _top_counts(symbol_counts, MAX_TOP_SYMBOLS),
         "top_reasons": _top_counts(reason_counts, MAX_TOP_REASONS),
         "top_categories": _top_counts(category_counts, MAX_TOP_REASONS),
         "top_buckets": _top_counts(bucket_counts, MAX_TOP_REASONS),
         "symbol_reason_rollup": symbol_rollup,
+        "top_blocked_symbol_details": symbol_rollup[:MAX_TOP_SYMBOLS],
         "unclassified_rows_sample": unclassified_sample,
         "watched_momentum_symbols_seen": watched_seen,
         "watched_momentum_symbols_blocked": watched_blocked,
@@ -547,6 +580,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
         "trading_authority": "none",
         "ml_authority": "shadow_only",
         "improves_reason_coverage": True,
+        "cleans_symbol_only_placeholders": True,
     }
 
 
