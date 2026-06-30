@@ -10,7 +10,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, List
 
-VERSION = "blocked-entry-reason-selfcheck-overlay-2026-06-17-v1"
+VERSION = "blocked-entry-reason-selfcheck-overlay-2026-06-30-v2-reason-coverage"
 PATCHED_SELF_CHECK_IDS: set[int] = set()
 REGISTERED_APP_IDS: set[int] = set()
 
@@ -53,9 +53,14 @@ def _compact_audit(audit: Dict[str, Any]) -> Dict[str, Any]:
         "signals_found": audit.get("signals_found"),
         "blocked_entries_count": audit.get("blocked_entries_count"),
         "visible_blocked_rows_count": audit.get("visible_blocked_rows_count"),
+        "reason_coverage": audit.get("reason_coverage") or {},
+        "missing_reason_detail_count": audit.get("missing_reason_detail_count"),
+        "missing_reason_detail_symbols": audit.get("missing_reason_detail_symbols") or [],
         "top_blocked_symbols": audit.get("top_blocked_symbols") or [],
         "top_categories": audit.get("top_categories") or [],
         "top_reasons": audit.get("top_reasons") or [],
+        "top_buckets": audit.get("top_buckets") or [],
+        "symbol_reason_rollup": audit.get("symbol_reason_rollup") or [],
         "watched_momentum_symbols_seen": audit.get("watched_momentum_symbols_seen") or [],
         "watched_momentum_symbols_blocked": audit.get("watched_momentum_symbols_blocked") or [],
         "no_trade_read": audit.get("no_trade_read"),
@@ -75,6 +80,7 @@ def _build_audit(core: Any = None) -> Dict[str, Any]:
             "overall": "warn",
             "type": "blocked_entry_reason_audit_status",
             "version": VERSION,
+            "generated_local": _now(core),
             "advisory_only": True,
             "authority_changed": False,
             "error": f"blocked_entry_reason_audit_unavailable:{type(exc).__name__}",
@@ -94,6 +100,7 @@ def inject(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
     payload["dashboard"] = dashboard
     payload["blocked_entry_reason_audit_summary"] = audit
 
+    coverage = _dict(audit.get("reason_coverage"))
     operator = _dict(payload.get("operator_summary"))
     operator.update({
         "blocked_entry_reason_audit_status": audit.get("status"),
@@ -101,6 +108,10 @@ def inject(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
         "blocked_entry_top_categories": audit.get("top_categories") or [],
         "blocked_entry_top_reasons": audit.get("top_reasons") or [],
         "blocked_entry_top_symbols": audit.get("top_blocked_symbols") or [],
+        "blocked_entry_symbol_reason_rollup": audit.get("symbol_reason_rollup") or [],
+        "blocked_entry_reason_coverage_pct": coverage.get("actionable_reason_coverage_pct"),
+        "blocked_entry_rows_missing_reason_detail": coverage.get("rows_missing_reason_detail"),
+        "blocked_entry_missing_reason_symbols": audit.get("missing_reason_detail_symbols") or [],
         "watched_momentum_symbols_seen": audit.get("watched_momentum_symbols_seen") or [],
         "watched_momentum_symbols_blocked": audit.get("watched_momentum_symbols_blocked") or [],
     })
@@ -156,6 +167,10 @@ def apply(self_check_module: Any = None, core: Any = None) -> Dict[str, Any]:
                 "blocked_entry_top_categories",
                 "blocked_entry_top_reasons",
                 "blocked_entry_top_symbols",
+                "blocked_entry_symbol_reason_rollup",
+                "blocked_entry_reason_coverage_pct",
+                "blocked_entry_rows_missing_reason_detail",
+                "blocked_entry_missing_reason_symbols",
                 "watched_momentum_symbols_seen",
                 "watched_momentum_symbols_blocked",
             ],
