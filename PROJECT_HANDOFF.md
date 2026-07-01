@@ -35,40 +35,112 @@ Current operating mode:
 - Do not run execution routes after hours.
 - Do not run mutating Railway endpoints during routine post-push checks.
 
-Latest known good routine self-check supplied by operator on July 1, 2026 at 12:18:36 CDT showed:
+Latest known good routine self-check supplied by operator on July 1, 2026 at 12:37:28 CDT showed:
 
 - Overall: pass.
 - Status: ok.
 - Failed required: none.
 - Warnings: none.
+- Elapsed time: 286.92 ms.
 - Checked internal paths: /health and /paper/status.
 - Persistent storage configured: true.
 - State file: /data/state.json.
-- State size: 15,156,068 bytes.
-- Trades count: 88.
-- Execution rows: 88 / 150.
-- Cash: 11082.67.
-- Equity: 11082.67.
-- Open positions: 0.
-- Realized today: +36.71.
-- Realized total: +1082.67.
-- Unrealized PnL: 0.0.
-- Wins today: 1.
-- Wins total: 40.
+- State size: 20,299,313 bytes.
+- Trades count: 85.
+- Execution rows: 85 / 150.
+- Cash: 10686.88.
+- Equity: 11107.16.
+- Open positions: 1.
+- Position: SNDK.
+- SNDK entry: 1828.40.
+- SNDK last price: 2038.35.
+- SNDK unrealized PnL: +43.29, +11.48%.
+- Realized today: +206.21.
+- Realized total: +1063.89.
+- Unrealized PnL: +43.29.
+- Wins today: 3.
+- Wins total: 37.
 - Losses today: 0.
 - Losses total: 15.
-- Daily loss pct: 0.285.
-- Intraday drawdown pct: 0.285.
+- Daily loss pct: 0.0.
+- Intraday drawdown pct: 0.019.
 - Self-defense active: false.
 - Self-defense reason: feedback loop clear.
-- Scanner signals found: 52.
-- Blocked entries: 15.
+- Scanner signals found: 59.
+- Blocked entries: 10.
 - ML rows: 6000.
-- ML labeled rows: 1842.
-- ML observed outcomes: 55.
-- ML predictions: 25.
+- ML labeled rows: 1964.
+- ML observed outcomes: 52.
+- ML predictions: 23.
 - Phase 3A ready: false.
 - ML remains shadow-only.
+
+## Latest Verification — July 1, 2026 Clean Post-Timeout Self-Check
+
+The operator confirmed Railway logs looked clean and supplied a successful `/paper/self-check` payload at 2026-07-01 12:37:28 CDT after the dynamic-universe v4 source patch.
+
+Validation result:
+
+- `overall: pass`.
+- `status: ok`.
+- `failed_required: []`.
+- `warnings: []`.
+- `summary_counts`: pass 2, fail 0, warn 0, linked_only 3.
+- `/paper/self-check` returned quickly with `elapsed_ms: 286.92`, confirming the timeout condition was resolved.
+- Checked paths were `/health` and `/paper/status` using direct state snapshots.
+- Railway logs were reported clean by the operator after redeploy.
+
+Portfolio / risk status:
+
+- Equity: 11107.16.
+- Cash: 10686.88.
+- Open positions: 1.
+- Position: SNDK, long.
+- SNDK unrealized PnL: +43.29, +11.48%.
+- Realized today: +206.21.
+- Realized total: +1063.89.
+- Losses today: 0.
+- Daily loss pct: 0.0.
+- Intraday drawdown pct: 0.019.
+- Self-defense active: false.
+- Self-defense reason: feedback loop clear.
+
+Blocked-entry diagnostic status:
+
+- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` remains live.
+- `blocked_entries_count`: 10.
+- `signals_found`: 59.
+- `visible_blocked_rows_count`: 26.
+- `actionable_reason_coverage_pct`: 96.15.
+- `rows_with_actionable_reason`: 25.
+- `rows_missing_reason_detail`: 1.
+- Remaining missing row is still TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
+- Top blocker category: `quality_score` with 13 rows.
+- Other categories: `other_or_unclassified` 10 rows, `cooldown` 2 rows, `reason_detail_missing` 1 row.
+- Top reasons: `score_below_post_harvest_floor`, `profit_guard_active`, `cooldown`, `futures_bias_block_opening_longs`, and the one TEM missing reason.
+
+Top blocked symbols during this check:
+
+- MSTR
+- COIN
+- BTDR
+- IREN
+- CORZ
+- APLD
+- HUT
+- WGMI
+- CIFR
+- WULF
+
+Operational interpretation:
+
+- The dynamic-universe startup timeout fix worked.
+- The app is healthy, responsive, and passing required checks.
+- The bot is active enough to detect 59 signals but remains selective.
+- The current blocks are mostly quality/profit-guard/cooldown logic, not symbol hygiene failure.
+- Do not loosen thresholds blindly.
+- Do not promote ML authority yet; Phase 3A is still not ready.
+- Next non-urgent cleanup remains the TEM post-harvest reason persistence so the final `reason_not_available_in_state_snapshot` row goes to zero.
 
 ## Latest Update — July 1, 2026: Dynamic Universe Startup Timeout Fix
 
@@ -87,22 +159,7 @@ Problem observed:
 
 - `/paper/self-check` timed out.
 - yfinance batch downloads were still running during startup/registration and still included invalid state/action tokens.
-- Examples from logs:
-  - `LONG`
-  - `AUTO`
-  - `EQUITY`
-  - `REJECTED`
-  - `BLOCKED`
-  - `NONE`
-  - `COOLDOWN`
-  - `CONSTRUCTIVE`
-  - `NEUTRAL`
-  - `2026-07-01`
-  - `CIFRW`
-  - `SATS`
-  - `BITF`
-  - `SDIG`
-  - `PSTG`
+- Examples from logs included `LONG`, `AUTO`, `EQUITY`, `REJECTED`, `BLOCKED`, `NONE`, `COOLDOWN`, `CONSTRUCTIVE`, `NEUTRAL`, `2026-07-01`, `CIFRW`, `SATS`, `BITF`, `SDIG`, and `PSTG`.
 
 Root cause:
 
@@ -151,32 +208,6 @@ Safety / authority impact:
 - Live trade authority remains none.
 - ML authority remains shadow-only.
 
-Post-redeploy check:
-
-Open:
-
-https://trading-bot-clean.up.railway.app/paper/self-check
-
-Expected:
-
-- `overall: pass`
-- `failed_required: []`
-- no timeout
-- dynamic universe version should be `dynamic-universe-builder-2026-07-01-v4-source-symbol-hygiene` if surfaced through optional metadata/status route
-
-Optional direct lightweight route:
-
-https://trading-bot-clean.up.railway.app/paper/dynamic-universe-builder-status
-
-Expected:
-
-- `status: ok`
-- `overall: pass`
-- `startup_heavy_build_deferred: true`
-- `source_hygiene_active: true`
-
-Do not use `?force=1` during routine checks unless intentionally running the heavy builder.
-
 ## Previous Update — July 1, 2026: Symbol Hygiene Guard
 
 Files changed:
@@ -215,7 +246,7 @@ Interpretation:
 
 This wrapper remains useful as an additional runtime safety net, but the stronger fix is the direct v4 source patch to `dynamic_universe_builder.py` above.
 
-## Latest Verification — July 1, 2026 Afternoon Test
+## Prior Verification — July 1, 2026 Afternoon Test
 
 The operator supplied a post-redeploy afternoon `/paper/self-check` payload at 2026-07-01 12:18:36 CDT.
 
@@ -225,10 +256,10 @@ Validation result:
 - `status: ok`.
 - `failed_required: []`.
 - `warnings: []`.
-- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` is live.
-- `blocked_entry_top_symbol_details` is present.
-- `blocked_entry_missing_reason_rows_sample` is present.
-- `blocked_entry_symbol_reason_rollup` is present.
+- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` was live.
+- `blocked_entry_top_symbol_details` was present.
+- `blocked_entry_missing_reason_rows_sample` was present.
+- `blocked_entry_symbol_reason_rollup` was present.
 - `blocked_entry_reason_coverage_pct`: 97.73.
 - `blocked_entry_rows_missing_reason_detail`: 1.
 - Previous v2 reason-detail coverage was 79.63% with 11 missing rows; v3 cleanup improved this to 97.73% with 1 missing row.
@@ -399,4 +430,4 @@ Routine post-push validation:
 
 Current next best action:
 
-After Railway redeploys the dynamic universe v4 source patch, open `/paper/self-check`. It should no longer time out because dynamic-universe yfinance work is no longer run at startup or ordinary route registration. Optional check: `/paper/dynamic-universe-builder-status` should be lightweight and show `startup_heavy_build_deferred: true`.
+No immediate repair is required. Railway logs are clean, `/paper/self-check` is responsive again, and required checks are passing. Continue using only `/paper/self-check` for routine validation. The next non-urgent cleanup is to persist the exact blocker reason for the remaining TEM post-harvest `top_candidates_reviewed` row so the final `reason_not_available_in_state_snapshot` row goes to zero.
