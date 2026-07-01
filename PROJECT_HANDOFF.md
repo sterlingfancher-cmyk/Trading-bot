@@ -70,6 +70,102 @@ Latest routine self-check supplied by operator on July 1, 2026 at 12:18:36 CDT s
 - Phase 3A ready: false.
 - ML remains shadow-only.
 
+## Latest Update — July 1, 2026: Symbol Hygiene Guard
+
+### Railway log issue observed
+
+Operator pasted Railway deploy/startup logs from July 1, 2026 around 12:20 PM CDT.
+
+Container health interpretation:
+
+- Container started successfully.
+- Gunicorn started successfully.
+- Worker booted successfully.
+- Logs did not show an app crash.
+
+Problem observed:
+
+- yfinance was trying to download invalid/non-ticker tokens from scanner/dynamic-universe inputs.
+- Examples from logs:
+  - `LONG`
+  - `SHORT`
+  - `AUTO`
+  - `BEARISH`
+  - `CLEAR`
+  - `2026-06-04`
+  - `CIFRW`
+  - `SATS`
+- The likely source was dynamic-universe/state symbol flattening: short strings from state rows/log labels/action labels could be treated as symbols.
+
+### Code pushed
+
+Files changed:
+
+- `symbol_hygiene_guard.py`
+- `usercustomize.py`
+- `PROJECT_HANDOFF.md`
+
+New module version:
+
+- `symbol-hygiene-guard-2026-07-01-v1-invalid-token-filter`
+
+New usercustomize version:
+
+- `usercustomize-symbol-hygiene-guard-2026-07-01-v19`
+
+Commits:
+
+- `ca2d486a183f8ac939e31e7ce8d21a9601ff6fa5`
+  - Added `symbol_hygiene_guard.py`.
+  - Filters invalid state/log/action tokens before scanner/yfinance usage.
+  - Patches core `download_prices`, `fetch_intraday`, and `latest_price` wrappers.
+  - Patches `dynamic_universe_builder._symbol`, `_unique`, and `_download_daily` so dynamic seed lists are cleaned before yfinance batch download.
+  - Removes likely no-data instruments `CIFRW` and `SATS` by default.
+- `030af76995638301984a83cac8dcc16a5875e75e`
+  - Wired `symbol_hygiene_guard` into `usercustomize.py` startup before `dynamic_universe_builder`.
+  - Added `/paper/symbol-hygiene-guard-status` to optional self-check metadata.
+  - Added watchdog re-registration for `symbol_hygiene_guard`.
+
+Route added:
+
+- `/paper/symbol-hygiene-guard-status`
+
+Expected behavior after Railway redeploy:
+
+- The app should still boot normally.
+- `/paper/self-check` should remain `overall: pass` with `failed_required: []`.
+- `/paper/symbol-hygiene-guard-status` should return `status: ok`, `overall: pass`.
+- Future Railway logs should stop showing yfinance attempts for obvious non-tickers like `LONG`, `SHORT`, `AUTO`, `BEARISH`, `CLEAR`, and `2026-06-04`.
+- Some true tickers with provider/no-data issues may still occasionally show warnings if Yahoo has transient data gaps, but invalid state/action labels should no longer be sent.
+
+Safety / authority impact:
+
+- Runtime hygiene only.
+- Does not place trades.
+- Does not lower thresholds.
+- Does not bypass risk controls.
+- Does not change live authority.
+- Does not change ML authority.
+- Live trade authority remains none.
+- ML authority remains shadow-only.
+
+Post-redeploy check:
+
+Open:
+
+https://trading-bot-clean.up.railway.app/paper/self-check
+
+Optional direct module status:
+
+https://trading-bot-clean.up.railway.app/paper/symbol-hygiene-guard-status
+
+Expected:
+
+- `overall: pass`
+- `failed_required: []`
+- `symbol-hygiene-guard-2026-07-01-v1-invalid-token-filter` visible on the module route
+- no mutating endpoint required
+
 ## Latest Verification — July 1, 2026 Afternoon Test
 
 The operator supplied a post-redeploy afternoon `/paper/self-check` payload at 2026-07-01 12:18:36 CDT.
@@ -110,24 +206,12 @@ Top blocked symbols during the afternoon test:
 - GSAT
 - HUT
 
-Top blocked buckets:
-
-- `bitcoin_ai_compute`: 15.
-- `data_center_infra`: 6.
-- `cloud_cyber_software`: 5.
-- `small_cap_momentum`: 5.
-- `space_stocks`: 4.
-- `semi_leaders`: 4.
-- `mega_cap_ai`: 2.
-- `dynamic_discovery`: 2.
-- `ai_software_momentum`: 1.
-
 Operational interpretation:
 
 - The bot is healthy and flat with 100% cash, no open positions, no self-defense, and clean required checks.
 - It is seeing scanner activity but is staying selective because candidates are mostly failing quality score, extension/chase, rank, trend, or volume confirmation gates.
 - Do not loosen thresholds blindly.
-- If improving anything next, persist the full reason for the remaining TEM post-harvest top candidate row so `reason_not_available_in_state_snapshot` goes to zero.
+- If improving anything next after symbol hygiene, persist the full reason for the remaining TEM post-harvest top candidate row so `reason_not_available_in_state_snapshot` goes to zero.
 
 ## Latest Code Update — June 30, 2026: Blocked Reason Cleanup / Handoff Rule
 
@@ -159,15 +243,6 @@ Routes affected:
 - `/paper/blocked-entry-reason-audit-status`
 - `/paper/blocked-entry-reason-selfcheck-overlay-status`
 - `/paper/self-check` via mobile-safe overlay injection
-
-Fields expected in `/paper/self-check` after Railway redeploy:
-
-- `blocked_entry_top_symbol_details`
-- `blocked_entry_missing_reason_rows_sample`
-- `blocked_entry_symbol_reason_rollup`
-- `blocked_entry_reason_coverage_pct`
-- `blocked_entry_rows_missing_reason_detail`
-- `blocked_entry_missing_reason_symbols`
 
 Safety / authority impact:
 
@@ -215,7 +290,6 @@ Operator-confirmed self-check after this v2 update:
 - `actionable_reason_coverage_pct`: 79.63.
 - Top blocker category: `extension_chase` with 28 rows.
 - Other blocker categories: `quality_score`, `reason_detail_missing`, `missing_or_stale_price`.
-- Top blocked symbols included TEM, DDOG, AMKR, ETN, PLTR, SOUN, ARM, MSFT, BBAI, WPM.
 
 Interpretation:
 
@@ -240,8 +314,6 @@ Purpose:
 - Controlled post-harvest redeployment starter sleeve.
 - Reviews a limited set of high-ranked candidates after harvest/underdeployment situations.
 - Allows only starter-sized redeployment through existing quality gates.
-- Sits after post-harvest review and before entry quality finalization.
-- Does not wrap the whole app entry function directly.
 - Does not bypass cooldowns, self-defense, daily loss, intraday drawdown, risk halt, market-mode, or quality controls.
 
 Policy highlights:
@@ -259,21 +331,7 @@ Policy highlights:
 - ML authority: shadow-only.
 - Authority changed: false.
 
-Post-redeploy checks:
-
-- `/paper/controlled-redeployment-starter-sleeve-status`
-- `/paper/self-check`
-
-Expected:
-
-- `status: ok`
-- `overall: pass`
-- version matches `controlled-redeployment-starter-sleeve-2026-06-30-v2-borderline-quality-review`
-- `paper_context: true`
-- `patched: true`
-- authority unchanged
-
-If the route returns 404 or `patched: false`, explicitly wire `controlled_redeployment_starter_sleeve` into `wsgi.py` auxiliary registration instead of relying only on `usercustomize.py` auto-registration/watchdog.
+If `/paper/controlled-redeployment-starter-sleeve-status` returns 404 or `patched: false`, explicitly wire `controlled_redeployment_starter_sleeve` into `wsgi.py` auxiliary registration instead of relying only on `usercustomize.py` auto-registration/watchdog.
 
 ## Recent Critical Fixes
 
@@ -289,28 +347,9 @@ Route:
 
 Purpose:
 
-- Converts the prior blunt `losses_today_not_clean` behavior into a graduated opportunity throttle.
+- Converts prior blunt `losses_today_not_clean` behavior into a graduated opportunity throttle.
 - Converts the old fixed 60% post-harvest cash threshold into a graduated soft gate.
 - Keeps risk halt, self-defense, hard drawdown, market risk-off, max-position, missing-data, cooldown, and quality gates intact.
-
-Runtime patches applied by the governor:
-
-- `post_harvest_redeployment_controller._risk_ok`
-- `post_harvest_redeployment_controller._entry_block_safe`
-- `post_harvest_redeployment_controller._profit_harvest_ok`
-- `post_harvest_redeployment_controller._quality_ok`
-- `post_harvest_redeployment_controller._starter_signal`
-- `post_harvest_redeployment_controller.select_redeployment_candidates`
-- `post_harvest_entry_fallback._risk_ok`
-
-Policy now active:
-
-- `losses_today_policy: throttle_not_hard_block`
-- `profit_taking_policy: frees_capital_if_quality_and_risk_are_clean`
-- `cash_pct_policy: graduated_soft_gate_not_fixed_hard_block`
-- Live trade authority remains none.
-- ML authority remains shadow_only.
-- Authority changed remains false.
 
 Throttle bands:
 
@@ -319,17 +358,6 @@ Throttle bands:
 - 1.00% to 2.00% drawdown: defensive_opportunity, 0.50 size factor, 60% cash floor.
 - 2.00% to 2.75% drawdown: near_limit_opportunity, 0.35 size factor, 65% cash floor.
 - 2.75%+ drawdown: hard_block.
-
-Commits for the post-harvest update sequence:
-
-- `7a6fb8e018df1368f4c814bb8c9f8b03b9513664`
-  - Added `post_harvest_opportunity_governor.py`.
-- `cb15363495f33aa1b2133e24caf991e67d5d4e20`
-  - Wired `post_harvest_opportunity_governor` into `usercustomize.py` startup.
-- `dee509d0f91cd19606ebea5ccd2a0272a329e6ea`
-  - Tightened post-harvest opportunity throttle logic.
-- `e662d40a5c6483462c0b1f4ff96a4230450b60da`
-  - Converted post-harvest cash gate from fixed hard threshold to graduated throttle.
 
 ### Space Stock Basket Overlay
 
@@ -356,41 +384,7 @@ Symbols added:
 - Earth observation / space data: PL, BKSY, SATL, SPIR.
 - Space infrastructure: RDW.
 
-Bucket:
-
-- Bucket name: `space_stocks`.
-- Default alloc factor: 0.70.
-- Default max exposure pct: 0.30.
-- Default max positions: 3.
-- Environment overrides:
-  - `SPACE_STOCKS_ALLOC_FACTOR`
-  - `SPACE_STOCKS_MAX_EXPOSURE_PCT`
-  - `SPACE_STOCKS_MAX_POSITIONS`
-
-Startup wiring:
-
-- `usercustomize.py` registers `space_stock_basket`.
-- `usercustomize.py` watchdog re-registers `space_stock_basket`.
-- `/paper/space-stock-basket-status` is included as optional self-check metadata.
-
-Important behavior:
-
-- These stocks are available to the scanner universe.
-- They still must pass normal scanner ranking, risk, quality, price, cooldown, sector/bucket exposure, and max-position rules.
-- No forced trades.
-- No live trading.
-- No ML authority change.
-
-Commits for the space basket update:
-
-- `5fea442ff21ce828e7cacca0f22b00f2ec3f17f4`
-  - Added `space_stock_basket.py`.
-- `73cfd23b4826e69811c32c1244e5d8634400f3b5`
-  - Wired `space_stock_basket` into `usercustomize.py` startup and watchdog.
-
 ### SPY malformed paper position repair
-
-A prior market surge queue executor entry deducted cash for SPY but stored the position in a malformed format. SPY showed `entry_price` and `qty`, but the normal status route expected legacy fields `entry` and `shares`.
 
 Fixed with:
 
@@ -449,4 +443,4 @@ Routine post-push validation:
 
 Current next best action:
 
-No immediate repair is required. The July 1 afternoon self-check passed and verified the blocked-reason v3 cleanup. If another cleanup is prioritized, target persistence of the remaining TEM post-harvest `top_candidates_reviewed` row so its exact blocker reason is stored instead of `reason_not_available_in_state_snapshot`.
+After Railway redeploys the symbol hygiene guard update, open `/paper/self-check`. If it passes, optionally open `/paper/symbol-hygiene-guard-status`. The next non-urgent cleanup after that is to persist the exact blocker reason for the remaining TEM post-harvest `top_candidates_reviewed` row so `reason_not_available_in_state_snapshot` goes to zero.
