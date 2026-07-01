@@ -1,4 +1,4 @@
-# Automated Trading Project Handoff — Updated June 30, 2026
+# Automated Trading Project Handoff — Updated July 1, 2026
 
 ## Standing Update Rule
 
@@ -35,7 +35,7 @@ Current operating mode:
 - Do not run execution routes after hours.
 - Do not run mutating Railway endpoints during routine post-push checks.
 
-Latest routine self-check supplied by operator on June 30, 2026 at roughly 12:15 CDT showed:
+Latest routine self-check supplied by operator on July 1, 2026 at 12:18:36 CDT showed:
 
 - Overall: pass.
 - Status: ok.
@@ -44,34 +44,92 @@ Latest routine self-check supplied by operator on June 30, 2026 at roughly 12:15
 - Checked internal paths: /health and /paper/status.
 - Persistent storage configured: true.
 - State file: /data/state.json.
-- State size: about 15.24 MB.
-- Trades count: 87.
-- Execution rows: 87 / 150.
-- Cash: 10764.61.
-- Equity: 11104.71.
-- Open positions: 1.
-- Position: SNDK.
-- SNDK unrealized PnL: +58.76, +20.88%.
-- Realized today: +188.28.
-- Realized total: +1045.96.
-- Wins today: 5.
-- Wins total: 39.
+- State size: 15,156,068 bytes.
+- Trades count: 88.
+- Execution rows: 88 / 150.
+- Cash: 11082.67.
+- Equity: 11082.67.
+- Open positions: 0.
+- Realized today: +36.71.
+- Realized total: +1082.67.
+- Unrealized PnL: 0.0.
+- Wins today: 1.
+- Wins total: 40.
 - Losses today: 0.
 - Losses total: 15.
-- Daily loss pct: 0.0.
-- Intraday drawdown pct: 0.0.
+- Daily loss pct: 0.285.
+- Intraday drawdown pct: 0.285.
 - Self-defense active: false.
 - Self-defense reason: feedback loop clear.
-- Scanner signals found: 50.
+- Scanner signals found: 52.
 - Blocked entries: 15.
 - ML rows: 6000.
-- ML labeled rows: 1915.
-- ML observed outcomes: 54.
+- ML labeled rows: 1842.
+- ML observed outcomes: 55.
 - ML predictions: 25.
 - Phase 3A ready: false.
 - ML remains shadow-only.
 
-## Latest Update — June 30, 2026: Blocked Reason Cleanup / Handoff Rule
+## Latest Verification — July 1, 2026 Afternoon Test
+
+The operator supplied a post-redeploy afternoon `/paper/self-check` payload at 2026-07-01 12:18:36 CDT.
+
+Validation result:
+
+- `overall: pass`.
+- `status: ok`.
+- `failed_required: []`.
+- `warnings: []`.
+- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` is live.
+- `blocked_entry_top_symbol_details` is present.
+- `blocked_entry_missing_reason_rows_sample` is present.
+- `blocked_entry_symbol_reason_rollup` is present.
+- `blocked_entry_reason_coverage_pct`: 97.73.
+- `blocked_entry_rows_missing_reason_detail`: 1.
+- Previous v2 reason-detail coverage was 79.63% with 11 missing rows; v3 cleanup improved this to 97.73% with 1 missing row.
+
+Blocked reason audit interpretation:
+
+- The false symbol-only placeholder problem is effectively cleaned up.
+- The remaining missing reason row is TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
+- Top blocker category is now `quality_score` with 24 rows.
+- Second blocker category is `extension_chase` with 18 rows.
+- Other categories: `missing_or_stale_price` 1 row and `reason_detail_missing` 1 row.
+- Top reasons include `score_below_post_harvest_floor`, `entry_score_below_minimum`, `extended_starter_rank_too_low`, `extended_starter_not_upper_extension_leader`, dynamic discovery trend/volume confirmation blocks, and one futures bias long block.
+
+Top blocked symbols during the afternoon test:
+
+- DELL
+- SMCI
+- NTNX
+- WULF
+- RIOT
+- ASTS
+- IREN
+- APLD
+- GSAT
+- HUT
+
+Top blocked buckets:
+
+- `bitcoin_ai_compute`: 15.
+- `data_center_infra`: 6.
+- `cloud_cyber_software`: 5.
+- `small_cap_momentum`: 5.
+- `space_stocks`: 4.
+- `semi_leaders`: 4.
+- `mega_cap_ai`: 2.
+- `dynamic_discovery`: 2.
+- `ai_software_momentum`: 1.
+
+Operational interpretation:
+
+- The bot is healthy and flat with 100% cash, no open positions, no self-defense, and clean required checks.
+- It is seeing scanner activity but is staying selective because candidates are mostly failing quality score, extension/chase, rank, trend, or volume confirmation gates.
+- Do not loosen thresholds blindly.
+- If improving anything next, persist the full reason for the remaining TEM post-harvest top candidate row so `reason_not_available_in_state_snapshot` goes to zero.
+
+## Latest Code Update — June 30, 2026: Blocked Reason Cleanup / Handoff Rule
 
 ### Blocked-entry reason audit cleanup
 
@@ -125,21 +183,6 @@ Safety / authority impact:
 Reason for update:
 
 The June 30 self-check showed the audit upgrade was working, but some `top_blocked_symbol_reason_not_in_mobile_snapshot` placeholders were still inflating missing-reason detail counts even when the same symbols had detailed blocker rows elsewhere. The v3 cleanup separates top blocked symbol collection from detailed blocker row extraction and only inserts a missing-reason placeholder when a top blocked symbol truly lacks row-level detail.
-
-Expected post-redeploy check:
-
-Open:
-
-https://trading-bot-clean.up.railway.app/paper/self-check
-
-Expected:
-
-- `overall: pass`
-- `failed_required: []`
-- audit version `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup`
-- overlay version `blocked-entry-reason-selfcheck-overlay-2026-06-30-v3-placeholder-cleanup`
-- `blocked_entry_top_symbol_details` present
-- `blocked_entry_rows_missing_reason_detail` lower than before unless symbols truly lack detailed rows
 
 ### Previous June 30 blocked-reason coverage upgrade
 
@@ -406,15 +449,4 @@ Routine post-push validation:
 
 Current next best action:
 
-After Railway redeploy from the latest handoff update and blocked-reason cleanup commits, open:
-
-https://trading-bot-clean.up.railway.app/paper/self-check
-
-Then confirm:
-
-- Overall remains pass.
-- No failed required checks.
-- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` is live.
-- `blocked-entry-reason-selfcheck-overlay-2026-06-30-v3-placeholder-cleanup` is live if surfaced.
-- `blocked_entry_top_symbol_details` is present.
-- Missing reason detail count is lower unless the symbols truly lack row-level details.
+No immediate repair is required. The July 1 afternoon self-check passed and verified the blocked-reason v3 cleanup. If another cleanup is prioritized, target persistence of the remaining TEM post-harvest `top_candidates_reviewed` row so its exact blocker reason is stored instead of `reason_not_available_in_state_snapshot`.
