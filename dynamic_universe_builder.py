@@ -1,4 +1,4 @@
-"""Dynamic Universe Builder v3 for the Railway paper-trading bot.
+"""Dynamic Universe Builder v4 for the Railway paper-trading bot.
 
 Purpose:
 - Move beyond a tiny hand-built ticker list without attempting to scan every
@@ -9,6 +9,9 @@ Purpose:
   scanner for the current session.
 - Use a session-aware intraday gate so early-morning opportunity is not choked
   by a fixed 35-bar requirement.
+- Apply source-level symbol hygiene before any yfinance batch download.
+- Avoid heavy yfinance work during app boot, usercustomize registration, or
+  ordinary self-check route registration.
 
 Guardrails:
 - Paper scanner expansion only.
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 import sys
 import time
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
@@ -31,7 +35,7 @@ try:
 except Exception:  # pragma: no cover
     ZoneInfo = None  # type: ignore
 
-VERSION = "dynamic-universe-builder-2026-06-18-v3-adaptive-intraday-gate"
+VERSION = "dynamic-universe-builder-2026-07-01-v4-source-symbol-hygiene"
 ENABLED = os.environ.get("DYNAMIC_UNIVERSE_BUILDER_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 PAPER_ONLY = os.environ.get("DYNAMIC_UNIVERSE_BUILDER_PAPER_ONLY", "true").lower() not in {"0", "false", "no", "off"}
 CACHE_TTL_SECONDS = int(os.environ.get("DYNAMIC_UNIVERSE_CACHE_TTL_SECONDS", "900"))
@@ -64,6 +68,23 @@ REGISTERED_APP_IDS: set[int] = set()
 PATCHED_MODULE_IDS: set[int] = set()
 _CACHE: Dict[str, Any] = {"ts": 0.0, "payload": None}
 _BASE_UNIVERSE: Dict[int, List[str]] = {}
+_LAST_SEED_REJECTIONS: List[Dict[str, str]] = []
+
+_RESERVED_WORDS = {
+    "LONG", "SHORT", "AUTO", "MANUAL", "BEARISH", "BULLISH", "CLEAR", "CLEAN", "RUN", "RUNNING",
+    "PASS", "FAIL", "WARN", "ERROR", "OK", "OPEN", "CLOSE", "CLOSED", "ENTRY", "EXIT", "BUY", "SELL",
+    "HOLD", "HELD", "CASH", "EQUITY", "POSITION", "POSITIONS", "TRADE", "TRADES", "SIGNAL", "SIGNALS",
+    "BLOCKED", "REJECTED", "CANDIDATE", "CANDIDATES", "TODAY", "YESTERDAY", "TOMORROW", "DATE",
+    "TRUE", "FALSE", "NONE", "NULL", "NAN", "INF", "LOSS", "WIN", "RISK", "QUALITY", "SCORE",
+    "COOLDOWN", "CONSTRUCTIVE", "NEUTRAL", "DEFENSIVE", "REGIME", "MODE", "STATUS", "REASON", "SOURCE",
+}
+_KNOWN_NO_DATA = {
+    s.strip().upper() for s in os.environ.get("DYNAMIC_UNIVERSE_KNOWN_NO_DATA_SYMBOLS", "CIFRW,SATS,BITF,SDIG,PSTG").split(",") if s.strip()
+}
+_ALLOWED_SPECIALS = {"^VIX", "^TNX", "ES=F", "NQ=F"}
+_SYMBOL_RE = re.compile(r"^[A-Z]{1,6}([.-][A-Z])?$")
+_DATE_RE = re.compile(r"^\d{4}[-/]\d{2}[-/]\d{2}$")
+_NUMERIC_RE = re.compile(r"^\d+(\.\d+)?$")
 
 THEME_BASKETS: Dict[str, List[str]] = {
     "semi_leaders": [
@@ -75,14 +96,14 @@ THEME_BASKETS: Dict[str, List[str]] = {
     "data_center_infra": [
         "SMCI", "ANET", "DELL", "HPE", "CIEN", "GLW", "COHR", "LITE", "AAOI", "WDC", "STX", "TER",
         "VRT", "ETN", "PWR", "GEV", "VST", "CEG", "NRG", "MOD", "POWL", "IESC", "EME", "FIX",
-        "ORCL", "IBM", "NTNX", "PSTG", "DDOG", "NET",
+        "ORCL", "IBM", "NTNX", "DDOG", "NET",
     ],
     "bitcoin_ai_compute": [
         "HIVE", "HUT", "IREN", "CIFR", "WULF", "CLSK", "MARA", "RIOT", "BTDR", "CORZ", "APLD",
-        "COIN", "MSTR", "GLXY", "CAN", "BITF", "SDIG", "CIFRW",
+        "COIN", "MSTR", "GLXY", "CAN",
     ],
     "ai_software_momentum": ["PLTR", "AI", "SOUN", "BBAI", "PATH", "DDOG", "APP", "DUOL", "SNOW", "NET", "CRWD", "PANW"],
-    "space_stocks": ["RKLB", "LUNR", "ASTS", "RDW", "PL", "BKSY", "SATL", "SPIR", "SPCE", "IRDM", "GSAT", "VSAT", "SATS", "SPCX"],
+    "space_stocks": ["RKLB", "LUNR", "ASTS", "RDW", "PL", "BKSY", "SATL", "SPIR", "SPCE", "IRDM", "GSAT", "VSAT", "SPCX"],
     "small_cap_momentum": ["SOUN", "RGTI", "QBTS", "IONQ", "RXRX", "TEM", "ACHR", "JOBY", "BBAI", "AI", "BE", "EOSE", "QS", "CHPT"],
     "biotech_speculative": ["RXRX", "TEM", "DNA", "EDIT", "CRSP", "NTLA", "BEAM", "TWST", "SDGR", "ABCL"],
     "industrial_power": ["GEV", "VRT", "ETN", "PWR", "EME", "FIX", "POWL", "IESC", "CEG", "VST", "NRG"],
@@ -136,10 +157,40 @@ def _paper_context() -> bool:
     return not live and not broker_live
 
 
+def _invalid_symbol_reason(value: Any) -> str | None:
+    try:
+        s = str(value or "").upper().strip()
+        if s.startswith("$"):
+            s = s[1:]
+    except Exception:
+        return "symbol_parse_error"
+    if not s:
+        return "blank_symbol"
+    if s in _ALLOWED_SPECIALS:
+        return None
+    if s in _RESERVED_WORDS:
+        return "reserved_state_word_not_ticker"
+    if s in _KNOWN_NO_DATA:
+        return "known_provider_no_data_symbol"
+    if _DATE_RE.match(s):
+        return "date_token_not_ticker"
+    if _NUMERIC_RE.match(s):
+        return "numeric_token_not_ticker"
+    if any(ch.isspace() for ch in s) or "," in s or ":" in s or "/" in s:
+        return "contains_non_ticker_separator"
+    if s.endswith("W") and len(s) >= 5:
+        return "probable_warrant_symbol"
+    if not _SYMBOL_RE.match(s):
+        return "ticker_format_rejected"
+    return None
+
+
 def _symbol(value: Any) -> str:
     try:
         s = str(value or "").upper().strip()
-        return s if 1 <= len(s) <= 12 and s.replace(".", "").replace("-", "").isalnum() else ""
+        if s.startswith("$"):
+            s = s[1:]
+        return s if _invalid_symbol_reason(s) is None else ""
     except Exception:
         return ""
 
@@ -156,13 +207,21 @@ def _safe_float(value: Any, default: float | None = 0.0) -> float | None:
 
 
 def _unique(seq: Iterable[Any]) -> List[str]:
+    global _LAST_SEED_REJECTIONS
     out: List[str] = []
     seen = set()
-    for item in seq:
+    rejected: List[Dict[str, str]] = []
+    for item in seq or []:
+        raw = str(item or "").upper().strip()
         s = _symbol(item)
         if s and s not in seen:
             seen.add(s)
             out.append(s)
+        elif raw:
+            reason = _invalid_symbol_reason(raw)
+            if reason and len(rejected) < 150:
+                rejected.append({"token": raw, "reason": reason})
+    _LAST_SEED_REJECTIONS = rejected
     return out
 
 
@@ -211,7 +270,9 @@ def _flatten_symbols(obj: Any, max_items: int = 15000) -> List[str]:
             return
         seen += 1
         if isinstance(value, dict):
-            for key in ("symbol", "ticker", "asset", "name"):
+            # Only explicit market-symbol fields should be treated as symbols.
+            # Do not scrape generic names/messages/status values.
+            for key in ("symbol", "ticker", "asset"):
                 if key in value:
                     s = _symbol(value.get(key))
                     if s:
@@ -221,10 +282,8 @@ def _flatten_symbols(obj: Any, max_items: int = 15000) -> List[str]:
         elif isinstance(value, list):
             for item in value:
                 walk(item)
-        elif isinstance(value, str):
-            s = _symbol(value)
-            if s:
-                found.append(s)
+        # Intentionally ignore free-floating strings in state. They are where
+        # LONG/SHORT/AUTO/BEARISH/CLEAR/date tokens leaked from.
 
     walk(obj)
     return _unique(found)
@@ -272,6 +331,10 @@ def _seed_symbols(core: Any) -> Tuple[List[str], Dict[str, Any]]:
         "max_seed_symbols": MAX_SEED_SYMBOLS,
         "theme_baskets": {k: len(v) for k, v in THEME_BASKETS.items()},
         "configured_extra_symbols": _configured_extra_symbols(),
+        "source_hygiene_active": True,
+        "reserved_words_count": len(_RESERVED_WORDS),
+        "known_no_data_symbols": sorted(_KNOWN_NO_DATA),
+        "recent_rejected_seed_tokens": _LAST_SEED_REJECTIONS[:50],
     }
     return seeds, meta
 
@@ -319,12 +382,15 @@ def _clean_values(series: Any) -> List[float]:
 
 
 def _download_daily(seeds: Sequence[str]) -> Tuple[Any, str | None]:
+    clean_seeds = _unique(seeds)
+    if not clean_seeds:
+        return None, "no_valid_symbols_after_source_hygiene"
     try:
         import yfinance as yf  # type: ignore
     except Exception as exc:
         return None, f"yfinance_unavailable:{type(exc).__name__}"
     try:
-        return yf.download(list(seeds), period="30d", interval="1d", progress=False, auto_adjust=False, threads=True, group_by="ticker"), None
+        return yf.download(clean_seeds, period="30d", interval="1d", progress=False, auto_adjust=False, threads=True, group_by="ticker"), None
     except Exception as exc:
         return None, f"download_failed:{type(exc).__name__}: {exc}"
 
@@ -435,15 +501,15 @@ def _session_gate_policy() -> Dict[str, Any]:
         base["minutes_since_open"] = minutes
         base["now_local"] = now_local.strftime("%Y-%m-%d %H:%M:%S %Z")
         if minutes < 0:
-            base.update({"phase": "pre_market", "allow_dynamic_promotion": False, "early_starter": False, "required_bars": MIN_INTRADAY_BARS, "reason": "pre_market_observation_only"})
+            base.update({"phase": "pre_market", "allow_dynamic_promotion": False, "required_bars": MIN_INTRADAY_BARS, "reason": "pre_market_observation_only"})
         elif minutes < OPENING_OBSERVATION_MINUTES:
-            base.update({"phase": "opening_observation", "allow_dynamic_promotion": False, "early_starter": False, "required_bars": EARLY_MIN_INTRADAY_BARS, "reason": "first_minutes_observation_only_for_dynamic_symbols"})
+            base.update({"phase": "opening_observation", "allow_dynamic_promotion": False, "required_bars": EARLY_MIN_INTRADAY_BARS, "reason": "first_minutes_observation_only_for_dynamic_symbols"})
         elif minutes < EARLY_STARTER_UNTIL_MINUTES:
             base.update({"phase": "early_starter", "allow_dynamic_promotion": True, "early_starter": True, "required_bars": EARLY_MIN_INTRADAY_BARS, "reason": "adaptive_early_starter_intraday_gate"})
         elif minutes < MID_SESSION_UNTIL_MINUTES:
-            base.update({"phase": "mid_session_buildout", "allow_dynamic_promotion": True, "early_starter": False, "required_bars": MID_MIN_INTRADAY_BARS, "reason": "adaptive_mid_session_intraday_gate"})
+            base.update({"phase": "mid_session_buildout", "allow_dynamic_promotion": True, "required_bars": MID_MIN_INTRADAY_BARS, "reason": "adaptive_mid_session_intraday_gate"})
         else:
-            base.update({"phase": "standard", "allow_dynamic_promotion": True, "early_starter": False, "required_bars": MIN_INTRADAY_BARS, "reason": "standard_full_intraday_gate"})
+            base.update({"phase": "standard", "allow_dynamic_promotion": True, "required_bars": MIN_INTRADAY_BARS, "reason": "standard_full_intraday_gate"})
     except Exception as exc:
         base.update({"reason": f"adaptive_gate_fallback:{type(exc).__name__}", "required_bars": MIN_INTRADAY_BARS})
     return base
@@ -488,6 +554,8 @@ def _intraday_from_df(core: Any, symbol: str, df: Any, required_bars: int) -> Di
 
 def _intraday_check(core: Any, symbol: str, is_base_symbol: bool = False) -> Dict[str, Any]:
     symbol = _symbol(symbol)
+    if not symbol:
+        return {"scannable": False, "reason": "invalid_symbol_after_hygiene", "bars": 0}
     policy = _session_gate_policy()
     if not REQUIRE_INTRADAY_DATA:
         return {"scannable": True, "reason": "intraday_gate_disabled", "bars": None, "adaptive_session_gate": policy}
@@ -511,7 +579,7 @@ def _apply_dynamic_maps(core: Any, promoted: List[Dict[str, Any]]) -> None:
     bucket_cfg = getattr(core, "BUCKET_CONFIG", {})
     if isinstance(sector_map, dict) and isinstance(bucket_map, dict):
         for row in promoted:
-            symbol = row.get("symbol")
+            symbol = _symbol(row.get("symbol"))
             bucket = row.get("bucket") or _bucket_for_symbol(core, symbol)
             sector = row.get("sector") or _sector_for_symbol(core, symbol, bucket)
             if symbol:
@@ -617,6 +685,8 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
                     "promoted_count": len(promoted_symbols),
                     "early_starter_count": len(early_starter_symbols),
                     "final_universe_count": len(final_universe),
+                    "source_hygiene_active": True,
+                    "recent_rejected_seed_tokens": _LAST_SEED_REJECTIONS[:50],
                     "promoted_symbols": promoted_symbols[:MAX_PROMOTED_SYMBOLS],
                     "early_starter_symbols": early_starter_symbols[:25],
                     "promoted_and_scannable": promoted[:25],
@@ -651,6 +721,8 @@ def build_dynamic_universe(core: Any = None, force: bool = False) -> Dict[str, A
         "data_error": data_error,
         "session_gate": session_policy,
         "seed_meta": seed_meta,
+        "source_hygiene_active": True,
+        "recent_rejected_seed_tokens": _LAST_SEED_REJECTIONS[:50],
         "base_universe_count": len(base),
         "seed_count": len(seeds),
         "daily_candidate_count": len(daily_candidates),
@@ -749,17 +821,46 @@ def _patch_scan_signals(core: Any) -> bool:
     return True
 
 
+def lightweight_status(core: Any = None) -> Dict[str, Any]:
+    core = core or _mod()
+    return {
+        "status": "ok" if core is not None else "pending",
+        "overall": "pass" if core is not None else "pending",
+        "type": "dynamic_universe_builder_status",
+        "version": VERSION,
+        "generated_local": _now(core),
+        "enabled": bool(ENABLED),
+        "paper_context": bool(_paper_context()),
+        "source_hygiene_active": True,
+        "startup_heavy_build_deferred": True,
+        "promotion_applied": False,
+        "reason": "startup_patch_only; build runs inside scan_signals or when force=1",
+        "authority_changed": False,
+        "does_not_trade": True,
+        "does_not_lower_thresholds": True,
+        "does_not_change_ml_authority": True,
+        "does_not_grant_live_authority": True,
+        "filters": {
+            "reserved_words_count": len(_RESERVED_WORDS),
+            "known_no_data_symbols": sorted(_KNOWN_NO_DATA),
+            "allowed_special_symbols": sorted(_ALLOWED_SPECIALS),
+        },
+    }
+
+
 def status_payload(core: Any = None, force: bool = False) -> Dict[str, Any]:
-    return build_dynamic_universe(core or _mod(), force=force)
+    if force:
+        return build_dynamic_universe(core or _mod(), force=True)
+    return lightweight_status(core or _mod())
 
 
 def apply(core: Any = None) -> Dict[str, Any]:
     core = core or _mod()
     if core is None:
-        return status_payload(core)
+        return lightweight_status(core)
     patched = _patch_scan_signals(core)
     PATCHED_MODULE_IDS.add(id(core))
-    payload = build_dynamic_universe(core, force=False)
+    payload = lightweight_status(core)
     payload["patched_scan_signals"] = bool(getattr(getattr(core, "scan_signals", None), "_dynamic_universe_builder_patched", False))
     payload["patched_this_call"] = {"scan_signals": bool(patched)}
     return payload
@@ -780,7 +881,7 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
 
     def status_route():
         force = str(request.args.get("force", "0")).lower() in {"1", "true", "yes"}
-        return jsonify(apply(core or _mod()) if not force else status_payload(core or _mod(), force=True))
+        return jsonify(status_payload(core or _mod(), force=force))
 
     if "/paper/dynamic-universe-builder-status" not in existing:
         flask_app.add_url_rule("/paper/dynamic-universe-builder-status", "dynamic_universe_builder_status", status_route)
