@@ -35,7 +35,7 @@ Current operating mode:
 - Do not run execution routes after hours.
 - Do not run mutating Railway endpoints during routine post-push checks.
 
-Latest routine self-check supplied by operator on July 1, 2026 at 12:18:36 CDT showed:
+Latest known good routine self-check supplied by operator on July 1, 2026 at 12:18:36 CDT showed:
 
 - Overall: pass.
 - Status: ok.
@@ -70,34 +70,114 @@ Latest routine self-check supplied by operator on July 1, 2026 at 12:18:36 CDT s
 - Phase 3A ready: false.
 - ML remains shadow-only.
 
-## Latest Update — July 1, 2026: Symbol Hygiene Guard
+## Latest Update — July 1, 2026: Dynamic Universe Startup Timeout Fix
 
-### Railway log issue observed
+### Railway issue observed
 
-Operator pasted Railway deploy/startup logs from July 1, 2026 around 12:20 PM CDT.
+Operator pasted Railway logs from July 1, 2026 around 12:27 PM CDT.
 
 Container health interpretation:
 
 - Container started successfully.
 - Gunicorn started successfully.
 - Worker booted successfully.
-- Logs did not show an app crash.
+- Logs did not show a crash.
 
 Problem observed:
 
-- yfinance was trying to download invalid/non-ticker tokens from scanner/dynamic-universe inputs.
+- `/paper/self-check` timed out.
+- yfinance batch downloads were still running during startup/registration and still included invalid state/action tokens.
 - Examples from logs:
   - `LONG`
-  - `SHORT`
   - `AUTO`
-  - `BEARISH`
-  - `CLEAR`
-  - `2026-06-04`
+  - `EQUITY`
+  - `REJECTED`
+  - `BLOCKED`
+  - `NONE`
+  - `COOLDOWN`
+  - `CONSTRUCTIVE`
+  - `NEUTRAL`
+  - `2026-07-01`
   - `CIFRW`
   - `SATS`
-- The likely source was dynamic-universe/state symbol flattening: short strings from state rows/log labels/action labels could be treated as symbols.
+  - `BITF`
+  - `SDIG`
+  - `PSTG`
+
+Root cause:
+
+- The first `symbol_hygiene_guard.py` runtime wrapper was useful but not early enough for all paths.
+- `dynamic_universe_builder.py` itself still accepted short alphanumeric state strings as tickers.
+- `dynamic_universe_builder.apply()` and route registration called a yfinance-backed universe build during app startup, which could block the worker and make `/paper/self-check` time out.
 
 ### Code pushed
+
+Files changed:
+
+- `dynamic_universe_builder.py`
+- `PROJECT_HANDOFF.md`
+
+New dynamic universe version:
+
+- `dynamic-universe-builder-2026-07-01-v4-source-symbol-hygiene`
+
+Commit:
+
+- `3ef1a556351afaf8f7a9cfd1f50f7e0353299f97`
+  - Hardened `dynamic_universe_builder.py` at the source.
+  - Added reserved-word/date/numeric/no-data symbol filtering directly in `_symbol()` and `_unique()`.
+  - Stopped `_flatten_symbols()` from scraping free-floating strings in state, which is where labels like `LONG`, `AUTO`, `BLOCKED`, and dates leaked from.
+  - Removed known provider/no-data instruments from default theme baskets: `CIFRW`, `SATS`, `BITF`, `SDIG`, `PSTG`.
+  - Added `source_hygiene_active` and `recent_rejected_seed_tokens` telemetry.
+  - Changed startup/register/apply behavior to lightweight patch-only mode.
+  - Deferred the expensive yfinance-backed universe build until `scan_signals()` actually runs or `/paper/dynamic-universe-builder-status?force=1` is explicitly requested.
+
+Expected behavior after Railway redeploy:
+
+- App should boot faster.
+- `/paper/self-check` should load instead of timing out.
+- Invalid tokens should no longer appear in yfinance 30d batch download logs.
+- `/paper/dynamic-universe-builder-status` should be lightweight by default and should not force yfinance.
+- Use `/paper/dynamic-universe-builder-status?force=1` only when intentionally testing the heavy yfinance-backed builder.
+
+Safety / authority impact:
+
+- Runtime/source hygiene only.
+- Does not place trades.
+- Does not lower thresholds.
+- Does not bypass risk controls.
+- Does not change live authority.
+- Does not change ML authority.
+- Live trade authority remains none.
+- ML authority remains shadow-only.
+
+Post-redeploy check:
+
+Open:
+
+https://trading-bot-clean.up.railway.app/paper/self-check
+
+Expected:
+
+- `overall: pass`
+- `failed_required: []`
+- no timeout
+- dynamic universe version should be `dynamic-universe-builder-2026-07-01-v4-source-symbol-hygiene` if surfaced through optional metadata/status route
+
+Optional direct lightweight route:
+
+https://trading-bot-clean.up.railway.app/paper/dynamic-universe-builder-status
+
+Expected:
+
+- `status: ok`
+- `overall: pass`
+- `startup_heavy_build_deferred: true`
+- `source_hygiene_active: true`
+
+Do not use `?force=1` during routine checks unless intentionally running the heavy builder.
+
+## Previous Update — July 1, 2026: Symbol Hygiene Guard
 
 Files changed:
 
@@ -120,51 +200,20 @@ Commits:
   - Filters invalid state/log/action tokens before scanner/yfinance usage.
   - Patches core `download_prices`, `fetch_intraday`, and `latest_price` wrappers.
   - Patches `dynamic_universe_builder._symbol`, `_unique`, and `_download_daily` so dynamic seed lists are cleaned before yfinance batch download.
-  - Removes likely no-data instruments `CIFRW` and `SATS` by default.
 - `030af76995638301984a83cac8dcc16a5875e75e`
   - Wired `symbol_hygiene_guard` into `usercustomize.py` startup before `dynamic_universe_builder`.
   - Added `/paper/symbol-hygiene-guard-status` to optional self-check metadata.
   - Added watchdog re-registration for `symbol_hygiene_guard`.
+- `fa0a03bc3c343790ad003e8ef3d78087188a387f`
+  - Updated handoff with first symbol hygiene pass.
 
 Route added:
 
 - `/paper/symbol-hygiene-guard-status`
 
-Expected behavior after Railway redeploy:
+Interpretation:
 
-- The app should still boot normally.
-- `/paper/self-check` should remain `overall: pass` with `failed_required: []`.
-- `/paper/symbol-hygiene-guard-status` should return `status: ok`, `overall: pass`.
-- Future Railway logs should stop showing yfinance attempts for obvious non-tickers like `LONG`, `SHORT`, `AUTO`, `BEARISH`, `CLEAR`, and `2026-06-04`.
-- Some true tickers with provider/no-data issues may still occasionally show warnings if Yahoo has transient data gaps, but invalid state/action labels should no longer be sent.
-
-Safety / authority impact:
-
-- Runtime hygiene only.
-- Does not place trades.
-- Does not lower thresholds.
-- Does not bypass risk controls.
-- Does not change live authority.
-- Does not change ML authority.
-- Live trade authority remains none.
-- ML authority remains shadow-only.
-
-Post-redeploy check:
-
-Open:
-
-https://trading-bot-clean.up.railway.app/paper/self-check
-
-Optional direct module status:
-
-https://trading-bot-clean.up.railway.app/paper/symbol-hygiene-guard-status
-
-Expected:
-
-- `overall: pass`
-- `failed_required: []`
-- `symbol-hygiene-guard-2026-07-01-v1-invalid-token-filter` visible on the module route
-- no mutating endpoint required
+This wrapper remains useful as an additional runtime safety net, but the stronger fix is the direct v4 source patch to `dynamic_universe_builder.py` above.
 
 ## Latest Verification — July 1, 2026 Afternoon Test
 
@@ -184,34 +233,12 @@ Validation result:
 - `blocked_entry_rows_missing_reason_detail`: 1.
 - Previous v2 reason-detail coverage was 79.63% with 11 missing rows; v3 cleanup improved this to 97.73% with 1 missing row.
 
-Blocked reason audit interpretation:
-
-- The false symbol-only placeholder problem is effectively cleaned up.
-- The remaining missing reason row is TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
-- Top blocker category is now `quality_score` with 24 rows.
-- Second blocker category is `extension_chase` with 18 rows.
-- Other categories: `missing_or_stale_price` 1 row and `reason_detail_missing` 1 row.
-- Top reasons include `score_below_post_harvest_floor`, `entry_score_below_minimum`, `extended_starter_rank_too_low`, `extended_starter_not_upper_extension_leader`, dynamic discovery trend/volume confirmation blocks, and one futures bias long block.
-
-Top blocked symbols during the afternoon test:
-
-- DELL
-- SMCI
-- NTNX
-- WULF
-- RIOT
-- ASTS
-- IREN
-- APLD
-- GSAT
-- HUT
-
 Operational interpretation:
 
-- The bot is healthy and flat with 100% cash, no open positions, no self-defense, and clean required checks.
-- It is seeing scanner activity but is staying selective because candidates are mostly failing quality score, extension/chase, rank, trend, or volume confirmation gates.
+- The bot was healthy and flat with 100% cash, no open positions, no self-defense, and clean required checks.
+- It was seeing scanner activity but staying selective because candidates were mostly failing quality score, extension/chase, rank, trend, or volume confirmation gates.
 - Do not loosen thresholds blindly.
-- If improving anything next after symbol hygiene, persist the full reason for the remaining TEM post-harvest top candidate row so `reason_not_available_in_state_snapshot` goes to zero.
+- If improving anything after startup/symbol hygiene, persist the full reason for the remaining TEM post-harvest top candidate row so `reason_not_available_in_state_snapshot` goes to zero.
 
 ## Latest Code Update — June 30, 2026: Blocked Reason Cleanup / Handoff Rule
 
@@ -238,12 +265,6 @@ Commits:
   - Updated `blocked_entry_reason_selfcheck_overlay.py`.
   - Exposes cleaned fields in `/paper/self-check` operator summary/dashboard.
 
-Routes affected:
-
-- `/paper/blocked-entry-reason-audit-status`
-- `/paper/blocked-entry-reason-selfcheck-overlay-status`
-- `/paper/self-check` via mobile-safe overlay injection
-
 Safety / authority impact:
 
 - Advisory-only diagnostic cleanup.
@@ -255,51 +276,7 @@ Safety / authority impact:
 - Live trade authority remains none.
 - ML authority remains shadow-only.
 
-Reason for update:
-
-The June 30 self-check showed the audit upgrade was working, but some `top_blocked_symbol_reason_not_in_mobile_snapshot` placeholders were still inflating missing-reason detail counts even when the same symbols had detailed blocker rows elsewhere. The v3 cleanup separates top blocked symbol collection from detailed blocker row extraction and only inserts a missing-reason placeholder when a top blocked symbol truly lacks row-level detail.
-
-### Previous June 30 blocked-reason coverage upgrade
-
-Files changed:
-
-- `blocked_entry_reason_audit.py`
-- `blocked_entry_reason_selfcheck_overlay.py`
-
-Versions:
-
-- `blocked-entry-reason-audit-2026-06-30-v2-reason-coverage`
-- `blocked-entry-reason-selfcheck-overlay-2026-06-30-v2-reason-coverage`
-
-Commits:
-
-- `9a99c921368826fd54cc8fdf5eef6931a991d13c`
-  - Added reason coverage accounting.
-  - Fixed `blocked_entries_count` fallback when state had visible rows but count was null.
-  - Added nested reason extraction from `quality_info`, `participation_valve`, `score_gate`, `rotation_info`, and related objects.
-- `2fa3caf0780cea6ddf656e1c2168fa61b67d7cb7`
-  - Exposed reason coverage fields inside `/paper/self-check`.
-
-Operator-confirmed self-check after this v2 update:
-
-- Audit version live: `blocked-entry-reason-audit-2026-06-30-v2-reason-coverage`.
-- `blocked_entries_count`: 15.
-- `visible_blocked_rows_count`: 54.
-- `rows_with_actionable_reason`: 43.
-- `rows_missing_reason_detail`: 11.
-- `actionable_reason_coverage_pct`: 79.63.
-- Top blocker category: `extension_chase` with 28 rows.
-- Other blocker categories: `quality_score`, `reason_detail_missing`, `missing_or_stale_price`.
-
-Interpretation:
-
-The bot was seeing opportunities but correctly blocking most of them because they were extended/chasing risk or below quality floors. That is the intended behavior for controlled redeployment; do not loosen risk blindly.
-
 ## Controlled Redeployment Starter Sleeve — June 30, 2026
-
-Latest pushed file:
-
-- `controlled_redeployment_starter_sleeve.py`
 
 Latest known version:
 
@@ -331,8 +308,6 @@ Policy highlights:
 - ML authority: shadow-only.
 - Authority changed: false.
 
-If `/paper/controlled-redeployment-starter-sleeve-status` returns 404 or `patched: false`, explicitly wire `controlled_redeployment_starter_sleeve` into `wsgi.py` auxiliary registration instead of relying only on `usercustomize.py` auto-registration/watchdog.
-
 ## Recent Critical Fixes
 
 ### Post-harvest redeployment opportunity governor
@@ -351,14 +326,6 @@ Purpose:
 - Converts the old fixed 60% post-harvest cash threshold into a graduated soft gate.
 - Keeps risk halt, self-defense, hard drawdown, market risk-off, max-position, missing-data, cooldown, and quality gates intact.
 
-Throttle bands:
-
-- Under 0.50% drawdown: normal_opportunity, 1.00 size factor, 50% cash floor.
-- 0.50% to 1.00% drawdown: cautious_opportunity, 0.75 size factor, 55% cash floor.
-- 1.00% to 2.00% drawdown: defensive_opportunity, 0.50 size factor, 60% cash floor.
-- 2.00% to 2.75% drawdown: near_limit_opportunity, 0.35 size factor, 65% cash floor.
-- 2.75%+ drawdown: hard_block.
-
 ### Space Stock Basket Overlay
 
 File:
@@ -376,13 +343,6 @@ Route:
 Purpose:
 
 Adds a focused space / space-infrastructure theme to the active scanner universe without rewriting `app.py`. This is a metadata and universe overlay only. It does not place trades, change ML authority, bypass risk controls, or force entries.
-
-Symbols added:
-
-- Launch / lunar: RKLB, LUNR, SPCE.
-- Satellite connectivity: ASTS, IRDM, GSAT, VSAT, SATS.
-- Earth observation / space data: PL, BKSY, SATL, SPIR.
-- Space infrastructure: RDW.
 
 ### SPY malformed paper position repair
 
@@ -407,10 +367,6 @@ File:
 Current known version from June 16 handoff:
 
 - `market-surge-deployment-mode-2026-06-16-v3-hybrid-stock-leaders`
-
-Purpose:
-
-Hybrid paper-only market surge deployment mode that prioritizes high-quality individual stock leaders from the scanner while keeping ETFs as a broad-market anchor and fallback.
 
 Routes:
 
@@ -443,4 +399,4 @@ Routine post-push validation:
 
 Current next best action:
 
-After Railway redeploys the symbol hygiene guard update, open `/paper/self-check`. If it passes, optionally open `/paper/symbol-hygiene-guard-status`. The next non-urgent cleanup after that is to persist the exact blocker reason for the remaining TEM post-harvest `top_candidates_reviewed` row so `reason_not_available_in_state_snapshot` goes to zero.
+After Railway redeploys the dynamic universe v4 source patch, open `/paper/self-check`. It should no longer time out because dynamic-universe yfinance work is no longer run at startup or ordinary route registration. Optional check: `/paper/dynamic-universe-builder-status` should be lightweight and show `startup_heavy_build_deferred: true`.
