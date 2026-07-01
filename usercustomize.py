@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-quality-blocker-diagnostics-2026-06-29-v18"
+VERSION = "usercustomize-symbol-hygiene-guard-2026-07-01-v19"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -27,6 +27,7 @@ def _patch_self_check_endpoints() -> None:
         if not isinstance(endpoints, list):
             return
         wanted = [
+            {"path": "/paper/symbol-hygiene-guard-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-audit-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-selfcheck-overlay-status", "category": "governance", "required": False},
             {"path": "/paper/dynamic-universe-builder-status", "category": "governance", "required": False},
@@ -80,6 +81,7 @@ MODULES = (
     ("fmp_cached_profile_label_guard", "app_and_module"),
     ("space_stock_basket", "app_and_module"),
     ("spacex_direct_overlay", "app_and_module"),
+    ("symbol_hygiene_guard", "app_and_module"),
     ("blocked_entry_reason_audit", "app_and_module"),
     ("blocked_entry_reason_selfcheck_overlay", "app_and_module"),
     ("dynamic_universe_builder", "app_and_module"),
@@ -110,6 +112,7 @@ def _watchdog() -> None:
             flask_app = getattr(m, "app", None) if m is not None else None
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, m)
+                _register_module(flask_app, m, "symbol_hygiene_guard", route_args="app_and_module")
                 _register_module(flask_app, m, "core_entry_pipeline", route_args="app_and_module")
                 _register_module(flask_app, m, "extended_leader_starter_valve", route_args="app_and_module")
                 _register_module(flask_app, m, "controlled_redeployment_starter_sleeve", route_args="app_and_module")
