@@ -29,48 +29,125 @@ Current operating mode:
 - Paper trading only.
 - Live trade authority: none.
 - ML live authority: none.
+- Early paper Phase 3A guarded-advisory mode: active after July 2 afternoon validation.
+- Strict Phase 3A / stronger authority benchmark: still 150 execution rows and 100 observed outcomes.
 - Routine test link: https://trading-bot-clean.up.railway.app/paper/self-check
 - Do not use heavy diagnostic routes unless intentionally debugging.
 - Do not run repair routes unless a specific state issue appears.
 - Do not run execution routes after hours.
 - Do not run mutating Railway endpoints during routine post-push checks.
 
-Latest known good routine self-check supplied by operator on July 2, 2026 at 11:06:34 CDT showed:
+Latest known good routine self-check supplied by operator on July 2, 2026 at 13:58:36 CDT showed:
 
 - Overall: pass.
 - Status: ok.
 - Failed required: none.
 - Warnings: none.
-- Elapsed time: 85.04 ms.
+- Elapsed time: 132.64 ms.
 - Checked internal paths: /health and /paper/status.
 - Persistent storage configured: true.
 - State file: /data/state.json.
-- State size: 15,007,905 bytes.
-- Trades count: 87.
-- Execution rows: 87 / 150.
-- Cash: 11100.98.
-- Equity: 11100.98.
+- State size: 20,133,048 bytes.
+- Trades count: 88.
+- Execution rows: 88 / 150.
+- Cash: 10969.66.
+- Equity: 10969.66.
 - Open positions: 0.
-- Realized today: +15.44.
-- Realized total: +1101.00.
+- Realized today: +112.00.
+- Realized total: +969.68.
 - Unrealized PnL: 0.0.
-- Wins today: 1.
-- Wins total: 39.
-- Losses today: 0.
-- Losses total: 15.
-- Daily loss pct: 0.053.
-- Intraday drawdown pct: 0.053.
+- Wins today: 4.
+- Wins total: 38.
+- Losses today: 2.
+- Losses total: 17.
+- Daily loss pct: 0.421.
+- Intraday drawdown pct: 0.421.
 - Self-defense active: false.
 - Self-defense reason: feedback loop clear.
-- Scanner signals found: 58.
-- Blocked entries: 15.
+- Scanner signals found: 54.
+- Blocked entries: 1.
 - ML rows: 6000.
-- ML labeled rows: 1825.
-- ML observed outcomes: 54.
+- ML labeled rows: 1968.
+- ML observed outcomes: 55.
 - ML predictions: 25.
-- Strict Phase 3A ready: false.
+- Early paper Phase 3A ready: true.
+- Live ML authority: false / none.
 
-## Latest Update — July 2, 2026: Early Paper ML Phase 3A Gate
+## Latest Verification — July 2, 2026 Afternoon Early Paper Phase 3A Validation
+
+The operator supplied a successful afternoon `/paper/self-check` payload at 2026-07-02 13:58:36 CDT after the early paper ML Phase 3A gate was deployed.
+
+Validation result:
+
+- `overall: pass`.
+- `status: ok`.
+- `failed_required: []`.
+- `warnings: []`.
+- `summary_counts`: pass 2, fail 0, warn 0, linked_only 3.
+- `/paper/self-check` returned quickly with `elapsed_ms: 132.64`.
+- Checked paths were `/health` and `/paper/status` using direct state snapshots.
+- `one-test-policy-2026-06-03-decision-audit-summary` remains active.
+- Mobile-safe mode remains active.
+
+Early paper Phase 3A result:
+
+- Decision audit changed posture as intended.
+- `phase3a_ready`: true.
+- Chief Advisory Coach next action: run early paper Phase 3A guarded-advisory mode; do not grant live authority.
+- Trade Quality Coach next action: `execution_rows=88/150`; early paper Phase 3A gate is open with live authority off; continue collecting rows for the strict benchmark.
+- ML counts: rows 6000, labeled 1968, observed outcomes 55, predictions 25.
+- `advisory_only`: true.
+- `authority_changed`: false.
+- Live authority remains off.
+- Strict 150-row benchmark remains a reference for stronger authority.
+
+Portfolio / risk status:
+
+- Equity: 10969.66.
+- Cash: 10969.66.
+- Open positions: 0.
+- Realized today: +112.00.
+- Realized total: +969.68.
+- Unrealized PnL: 0.0.
+- Wins today: 4.
+- Losses today: 2.
+- Daily loss pct: 0.421.
+- Intraday drawdown pct: 0.421.
+- Self-defense active: false.
+- Self-defense reason: feedback loop clear.
+
+Blocked-entry diagnostic status:
+
+- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` remains live.
+- `blocked_entries_count`: 1.
+- `signals_found`: 54.
+- `visible_blocked_rows_count`: 30.
+- `actionable_reason_coverage_pct`: 96.67.
+- `rows_with_actionable_reason`: 29.
+- `rows_missing_reason_detail`: 1.
+- Remaining missing row is still TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
+- Top visible blocked symbol: TEM.
+- Top blocker category: `quality_score` with 24 rows.
+- Other categories: `extension_chase` 5 rows and `reason_detail_missing` 1 row.
+- Top reasons included `score_below_post_harvest_floor`, `extended_above_5m_ma20`, `volume_not_confirmed`, `futures_bias_block_opening_longs`, `relative_edge_too_small`, `trend_not_confirmed`, `wait_for_pullback_not_chasing_high`, and the single TEM missing-reason row.
+
+Watched momentum symbols:
+
+- Blocked: CIFR, CLSK, CORZ, HUT, MARA, PL, RIOT, WULF.
+- Seen: CIFR, CLSK, CORZ, DELL, HIVE, HPE, HUT, IREN, LRCX, MARA, MU, NBIS, NVTS, PL, RIOT, RKLB, TER, WDC, WULF.
+
+Operational interpretation:
+
+- No repair is required.
+- The early paper Phase 3A gate is working as intended in `/paper/self-check`.
+- The system is still paper-only and has not granted live ML authority.
+- The bot is flat in cash and self-defense is inactive.
+- The day is profitable despite two losses, but realized total dipped from the morning snapshot; keep monitoring trade quality while early paper Phase 3A runs.
+- Current no-entry state is selective/risk-controlled, not broken.
+- Do not loosen thresholds blindly.
+- Next non-urgent cleanup remains TEM post-harvest reason persistence so the final `reason_not_available_in_state_snapshot` row goes to zero.
+
+## Latest Code Update — July 2, 2026: Early Paper ML Phase 3A Gate
 
 ### Reasoning
 
@@ -111,18 +188,12 @@ Commits:
 - `378b6f258cdc3b98683ae1d930266133ebb136f4`
   - Wired the early paper Phase 3A gate into `usercustomize.py` startup and watchdog registration.
   - Added `/paper/ml3a-early-paper-status` to optional one-test metadata.
+- `fe4bbf5f4d94fef96d5f7716cbce8a8327f35ddf`
+  - Updated handoff with early paper Phase 3A rationale, expected checks, and authority guardrails.
 
 Route added:
 
 - `/paper/ml3a-early-paper-status`
-
-Expected behavior after Railway redeploy:
-
-- `/paper/self-check` should remain fast and should pass.
-- `/paper/ml3a-early-paper-status` should show `phase3a_paper_early_ready: true` if the current state remains near the July 2 morning counts: 87 execution rows, 54 observed outcomes, 1825 labeled rows, 25 predictions, and clean risk.
-- Decision audit should stop making the 150-row gate the highest priority if early paper gates are passing.
-- Chief Advisory Coach should shift to guarded paper Phase 3A advisory mode while still stating that live authority remains off.
-- ML strict readiness should still remain separate from early paper readiness.
 
 Safety / authority impact:
 
@@ -137,34 +208,7 @@ Safety / authority impact:
 - Does not bypass risk controls.
 - Does not disable self-defense, cooldowns, or quality gates.
 
-Post-redeploy check:
-
-Routine check:
-
-https://trading-bot-clean.up.railway.app/paper/self-check
-
-Expected:
-
-- `overall: pass`
-- `failed_required: []`
-- no timeout
-- decision audit should no longer frame 150 rows as the only possible Phase 3A transition if early paper gates are passing
-
-Optional direct check:
-
-https://trading-bot-clean.up.railway.app/paper/ml3a-early-paper-status
-
-Expected if current state is still similar to the July 2 morning test:
-
-- `status: ok`
-- `phase3a_paper_early_ready: true`
-- `strict_phase3a_ready: false`
-- `phase3a_live_authority_allowed: false`
-- `ml_authority: paper_phase3a_guarded_advisory`
-- `does_not_place_trades: true`
-- `does_not_bypass_risk_controls: true`
-
-## Latest Verification — July 2, 2026 Morning Self-Check
+## Prior Verification — July 2, 2026 Morning Self-Check
 
 The operator supplied a successful morning `/paper/self-check` payload at 2026-07-02 11:06:34 CDT.
 
@@ -196,40 +240,16 @@ Portfolio / risk status:
 
 Blocked-entry diagnostic status:
 
-- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` remains live.
+- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` remained live.
 - `blocked_entries_count`: 15.
 - `signals_found`: 58.
 - `visible_blocked_rows_count`: 44.
 - `actionable_reason_coverage_pct`: 97.73.
 - `rows_with_actionable_reason`: 43.
 - `rows_missing_reason_detail`: 1.
-- Remaining missing row is still TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
+- Remaining missing row was TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
 - Top blocker category: `extension_chase` with 30 rows.
 - Other categories: `quality_score` 13 rows and `reason_detail_missing` 1 row.
-- Top reasons: `extended_below_5m_ma20`, `score_below_post_harvest_floor`, `entry_score_below_minimum` with extended-starter rank/leader blocks, one futures-bias opening-long block, and the one TEM missing reason.
-
-Top blocked symbols during this check:
-
-- CDE
-- NEM
-- PHYS
-- GLD
-- IAU
-- RGLD
-- AG
-- HL
-- AMZN
-- GDXJ
-
-Top blocked buckets during this check:
-
-- `precious_metals`: 13.
-- `semi_leaders`: 9.
-- `data_center_infra`: 8.
-- `bitcoin_ai_compute`: 6.
-- `small_cap_momentum`: 4.
-- `cloud_cyber_software`: 3.
-- `mega_cap_ai`: 1.
 
 Decision-audit status before early paper-3A gate:
 
@@ -246,17 +266,6 @@ Decision-audit status before early paper-3A gate:
 - ML observed outcomes: 54.
 - ML predictions: 25.
 - Strict Phase 3A ready: false.
-
-Operational interpretation:
-
-- No repair was required.
-- The July 1 timeout fix remained validated by the very fast 85 ms self-check.
-- The bot was flat in cash after realizing profit and had no active self-defense condition.
-- Scanner activity was healthy; 58 signals were seen.
-- The current no-entry behavior was selective/risk-controlled, not broken.
-- Most visible blocks were extension/chase and quality-score controls, especially in precious metals and related momentum areas.
-- Do not loosen thresholds blindly.
-- Strict Phase 3A was still not ready under the old 150/100 benchmark, which motivated the early paper-3A gate above.
 
 ## Prior Verification — July 1, 2026 Clean Post-Timeout Self-Check
 
@@ -472,4 +481,4 @@ Routine post-push validation:
 
 Current next best action:
 
-After Railway redeploys the early paper ML Phase 3A gate, use only `/paper/self-check` for routine validation. Optional direct check: `/paper/ml3a-early-paper-status`. If the current counts are similar to the July 2 morning state, the early paper gate should pass while live authority remains off. The next non-urgent cleanup after that remains TEM post-harvest reason persistence.
+No immediate repair is required. Continue using only `/paper/self-check` for routine validation while early paper Phase 3A guarded-advisory mode runs. Watch the next several paper exits closely because realized total moved down versus the morning snapshot even though the day remains profitable. Keep live ML authority off until the strict benchmark and deeper walk-forward/MAE-MFE validation justify stronger authority. The next non-urgent cleanup remains TEM post-harvest reason persistence.
