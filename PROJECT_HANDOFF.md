@@ -1,4 +1,4 @@
-# Automated Trading Project Handoff — Updated July 1, 2026
+# Automated Trading Project Handoff — Updated July 2, 2026
 
 ## Standing Update Rule
 
@@ -35,47 +35,138 @@ Current operating mode:
 - Do not run execution routes after hours.
 - Do not run mutating Railway endpoints during routine post-push checks.
 
-Latest known good routine self-check supplied by operator on July 1, 2026 at 12:37:28 CDT showed:
+Latest known good routine self-check supplied by operator on July 2, 2026 at 11:06:34 CDT showed:
 
 - Overall: pass.
 - Status: ok.
 - Failed required: none.
 - Warnings: none.
-- Elapsed time: 286.92 ms.
+- Elapsed time: 85.04 ms.
 - Checked internal paths: /health and /paper/status.
 - Persistent storage configured: true.
 - State file: /data/state.json.
-- State size: 20,299,313 bytes.
-- Trades count: 85.
-- Execution rows: 85 / 150.
-- Cash: 10686.88.
-- Equity: 11107.16.
-- Open positions: 1.
-- Position: SNDK.
-- SNDK entry: 1828.40.
-- SNDK last price: 2038.35.
-- SNDK unrealized PnL: +43.29, +11.48%.
-- Realized today: +206.21.
-- Realized total: +1063.89.
-- Unrealized PnL: +43.29.
-- Wins today: 3.
-- Wins total: 37.
+- State size: 15,007,905 bytes.
+- Trades count: 87.
+- Execution rows: 87 / 150.
+- Cash: 11100.98.
+- Equity: 11100.98.
+- Open positions: 0.
+- Realized today: +15.44.
+- Realized total: +1101.00.
+- Unrealized PnL: 0.0.
+- Wins today: 1.
+- Wins total: 39.
 - Losses today: 0.
 - Losses total: 15.
-- Daily loss pct: 0.0.
-- Intraday drawdown pct: 0.019.
+- Daily loss pct: 0.053.
+- Intraday drawdown pct: 0.053.
 - Self-defense active: false.
 - Self-defense reason: feedback loop clear.
-- Scanner signals found: 59.
-- Blocked entries: 10.
+- Scanner signals found: 58.
+- Blocked entries: 15.
 - ML rows: 6000.
-- ML labeled rows: 1964.
-- ML observed outcomes: 52.
-- ML predictions: 23.
+- ML labeled rows: 1825.
+- ML observed outcomes: 54.
+- ML predictions: 25.
 - Phase 3A ready: false.
 - ML remains shadow-only.
 
-## Latest Verification — July 1, 2026 Clean Post-Timeout Self-Check
+## Latest Verification — July 2, 2026 Morning Self-Check
+
+The operator supplied a successful morning `/paper/self-check` payload at 2026-07-02 11:06:34 CDT.
+
+Validation result:
+
+- `overall: pass`.
+- `status: ok`.
+- `failed_required: []`.
+- `warnings: []`.
+- `summary_counts`: pass 2, fail 0, warn 0, linked_only 3.
+- `/paper/self-check` returned quickly with `elapsed_ms: 85.04`.
+- Checked paths were `/health` and `/paper/status` using direct state snapshots.
+- `one-test-policy-2026-06-03-decision-audit-summary` remains active.
+- Mobile-safe mode remains active.
+
+Portfolio / risk status:
+
+- Equity: 11100.98.
+- Cash: 11100.98.
+- Open positions: 0.
+- Realized today: +15.44.
+- Realized total: +1101.00.
+- Unrealized PnL: 0.0.
+- Losses today: 0.
+- Daily loss pct: 0.053.
+- Intraday drawdown pct: 0.053.
+- Self-defense active: false.
+- Self-defense reason: feedback loop clear.
+
+Blocked-entry diagnostic status:
+
+- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` remains live.
+- `blocked_entries_count`: 15.
+- `signals_found`: 58.
+- `visible_blocked_rows_count`: 44.
+- `actionable_reason_coverage_pct`: 97.73.
+- `rows_with_actionable_reason`: 43.
+- `rows_missing_reason_detail`: 1.
+- Remaining missing row is still TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
+- Top blocker category: `extension_chase` with 30 rows.
+- Other categories: `quality_score` 13 rows and `reason_detail_missing` 1 row.
+- Top reasons: `extended_below_5m_ma20`, `score_below_post_harvest_floor`, `entry_score_below_minimum` with extended-starter rank/leader blocks, one futures-bias opening-long block, and the one TEM missing reason.
+
+Top blocked symbols during this check:
+
+- CDE
+- NEM
+- PHYS
+- GLD
+- IAU
+- RGLD
+- AG
+- HL
+- AMZN
+- GDXJ
+
+Top blocked buckets during this check:
+
+- `precious_metals`: 13.
+- `semi_leaders`: 9.
+- `data_center_infra`: 8.
+- `bitcoin_ai_compute`: 6.
+- `small_cap_momentum`: 4.
+- `cloud_cyber_software`: 3.
+- `mega_cap_ai`: 1.
+
+Decision-audit status:
+
+- `decision-audit-consolidation-2026-06-04-v6-chief-advisory-coach` remains live.
+- `post_harvest_outcome`: blocked.
+- `post_harvest_reason`: post_harvest_controlled_redeployment_candidates.
+- `candidate_symbols`: TEM.
+- `entries_count`: 0.
+- `open_positions_count`: 0.
+- `rejected_signals_count`: 15.
+- `self_defense_active`: false.
+- ML rows: 6000.
+- ML labeled rows: 1825.
+- ML observed outcomes: 54.
+- ML predictions: 25.
+- Phase 3A ready: false.
+
+Operational interpretation:
+
+- No repair is required.
+- The July 1 timeout fix remains validated by the very fast 85 ms self-check.
+- The bot is flat in cash after realizing profit and has no active self-defense condition.
+- Scanner activity is healthy; 58 signals were seen.
+- The current no-entry behavior is selective/risk-controlled, not broken.
+- Most visible blocks are extension/chase and quality-score controls, especially in precious metals and related momentum areas.
+- Do not loosen thresholds blindly.
+- Do not promote ML authority yet; Phase 3A is still not ready.
+- Next non-urgent cleanup remains TEM post-harvest reason persistence so the final `reason_not_available_in_state_snapshot` row goes to zero.
+
+## Prior Verification — July 1, 2026 Clean Post-Timeout Self-Check
 
 The operator confirmed Railway logs looked clean and supplied a successful `/paper/self-check` payload at 2026-07-01 12:37:28 CDT after the dynamic-universe v4 source patch.
 
@@ -107,42 +198,27 @@ Portfolio / risk status:
 
 Blocked-entry diagnostic status:
 
-- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` remains live.
+- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` remained live.
 - `blocked_entries_count`: 10.
 - `signals_found`: 59.
 - `visible_blocked_rows_count`: 26.
 - `actionable_reason_coverage_pct`: 96.15.
 - `rows_with_actionable_reason`: 25.
 - `rows_missing_reason_detail`: 1.
-- Remaining missing row is still TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
+- Remaining missing row was TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
 - Top blocker category: `quality_score` with 13 rows.
 - Other categories: `other_or_unclassified` 10 rows, `cooldown` 2 rows, `reason_detail_missing` 1 row.
-- Top reasons: `score_below_post_harvest_floor`, `profit_guard_active`, `cooldown`, `futures_bias_block_opening_longs`, and the one TEM missing reason.
-
-Top blocked symbols during this check:
-
-- MSTR
-- COIN
-- BTDR
-- IREN
-- CORZ
-- APLD
-- HUT
-- WGMI
-- CIFR
-- WULF
 
 Operational interpretation:
 
 - The dynamic-universe startup timeout fix worked.
-- The app is healthy, responsive, and passing required checks.
-- The bot is active enough to detect 59 signals but remains selective.
-- The current blocks are mostly quality/profit-guard/cooldown logic, not symbol hygiene failure.
+- The app was healthy, responsive, and passing required checks.
+- The bot was active enough to detect 59 signals but remained selective.
+- The blocks were mostly quality/profit-guard/cooldown logic, not symbol hygiene failure.
 - Do not loosen thresholds blindly.
-- Do not promote ML authority yet; Phase 3A is still not ready.
-- Next non-urgent cleanup remains the TEM post-harvest reason persistence so the final `reason_not_available_in_state_snapshot` row goes to zero.
+- Do not promote ML authority yet; Phase 3A was still not ready.
 
-## Latest Update — July 1, 2026: Dynamic Universe Startup Timeout Fix
+## Latest Code Update — July 1, 2026: Dynamic Universe Startup Timeout Fix
 
 ### Railway issue observed
 
@@ -430,4 +506,4 @@ Routine post-push validation:
 
 Current next best action:
 
-No immediate repair is required. Railway logs are clean, `/paper/self-check` is responsive again, and required checks are passing. Continue using only `/paper/self-check` for routine validation. The next non-urgent cleanup is to persist the exact blocker reason for the remaining TEM post-harvest `top_candidates_reviewed` row so the final `reason_not_available_in_state_snapshot` row goes to zero.
+No immediate repair is required. `/paper/self-check` is responsive, required checks are passing, the bot is flat in cash, and scanner activity is healthy. Continue using only `/paper/self-check` for routine validation. The next non-urgent cleanup is to persist the exact blocker reason for the remaining TEM post-harvest `top_candidates_reviewed` row so the final `reason_not_available_in_state_snapshot` row goes to zero.
