@@ -2,15 +2,7 @@
 
 ## Standing Update Rule
 
-Every future code/configuration update must also update this `PROJECT_HANDOFF.md` file in the same work session. The handoff entry should include:
-
-- Files changed.
-- New module/version strings.
-- Commit SHA(s).
-- Routes affected.
-- Authority/safety impact.
-- Railway post-redeploy check result or the exact endpoints still needing verification.
-- Next recommended action.
+Every future code/configuration update must also update this `PROJECT_HANDOFF.md` file in the same work session. The handoff entry should include files changed, new module/version strings, commits, routes affected, authority/safety impact, Railway post-redeploy check result or exact endpoints still needing verification, and next recommended action.
 
 This rule exists so the project can be resumed from GitHub without relying on chat history.
 
@@ -29,7 +21,8 @@ Current operating mode:
 - Paper trading only.
 - Live trade authority: none.
 - ML live authority: none.
-- Early paper Phase 3A guarded-advisory mode: active and still confirmed in the July 6 morning self-check.
+- Early paper Phase 3A guarded-advisory mode: active and confirmed in the July 6 morning self-check.
+- New risk-on starter participation valve: added July 6, 2026; awaiting Railway redeploy validation.
 - Strict Phase 3A / stronger authority benchmark: still 150 execution rows and 100 observed outcomes.
 - Routine test link: https://trading-bot-clean.up.railway.app/paper/self-check
 - Do not use heavy diagnostic routes unless intentionally debugging.
@@ -74,9 +67,99 @@ Latest known good routine self-check supplied by operator on July 6, 2026 at 11:
 - Early paper Phase 3A ready: true.
 - Live ML authority: false / none.
 
+## Latest Code Update — July 6, 2026: Risk-On Starter Participation Valve
+
+### Reasoning
+
+The July 6 morning check and operator screenshots showed a broad green morning: S&P 500 was up about 0.68%, QQQ was up about 1.65%, and many individual growth/semiconductor/momentum names appeared green. The bot was healthy and risk-clean but stayed 100% cash while most blockers were extension/FVG confirmation, early-entry reclaim requirements, and near-score-floor starter blocks.
+
+The intended behavior is not to remove those protections. The intended behavior is to add a narrow, paper-only starter exception for broad risk-on mornings so the account can participate with one small starter instead of waiting for a perfect FVG/VWAP/EMA reclaim that may never come on trend-grind days.
+
+### Files changed
+
+- `risk_on_starter_participation_valve.py`
+- `usercustomize.py`
+- `PROJECT_HANDOFF.md`
+
+### New module version
+
+- `risk-on-starter-participation-valve-2026-07-06-v1`
+
+### New usercustomize version
+
+- `usercustomize-risk-on-starter-valve-2026-07-06-v21`
+
+### Commits
+
+- `fe6c32a9808601cbd32a024f1af6ad3d7bea864b`
+  - Added `risk_on_starter_participation_valve.py`.
+  - Patches only `core_entry_pipeline._participation_valve_ok`.
+  - Calls the prior/base participation valve first; only evaluates the new exception if prior valves do not allow the trade.
+  - Allows at most one small paper starter per day and one per cycle.
+  - Uses allocation factor `0.18`.
+  - Requires paper context, high cash, low/no open positions, clean risk, allowed market mode, and risk-on confirmation.
+  - Requires the blocker to be an allowed participation-style blocker such as FVG/opening-range reclaim, extension/chase, entry-score floor, or existing extended-starter rank/raw/rank-score blocks.
+  - Rejects hard blockers such as self-defense, risk halt, cooldown, daily loss, intraday drawdown, missing price, futures blocking opening longs, risk-off/bear/crash context, volume-not-confirmed, trend-not-confirmed, stock-not-green-enough, and relative-edge-too-small.
+  - Does not wrap the main entry loop and does not place trades directly.
+- `fa6bc76bb6962c99d5837dd397f0a43ab74809f4`
+  - Wired `risk_on_starter_participation_valve` into `usercustomize.py` after `extended_leader_starter_valve` and before `controlled_redeployment_starter_sleeve`.
+  - Added `/paper/risk-on-starter-participation-status` to optional one-test metadata.
+  - Added watchdog registration for the new module.
+
+### Route added
+
+- `/paper/risk-on-starter-participation-status`
+
+### Safety / authority impact
+
+- Paper-only participation overlay.
+- Live trade authority remains none.
+- ML live authority remains none.
+- Does not bypass self-defense.
+- Does not bypass risk halts.
+- Does not bypass cooldowns.
+- Does not bypass daily-loss or intraday-drawdown controls.
+- Does not place trades directly.
+- Does not wrap the main entry loop.
+- Does not lower the global entry threshold.
+- Does not open more than one risk-on starter per day.
+- Uses starter allocation only.
+- Existing quality/risk/entry pipeline remains authoritative.
+
+### Post-redeploy checks
+
+Routine check:
+
+https://trading-bot-clean.up.railway.app/paper/self-check
+
+Expected:
+
+- `overall: pass`.
+- `failed_required: []`.
+- `warnings: []`.
+- Self-check remains fast.
+- Early paper Phase 3A remains active.
+- Live authority remains off.
+
+Optional direct check:
+
+https://trading-bot-clean.up.railway.app/paper/risk-on-starter-participation-status
+
+Expected:
+
+- `status: ok`.
+- `patched: true`.
+- `version: risk-on-starter-participation-valve-2026-07-06-v1`.
+- Policy shows max entries per day 1, alloc factor 0.18, paper-only true, live authority none, and no bypass of cooldowns/self-defense/risk halts.
+
+Expected behavior on a broad risk-on morning:
+
+- If SPY/S&P and QQQ-style context is risk-on, the book is mostly cash, risk is clean, and a preferred leadership candidate is blocked only by FVG/extension/near-score-floor logic, the valve may allow one small paper starter.
+- It should still block if the candidate lacks trend/volume confirmation, has hard risk blockers, is in cooldown, or if market context is not risk-on.
+
 ## Latest Verification — July 6, 2026 Morning Self-Check
 
-The operator supplied a successful morning `/paper/self-check` payload at 2026-07-06 11:40:07 CDT.
+The operator supplied a successful morning `/paper/self-check` payload at 2026-07-06 11:40:07 CDT, before the risk-on starter valve was added.
 
 Validation result:
 
@@ -144,20 +227,6 @@ Top blocked symbols during this check:
 - WPM
 - SILJ
 
-Top blocked buckets during this check:
-
-- `semi_leaders`: 17.
-- `precious_metals`: 16.
-- `cloud_cyber_software`: 7.
-- `bitcoin_ai_compute`: 6.
-- `small_cap_momentum`: 5.
-- `benchmark_etf`: 4.
-- `space_stocks`: 4.
-- `data_center_infra`: 3.
-- `energy_leaders`: 2.
-- `mega_cap_ai`: 2.
-- `ai_cloud_breakout`: 1.
-
 Watched momentum symbols:
 
 - Blocked: AMD, ASTS, AVGO, BKSY, CLSK, CORZ, HUT, MU, PL, RKLB, SPCE, WULF.
@@ -165,15 +234,12 @@ Watched momentum symbols:
 
 Operational interpretation:
 
-- No repair is required.
-- The system is healthy, fast, and passing routine checks.
-- Early paper Phase 3A remains active and correctly guarded; live authority is still off.
-- The bot is flat in cash and self-defense is inactive.
-- Current no-entry behavior is selective/risk-controlled, not broken.
-- The major visible block pattern is protective extension/FVG-confirmation logic, especially in semis, precious metals, cloud/software, bitcoin compute, and space/momentum names.
-- Do not loosen thresholds blindly.
-- The audit coverage improved to 98.51%, but the same one TEM post-harvest reason row still needs persistence cleanup.
-- Next non-urgent cleanup remains TEM post-harvest reason persistence so the final `reason_not_available_in_state_snapshot` row goes to zero.
+- No repair was required before this change.
+- The system was healthy, fast, and passing routine checks.
+- Early paper Phase 3A remained active and correctly guarded; live authority was still off.
+- The bot was flat in cash and self-defense was inactive.
+- The major visible block pattern was protective extension/FVG-confirmation logic.
+- The risk-on starter participation valve was added specifically to address this missed-participation pattern without loosening the entire system.
 
 ## Prior Verification — July 2, 2026 Afternoon Early Paper Phase 3A Validation
 
@@ -185,9 +251,7 @@ Validation result:
 - `status: ok`.
 - `failed_required: []`.
 - `warnings: []`.
-- `summary_counts`: pass 2, fail 0, warn 0, linked_only 3.
 - `/paper/self-check` returned quickly with `elapsed_ms: 132.64`.
-- Checked paths were `/health` and `/paper/status` using direct state snapshots.
 - Decision audit changed posture as intended.
 - `phase3a_ready`: true.
 - Chief Advisory Coach next action: run early paper Phase 3A guarded-advisory mode; do not grant live authority.
@@ -204,38 +268,11 @@ Portfolio / risk status:
 - Open positions: 0.
 - Realized today: +112.00.
 - Realized total: +969.68.
-- Unrealized PnL: 0.0.
 - Wins today: 4.
 - Losses today: 2.
-- Daily loss pct: 0.421.
-- Intraday drawdown pct: 0.421.
 - Self-defense active: false.
-- Self-defense reason: feedback loop clear.
-
-Operational interpretation:
-
-- No repair was required.
-- The early paper Phase 3A gate worked as intended in `/paper/self-check`.
-- The system was still paper-only and had not granted live ML authority.
-- The bot was flat in cash and self-defense was inactive.
-- The day was profitable despite two losses, but realized total dipped from the morning snapshot; keep monitoring trade quality while early paper Phase 3A runs.
-- Current no-entry state was selective/risk-controlled, not broken.
-- Do not loosen thresholds blindly.
 
 ## Latest Code Update — July 2, 2026: Early Paper ML Phase 3A Gate
-
-### Reasoning
-
-The original 150-execution-row gate existed to reduce false confidence, overfitting, regime bias, and noisy feedback-loop learning before allowing stronger ML authority. Because the system is still paper-only and has no live-money authority, it is reasonable to start a guarded paper Phase 3A experiment earlier as long as:
-
-- Live authority remains disabled.
-- ML does not bypass risk controls.
-- ML does not lower rule thresholds automatically.
-- ML does not change sizing authority.
-- Existing quality gates, self-defense, cooldowns, and risk controls remain authoritative.
-- The stricter 150-row / 100-observed-outcome standard remains the benchmark before stronger or live authority.
-
-### Code pushed
 
 Files changed:
 
@@ -243,30 +280,17 @@ Files changed:
 - `usercustomize.py`
 - `PROJECT_HANDOFF.md`
 
-New module version:
+Versions:
 
 - `ml-phase3a-early-paper-gate-2026-07-02-v1`
-
-New usercustomize version:
-
 - `usercustomize-ml3a-early-paper-gate-2026-07-02-v20`
 
 Commits:
 
 - `bbd3793118a40052e43e8fd842ffc43efe1a3e61`
-  - Added `ml_phase3a_early_paper_gate.py`.
-  - Adds a paper-only early Phase 3A gate with default thresholds: 75 execution rows, 50 observed outcomes, 100 labeled rows, 10 predictions, and clean risk.
-  - Stores status in `state["ml_phase3a_early_paper_gate"]` and updates `state["ml_phase25"]` with early paper readiness.
-  - Adds `/paper/ml3a-early-paper-status`.
-  - Patches decision-audit advisory functions so `/paper/self-check` can report early paper-3A readiness instead of treating 150 rows as the only transition point.
-  - Does not place trades, does not patch execution functions, does not change sizing, does not lower thresholds, and does not bypass risk controls.
 - `378b6f258cdc3b98683ae1d930266133ebb136f4`
-  - Wired the early paper Phase 3A gate into `usercustomize.py` startup and watchdog registration.
-  - Added `/paper/ml3a-early-paper-status` to optional one-test metadata.
 - `fe4bbf5f4d94fef96d5f7716cbce8a8327f35ddf`
-  - Updated handoff with early paper Phase 3A rationale, expected checks, and authority guardrails.
 - `6a94f207350e5081b2e8b8ee280d88f9e2da96cc`
-  - Updated handoff with July 2 afternoon early paper Phase 3A validation.
 
 Route added:
 
@@ -285,65 +309,6 @@ Safety / authority impact:
 - Does not bypass risk controls.
 - Does not disable self-defense, cooldowns, or quality gates.
 
-## Prior Verification — July 2, 2026 Morning Self-Check
-
-The operator supplied a successful morning `/paper/self-check` payload at 2026-07-02 11:06:34 CDT.
-
-Validation result:
-
-- `overall: pass`.
-- `status: ok`.
-- `failed_required: []`.
-- `warnings: []`.
-- `summary_counts`: pass 2, fail 0, warn 0, linked_only 3.
-- `/paper/self-check` returned quickly with `elapsed_ms: 85.04`.
-- Checked paths were `/health` and `/paper/status` using direct state snapshots.
-- `one-test-policy-2026-06-03-decision-audit-summary` remains active.
-- Mobile-safe mode remains active.
-
-Portfolio / risk status:
-
-- Equity: 11100.98.
-- Cash: 11100.98.
-- Open positions: 0.
-- Realized today: +15.44.
-- Realized total: +1101.00.
-- Unrealized PnL: 0.0.
-- Losses today: 0.
-- Daily loss pct: 0.053.
-- Intraday drawdown pct: 0.053.
-- Self-defense active: false.
-- Self-defense reason: feedback loop clear.
-
-Blocked-entry diagnostic status:
-
-- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` remained live.
-- `blocked_entries_count`: 15.
-- `signals_found`: 58.
-- `visible_blocked_rows_count`: 44.
-- `actionable_reason_coverage_pct`: 97.73.
-- `rows_with_actionable_reason`: 43.
-- `rows_missing_reason_detail`: 1.
-- Remaining missing row was TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
-- Top blocker category: `extension_chase` with 30 rows.
-- Other categories: `quality_score` 13 rows and `reason_detail_missing` 1 row.
-
-Decision-audit status before early paper-3A gate:
-
-- `decision-audit-consolidation-2026-06-04-v6-chief-advisory-coach` was live.
-- `post_harvest_outcome`: blocked.
-- `post_harvest_reason`: post_harvest_controlled_redeployment_candidates.
-- `candidate_symbols`: TEM.
-- `entries_count`: 0.
-- `open_positions_count`: 0.
-- `rejected_signals_count`: 15.
-- `self_defense_active`: false.
-- ML rows: 6000.
-- ML labeled rows: 1825.
-- ML observed outcomes: 54.
-- ML predictions: 25.
-- Strict Phase 3A ready: false.
-
 ## Prior Verification — July 1, 2026 Clean Post-Timeout Self-Check
 
 The operator confirmed Railway logs looked clean and supplied a successful `/paper/self-check` payload at 2026-07-01 12:37:28 CDT after the dynamic-universe v4 source patch.
@@ -354,17 +319,7 @@ Validation result:
 - `status: ok`.
 - `failed_required: []`.
 - `warnings: []`.
-- `summary_counts`: pass 2, fail 0, warn 0, linked_only 3.
 - `/paper/self-check` returned quickly with `elapsed_ms: 286.92`, confirming the timeout condition was resolved.
-- Checked paths were `/health` and `/paper/status` using direct state snapshots.
-- Railway logs were reported clean by the operator after redeploy.
-
-Operational interpretation:
-
-- The dynamic-universe startup timeout fix worked.
-- The app was healthy, responsive, and passing required checks.
-- The bot was active enough to detect 59 signals but remained selective.
-- The blocks were mostly quality/profit-guard/cooldown logic, not symbol hygiene failure.
 
 ## Latest Code Update — July 1, 2026: Dynamic Universe Startup Timeout Fix
 
@@ -373,19 +328,13 @@ Files changed:
 - `dynamic_universe_builder.py`
 - `PROJECT_HANDOFF.md`
 
-New dynamic universe version:
+Version:
 
 - `dynamic-universe-builder-2026-07-01-v4-source-symbol-hygiene`
 
 Commit:
 
 - `3ef1a556351afaf8f7a9cfd1f50f7e0353299f97`
-  - Hardened `dynamic_universe_builder.py` at the source.
-  - Added reserved-word/date/numeric/no-data symbol filtering directly in `_symbol()` and `_unique()`.
-  - Stopped `_flatten_symbols()` from scraping free-floating strings in state, which is where labels like `LONG`, `AUTO`, `BLOCKED`, and dates leaked from.
-  - Removed known provider/no-data instruments from default theme baskets: `CIFRW`, `SATS`, `BITF`, `SDIG`, `PSTG`.
-  - Changed startup/register/apply behavior to lightweight patch-only mode.
-  - Deferred the expensive yfinance-backed universe build until `scan_signals()` actually runs or `/paper/dynamic-universe-builder-status?force=1` is explicitly requested.
 
 Safety / authority impact:
 
@@ -404,13 +353,9 @@ Files changed:
 - `usercustomize.py`
 - `PROJECT_HANDOFF.md`
 
-New module version:
+Version:
 
 - `symbol-hygiene-guard-2026-07-01-v1-invalid-token-filter`
-
-New usercustomize version at that time:
-
-- `usercustomize-symbol-hygiene-guard-2026-07-01-v19`
 
 Commits:
 
@@ -422,29 +367,6 @@ Route added:
 
 - `/paper/symbol-hygiene-guard-status`
 
-Interpretation:
-
-This wrapper remains useful as an additional runtime safety net, but the stronger fix was the direct v4 source patch to `dynamic_universe_builder.py`.
-
-## Prior Verification — July 1, 2026 Afternoon Test
-
-The operator supplied a post-redeploy afternoon `/paper/self-check` payload at 2026-07-01 12:18:36 CDT.
-
-Validation result:
-
-- `overall: pass`.
-- `status: ok`.
-- `failed_required: []`.
-- `warnings: []`.
-- `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` was live.
-- `blocked_entry_reason_coverage_pct`: 97.73.
-- `blocked_entry_rows_missing_reason_detail`: 1.
-
-Operational interpretation:
-
-- The bot was healthy and flat with 100% cash, no open positions, no self-defense, and clean required checks.
-- It was seeing scanner activity but staying selective because candidates were mostly failing quality score, extension/chase, rank, trend, or volume confirmation gates.
-
 ## Latest Code Update — June 30, 2026: Blocked Reason Cleanup
 
 Files changed:
@@ -452,7 +374,7 @@ Files changed:
 - `blocked_entry_reason_audit.py`
 - `blocked_entry_reason_selfcheck_overlay.py`
 
-Current versions after cleanup:
+Versions:
 
 - `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup`
 - `blocked-entry-reason-selfcheck-overlay-2026-06-30-v3-placeholder-cleanup`
@@ -552,10 +474,10 @@ Routine post-push validation:
 
 1. Use only `/paper/self-check` unless deeper diagnostics are intentionally needed.
 2. Confirm `overall`, `status`, `failed_required`, `warnings`, `health`, `status`, `operator_summary`, and any changed module version strings.
-3. For route-specific module work, also check that module's status endpoint when required by the change.
+3. For route-specific module work, optionally check `/paper/risk-on-starter-participation-status` after the July 6 valve update.
 4. Do not run mutating endpoints unless specifically repairing or executing a known paper-trade operation.
 5. Update this handoff after the code/config change and after interpreting the latest check.
 
 Current next best action:
 
-No immediate repair is required. Continue using only `/paper/self-check` for routine validation while early paper Phase 3A guarded-advisory mode runs. The July 6 morning state is flat in cash with clean risk and no drawdown. Watch whether the early-entry/FVG confirmation and extension-chase blocks repeatedly prevent strong later winners before loosening anything. Keep live ML authority off until the strict benchmark and deeper walk-forward/MAE-MFE validation justify stronger authority. The next non-urgent cleanup remains TEM post-harvest reason persistence.
+After Railway redeploys, run `/paper/self-check`. Optional direct route: `/paper/risk-on-starter-participation-status`. If the route is patched and the next broad risk-on morning occurs with clean risk and high cash, monitor whether the valve allows one small starter in a preferred leader rather than blocking every FVG/extension candidate. Keep live ML authority off until the strict benchmark and deeper walk-forward/MAE-MFE validation justify stronger authority. The next non-urgent cleanup remains TEM post-harvest reason persistence.
