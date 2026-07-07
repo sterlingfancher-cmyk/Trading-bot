@@ -19,7 +19,7 @@ import os
 import sys
 from typing import Any, Dict, Iterable, Tuple
 
-VERSION = "risk-on-starter-participation-valve-2026-07-06-v1"
+VERSION = "risk-on-starter-participation-valve-2026-07-07-v2-opening-warmup"
 ENABLED = os.environ.get("RISK_ON_STARTER_VALVE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 MAX_REVIEWED_RANK = int(os.environ.get("RISK_ON_STARTER_MAX_REVIEWED_RANK", "8"))
 MAX_ENTRIES_PER_DAY = int(os.environ.get("RISK_ON_STARTER_MAX_ENTRIES_PER_DAY", "1"))
@@ -39,15 +39,15 @@ PREFERRED_BUCKETS = {s.strip() for s in os.environ.get(
 ).split(",") if s.strip()}
 PREFERRED_SYMBOLS = {s.strip().upper() for s in os.environ.get(
     "RISK_ON_STARTER_PREFERRED_SYMBOLS",
-    "NVDA,AMD,AVGO,MU,LRCX,DELL,HPE,STX,WDC,SNDK,GEV,GLW,ON,NBIS,NVTS,ASTS,RKLB,RDW,LUNR,SPCE,BKSY,PL,CIFR,CLSK,CORZ,HUT,IREN,MARA,RIOT,WULF,HIVE,BTDR",
+    "NVDA,AMD,AVGO,MU,LRCX,DELL,HPE,STX,WDC,SNDK,GEV,GLW,ON,NBIS,NVTS,ASTS,RKLB,RDW,LUNR,SPCE,BKSY,PL,CIFR,CLSK,CORZ,HUT,IREN,MARA,RIOT,WULF,HIVE,BTDR,SNOW,DUOL,PLTR",
 ).split(",") if s.strip()}
 ALLOWED_BLOCK_TOKENS = tuple(s.strip().lower() for s in os.environ.get(
     "RISK_ON_STARTER_ALLOWED_BLOCK_TOKENS",
-    "early_entry_requires_fvg_reclaim_vwap_ema_confirmation,extended_above_5m_ma20,extension_chase,entry_score_below_minimum,score_below_post_harvest_floor,extended_starter_rank_too_low,extended_starter_raw_score_too_low,extended_starter_rank_score_too_low,participation_valve_extension_or_chase_block,relative_strength_leader_exception_block",
+    "opening_warmup_active,early_entry_requires_fvg_reclaim_vwap_ema_confirmation,extended_above_5m_ma20,extension_chase,entry_score_below_minimum,score_below_post_harvest_floor,extended_starter_rank_too_low,extended_starter_raw_score_too_low,extended_starter_rank_score_too_low,participation_valve_extension_or_chase_block,relative_strength_leader_exception_block",
 ).split(",") if s.strip())
 HARD_BLOCK_TOKENS = tuple(s.strip().lower() for s in os.environ.get(
     "RISK_ON_STARTER_HARD_BLOCK_TOKENS",
-    "self_defense,risk_halted,halted,daily_loss,intraday_drawdown,cooldown,already_held,missing_price,no_price,market_regime_block,market_mode_not_allowed,bear,crash,risk_off,futures_block_opening_longs,futures_bias_block_opening_longs,volume_not_confirmed,trend_not_confirmed,stock_not_green_enough,relative_edge_too_small",
+    "self_defense,risk_halted,halted,daily_loss,intraday_drawdown,cooldown,already_held,daily_limit,cycle_limit,missing_price,no_price,market_regime_block,bear,crash,risk_off,futures_block_opening_longs,futures_bias_block_opening_longs,volume_not_confirmed,trend_not_confirmed,stock_not_green_enough,relative_edge_too_small",
 ).split(",") if s.strip())
 
 REGISTERED_APP_IDS: set[int] = set()
