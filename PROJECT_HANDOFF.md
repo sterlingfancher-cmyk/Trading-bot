@@ -1,4 +1,4 @@
-# Automated Trading Project Handoff — Updated July 7, 2026
+# Automated Trading Project Handoff — Updated July 8, 2026
 
 ## Standing Update Rule
 
@@ -21,55 +21,56 @@ Current operating mode:
 - Paper trading only.
 - Live trade authority: none.
 - ML live authority: none.
-- Early paper Phase 3A guarded-advisory mode: active and confirmed in the July 7 afternoon self-check.
-- Risk-on starter participation valve: v2 added July 7, 2026; awaiting Railway redeploy validation.
+- Early paper Phase 3A guarded-advisory mode: active and confirmed in the July 8 morning self-check.
+- Risk-on starter participation valve: v2 deployed; July 8 self-check confirms health/safety is clean, but the market context included `market_risk_not_ok` blockers, so no further loosening is recommended from this snapshot.
 - Strict Phase 3A / stronger authority benchmark: still 150 execution rows and 100 observed outcomes.
 - Routine test link: https://trading-bot-clean.up.railway.app/paper/self-check
+- Optional risk-on starter valve route: https://trading-bot-clean.up.railway.app/paper/risk-on-starter-participation-status
 - Do not use heavy diagnostic routes unless intentionally debugging.
 - Do not run repair routes unless a specific state issue appears.
 - Do not run execution routes after hours.
 - Do not run mutating Railway endpoints during routine post-push checks.
 
-Latest known good routine self-check supplied by operator on July 7, 2026 at 14:19:58 CDT showed:
+Latest known good routine self-check supplied by operator on July 8, 2026 at 11:48:58 CDT showed:
 
 - Overall: pass.
 - Status: ok.
 - Failed required: none.
 - Warnings: none.
-- Elapsed time: 199.93 ms.
+- Elapsed time: 80.62 ms.
 - Checked internal paths: /health and /paper/status.
 - Persistent storage configured: true.
 - State file: /data/state.json.
-- State size: 15,041,542 bytes.
-- Trades count: 85.
-- Execution rows: 85 / 150.
-- Cash: 10987.98.
-- Equity: 10987.98.
+- State size: 14,683,010 bytes.
+- Trades count: 88.
+- Execution rows: 88 / 150.
+- Cash: 10973.83.
+- Equity: 10973.83.
 - Open positions: 0.
-- Realized today: 0.0.
-- Realized total: +988.00.
+- Realized today: -25.01.
+- Realized total: +973.85.
 - Unrealized PnL: 0.0.
 - Wins today: 0.
 - Wins total: 36.
-- Losses today: 0.
-- Losses total: 16.
+- Losses today: 1.
+- Losses total: 19.
 - Daily loss pct: 0.0.
 - Intraday drawdown pct: 0.0.
 - Self-defense active: false.
 - Self-defense reason: feedback loop clear.
-- Scanner signals found: 23.
-- Scanner-audit blocked entries: 103.
-- Decision-audit blocked entries: 10.
+- Scanner signals found: 1.
+- Scanner-audit blocked entries: 0.
+- Decision-audit blocked entries: 0.
 - ML rows: 6000.
-- ML labeled rows: 1910.
-- ML observed outcomes: 52.
-- ML predictions: 25.
+- ML labeled rows: 1875.
+- ML observed outcomes: 55.
+- ML predictions: 15.
 - Early paper Phase 3A ready: true.
 - Live ML authority: false / none.
 
-## Latest Verification — July 7, 2026 Afternoon Self-Check
+## Latest Verification — July 8, 2026 Morning Self-Check
 
-The operator supplied a successful afternoon `/paper/self-check` payload at 2026-07-07 14:19:58 CDT after the initial risk-on starter participation valve was deployed.
+The operator supplied a successful morning `/paper/self-check` payload at 2026-07-08 11:48:58 CDT after the July 7 risk-on starter valve v2 patch.
 
 Validation result:
 
@@ -78,7 +79,7 @@ Validation result:
 - `failed_required: []`.
 - `warnings: []`.
 - `summary_counts`: pass 2, fail 0, warn 0, linked_only 3.
-- `/paper/self-check` returned quickly with `elapsed_ms: 199.93`.
+- `/paper/self-check` returned very quickly with `elapsed_ms: 80.62`.
 - Checked paths were `/health` and `/paper/status` using direct state snapshots.
 - `one-test-policy-2026-06-03-decision-audit-summary` remains active.
 - Mobile-safe mode remains active.
@@ -87,8 +88,8 @@ Early paper Phase 3A status:
 
 - Early paper Phase 3A guarded-advisory mode remains active.
 - Decision audit still says: run early paper Phase 3A guarded-advisory mode; do not grant live authority.
-- Trade Quality Coach: `execution_rows=85/150`; early paper Phase 3A gate is open with live authority off; continue collecting rows for the strict benchmark.
-- ML counts: rows 6000, labeled 1910, observed outcomes 52, predictions 25.
+- Trade Quality Coach: `execution_rows=88/150`; early paper Phase 3A gate is open with live authority off; continue collecting rows for the strict benchmark.
+- ML counts: rows 6000, labeled 1875, observed outcomes 55, predictions 15.
 - `phase3a_ready`: true.
 - `advisory_only`: true.
 - `authority_changed`: false.
@@ -96,14 +97,14 @@ Early paper Phase 3A status:
 
 Portfolio / risk status:
 
-- Equity: 10987.98.
-- Cash: 10987.98.
+- Equity: 10973.83.
+- Cash: 10973.83.
 - Open positions: 0.
-- Realized today: 0.0.
-- Realized total: +988.00.
+- Realized today: -25.01.
+- Realized total: +973.85.
 - Unrealized PnL: 0.0.
 - Wins today: 0.
-- Losses today: 0.
+- Losses today: 1.
 - Daily loss pct: 0.0.
 - Intraday drawdown pct: 0.0.
 - Self-defense active: false.
@@ -112,42 +113,55 @@ Portfolio / risk status:
 Blocked-entry diagnostic status:
 
 - `blocked-entry-reason-audit-2026-06-30-v3-placeholder-cleanup` remains live.
-- `blocked_entries_count`: 103 in scanner audit / 10 in decision audit.
-- `signals_found`: 23.
-- `visible_blocked_rows_count`: 75.
-- `actionable_reason_coverage_pct`: 98.67.
-- `rows_with_actionable_reason`: 74.
+- `blocked_entries_count`: 0 in scanner audit / 0 in decision audit.
+- `signals_found`: 1.
+- `visible_blocked_rows_count`: 29.
+- `actionable_reason_coverage_pct`: 96.55.
+- `rows_with_actionable_reason`: 28.
 - `rows_missing_reason_detail`: 1.
 - Remaining missing row is still TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
-- Top blocker category: `other_or_unclassified` with 46 rows.
-- Other categories: `extension_chase` 15 rows, `quality_score` 13 rows, and `reason_detail_missing` 1 row.
-- Top reasons included `early_entry_requires_fvg_reclaim_vwap_ema_confirmation` 36 rows, `extended_below_5m_ma20` 13 rows, `score_below_post_harvest_floor` 12 rows, `opening_warmup_active` 10 rows, `extended_above_5m_ma20` 2 rows, one futures-bias opening-long block, and the single TEM missing-reason row.
+- Top blocker category: `quality_score` with 13 rows.
+- Other categories: `risk_control` 9 rows, `extension_chase` 6 rows, and `reason_detail_missing` 1 row.
+- Top reasons included `score_below_post_harvest_floor`, `extended_above_5m_ma20`, and multiple `market_risk_not_ok` combinations with `trend_not_confirmed`, `volume_not_confirmed`, and `wait_for_pullback_not_chasing_high`.
 
-Top blocked symbols during this check:
+Top visible blocked symbols during this check:
 
-- SNOW
-- HPE
-- DUOL
+- AVGO
+- MPWR
+- UCTT
 - DELL
-- WPM
-- AEM
-- PHYS
-- GLD
-- IAU
-- PLTR
+- TEM
+- LUNR
+- TXN
+- CRDO
+- SNDK
+- ANET
+- MU
+- SMCI
+- VRT
+- WGMI
+- HUT
+- CLSK
+- WULF
+- IESC
+- PANW
+- NVDA
 
 Watched momentum symbols:
 
-- Blocked: AMD, AVGO, CLSK, CORZ, DELL, HPE, HUT, MU, PL, SATL, WULF.
-- Seen: AMD, AVGO, BKSY, CLSK, CORZ, DELL, HPE, HUT, LRCX, MU, PL, SATL, SPCX, WULF.
+- Blocked: AVGO, CLSK, CORZ, DELL, HUT, LUNR, MU, PL, WULF.
+- Seen: AVGO, CLSK, CORZ, DELL, HUT, LUNR, MU, PL, WULF.
 
 Operational interpretation:
 
-- No repair was required from a health/risk standpoint.
-- The system was healthy, fast, and passing routine checks.
-- The bot was flat in cash and self-defense was inactive.
-- The new valve did not yet solve the missed-participation pattern because `opening_warmup_active` was a major blocker and v1 did not explicitly allow that blocker.
-- The v2 patch below was added to allow a narrow opening-warmup starter on confirmed risk-on days while preserving the one-starter cap and hard safety controls.
+- No repair is required.
+- The system is healthy, fast, and passing routine checks.
+- The bot is flat in cash and self-defense is inactive.
+- The one realized paper loss today is small relative to account equity and did not trigger drawdown/self-defense conditions.
+- The July 7 risk-on starter v2 change should not be loosened further from this snapshot because the current blockers include `market_risk_not_ok`, `trend_not_confirmed`, and `volume_not_confirmed`; those are hard safety/quality blockers that v2 intentionally keeps intact.
+- Current no-entry state is selective/risk-controlled, not broken.
+- Continue monitoring whether v2 allows one starter on a true broad risk-on morning where the blocker is only opening-warmup/FVG/extension/near-score-floor logic.
+- Next non-urgent cleanup remains TEM post-harvest reason persistence so the final `reason_not_available_in_state_snapshot` row goes to zero.
 
 ## Latest Code Update — July 7, 2026: Risk-On Starter Participation Valve v2
 
@@ -160,7 +174,7 @@ The July 7 afternoon self-check remained healthy but showed no starter entries a
 - `risk_on_starter_participation_valve.py`
 - `PROJECT_HANDOFF.md`
 
-### New module version
+### Module version
 
 - `risk-on-starter-participation-valve-2026-07-07-v2-opening-warmup`
 
@@ -176,6 +190,8 @@ The July 7 afternoon self-check remained healthy but showed no starter entries a
   - Keeps live authority off.
   - Keeps self-defense, risk halt, cooldown, daily-loss, intraday-drawdown, missing-price, risk-off/bear/crash, volume-not-confirmed, trend-not-confirmed, stock-not-green-enough, and weak-relative-edge blockers intact.
   - Removes prior-valve `market_mode_not_allowed` text from the default hard-block list so the module can use its own risk-on context check instead of being blocked by stale or narrower upstream market-mode text.
+- `07a28ed47504a2f0294b805de9351700155f8b7a`
+  - Updated handoff with July 7 afternoon self-check and v2 patch notes.
 
 ### Route
 
@@ -196,38 +212,6 @@ The July 7 afternoon self-check remained healthy but showed no starter entries a
 - Does not open more than one risk-on starter per day.
 - Uses starter allocation only.
 - Existing quality/risk/entry pipeline remains authoritative.
-
-### Post-redeploy checks
-
-Routine check:
-
-https://trading-bot-clean.up.railway.app/paper/self-check
-
-Expected:
-
-- `overall: pass`.
-- `failed_required: []`.
-- `warnings: []`.
-- Self-check remains fast.
-- Early paper Phase 3A remains active.
-- Live authority remains off.
-
-Optional direct check:
-
-https://trading-bot-clean.up.railway.app/paper/risk-on-starter-participation-status
-
-Expected:
-
-- `status: ok`.
-- `patched: true`.
-- `version: risk-on-starter-participation-valve-2026-07-07-v2-opening-warmup`.
-- Policy shows max entries per day 1, alloc factor 0.18, paper-only true, live authority none, and no bypass of cooldowns/self-defense/risk halts.
-- Allowed block tokens should include `opening_warmup_active`.
-
-Expected behavior on a broad risk-on morning:
-
-- If SPY/S&P and QQQ-style context is risk-on, the book is mostly cash, risk is clean, and a preferred leadership candidate is blocked only by opening warmup, FVG/extension, or near-score-floor logic, the valve may allow one small paper starter.
-- It should still block if the candidate lacks trend/volume confirmation, has hard risk blockers, is in cooldown, or if market context is not risk-on.
 
 ## Prior Code Update — July 6, 2026: Risk-On Starter Participation Valve v1
 
@@ -491,4 +475,4 @@ Routine post-push validation:
 
 Current next best action:
 
-After Railway redeploys v2, run `/paper/self-check`. Optional direct route: `/paper/risk-on-starter-participation-status`. Confirm v2 is patched and that allowed block tokens include `opening_warmup_active`. If the next broad risk-on morning occurs with clean risk and high cash, monitor whether the valve allows one small starter in a preferred leader instead of blocking every opening-warmup/FVG candidate. Keep live ML authority off until the strict benchmark and deeper walk-forward/MAE-MFE validation justify stronger authority. The next non-urgent cleanup remains TEM post-harvest reason persistence.
+No immediate repair is required. Continue using `/paper/self-check` for routine validation. The July 8 morning check is fast and passing, but this is not a reason to loosen the v2 valve because the visible blockers include `market_risk_not_ok`, `trend_not_confirmed`, and `volume_not_confirmed`. Those are intentionally hard blockers. Watch for a true broad risk-on morning where the blocker is only opening-warmup/FVG/extension/near-score-floor logic; that is the condition the v2 valve is intended to address. Keep live ML authority off until the strict benchmark and deeper walk-forward/MAE-MFE validation justify stronger authority. The next non-urgent cleanup remains TEM post-harvest reason persistence.
