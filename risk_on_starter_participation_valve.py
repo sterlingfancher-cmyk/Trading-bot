@@ -19,7 +19,7 @@ import os
 import sys
 from typing import Any, Dict, Iterable, Tuple
 
-VERSION = "risk-on-starter-participation-valve-2026-07-07-v2-opening-warmup"
+VERSION = "risk-on-starter-participation-valve-2026-07-09-v3-telemetry"
 ENABLED = os.environ.get("RISK_ON_STARTER_VALVE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 MAX_REVIEWED_RANK = int(os.environ.get("RISK_ON_STARTER_MAX_REVIEWED_RANK", "8"))
 MAX_ENTRIES_PER_DAY = int(os.environ.get("RISK_ON_STARTER_MAX_ENTRIES_PER_DAY", "1"))
@@ -32,6 +32,7 @@ ALLOC_FACTOR = float(os.environ.get("RISK_ON_STARTER_ALLOC_FACTOR", "0.18"))
 MAX_DAILY_LOSS_PCT = float(os.environ.get("RISK_ON_STARTER_MAX_DAILY_LOSS_PCT", "0.00"))
 MAX_INTRADAY_DRAWDOWN_PCT = float(os.environ.get("RISK_ON_STARTER_MAX_INTRADAY_DRAWDOWN_PCT", "0.10"))
 MIN_RISK_SCORE = float(os.environ.get("RISK_ON_STARTER_MIN_RISK_SCORE", "62"))
+TELEMETRY_MAX_ROWS = int(os.environ.get("RISK_ON_STARTER_TELEMETRY_MAX_ROWS", "40"))
 ALLOWED_MODES = {s.strip().lower() for s in os.environ.get("RISK_ON_STARTER_ALLOWED_MODES", "risk_on,constructive").split(",") if s.strip()}
 PREFERRED_BUCKETS = {s.strip() for s in os.environ.get(
     "RISK_ON_STARTER_PREFERRED_BUCKETS",
@@ -100,15 +101,71 @@ def _d(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _l(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
 def _portfolio(core: Any) -> Dict[str, Any]:
     try:
         return getattr(core, "portfolio", {}) or {}
     except Exception:
         return {}
+
+
+def _state(core: Any = None) -> Dict[str, Any]:
+    core = core or _mod()
+    if core is not None:
+        try:
+            fn = getattr(core, "load_state", None)
+            if callable(fn):
+                row = fn()
+                return row if isinstance(row, dict) else {}
+        except Exception:
+            pass
+    return _portfolio(core)
+
+
+def _save_state(core: Any, state: Dict[str, Any]) -> bool:
+    if not isinstance(state, dict):
+        return False
+    core = core or _mod()
+    if core is not None:
+        try:
+            fn = getattr(core, "save_state", None)
+            if callable(fn):
+                fn(state)
+                try:
+                    setattr(core, "portfolio", state)
+                except Exception:
+                    pass
+                return True
+        except Exception:
+            pass
+    try:
+        if core is not None and hasattr(core, "portfolio"):
+            setattr(core, "portfolio", state)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _json_safe(value: Any, depth: int = 0) -> Any:
+    if depth > 6:
+        return str(value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "item"):
+        try:
+            return _json_safe(value.item(), depth + 1)
+        except Exception:
+            return str(value)
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for key, item in value.items():
+            if callable(item):
+                continue
+            out[str(key)] = _json_safe(item, depth + 1)
+        return out
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item, depth + 1) for item in list(value)[:80]]
+    return str(value)
 
 
 def _positions(core: Any) -> Dict[str, Any]:
@@ -280,45 +337,143 @@ def _quality_block_allowed(signal: Dict[str, Any], quality_info: Any, base_info:
     return True, {"reason": "risk_on_starter_block_reason_allowed", "matched_tokens": allowed_hits[:8]}
 
 
-def _patched_participation_valve_ok(core: Any, signal: Dict[str, Any], params: Dict[str, Any], market: Dict[str, Any], quality_info: Any, rank_index: int, entries_this_cycle: int, valve_entries_this_cycle: int):
-    global _LAST_STATUS
-    original = _ORIGINAL_FN
-    if callable(original):
-        ok, info = original(core, signal, params, market, quality_info, rank_index, entries_this_cycle, valve_entries_this_cycle)
-        if ok:
-            _LAST_STATUS = {"status": "passthrough_allowed", "reason": "prior_participation_valve_allowed", "latest": info}
-            return ok, info
-    else:
-        info = {"reason": "prior_participation_valve_missing"}
+def _state_telemetry(core: Any = None) -> Dict[str, Any]:
+    state = _state(core)
+    telemetry = state.get("risk_on_starter_participation_valve") if isinstance(state, dict) else {}
+    return telemetry if isinstance(telemetry, dict) else {}
 
+
+def _persist_evaluation(core: Any, status: str, payload: Dict[str, Any]) -> None:
+    global _LAST_STATUS
+    payload = _json_safe(payload)
+    now_text = _now(core)
+    reason = payload.get("reason") if isinstance(payload, dict) else None
+    row = {
+        "generated_local": now_text,
+        "version": VERSION,
+        "status": status,
+        "reason": reason,
+        "symbol": payload.get("symbol"),
+        "bucket": payload.get("bucket"),
+        "side": payload.get("side"),
+        "rank_index": payload.get("rank_index"),
+        "score": payload.get("score"),
+        "rank_score": payload.get("rank_score"),
+        "cash_pct": payload.get("cash_pct"),
+        "open_positions_count": payload.get("open_positions_count"),
+        "quality_reason": payload.get("quality_reason"),
+        "prior_reason": _d(payload.get("prior_participation_result")).get("reason"),
+        "quality_block": payload.get("quality_block"),
+        "risk": payload.get("risk"),
+        "hard_block_tokens": payload.get("hard_block_tokens"),
+        "matched_tokens": payload.get("matched_tokens") or _d(payload.get("quality_block")).get("matched_tokens"),
+        "allowed_tokens": payload.get("allowed_tokens"),
+    }
+    row = _json_safe(row)
+    latest = {"status": status, "updated_local": now_text, "latest": payload}
+    _LAST_STATUS = latest
+
+    state = _state(core)
+    if not isinstance(state, dict):
+        return
+    telemetry = state.setdefault("risk_on_starter_participation_valve", {})
+    if not isinstance(telemetry, dict):
+        telemetry = {}
+        state["risk_on_starter_participation_valve"] = telemetry
+    telemetry["version"] = VERSION
+    telemetry["enabled"] = bool(ENABLED)
+    telemetry["patched"] = bool(_PATCHED)
+    telemetry["updated_local"] = now_text
+    telemetry["last_status"] = status
+    telemetry["last_reason"] = reason
+    telemetry["last_symbol"] = row.get("symbol")
+    telemetry["last_bucket"] = row.get("bucket")
+    telemetry["last_evaluation"] = row
+    telemetry["last"] = latest
+    telemetry["policy_snapshot"] = {
+        "max_entries_per_day": MAX_ENTRIES_PER_DAY,
+        "max_entries_per_cycle": MAX_ENTRIES_PER_CYCLE,
+        "alloc_factor": ALLOC_FACTOR,
+        "min_cash_pct": MIN_CASH_PCT,
+        "min_raw_score": MIN_RAW_SCORE,
+        "min_rank_score": MIN_RANK_SCORE,
+        "min_risk_score": MIN_RISK_SCORE,
+        "allowed_modes": sorted(ALLOWED_MODES),
+        "preferred_buckets": sorted(PREFERRED_BUCKETS),
+        "hard_block_tokens": list(HARD_BLOCK_TOKENS),
+        "allowed_block_tokens": list(ALLOWED_BLOCK_TOKENS),
+    }
+    counters = telemetry.setdefault("counters", {})
+    if isinstance(counters, dict):
+        counters["evaluations_total"] = _safe_int(counters.get("evaluations_total"), 0) + 1
+        counters[f"{status}_total"] = _safe_int(counters.get(f"{status}_total"), 0) + 1
+    recent = telemetry.setdefault("recent_evaluations", [])
+    if not isinstance(recent, list):
+        recent = []
+    recent.append(row)
+    telemetry["recent_evaluations"] = recent[-max(1, TELEMETRY_MAX_ROWS):]
+    _save_state(core, state)
+
+
+def _latest_status(core: Any = None) -> Dict[str, Any]:
+    if _LAST_STATUS:
+        return dict(_LAST_STATUS)
+    telemetry = _state_telemetry(core)
+    if telemetry.get("last"):
+        return _d(telemetry.get("last"))
+    if telemetry.get("last_evaluation"):
+        return {
+            "status": telemetry.get("last_status"),
+            "updated_local": telemetry.get("updated_local"),
+            "latest": telemetry.get("last_evaluation"),
+        }
+    return {}
+
+
+def _base_row(core: Any, signal: Dict[str, Any], quality_info: Any, rank_index: int, info: Dict[str, Any]) -> Dict[str, Any]:
     symbol = _symbol(signal)
-    side = _side(signal)
     score = _safe_float(signal.get("score"), 0.0)
     rank_score = _safe_float(signal.get("core_entry_rank_score"), score)
-    bucket = _bucket(core, symbol, signal)
-    cash_pct = _cash_pct(core)
-    base = {
+    return {
         "version": VERSION,
         "symbol": symbol,
-        "side": side,
-        "bucket": bucket,
+        "side": _side(signal),
+        "bucket": _bucket(core, symbol, signal),
         "rank_index": rank_index,
         "score": round(score, 6),
         "rank_score": round(rank_score, 6),
         "quality_reason": _quality_reason(quality_info),
-        "cash_pct": cash_pct,
+        "cash_pct": _cash_pct(core),
         "open_positions_count": len(_positions(core)),
         "prior_participation_result": info,
     }
 
+
+def _patched_participation_valve_ok(core: Any, signal: Dict[str, Any], params: Dict[str, Any], market: Dict[str, Any], quality_info: Any, rank_index: int, entries_this_cycle: int, valve_entries_this_cycle: int):
+    original = _ORIGINAL_FN
+    info: Dict[str, Any] = {"reason": "prior_participation_valve_missing"}
+    if callable(original):
+        ok, raw_info = original(core, signal, params, market, quality_info, rank_index, entries_this_cycle, valve_entries_this_cycle)
+        info = raw_info if isinstance(raw_info, dict) else {"reason": str(raw_info)}
+        if ok:
+            payload = {
+                **_base_row(core, signal, quality_info, rank_index, info),
+                "reason": "prior_participation_valve_allowed",
+                "prior_allowed": True,
+            }
+            _persist_evaluation(core, "passthrough_allowed", payload)
+            return ok, info
+
+    base = _base_row(core, signal, quality_info, rank_index, info)
+
     def blocked(reason: str, **extra: Any):
         payload = {**base, "reason": reason, **extra}
-        _LAST_STATUS = {"status": "blocked", "latest": payload}
+        _persist_evaluation(core, "blocked", payload)
         return False, payload
 
     if not ENABLED:
         return blocked("risk_on_starter_disabled")
-    if side != "long":
+    if base.get("side") != "long":
         return blocked("risk_on_starter_long_only")
     if rank_index > MAX_REVIEWED_RANK:
         return blocked("risk_on_starter_rank_too_low", max_rank=MAX_REVIEWED_RANK)
@@ -326,15 +481,15 @@ def _patched_participation_valve_ok(core: Any, signal: Dict[str, Any], params: D
         return blocked("risk_on_starter_cycle_limit", max_entries_per_cycle=MAX_ENTRIES_PER_CYCLE)
     if _entries_today(core) >= MAX_ENTRIES_PER_DAY:
         return blocked("risk_on_starter_daily_limit", max_entries_per_day=MAX_ENTRIES_PER_DAY)
-    if cash_pct < MIN_CASH_PCT:
+    if _safe_float(base.get("cash_pct"), 0.0) < MIN_CASH_PCT:
         return blocked("risk_on_starter_cash_not_high_enough", min_cash_pct=MIN_CASH_PCT)
     if len(_positions(core)) > MAX_OPEN_POSITIONS:
         return blocked("risk_on_starter_too_many_open_positions", max_open_positions=MAX_OPEN_POSITIONS)
-    if score < MIN_RAW_SCORE:
+    if _safe_float(base.get("score"), 0.0) < MIN_RAW_SCORE:
         return blocked("risk_on_starter_raw_score_too_low", min_raw_score=MIN_RAW_SCORE)
-    if rank_score < MIN_RANK_SCORE:
+    if _safe_float(base.get("rank_score"), 0.0) < MIN_RANK_SCORE:
         return blocked("risk_on_starter_rank_score_too_low", min_rank_score=MIN_RANK_SCORE)
-    if bucket not in PREFERRED_BUCKETS and symbol not in PREFERRED_SYMBOLS:
+    if base.get("bucket") not in PREFERRED_BUCKETS and str(base.get("symbol") or "").upper() not in PREFERRED_SYMBOLS:
         return blocked("risk_on_starter_not_preferred_leadership_bucket_or_symbol", preferred_buckets=sorted(PREFERRED_BUCKETS))
     reason_ok, reason_info = _quality_block_allowed(signal, quality_info, info)
     if not reason_ok:
@@ -359,7 +514,7 @@ def _patched_participation_valve_ok(core: Any, signal: Dict[str, Any], params: D
         "live_trade_authority": "none",
         "ml_authority": "paper_phase3a_guarded_advisory",
     }
-    _LAST_STATUS = {"status": "allowed", "latest": payload}
+    _persist_evaluation(core, "allowed", payload)
     return True, payload
 
 
@@ -402,6 +557,7 @@ def policy() -> Dict[str, Any]:
         "min_rank_score": MIN_RANK_SCORE,
         "alloc_factor": ALLOC_FACTOR,
         "min_risk_score": MIN_RISK_SCORE,
+        "telemetry_max_rows": TELEMETRY_MAX_ROWS,
         "allowed_modes": sorted(ALLOWED_MODES),
         "preferred_buckets": sorted(PREFERRED_BUCKETS),
         "preferred_symbols_sample": sorted(PREFERRED_SYMBOLS)[:30],
@@ -418,15 +574,25 @@ def policy() -> Dict[str, Any]:
 
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
+    core = core or _mod()
+    telemetry = _state_telemetry(core)
+    latest = _latest_status(core)
     return {
         "status": "ok",
         "overall": "pass",
         "type": "risk_on_starter_participation_valve_status",
         "version": VERSION,
-        "generated_local": _now(core or _mod()),
+        "generated_local": _now(core),
         "enabled": bool(ENABLED),
         "patched": bool(_PATCHED),
-        "latest": dict(_LAST_STATUS),
+        "latest": latest,
+        "state_telemetry": telemetry,
+        "last_evaluation": telemetry.get("last_evaluation") or _d(latest.get("latest")),
+        "last_status": telemetry.get("last_status") or latest.get("status"),
+        "last_reason": telemetry.get("last_reason") or _d(latest.get("latest")).get("reason"),
+        "recent_evaluations": telemetry.get("recent_evaluations") or [],
+        "counters": telemetry.get("counters") or {},
+        "telemetry_persisted": bool(telemetry),
         "policy": policy(),
     }
 
