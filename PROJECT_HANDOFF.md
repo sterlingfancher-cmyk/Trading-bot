@@ -22,7 +22,8 @@ Current operating mode:
 - Live trade authority: none.
 - ML live authority: none.
 - Early paper Phase 3A guarded-advisory mode: active and confirmed in the July 9 morning self-check.
-- Risk-on starter participation valve: v2 deployed. July 9 self-check shows the FVG/reclaim missed-participation pattern returned, but the direct valve status payload was not included in `/paper/self-check`; check `/paper/risk-on-starter-participation-status` before making another valve change.
+- Risk-on starter participation valve: v2 is deployed and patched. Direct route confirmed `patched: true` on July 9 at 11:18:31 CDT.
+- Risk-on starter valve policy is intentionally narrow: max one starter per day / one per cycle, allocation factor 0.18, high-cash requirement, clean-risk requirement, preferred leadership buckets/symbols only, and no hard safety bypass.
 - Strict Phase 3A / stronger authority benchmark: still 150 execution rows and 100 observed outcomes.
 - Routine test link: https://trading-bot-clean.up.railway.app/paper/self-check
 - Optional risk-on starter valve route: https://trading-bot-clean.up.railway.app/paper/risk-on-starter-participation-status
@@ -67,6 +68,54 @@ Latest known good routine self-check supplied by operator on July 9, 2026 at 11:
 - ML predictions: 25.
 - Early paper Phase 3A ready: true.
 - Live ML authority: false / none.
+
+## Latest Verification — July 9, 2026 Risk-On Starter Valve Direct Status
+
+The operator supplied `/paper/risk-on-starter-participation-status` at 2026-07-09 11:18:31 CDT.
+
+Validation result:
+
+- `status: ok`.
+- `overall: pass`.
+- `enabled: true`.
+- `patched: true`.
+- `version: risk-on-starter-participation-valve-2026-07-07-v2-opening-warmup`.
+- `latest: {}`.
+
+Policy confirmed by direct route:
+
+- `paper_only: true`.
+- `live_trade_authority: none`.
+- `authority_changed: false`.
+- `does_not_place_trades_directly: true`.
+- `does_not_wrap_main_entry_loop: true`.
+- `does_not_bypass_cooldowns: true`.
+- `does_not_bypass_risk_halts: true`.
+- `does_not_bypass_self_defense: true`.
+- `does_not_change_live_authority: true`.
+- `does_not_change_ml_authority: true`.
+- `max_entries_per_day: 1`.
+- `max_entries_per_cycle: 1`.
+- `max_open_positions: 2`.
+- `max_reviewed_rank: 8`.
+- `min_cash_pct: 85.0`.
+- `min_raw_score: 0.008`.
+- `min_rank_score: 0.012`.
+- `min_risk_score: 62.0`.
+- `alloc_factor: 0.18`.
+- Allowed modes: `constructive`, `risk_on`.
+- Preferred buckets: `ai_cloud_breakout`, `bitcoin_ai_compute`, `cloud_cyber_software`, `data_center_infra`, `mega_cap_ai`, `memory_storage`, `power_grid_data_center`, `semi_leaders`, `small_cap_momentum`, `space_stocks`.
+- Allowed block tokens include `opening_warmup_active`, `early_entry_requires_fvg_reclaim_vwap_ema_confirmation`, `extended_above_5m_ma20`, `extension_chase`, `entry_score_below_minimum`, `score_below_post_harvest_floor`, and extended-starter rank/raw/rank-score blocks.
+- Hard block tokens include `self_defense`, `risk_halted`, `halted`, `daily_loss`, `intraday_drawdown`, `cooldown`, `already_held`, `daily_limit`, `cycle_limit`, `missing_price`, `no_price`, `market_regime_block`, `bear`, `crash`, `risk_off`, futures blocking opening longs, `volume_not_confirmed`, `trend_not_confirmed`, `stock_not_green_enough`, and `relative_edge_too_small`.
+
+Interpretation:
+
+- The v2 module is installed and patched correctly.
+- The v2 policy includes the exact FVG/opening-warmup blockers it was intended to allow.
+- Because `latest` is empty, the valve has not recorded a recent participation-valve evaluation in this process snapshot.
+- That means the missed July 9 FVG/reclaim participation cannot be blamed on v2 being absent or unpatched.
+- The more likely remaining causes are: candidate flow did not reach `core_entry_pipeline._participation_valve_ok`, the relevant candidates were filtered earlier, the direct route was hit before any post-redeploy candidate evaluation, the candidate was outside preferred bucket/symbol rules, the rank/score/cash/risk requirements failed, or the one-entry cap logic stopped the evaluation.
+- Next code work should be telemetry, not risk loosening: persist `risk_on_starter_last_evaluation`, `risk_on_starter_last_block_reason`, and candidate-level evaluation rows into state/operator summary so `/paper/self-check` can explain whether the valve was invoked and why it allowed or blocked.
 
 ## Latest Verification — July 9, 2026 Morning Self-Check
 
@@ -120,11 +169,6 @@ Blocked-entry diagnostic status:
 - `rows_with_actionable_reason`: 73.
 - `rows_missing_reason_detail`: 4.
 - Missing detail symbols now include RGLD, AEM, and BKSY from `scanner_audit.top_blocked_symbols`, plus the persistent TEM post-harvest row.
-- Missing reason rows were:
-  - TEM from `state.post_harvest_redeployment.top_candidates_reviewed` with `reason_not_available_in_state_snapshot`.
-  - RGLD from `scanner_audit.top_blocked_symbols` with `top_blocked_symbol_reason_not_in_mobile_snapshot`.
-  - AEM from `scanner_audit.top_blocked_symbols` with `top_blocked_symbol_reason_not_in_mobile_snapshot`.
-  - BKSY from `scanner_audit.top_blocked_symbols` with `top_blocked_symbol_reason_not_in_mobile_snapshot`.
 - Top blocker category: `other_or_unclassified` with 45 rows.
 - Other categories: `extension_chase` 15 rows, `quality_score` 13 rows, and `reason_detail_missing` 4 rows.
 - Top reasons included `early_entry_requires_fvg_reclaim_vwap_ema_confirmation` 45 rows, `extended_above_5m_ma20` 14 rows, `score_below_post_harvest_floor` 12 rows, three `top_blocked_symbol_reason_not_in_mobile_snapshot` rows, one `extended_below_5m_ma20`, one futures-bias opening-long block, and the persistent TEM missing-reason row.
@@ -152,10 +196,10 @@ Operational interpretation:
 - No repair is required for health/risk.
 - The system is healthy, fast, and passing routine checks.
 - The bot is flat in cash and self-defense is inactive.
-- This snapshot does show the missed-participation pattern that v2 was meant to address: 45 visible rows blocked by `early_entry_requires_fvg_reclaim_vwap_ema_confirmation`, with additional extension and score-floor blocks.
-- However, `/paper/self-check` does not include the direct risk-on starter valve status payload, so it is not yet clear whether the v2 valve was unpatched, blocked by its own risk-on context test, blocked by preferred bucket/symbol rules, blocked by rank/score, or blocked by the daily/cycle cap.
-- Next diagnostic should be the direct route `/paper/risk-on-starter-participation-status` before loosening thresholds again.
-- The July 9 top blockers were weighted toward precious metals and a few momentum/software/space names, so the valve may have skipped some candidates because `precious_metals` is not currently in the preferred risk-on starter buckets.
+- This snapshot shows the missed-participation pattern that v2 was meant to address: 45 visible rows blocked by `early_entry_requires_fvg_reclaim_vwap_ema_confirmation`, with additional extension and score-floor blocks.
+- The direct valve route confirms v2 is patched and has the right allowed tokens, but `latest: {}` means the valve has not captured a recent evaluation.
+- Do not loosen v2 further until there is candidate-level valve telemetry showing the actual reject reason.
+- The July 9 top blockers were weighted toward precious metals and a few momentum/software/space names, so some candidates may have been outside the preferred bucket/symbol policy.
 - The blocked-reason audit regressed from one missing row to four missing rows due to three top-blocked-symbol placeholders. This is diagnostic/reporting debt, not a trading-authority issue.
 - Next non-urgent cleanup remains blocker reason persistence: persist full blocker rows for top blocked symbols and the TEM post-harvest row so `top_blocked_symbol_reason_not_in_mobile_snapshot` and `reason_not_available_in_state_snapshot` go to zero.
 
@@ -204,12 +248,14 @@ The July 7 afternoon self-check remained healthy but showed no starter entries a
   - Keeps allocation factor `0.18`.
   - Keeps paper-only behavior.
   - Keeps live authority off.
-  - Keeps self-defense, risk halt, cooldown, daily-loss, intraday-drawdown, missing-price, risk-off/bear/crash, volume-not-confirmed, trend-not-confirmed, stock-not-green-enough, and weak-relative-edge blockers intact.
+  - Keeps self-defense, risk halt, cooldown, daily-loss, intraday-drawdown, missing-price, risk-off/bear/crash, volume-not-confirmed, trend-not_confirmed, stock-not-green-enough, and weak-relative-edge blockers intact.
   - Removes prior-valve `market_mode_not_allowed` text from the default hard-block list so the module can use its own risk-on context check instead of being blocked by stale or narrower upstream market-mode text.
 - `07a28ed47504a2f0294b805de9351700155f8b7a`
   - Updated handoff with July 7 afternoon self-check and v2 patch notes.
 - `98fe492e47e67aca8972ae91cc38f9da289c4502`
   - Updated handoff with July 8 morning self-check interpretation.
+- `49d813b770c2d0cd3365df282a101af60c62743a`
+  - Updated handoff with July 9 morning self-check interpretation.
 
 ### Route
 
@@ -487,10 +533,10 @@ Routine post-push validation:
 
 1. Use only `/paper/self-check` unless deeper diagnostics are intentionally needed.
 2. Confirm `overall`, `status`, `failed_required`, `warnings`, `health`, `status`, `operator_summary`, and any changed module version strings.
-3. For route-specific module work, optionally check `/paper/risk-on-starter-participation-status` after the July 7 valve v2 update.
+3. For risk-on starter valve diagnostics, use `/paper/risk-on-starter-participation-status`; current route confirms v2 is patched but `latest` is empty.
 4. Do not run mutating endpoints unless specifically repairing or executing a known paper-trade operation.
 5. Update this handoff after the code/config change and after interpreting the latest check.
 
 Current next best action:
 
-No immediate repair is required for health/risk. Continue using `/paper/self-check` for routine validation, but run `/paper/risk-on-starter-participation-status` once to confirm whether the v2 risk-on starter valve is patched and why it last blocked or allowed. Do not loosen v2 again until that route shows whether the blocker was market-context, preferred-bucket/symbol, rank/score, or entry-cap related. The next code cleanup should be diagnostic, not risk loosening: persist full blocker rows for top blocked symbols and the TEM post-harvest row so missing-reason coverage returns near 100%.
+No immediate repair is required for health/risk. Do not loosen v2 further from the current evidence. The direct valve route confirms the v2 policy is patched, but `latest: {}` means it has not recorded a recent candidate evaluation. The next useful code change should be diagnostic telemetry, not risk loosening: persist risk-on-starter candidate evaluations into state/self-check so the operator can see whether the valve was reached and whether the reject came from market context, preferred bucket/symbol, rank/score, cash/risk, or entry cap. Also persist full blocker rows for top blocked symbols and the TEM post-harvest row so missing-reason coverage returns near 100%.
