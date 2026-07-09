@@ -5,15 +5,16 @@ Routine testing should use one URL only:
 
 This module keeps the important diagnostic endpoints inside that one check while
 making the output one-link-first. It also promotes state/journal guard failures,
-decision-audit warnings, and hidden endpoint status errors into the operator
-summary so a successful HTTP 200 cannot hide a bad internal diagnostic.
+decision-audit warnings, risk-on starter telemetry, and hidden endpoint status
+errors into the operator summary so a successful HTTP 200 cannot hide a bad
+internal diagnostic.
 """
 from __future__ import annotations
 
 import os
 from typing import Any, Dict, Iterable, List
 
-VERSION = "one-test-policy-2026-06-03-decision-audit-summary"
+VERSION = "one-test-policy-2026-07-09-risk-on-starter-telemetry"
 
 ONE_TEST_ROUTE = "/paper/self-check"
 REPAIR_ROUTE = "/paper/state-journal-repair"
@@ -31,6 +32,7 @@ ONE_TEST_ENDPOINTS = [
     {"path": "/paper/journal-truth-status", "category": "journal", "required": True, "after": "/paper/trade-event-hook-status"},
     {"path": "/paper/state-journal-guard-status", "category": "journal", "required": True, "after": "/paper/journal-truth-status"},
     {"path": "/paper/decision-audit-status", "category": "governance", "required": False, "after": "/paper/state-journal-guard-status"},
+    {"path": "/paper/risk-on-starter-participation-status", "category": "governance", "required": False, "after": "/paper/decision-audit-status"},
 ]
 
 
@@ -143,6 +145,54 @@ def _compact_decision_audit(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _compact_risk_on_starter(payload: Dict[str, Any]) -> Dict[str, Any]:
+    latest = _safe_dict(payload.get("latest"))
+    latest_row = _safe_dict(payload.get("last_evaluation")) or _safe_dict(latest.get("latest"))
+    policy = _safe_dict(payload.get("policy"))
+    counters = _safe_dict(payload.get("counters"))
+    return {
+        "status": payload.get("status"),
+        "overall": payload.get("overall"),
+        "type": payload.get("type"),
+        "version": payload.get("version"),
+        "generated_local": payload.get("generated_local"),
+        "enabled": payload.get("enabled"),
+        "patched": payload.get("patched"),
+        "telemetry_persisted": payload.get("telemetry_persisted"),
+        "last_status": payload.get("last_status") or latest.get("status"),
+        "last_reason": payload.get("last_reason") or latest_row.get("reason"),
+        "last_symbol": latest_row.get("symbol"),
+        "last_bucket": latest_row.get("bucket"),
+        "last_score": latest_row.get("score"),
+        "last_rank_score": latest_row.get("rank_score"),
+        "last_rank_index": latest_row.get("rank_index"),
+        "last_cash_pct": latest_row.get("cash_pct"),
+        "last_prior_reason": latest_row.get("prior_reason"),
+        "last_quality_reason": latest_row.get("quality_reason"),
+        "last_matched_tokens": latest_row.get("matched_tokens"),
+        "last_hard_block_tokens": latest_row.get("hard_block_tokens"),
+        "last_risk": latest_row.get("risk"),
+        "recent_evaluations": _safe_list(payload.get("recent_evaluations"))[-8:],
+        "counters": counters,
+        "policy_summary": {
+            "max_entries_per_day": policy.get("max_entries_per_day"),
+            "max_entries_per_cycle": policy.get("max_entries_per_cycle"),
+            "alloc_factor": policy.get("alloc_factor"),
+            "min_cash_pct": policy.get("min_cash_pct"),
+            "min_raw_score": policy.get("min_raw_score"),
+            "min_rank_score": policy.get("min_rank_score"),
+            "min_risk_score": policy.get("min_risk_score"),
+            "allowed_modes": policy.get("allowed_modes"),
+            "preferred_buckets": policy.get("preferred_buckets"),
+            "paper_only": policy.get("paper_only"),
+            "live_trade_authority": policy.get("live_trade_authority"),
+            "does_not_bypass_self_defense": policy.get("does_not_bypass_self_defense"),
+            "does_not_bypass_risk_halts": policy.get("does_not_bypass_risk_halts"),
+            "does_not_bypass_cooldowns": policy.get("does_not_bypass_cooldowns"),
+        },
+    }
+
+
 def _extract_result(results: Iterable[Dict[str, Any]], path: str) -> Dict[str, Any]:
     for row in results:
         if isinstance(row, dict) and row.get("path") == path:
@@ -245,6 +295,17 @@ def _build_decision_audit_direct() -> Dict[str, Any]:
     return {}
 
 
+def _build_risk_on_starter_direct() -> Dict[str, Any]:
+    try:
+        import risk_on_starter_participation_valve as valve
+        fn = getattr(valve, "status_payload", None)
+        if callable(fn):
+            return _compact_risk_on_starter(_safe_dict(fn()))
+    except Exception:
+        pass
+    return {}
+
+
 def _promote_decision_audit(payload: Dict[str, Any]) -> Dict[str, Any]:
     results = _safe_list(payload.get("results"))
     audit = _extract_compact(results, "/paper/decision-audit-status") or _build_decision_audit_direct()
@@ -278,6 +339,41 @@ def _promote_decision_audit(payload: Dict[str, Any]) -> Dict[str, Any]:
             "error": "decision audit warning",
             "details": audit.get("warnings") or [],
         })
+    return payload
+
+
+def _promote_risk_on_starter(payload: Dict[str, Any]) -> Dict[str, Any]:
+    results = _safe_list(payload.get("results"))
+    valve = _extract_compact(results, "/paper/risk-on-starter-participation-status") or _build_risk_on_starter_direct()
+    if not valve:
+        return payload
+
+    dashboard = _safe_dict(payload.get("dashboard"))
+    dashboard["risk_on_starter_participation"] = valve
+    payload["dashboard"] = dashboard
+    payload["risk_on_starter_participation_summary"] = valve
+
+    operator = _safe_dict(payload.get("operator_summary"))
+    operator.update({
+        "risk_on_starter_status": valve.get("status"),
+        "risk_on_starter_version": valve.get("version"),
+        "risk_on_starter_enabled": valve.get("enabled"),
+        "risk_on_starter_patched": valve.get("patched"),
+        "risk_on_starter_telemetry_persisted": valve.get("telemetry_persisted"),
+        "risk_on_starter_last_status": valve.get("last_status"),
+        "risk_on_starter_last_reason": valve.get("last_reason"),
+        "risk_on_starter_last_symbol": valve.get("last_symbol"),
+        "risk_on_starter_last_bucket": valve.get("last_bucket"),
+        "risk_on_starter_last_score": valve.get("last_score"),
+        "risk_on_starter_last_rank_score": valve.get("last_rank_score"),
+        "risk_on_starter_last_rank_index": valve.get("last_rank_index"),
+        "risk_on_starter_last_prior_reason": valve.get("last_prior_reason"),
+        "risk_on_starter_last_matched_tokens": valve.get("last_matched_tokens"),
+        "risk_on_starter_last_hard_block_tokens": valve.get("last_hard_block_tokens"),
+        "risk_on_starter_counters": valve.get("counters") or {},
+        "risk_on_starter_recent_evaluations": valve.get("recent_evaluations") or [],
+    })
+    payload["operator_summary"] = operator
     return payload
 
 
@@ -387,8 +483,6 @@ def _enforce_one_test_output(payload: Dict[str, Any], self_check_module: Any) ->
     payload["checked_links_count"] = len(checked_paths)
     payload["checked_paths"] = checked_paths
 
-    # Keep the normal copy/paste area clean. Verbose mode remains available for debugging,
-    # but the default operator workflow is one link.
     if _truthy_env("SELF_CHECK_VERBOSE_LINKS"):
         payload["copy_paste_links_separate"] = [_full_url(self_check_module, p) for p in checked_paths]
         payload["debug_links_note"] = "Verbose mode is on; routine testing still uses single_best_link."
@@ -406,6 +500,7 @@ def _postprocess_one_test_payload(payload: Dict[str, Any], self_check_module: An
     payload = _repair_mobile_safe_summary_fields(payload)
     payload = _promote_state_journal_guard(payload)
     payload = _promote_decision_audit(payload)
+    payload = _promote_risk_on_starter(payload)
     payload = _promote_position_truth_mismatch(payload)
     _promote_hidden_status_errors(payload)
     return payload
@@ -427,6 +522,8 @@ def _patch_self_check(self_check_module: Any) -> None:
             compact.update(_compact_state_journal_guard(_safe_dict(payload)))
         if str(path) == "/paper/decision-audit-status":
             compact.update(_compact_decision_audit(_safe_dict(payload)))
+        if str(path) == "/paper/risk-on-starter-participation-status":
+            compact.update(_compact_risk_on_starter(_safe_dict(payload)))
         return compact
 
     def run_self_check(flask_app: Any, mode: str = "light") -> Dict[str, Any]:
@@ -481,6 +578,8 @@ def apply(self_check_module: Any = None) -> Dict[str, Any]:
             "state_journal_guard_truth_in_operator_summary": True,
             "decision_audit_in_self_check": True,
             "decision_audit_in_operator_summary": True,
+            "risk_on_starter_telemetry_in_self_check": True,
+            "risk_on_starter_telemetry_in_operator_summary": True,
             "hidden_status_errors_promoted_to_warning": True,
             "status_vs_truth_position_mismatch_warning": True,
             "mobile_safe_summary_repair": True,
@@ -495,7 +594,6 @@ def apply(self_check_module: Any = None) -> Dict[str, Any]:
 
 
 def register_routes(flask_app: Any = None, module: Any = None) -> Dict[str, Any]:
-    # Nothing new to register. This module patches self_check's existing route list.
     try:
         import self_check
         return apply(self_check)
