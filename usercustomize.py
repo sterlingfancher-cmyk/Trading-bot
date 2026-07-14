@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-14-v23"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-14-v24-stable-watchdog"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -113,9 +113,9 @@ def _register_auxiliary_routes(flask_app: Any, module_hint: Any | None = None) -
 
 
 def _repair_entry_stack(flask_app: Any, core: Any) -> None:
-    _register_module(flask_app, core, "core_entry_pipeline", route_args="app_and_module")
+    # Extended-leader helper is idempotent. The composition guard owns core
+    # restoration and paper-exposure composition; X-Ray remains outermost.
     _register_module(flask_app, core, "extended_leader_starter_valve", route_args="app_and_module")
-    _register_module(flask_app, core, "risk_on_starter_participation_valve", route_args="app_and_module")
     _register_module(flask_app, core, "entry_pipeline_composition_guard", route_args="app_and_module")
     _register_module(flask_app, core, "entry_pipeline_xray", route_args="app_and_module")
 
