@@ -1,4 +1,4 @@
-# Automated Trading Project Handoff — Updated July 10, 2026
+# Automated Trading Project Handoff — Updated July 13, 2026
 
 ## Standing Rule
 
@@ -15,101 +15,115 @@ Every future code/configuration update must also update this file in the same wo
 - Early paper Phase 3A guarded-advisory mode: active
 - Strict stronger-authority benchmark: 150 execution rows and 100 observed outcomes
 
-## Latest Known Good State — July 10, 2026, 12:55:50 CDT
+## Latest Known Good State — July 13, 2026, 19:51:01 CDT
 
 - Self-check: pass
 - Status: ok
 - Failed required: none
 - Warnings: none
-- Elapsed: 84.72 ms
-- Cash/equity: 11075.54
+- Elapsed: 80.99 ms
+- Cash/equity: 11061.58
 - Open positions: 0
-- Realized today: -1.46
-- Realized total: +1075.56
+- Realized today: -5.22
+- Realized total: +1061.60
 - Unrealized PnL: 0.0
-- Daily/intraday drawdown: 0.055%
+- Daily/intraday drawdown: 0.168%
 - Self-defense: inactive
-- Signals found: 46
+- Signals found: 54
+- Scanner blocked entries: 120
+- Decision-audit blocked entries: 1
 - Execution rows: 88 / 150
 - ML rows: 6000
-- ML labeled rows: 1864
+- ML labeled rows: 1892
 - ML observed outcomes: 55
 - ML predictions: 25
 - Early paper Phase 3A ready: true
 
-## Latest Code Update — Entry Pipeline X-Ray
+## Latest Finding — Original X-Ray Did Not Observe Active Cycles
+
+The July 13 after-hours self-check confirmed:
+
+- `entry-pipeline-xray-2026-07-10-v1` was patched.
+- `entry_pipeline_xray.telemetry_persisted` was false.
+- Stage counts, symbol paths, bottleneck, and counters were empty.
+- Risk-on starter telemetry was also patched but still had no evaluations.
+- The scanner found 54 signals and persisted 120 scanner blocker rows.
+
+Inspection of `app.py` confirmed the real runtime path:
+
+1. `run_cycle()` calls `scan_signals(market)`.
+2. It computes opening/risk/self-defense entry blockers.
+3. It calls the global `app.try_entries_and_rotations(...)` callable directly.
+4. The result is written into scanner audit and state.
+
+The first X-Ray wrapped `core_entry_pipeline._core_try_entries_and_rotations`, which is an internal helper. Runtime patch order can replace or bypass that helper wrapper while `app.try_entries_and_rotations` remains the function actually invoked by `run_cycle()`.
+
+## Latest Code Update — Active Call-Site Entry Pipeline X-Ray v2
 
 ### Purpose
 
-Multiple sessions produced dozens of scanner signals but zero entries. Risk-on starter telemetry confirmed the valve was installed and patched, but no valve evaluations were persisted. The remaining question was where candidates disappeared before reaching `core_entry_pipeline._participation_valve_ok`.
+Instrument the exact callable used by `run_cycle()` so every market-cycle scanner-to-entry handoff is observed regardless of which entry implementation or overlay is active.
 
-The Entry Pipeline X-Ray adds stage-by-stage and per-symbol telemetry around the entire core entry function without modifying trading behavior.
-
-### Files changed
+### File changed
 
 - `entry_pipeline_xray.py`
-- `usercustomize.py`
 - `PROJECT_HANDOFF.md`
 
-### Versions
+### Version
 
-- `entry-pipeline-xray-2026-07-10-v1`
-- `usercustomize-entry-pipeline-xray-2026-07-10-v22`
-- One-test policy is promoted at runtime to `one-test-policy-2026-07-10-entry-pipeline-xray`
+- `entry-pipeline-xray-2026-07-13-v2-active-callsite`
+- Runtime one-test policy promotion: `one-test-policy-2026-07-13-entry-pipeline-active-callsite`
 
-### Commits
+### Commit
 
-- `ef8c4796ae56fe5d9efdf72b8dbda81c2e638215`
-  - Added `entry_pipeline_xray.py`.
-  - Wraps `core_entry_pipeline._core_try_entries_and_rotations` for observation only.
-  - Records raw long/short signal counts, prepared candidate count, entries, rotations, blocked rows, quality blocks, participation-valve reachability, candidates without final rows, bottleneck classification, top rejection reasons, and per-symbol paths.
-  - Persists telemetry under `state["entry_pipeline_xray"]`.
-  - Adds `/paper/entry-pipeline-xray-status`.
-  - Promotes compact X-Ray telemetry into `/paper/self-check` through the existing one-test postprocessor.
-- `ab32cff7481face14a0641f3b09d42bc79a534a6`
-  - Wired `entry_pipeline_xray` into `usercustomize.py` after `risk_on_starter_participation_valve`.
-  - Added the route to optional one-test governance metadata.
-  - Added watchdog re-registration.
+- `91551026f10effbf324dba0feff7aa8112b5c85e`
+  - Replaced the internal-helper-only X-Ray with a wrapper around `app.try_entries_and_rotations`.
+  - Records the actual wrapped callable metadata, including whether the underlying callable is the core-entry non-wrapper replacement.
+  - Passes arguments and return values through unchanged.
+  - Persists telemetry even when the wrapped callable raises, then re-raises the original exception.
 
-### Telemetry fields
+### Exact telemetry now recorded
 
-The X-Ray records:
+- Patch target: `app.try_entries_and_rotations`
+- Wrapped callable name/module/version metadata
+- Raw long signals
+- Raw short signals
+- Total scanner signals handed into the active entry callable
+- Active call-site invocation count
+- Prepared candidates
+- Entries returned
+- Rotations returned
+- Blocked rows returned
+- Quality-blocked rows
+- Participation-valve reached rows
+- Candidates without a final visible row
+- Per-symbol stage paths
+- Top rejection reasons
+- Entry-block reason
+- Market mode
+- Whether longs/shorts were allowed
+- Exceptions from the active callable
+- Recent cycles and bottleneck counters
 
-- `raw_long_signals`
-- `raw_short_signals`
-- `raw_total_signals`
-- `prepared_candidates`
-- `core_entries_returned`
-- `core_rotations_returned`
-- `core_blocked_rows_returned`
-- `quality_blocked_rows`
-- `participation_valve_reached_rows`
-- `candidates_without_final_row`
-- `bottleneck`
-- `top_rejection_reasons`
-- `symbol_paths`
-- recent cycle counters
+### New per-symbol path format
 
-Per-symbol paths identify whether a candidate:
+Examples:
 
-- entered as an input signal;
-- became a prepared candidate;
-- reached core pipeline review;
-- reached the participation valve;
-- returned an entry;
-- returned a blocked row; or
-- disappeared without a final visible row.
+- `scanner_signal -> run_cycle_handoff -> active_try_entries_call -> prepared_candidate -> entry_pipeline_reviewed -> participation_valve_reached -> blocked`
+- `scanner_signal -> run_cycle_handoff -> active_try_entries_call -> prepared_candidate -> entry_pipeline_reviewed -> entry_returned`
+- `scanner_signal -> run_cycle_handoff -> active_try_entries_call -> prepared_candidate -> no_final_row_visible`
 
 ### Bottleneck classifications
 
+- `active_callsite_error`
 - `new_entries_not_allowed`
 - `candidate_preparation`
-- `core_pipeline_no_final_rows`
-- `before_entry_quality_or_valve`
-- `quality_block_not_reaching_valve`
+- `active_pipeline_no_final_rows`
+- `before_quality_or_participation_valve`
+- `quality_block_not_reaching_participation_valve`
 - `participation_valve_or_enter_position`
 - `entries_returned`
-- `none`
+- `no_candidates_or_no_action`
 
 ### Routes
 
@@ -120,36 +134,39 @@ Per-symbol paths identify whether a candidate:
 ### Safety / authority impact
 
 - Diagnostic only
-- Does not change signals or candidates
+- Does not change candidate lists
 - Does not change thresholds
 - Does not change sizing
 - Does not place trades
+- Does not change the wrapped callable return value
 - Does not change live authority
 - Does not change ML authority
 - Does not bypass cooldowns, self-defense, risk halts, drawdown controls, trend/volume checks, or entry-quality controls
 
-### Post-redeploy expectations
+## Post-Redeploy Expectations
 
-Run `/paper/self-check` after Railway redeploys.
+Run the normal self-check after Railway redeploys:
 
-Expected:
+`https://trading-bot-clean.up.railway.app/paper/self-check`
+
+Expected immediately:
 
 - `overall: pass`
 - `failed_required: []`
-- `one_test_policy_version: one-test-policy-2026-07-10-entry-pipeline-xray`
-- `dashboard.entry_pipeline_xray` present
-- `entry_pipeline_xray_summary` present
-- `operator_summary.entry_pipeline_xray_*` fields present
+- X-Ray version: `entry-pipeline-xray-2026-07-13-v2-active-callsite`
+- Patch target: `app.try_entries_and_rotations`
+- Current callable metadata should show the X-Ray wrapper.
+- Wrapped callable metadata should identify the underlying active entry implementation.
 
-The direct route should show:
+Expected after the next open-market cycle:
 
-- `status: ok`
-- `patched: true`
-- `version: entry-pipeline-xray-2026-07-10-v1`
-- `telemetry_persisted: true` after a fresh entry cycle
-- last stage counts, bottleneck, rejection reasons, and symbol paths
+- `telemetry_persisted: true`
+- `active_callsite_invocations` at least 1
+- Non-empty `last_stage_counts`
+- A concrete `last_bottleneck`
+- Non-empty symbol paths whenever scanner signals were passed into the entry callable
 
-If telemetry is present but no cycle has run yet, allow the next scanner/entry cycle to complete and check again.
+If telemetry remains empty after an open-market cycle, inspect whether `run_cycle()` itself is being replaced or whether the auto-runner is executing a different module/process. That would be the next and narrower runtime-path issue.
 
 ## Risk-On Starter Valve Status
 
@@ -169,15 +186,7 @@ Current policy:
 - Live authority none
 - Hard safety blockers remain authoritative
 
-Prior July 10 validation showed:
-
-- enabled: true
-- patched: true
-- telemetry persisted: false
-- recent evaluations: empty
-- last reason/symbol/status: null
-
-That result motivated the upstream Entry Pipeline X-Ray.
+The starter valve has been patched but has not yet persisted a candidate evaluation. Active call-site X-Ray v2 should determine whether candidates reach the core pipeline and whether quality-block rows contain participation-valve details.
 
 ## Other Critical Current Modules
 
@@ -195,11 +204,11 @@ That result motivated the upstream Entry Pipeline X-Ray.
 ## Operating Guidance
 
 1. Use `/paper/self-check` for routine post-push validation.
-2. Use `/paper/entry-pipeline-xray-status` only when inspecting the entry bottleneck.
+2. Use `/paper/entry-pipeline-xray-status` only for detailed entry-path inspection.
 3. Do not run repair or execution routes unless intentionally required.
-4. Do not loosen entry/risk thresholds until X-Ray telemetry identifies the actual stage reducing candidates to zero.
+4. Do not loosen entry/risk thresholds until active-call-site X-Ray telemetry identifies the actual stage reducing candidates to zero.
 5. Keep live ML authority off until strict benchmark and walk-forward/MAE-MFE validation support stronger authority.
 
 ## Next Action
 
-After Railway redeploys, run the normal self-check. If X-Ray telemetry shows `before_entry_quality_or_valve`, `candidate_preparation`, or `core_pipeline_no_final_rows`, inspect that specific upstream path. If it shows `participation_valve_or_enter_position`, use the persisted symbol paths and rejection reasons to adjust only the proven bottleneck. Do not broadly loosen the system before this evidence is available.
+After Railway redeploys, run `/paper/self-check`. After the next open-market auto-run cycle, inspect `entry_pipeline_xray_summary`. The expected result is a concrete stage count and bottleneck from the exact `app.try_entries_and_rotations` call used by `run_cycle()`. Adjust only the proven bottleneck after that evidence is available.
