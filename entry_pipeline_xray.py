@@ -1,12 +1,14 @@
-"""Entry Pipeline X-Ray v2 — active call-site telemetry.
+"""Entry Pipeline X-Ray v3 — stable active-callsite telemetry.
 
-Diagnostic-only overlay around the actual app.try_entries_and_rotations callable
-used by run_cycle(). This records scanner-to-entry handoff counts, outputs,
-rejection reasons, participation-valve reachability, and per-symbol paths.
+This diagnostic wrapper observes the exact app.try_entries_and_rotations callable
+used by run_cycle(). Before wrapping, it asks entry_pipeline_composition_guard to
+ensure the intended stack:
 
-It does not change candidates, thresholds, sizing, authority, or execution
-results. The wrapped function's arguments and return value are passed through
-unchanged.
+    X-Ray -> paper exposure overlay -> authoritative core entry pipeline
+
+It records stage counts, symbol paths, recent errors, the latest cycle, and the
+latest meaningful non-empty cycle. It does not change arguments, candidates,
+thresholds, sizing, return values, risk controls, or authority.
 """
 from __future__ import annotations
 
@@ -16,23 +18,24 @@ import sys
 from collections import Counter
 from typing import Any, Dict, Iterable, List
 
-VERSION = "entry-pipeline-xray-2026-07-13-v2-active-callsite"
+VERSION = "entry-pipeline-xray-2026-07-14-v3-composition-errors"
 ENABLED = os.environ.get("ENTRY_PIPELINE_XRAY_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 MAX_SYMBOL_ROWS = int(os.environ.get("ENTRY_PIPELINE_XRAY_MAX_SYMBOL_ROWS", "50"))
 MAX_RECENT_CYCLES = int(os.environ.get("ENTRY_PIPELINE_XRAY_MAX_RECENT_CYCLES", "25"))
+MAX_RECENT_ERRORS = int(os.environ.get("ENTRY_PIPELINE_XRAY_MAX_RECENT_ERRORS", "20"))
 REGISTERED_APP_IDS: set[int] = set()
 _PATCHED = False
-_PATCH_TARGET = None
+_PATCH_TARGET: Dict[str, Any] | None = None
 
 
 def _mod() -> Any | None:
     for name in ("app", "__main__"):
-        m = sys.modules.get(name)
-        if m is not None and getattr(m, "app", None) is not None and hasattr(m, "try_entries_and_rotations"):
-            return m
-    for m in list(sys.modules.values()):
-        if m is not None and getattr(m, "app", None) is not None and hasattr(m, "try_entries_and_rotations"):
-            return m
+        module = sys.modules.get(name)
+        if module is not None and getattr(module, "app", None) is not None and hasattr(module, "try_entries_and_rotations"):
+            return module
+    for module in list(sys.modules.values()):
+        if module is not None and getattr(module, "app", None) is not None and hasattr(module, "try_entries_and_rotations"):
+            return module
     return None
 
 
@@ -51,17 +54,6 @@ def _l(value: Any) -> List[Any]:
     return value if isinstance(value, list) else []
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        if value is None:
-            return default
-        if hasattr(value, "item"):
-            value = value.item()
-        return float(value)
-    except Exception:
-        return default
-
-
 def _json_safe(value: Any, depth: int = 0) -> Any:
     if depth > 7:
         return str(value)
@@ -73,9 +65,9 @@ def _json_safe(value: Any, depth: int = 0) -> Any:
         except Exception:
             return str(value)
     if isinstance(value, dict):
-        return {str(k): _json_safe(v, depth + 1) for k, v in value.items() if not callable(v)}
+        return {str(key): _json_safe(item, depth + 1) for key, item in value.items() if not callable(item)}
     if isinstance(value, (list, tuple, set)):
-        return [_json_safe(v, depth + 1) for v in list(value)[:120]]
+        return [_json_safe(item, depth + 1) for item in list(value)[:120]]
     return str(value)
 
 
@@ -93,10 +85,7 @@ def _state(core: Any) -> Dict[str, Any]:
 def _save(core: Any, state: Dict[str, Any]) -> None:
     try:
         core.save_state(state)
-        try:
-            core.portfolio = state
-        except Exception:
-            pass
+        core.portfolio = state
     except Exception:
         try:
             core.portfolio = state
@@ -125,26 +114,26 @@ def _reason(row: Dict[str, Any]) -> str:
 
 def _prepare_candidates(core: Any, longs: Any, shorts: Any, params: Dict[str, Any], market: Dict[str, Any]) -> List[Dict[str, Any]]:
     try:
-        import core_entry_pipeline as cep
-        rows = cep._prepare_candidates(core, longs or [], shorts or [], params or {}, market or {})
+        import core_entry_pipeline as pipeline
+        rows = pipeline._prepare_candidates(core, longs or [], shorts or [], params or {}, market or {})
         return rows if isinstance(rows, list) else []
     except Exception:
         rows: List[Dict[str, Any]] = []
         if params.get("allow_longs", False):
-            rows.extend(dict(x) for x in _l(longs) if isinstance(x, dict))
+            rows.extend(dict(item) for item in _l(longs) if isinstance(item, dict))
         if params.get("allow_shorts", False):
-            rows.extend(dict(x) for x in _l(shorts) if isinstance(x, dict))
+            rows.extend(dict(item) for item in _l(shorts) if isinstance(item, dict))
         return rows
 
 
 def _entry_symbols(rows: Iterable[Any]) -> set[str]:
-    out: set[str] = set()
+    symbols: set[str] = set()
     for row in rows or []:
         if isinstance(row, dict):
             symbol = _symbol(row)
             if symbol:
-                out.add(symbol)
-    return out
+                symbols.add(symbol)
+    return symbols
 
 
 def _callable_metadata(fn: Any) -> Dict[str, Any]:
@@ -153,12 +142,38 @@ def _callable_metadata(fn: Any) -> Dict[str, Any]:
         "module": getattr(fn, "__module__", None),
         "core_entry_pipeline_version": getattr(fn, "_core_entry_pipeline_version", None),
         "core_entry_pipeline_patched": bool(getattr(fn, "_core_entry_pipeline_non_wrapper_patched", False)),
+        "paper_exposure_version": getattr(fn, "_paper_exposure_composition_version", None),
         "xray_version": getattr(fn, "_entry_pipeline_xray_version", None),
     }
 
 
-def _build_cycle(core: Any, longs: Any, shorts: Any, params: Dict[str, Any], market: Dict[str, Any], new_entries_allowed: bool, entry_block_reason: Any, prepared: List[Dict[str, Any]], result: Any, target_meta: Dict[str, Any], error: str | None = None) -> Dict[str, Any]:
-    entries, rotations, blocked = (result if isinstance(result, tuple) and len(result) == 3 else ([], [], []))
+def _ensure_composition(core: Any) -> Dict[str, Any]:
+    try:
+        import entry_pipeline_composition_guard as guard
+        payload = guard.enforce(core)
+        return payload if isinstance(payload, dict) else {"status": "unknown"}
+    except Exception as exc:
+        return {
+            "status": "error",
+            "reason": f"composition_guard_error:{type(exc).__name__}:{exc}",
+        }
+
+
+def _build_cycle(
+    core: Any,
+    longs: Any,
+    shorts: Any,
+    params: Dict[str, Any],
+    market: Dict[str, Any],
+    new_entries_allowed: bool,
+    entry_block_reason: Any,
+    prepared: List[Dict[str, Any]],
+    result: Any,
+    target_meta: Dict[str, Any],
+    composition: Dict[str, Any],
+    error: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    entries, rotations, blocked = result if isinstance(result, tuple) and len(result) == 3 else ([], [], [])
     entries = _l(entries)
     rotations = _l(rotations)
     blocked = _l(blocked)
@@ -189,7 +204,7 @@ def _build_cycle(core: Any, longs: Any, shorts: Any, params: Dict[str, Any], mar
         path = ["scanner_signal", "run_cycle_handoff", "active_try_entries_call", "prepared_candidate"]
         if rows:
             path.append("entry_pipeline_reviewed")
-            if any(isinstance(r.get("participation_valve"), dict) for r in rows):
+            if any(isinstance(row.get("participation_valve"), dict) for row in rows):
                 path.append("participation_valve_reached")
             path.append("blocked")
         elif symbol in entered:
@@ -204,7 +219,7 @@ def _build_cycle(core: Any, longs: Any, shorts: Any, params: Dict[str, Any], mar
             "score": candidate.get("score"),
             "rank_score": candidate.get("core_entry_rank_score"),
             "final_status": final_status,
-            "final_reasons": [_reason(r) for r in rows[:5]],
+            "final_reasons": [_reason(row) for row in rows[:5]],
             "path": path,
         })
 
@@ -228,7 +243,7 @@ def _build_cycle(core: Any, longs: Any, shorts: Any, params: Dict[str, Any], mar
         bottleneck = "active_callsite_error"
     elif not new_entries_allowed:
         bottleneck = "new_entries_not_allowed"
-    elif counts["raw_total_signals"] > 0 and len(prepared) == 0:
+    elif counts["raw_total_signals"] > 0 and not prepared:
         bottleneck = "candidate_preparation"
     elif prepared and not entries and not blocked:
         bottleneck = "active_pipeline_no_final_rows"
@@ -248,6 +263,7 @@ def _build_cycle(core: Any, longs: Any, shorts: Any, params: Dict[str, Any], mar
         "version": VERSION,
         "patch_target": "app.try_entries_and_rotations",
         "wrapped_callable": target_meta,
+        "composition": composition,
         "new_entries_allowed": bool(new_entries_allowed),
         "entry_block_reason": entry_block_reason,
         "market_mode": market.get("market_mode"),
@@ -266,12 +282,24 @@ def _build_cycle(core: Any, longs: Any, shorts: Any, params: Dict[str, Any], mar
     })
 
 
+def _is_meaningful(cycle: Dict[str, Any]) -> bool:
+    counts = _d(cycle.get("stage_counts"))
+    return bool(
+        int(counts.get("raw_total_signals") or 0) > 0
+        or int(counts.get("entries_returned") or 0) > 0
+        or int(counts.get("rotations_returned") or 0) > 0
+        or int(counts.get("blocked_rows_returned") or 0) > 0
+        or cycle.get("error")
+    )
+
+
 def _persist(core: Any, cycle: Dict[str, Any]) -> None:
     state = _state(core)
     xray = state.setdefault("entry_pipeline_xray", {})
     if not isinstance(xray, dict):
         xray = {}
         state["entry_pipeline_xray"] = xray
+
     xray.update({
         "version": VERSION,
         "patch_target": "app.try_entries_and_rotations",
@@ -282,16 +310,43 @@ def _persist(core: Any, cycle: Dict[str, Any]) -> None:
         "last_top_rejection_reasons": cycle.get("top_rejection_reasons"),
         "last_symbol_paths": cycle.get("symbol_paths"),
         "wrapped_callable": cycle.get("wrapped_callable"),
+        "composition": cycle.get("composition"),
     })
+
     recent = xray.get("recent_cycles") if isinstance(xray.get("recent_cycles"), list) else []
     recent.append(cycle)
     xray["recent_cycles"] = recent[-max(1, MAX_RECENT_CYCLES):]
+
+    if _is_meaningful(cycle):
+        xray["last_meaningful_cycle"] = cycle
+        xray["last_meaningful_stage_counts"] = cycle.get("stage_counts")
+        xray["last_meaningful_bottleneck"] = cycle.get("bottleneck")
+        xray["last_meaningful_symbol_paths"] = cycle.get("symbol_paths")
+        scanner = state.get("scanner_audit")
+        if isinstance(scanner, dict) and int(scanner.get("signals_found") or 0) > 0:
+            xray["last_meaningful_scanner_audit"] = _json_safe(scanner)
+
+    if cycle.get("error"):
+        recent_errors = xray.get("recent_errors") if isinstance(xray.get("recent_errors"), list) else []
+        recent_errors.append({
+            "generated_local": cycle.get("generated_local"),
+            "error": cycle.get("error"),
+            "wrapped_callable": cycle.get("wrapped_callable"),
+            "market_mode": cycle.get("market_mode"),
+            "stage_counts": cycle.get("stage_counts"),
+        })
+        xray["recent_errors"] = recent_errors[-max(1, MAX_RECENT_ERRORS):]
+        xray["last_error"] = recent_errors[-1]
+
     counters = xray.setdefault("counters", {})
     if isinstance(counters, dict):
         counters["cycles_total"] = int(counters.get("cycles_total") or 0) + 1
         counters["active_callsite_invocations_total"] = int(counters.get("active_callsite_invocations_total") or 0) + 1
         key = f"bottleneck_{cycle.get('bottleneck') or 'unknown'}_total"
         counters[key] = int(counters.get(key) or 0) + 1
+        if _is_meaningful(cycle):
+            counters["meaningful_cycles_total"] = int(counters.get("meaningful_cycles_total") or 0) + 1
+
     _save(core, state)
 
 
@@ -302,30 +357,58 @@ def _patch(core: Any = None) -> bool:
     core = core or _mod()
     if core is None:
         return False
+
+    composition = _ensure_composition(core)
     current = getattr(core, "try_entries_and_rotations", None)
     if not callable(current):
         return False
     if getattr(current, "_entry_pipeline_xray_version", None) == VERSION:
         _PATCHED = True
-        _PATCH_TARGET = _callable_metadata(current)
+        _PATCH_TARGET = _callable_metadata(getattr(current, "_entry_pipeline_xray_original", None))
         return False
 
     original = current
     original_meta = _callable_metadata(original)
 
     def wrapped(long_signals: Any, short_signals: Any, params: Any, market: Any, new_entries_allowed: bool = True, entry_block_reason: Any = None):
-        prepared = _prepare_candidates(core, long_signals, short_signals, dict(params or {}), dict(market or {}))
+        params_dict = dict(params or {})
+        market_dict = dict(market or {})
+        prepared = _prepare_candidates(core, long_signals, short_signals, params_dict, market_dict)
         result = None
-        error = None
+        error_row = None
         try:
-            result = original(long_signals, short_signals, params, market, new_entries_allowed=new_entries_allowed, entry_block_reason=entry_block_reason)
+            result = original(
+                long_signals,
+                short_signals,
+                params,
+                market,
+                new_entries_allowed=new_entries_allowed,
+                entry_block_reason=entry_block_reason,
+            )
             return result
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            error_row = {
+                "type": type(exc).__name__,
+                "message": str(exc),
+                "wrapped_callable": original_meta,
+            }
             raise
         finally:
             try:
-                cycle = _build_cycle(core, long_signals, short_signals, dict(params or {}), dict(market or {}), new_entries_allowed, entry_block_reason, prepared, result, original_meta, error=error)
+                cycle = _build_cycle(
+                    core,
+                    long_signals,
+                    short_signals,
+                    params_dict,
+                    market_dict,
+                    new_entries_allowed,
+                    entry_block_reason,
+                    prepared,
+                    result,
+                    original_meta,
+                    composition,
+                    error=error_row,
+                )
                 _persist(core, cycle)
             except Exception:
                 pass
@@ -333,6 +416,7 @@ def _patch(core: Any = None) -> bool:
     wrapped._entry_pipeline_xray_version = VERSION  # type: ignore[attr-defined]
     wrapped._entry_pipeline_xray_diagnostic_only = True  # type: ignore[attr-defined]
     wrapped._entry_pipeline_xray_wrapped_callable = original_meta  # type: ignore[attr-defined]
+    wrapped._entry_pipeline_xray_original = original  # type: ignore[attr-defined]
     core.try_entries_and_rotations = wrapped
     _PATCHED = True
     _PATCH_TARGET = original_meta
@@ -351,6 +435,11 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
     _patch(core)
     telemetry = _telemetry(core)
     current = getattr(core, "try_entries_and_rotations", None) if core is not None else None
+    try:
+        import entry_pipeline_composition_guard as guard
+        composition_status = guard.status_payload(core)
+    except Exception as exc:
+        composition_status = {"status": "error", "reason": str(exc)}
     return {
         "status": "ok",
         "overall": "pass",
@@ -362,12 +451,20 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "patch_target": "app.try_entries_and_rotations",
         "current_callable": _callable_metadata(current),
         "wrapped_callable": telemetry.get("wrapped_callable") or _PATCH_TARGET or {},
+        "composition_status": composition_status,
         "telemetry_persisted": bool(telemetry),
         "last_cycle": telemetry.get("last_cycle") or {},
         "last_bottleneck": telemetry.get("last_bottleneck"),
         "last_stage_counts": telemetry.get("last_stage_counts") or {},
         "last_top_rejection_reasons": telemetry.get("last_top_rejection_reasons") or [],
         "last_symbol_paths": telemetry.get("last_symbol_paths") or [],
+        "last_meaningful_cycle": telemetry.get("last_meaningful_cycle") or {},
+        "last_meaningful_bottleneck": telemetry.get("last_meaningful_bottleneck"),
+        "last_meaningful_stage_counts": telemetry.get("last_meaningful_stage_counts") or {},
+        "last_meaningful_symbol_paths": telemetry.get("last_meaningful_symbol_paths") or [],
+        "last_meaningful_scanner_audit": telemetry.get("last_meaningful_scanner_audit") or {},
+        "last_error": telemetry.get("last_error") or {},
+        "recent_errors": telemetry.get("recent_errors") or [],
         "counters": telemetry.get("counters") or {},
         "policy": {
             "diagnostic_only": True,
@@ -378,19 +475,29 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "does_not_change_return_value": True,
             "does_not_change_live_authority": True,
             "does_not_change_ml_authority": True,
+            "preserves_last_meaningful_cycle": True,
+            "captures_recent_errors": True,
             "max_symbol_rows": MAX_SYMBOL_ROWS,
             "max_recent_cycles": MAX_RECENT_CYCLES,
+            "max_recent_errors": MAX_RECENT_ERRORS,
         },
     }
 
 
 def _install_one_link_promotion() -> None:
     try:
-        import one_link_check as olc
-        endpoints = getattr(olc, "ONE_TEST_ENDPOINTS", None)
-        if isinstance(endpoints, list) and not any(isinstance(e, dict) and e.get("path") == "/paper/entry-pipeline-xray-status" for e in endpoints):
-            endpoints.append({"path": "/paper/entry-pipeline-xray-status", "category": "governance", "required": False, "after": "/paper/risk-on-starter-participation-status"})
-        current = getattr(olc, "_postprocess_one_test_payload", None)
+        import one_link_check as one_link
+        endpoints = getattr(one_link, "ONE_TEST_ENDPOINTS", None)
+        wanted = [
+            {"path": "/paper/entry-pipeline-composition-status", "category": "governance", "required": False},
+            {"path": "/paper/entry-pipeline-xray-status", "category": "governance", "required": False},
+        ]
+        if isinstance(endpoints, list):
+            existing = {item.get("path") for item in endpoints if isinstance(item, dict)}
+            for endpoint in wanted:
+                if endpoint["path"] not in existing:
+                    endpoints.append(endpoint)
+        current = getattr(one_link, "_postprocess_one_test_payload", None)
         if callable(current) and getattr(current, "_entry_pipeline_xray_version", None) != VERSION:
             def promoted(payload: Dict[str, Any], self_check_module: Any):
                 payload = current(payload, self_check_module)
@@ -402,11 +509,18 @@ def _install_one_link_promotion() -> None:
                     "patch_target": xray.get("patch_target"),
                     "current_callable": xray.get("current_callable"),
                     "wrapped_callable": xray.get("wrapped_callable"),
+                    "composition_status": xray.get("composition_status"),
                     "telemetry_persisted": xray.get("telemetry_persisted"),
                     "last_bottleneck": xray.get("last_bottleneck"),
                     "last_stage_counts": xray.get("last_stage_counts"),
+                    "last_meaningful_bottleneck": xray.get("last_meaningful_bottleneck"),
+                    "last_meaningful_stage_counts": xray.get("last_meaningful_stage_counts"),
+                    "last_meaningful_scanner_audit": xray.get("last_meaningful_scanner_audit"),
                     "last_top_rejection_reasons": xray.get("last_top_rejection_reasons"),
                     "last_symbol_paths": _l(xray.get("last_symbol_paths"))[:25],
+                    "last_meaningful_symbol_paths": _l(xray.get("last_meaningful_symbol_paths"))[:25],
+                    "last_error": xray.get("last_error"),
+                    "recent_errors": _l(xray.get("recent_errors"))[-10:],
                     "counters": xray.get("counters"),
                 }
                 dashboard = _d(payload.get("dashboard"))
@@ -421,17 +535,23 @@ def _install_one_link_promotion() -> None:
                     "entry_pipeline_xray_patch_target": compact.get("patch_target"),
                     "entry_pipeline_xray_current_callable": compact.get("current_callable"),
                     "entry_pipeline_xray_wrapped_callable": compact.get("wrapped_callable"),
+                    "entry_pipeline_xray_composition_status": compact.get("composition_status"),
                     "entry_pipeline_xray_telemetry_persisted": compact.get("telemetry_persisted"),
                     "entry_pipeline_xray_last_bottleneck": compact.get("last_bottleneck"),
                     "entry_pipeline_xray_last_stage_counts": compact.get("last_stage_counts"),
+                    "entry_pipeline_xray_last_meaningful_bottleneck": compact.get("last_meaningful_bottleneck"),
+                    "entry_pipeline_xray_last_meaningful_stage_counts": compact.get("last_meaningful_stage_counts"),
+                    "entry_pipeline_xray_last_meaningful_scanner_audit": compact.get("last_meaningful_scanner_audit"),
                     "entry_pipeline_xray_top_rejection_reasons": compact.get("last_top_rejection_reasons"),
                     "entry_pipeline_xray_symbol_paths": compact.get("last_symbol_paths"),
+                    "entry_pipeline_xray_last_error": compact.get("last_error"),
+                    "entry_pipeline_xray_recent_errors": compact.get("recent_errors"),
                 })
                 payload["operator_summary"] = operator
                 return payload
             promoted._entry_pipeline_xray_version = VERSION  # type: ignore[attr-defined]
-            olc._postprocess_one_test_payload = promoted
-            olc.VERSION = "one-test-policy-2026-07-13-entry-pipeline-active-callsite"
+            one_link._postprocess_one_test_payload = promoted
+            one_link.VERSION = "one-test-policy-2026-07-14-entry-pipeline-composition-v3"
     except Exception:
         pass
 
@@ -455,7 +575,11 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
     except Exception:
         existing = set()
     if "/paper/entry-pipeline-xray-status" not in existing:
-        flask_app.add_url_rule("/paper/entry-pipeline-xray-status", "entry_pipeline_xray_status", lambda: jsonify(apply(core or _mod())))
+        flask_app.add_url_rule(
+            "/paper/entry-pipeline-xray-status",
+            "entry_pipeline_xray_status",
+            lambda: jsonify(apply(core or _mod())),
+        )
     REGISTERED_APP_IDS.add(id(flask_app))
     apply(core or _mod())
 
