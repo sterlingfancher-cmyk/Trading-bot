@@ -1,14 +1,14 @@
-"""Entry pipeline composition guard.
+"""Stable runtime composition for the paper entry pipeline.
 
-Enforces the intended runtime stack used by run_cycle():
+Intended call stack used by run_cycle():
 
     entry_pipeline_xray (outer diagnostic)
       -> paper_exposure_rotation (composable overlay)
         -> core_entry_pipeline (authoritative implementation)
 
-The risk-on starter valve continues to patch core_entry_pipeline's internal
-participation-valve helper. This module does not change thresholds, sizing,
-candidates, or trade authority.
+The risk-on starter valve patches core_entry_pipeline's internal participation
+helper. This module changes composition only; it does not change candidates,
+thresholds, sizing, risk controls, broker authority, or ML authority.
 """
 from __future__ import annotations
 
@@ -16,18 +16,18 @@ import datetime as dt
 import sys
 from typing import Any, Dict
 
-VERSION = "entry-pipeline-composition-guard-2026-07-14-v1"
+VERSION = "entry-pipeline-composition-guard-2026-07-14-v2-stable-stack"
 REGISTERED_APP_IDS: set[int] = set()
 
 
 def _mod() -> Any | None:
     for name in ("app", "__main__"):
-        m = sys.modules.get(name)
-        if m is not None and getattr(m, "app", None) is not None and hasattr(m, "try_entries_and_rotations"):
-            return m
-    for m in list(sys.modules.values()):
-        if m is not None and getattr(m, "app", None) is not None and hasattr(m, "try_entries_and_rotations"):
-            return m
+        module = sys.modules.get(name)
+        if module is not None and getattr(module, "app", None) is not None and hasattr(module, "try_entries_and_rotations"):
+            return module
+    for module in list(sys.modules.values()):
+        if module is not None and getattr(module, "app", None) is not None and hasattr(module, "try_entries_and_rotations"):
+            return module
     return None
 
 
@@ -49,9 +49,39 @@ def _meta(fn: Any) -> Dict[str, Any]:
     }
 
 
-def _unwrap_xray(fn: Any) -> Any:
+def _inner_callable(fn: Any) -> Any:
     original = getattr(fn, "_entry_pipeline_xray_original", None)
     return original if callable(original) else fn
+
+
+def _save_payload(core: Any, payload: Dict[str, Any]) -> None:
+    try:
+        state = core.load_state()
+        if not isinstance(state, dict):
+            state = getattr(core, "portfolio", {}) or {}
+    except Exception:
+        state = getattr(core, "portfolio", {}) or {}
+    if not isinstance(state, dict):
+        return
+    state["entry_pipeline_composition_guard"] = payload
+    try:
+        core.save_state(state)
+        core.portfolio = state
+    except Exception:
+        try:
+            core.portfolio = state
+        except Exception:
+            pass
+
+
+def _is_stable(fn: Any) -> bool:
+    inner = _inner_callable(fn)
+    return bool(
+        callable(inner)
+        and getattr(inner, "_paper_exposure_composition_version", None) == VERSION
+        and getattr(inner, "_core_entry_pipeline_non_wrapper_patched", False)
+        and getattr(inner, "_core_entry_pipeline_version", None)
+    )
 
 
 def _breakout_overlay(core: Any, base_fn: Any):
@@ -59,16 +89,16 @@ def _breakout_overlay(core: Any, base_fn: Any):
 
     def composed(long_signals, short_signals, params, market, new_entries_allowed=True, entry_block_reason=None):
         breakout_candidates: Dict[str, Dict[str, Any]] = {}
-        for sig in list(long_signals or []) + list(short_signals or []):
-            if isinstance(sig, dict) and per._is_breakout_signal(sig):
-                symbol = str(sig.get("symbol") or "").upper()
+        for signal in list(long_signals or []) + list(short_signals or []):
+            if isinstance(signal, dict) and per._is_breakout_signal(signal):
+                symbol = str(signal.get("symbol") or "").upper()
                 breakout_candidates[symbol] = {
-                    "symbol": sig.get("symbol"),
-                    "side": sig.get("side"),
-                    "score": sig.get("score"),
-                    "entry_context": sig.get("entry_context"),
-                    "trade_class": sig.get("trade_class"),
-                    "breakout_participation": sig.get("breakout_participation"),
+                    "symbol": signal.get("symbol"),
+                    "side": signal.get("side"),
+                    "score": signal.get("score"),
+                    "entry_context": signal.get("entry_context"),
+                    "trade_class": signal.get("trade_class"),
+                    "breakout_participation": signal.get("breakout_participation"),
                 }
 
         entries, rotations, blocked_entries = base_fn(
@@ -101,8 +131,8 @@ def _breakout_overlay(core: Any, base_fn: Any):
                 "breakout_candidates_count": len(breakout_candidates),
                 "blocked_breakout_candidates_count": len(blocked_breakouts),
                 "blocked_breakout_candidates": blocked_breakouts[:20],
-                "entries_from_breakouts": [e for e in (entries or []) if str(e.get("symbol") or "").upper() in breakout_candidates][:20],
-                "rotations_from_breakouts": [r for r in (rotations or []) if str(r.get("in") or "").upper() in breakout_candidates][:20],
+                "entries_from_breakouts": [row for row in (entries or []) if str(row.get("symbol") or "").upper() in breakout_candidates][:20],
+                "rotations_from_breakouts": [row for row in (rotations or []) if str(row.get("in") or "").upper() in breakout_candidates][:20],
                 "positions_count": len((core.portfolio.get("positions", {}) or {})),
                 "max_positions": int((params or {}).get("max_positions", 0) or 0),
                 "max_new_entries_per_cycle": int(getattr(core, "MAX_NEW_ENTRIES_PER_CYCLE", 0)),
@@ -124,29 +154,71 @@ def enforce(core: Any = None) -> Dict[str, Any]:
     if core is None:
         return {"status": "pending", "version": VERSION, "reason": "app_module_not_ready"}
 
-    before = _meta(getattr(core, "try_entries_and_rotations", None))
-    current = _unwrap_xray(getattr(core, "try_entries_and_rotations", None))
+    current = getattr(core, "try_entries_and_rotations", None)
+    before = _meta(current)
+    if _is_stable(current):
+        inner = _inner_callable(current)
+        payload = {
+            "status": "ok",
+            "overall": "pass",
+            "type": "entry_pipeline_composition_guard_status",
+            "version": VERSION,
+            "generated_local": _now(core),
+            "before": before,
+            "after": _meta(inner),
+            "stable_fast_path": True,
+            "core_authoritative": True,
+            "paper_exposure_composed": True,
+            "stack": [
+                "entry_pipeline_xray_outer",
+                "paper_exposure_rotation_overlay",
+                "core_entry_pipeline_authoritative",
+                "risk_on_starter_valve_internal",
+            ],
+            "authority_changed": False,
+        }
+        _save_payload(core, payload)
+        return payload
 
     try:
-        import core_entry_pipeline as cep
-        cep.apply(core)
+        import core_entry_pipeline as core_pipeline
+        core_pipeline.apply(core)
         base = getattr(core, "try_entries_and_rotations", None)
+        if not callable(base) or not getattr(base, "_core_entry_pipeline_non_wrapper_patched", False):
+            raise RuntimeError("core_entry_pipeline_not_authoritative_after_apply")
     except Exception as exc:
-        return {"status": "error", "version": VERSION, "reason": f"core_apply_failed:{type(exc).__name__}:{exc}", "before": before}
+        payload = {
+            "status": "error",
+            "overall": "warn",
+            "version": VERSION,
+            "reason": f"core_apply_failed:{type(exc).__name__}:{exc}",
+            "before": before,
+        }
+        _save_payload(core, payload)
+        return payload
 
     try:
-        import paper_exposure_rotation as per
-        per._patch_bucket_and_sector_limits(core)
-        per._patch_aggression(core)
-        per._patch_rotation_allowed(core)
+        import paper_exposure_rotation as exposure
+        exposure._patch_bucket_and_sector_limits(core)
+        exposure._patch_aggression(core)
+        exposure._patch_rotation_allowed(core)
         composed = _breakout_overlay(core, base)
         core.try_entries_and_rotations = composed
     except Exception as exc:
-        return {"status": "error", "version": VERSION, "reason": f"paper_exposure_compose_failed:{type(exc).__name__}:{exc}", "before": before, "base": _meta(base)}
+        payload = {
+            "status": "error",
+            "overall": "warn",
+            "version": VERSION,
+            "reason": f"paper_exposure_compose_failed:{type(exc).__name__}:{exc}",
+            "before": before,
+            "base": _meta(base),
+        }
+        _save_payload(core, payload)
+        return payload
 
     try:
-        import risk_on_starter_participation_valve as valve
-        valve.apply(core)
+        import risk_on_starter_participation_valve as starter_valve
+        starter_valve.apply(core)
     except Exception:
         pass
 
@@ -159,6 +231,7 @@ def enforce(core: Any = None) -> Dict[str, Any]:
         "generated_local": _now(core),
         "before": before,
         "after": after,
+        "stable_fast_path": False,
         "stack": [
             "entry_pipeline_xray_outer",
             "paper_exposure_rotation_overlay",
@@ -174,10 +247,7 @@ def enforce(core: Any = None) -> Dict[str, Any]:
         "does_not_change_live_authority": True,
         "does_not_change_ml_authority": True,
     }
-    try:
-        core.portfolio["entry_pipeline_composition_guard"] = payload
-    except Exception:
-        pass
+    _save_payload(core, payload)
     return payload
 
 
@@ -193,16 +263,22 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
     core = core or _mod()
     if core is None:
         return {"status": "pending", "version": VERSION}
-    latest = (getattr(core, "portfolio", {}) or {}).get("entry_pipeline_composition_guard") or {}
-    current = _meta(getattr(core, "try_entries_and_rotations", None))
+    try:
+        state = core.load_state()
+    except Exception:
+        state = getattr(core, "portfolio", {}) or {}
+    latest = state.get("entry_pipeline_composition_guard") if isinstance(state, dict) else {}
+    current = getattr(core, "try_entries_and_rotations", None)
     return {
         "status": "ok",
         "overall": "pass",
         "type": "entry_pipeline_composition_guard_status",
         "version": VERSION,
         "generated_local": _now(core),
-        "current_callable": current,
-        "latest": latest,
+        "current_callable": _meta(current),
+        "inner_callable": _meta(_inner_callable(current)),
+        "stack_stable": _is_stable(current),
+        "latest": latest if isinstance(latest, dict) else {},
         "authority_changed": False,
     }
 
@@ -216,7 +292,11 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
     except Exception:
         existing = set()
     if "/paper/entry-pipeline-composition-status" not in existing:
-        flask_app.add_url_rule("/paper/entry-pipeline-composition-status", "entry_pipeline_composition_status", lambda: jsonify(status_payload(core or _mod())))
+        flask_app.add_url_rule(
+            "/paper/entry-pipeline-composition-status",
+            "entry_pipeline_composition_status",
+            lambda: jsonify(status_payload(core or _mod())),
+        )
     REGISTERED_APP_IDS.add(id(flask_app))
     enforce(core or _mod())
 
