@@ -59,7 +59,7 @@ Enforce this runtime stack:
 
 - `entry-pipeline-composition-guard-2026-07-14-v2-stable-stack`
 - `entry-pipeline-xray-2026-07-14-v3-composition-errors`
-- `usercustomize-entry-pipeline-composition-2026-07-14-v23`
+- `usercustomize-entry-pipeline-composition-2026-07-14-v24-stable-watchdog`
 - Runtime one-test policy promotion: `one-test-policy-2026-07-14-entry-pipeline-composition-v3`
 
 ### Commits
@@ -80,10 +80,14 @@ Enforce this runtime stack:
   - Preserves `last_meaningful_cycle`, `last_meaningful_stage_counts`, `last_meaningful_bottleneck`, symbol paths, and the last meaningful scanner audit so later empty cycles do not erase the useful session snapshot.
   - Keeps latest-cycle telemetry separately from meaningful-cycle telemetry.
 - `ac357b869e3fdc700301f4e33ad43cf92acda893`
-  - Wired the composition guard immediately before X-Ray during startup.
-  - Added `/paper/entry-pipeline-composition-status` to optional governance/self-check metadata.
-  - Added a watchdog repair sequence: core pipeline -> extended starter valve -> risk-on starter valve -> composition guard -> X-Ray.
-  - Updated usercustomize version to v23.
+  - Added initial startup wiring for composition guard before X-Ray.
+- `06f7189179076f656642371250d613a90807c2e6`
+  - Corrected watchdog ordering so it does not call the core replacement on every pass.
+  - The stable watchdog now reapplies only the idempotent extended-leader helper, composition guard, and outer X-Ray.
+  - Lets the composition guard own core restoration and paper-exposure composition.
+  - Prevents continuous stack rebuilding and reduces race risk during active cycles.
+- `709779f588f35a67691f64be20d90adadf310673`
+  - Recorded the completed repair and validation plan in the handoff.
 
 ### Routes
 
