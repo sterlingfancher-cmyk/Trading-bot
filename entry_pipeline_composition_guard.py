@@ -1,10 +1,15 @@
-"""Stable runtime composition for the paper entry pipeline.
+"""Recursion-safe runtime composition for the paper entry pipeline.
 
 Intended call stack used by run_cycle():
 
     entry_pipeline_xray (outer diagnostic)
       -> paper_exposure_rotation (composable overlay)
-        -> core_entry_pipeline (authoritative implementation)
+        -> direct core_entry_pipeline implementation
+
+The core base is captured as an immutable closure around
+core_entry_pipeline._core_try_entries_and_rotations. The composed overlay never
+resolves app.try_entries_and_rotations from inside itself, preventing wrapper
+cycles and recursion.
 
 The risk-on starter valve patches core_entry_pipeline's internal participation
 helper. This module changes composition only; it does not change candidates,
@@ -16,7 +21,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict
 
-VERSION = "entry-pipeline-composition-guard-2026-07-14-v2-stable-stack"
+VERSION = "entry-pipeline-composition-guard-2026-07-15-v3-recursion-safe"
 REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -46,6 +51,7 @@ def _meta(fn: Any) -> Dict[str, Any]:
         "core_entry_pipeline_patched": bool(getattr(fn, "_core_entry_pipeline_non_wrapper_patched", False)),
         "paper_exposure_version": getattr(fn, "_paper_exposure_composition_version", None),
         "xray_version": getattr(fn, "_entry_pipeline_xray_version", None),
+        "direct_core_base": bool(getattr(fn, "_entry_pipeline_direct_core_base", False)),
     }
 
 
@@ -81,7 +87,32 @@ def _is_stable(fn: Any) -> bool:
         and getattr(inner, "_paper_exposure_composition_version", None) == VERSION
         and getattr(inner, "_core_entry_pipeline_non_wrapper_patched", False)
         and getattr(inner, "_core_entry_pipeline_version", None)
+        and getattr(inner, "_entry_pipeline_direct_core_base", False)
     )
+
+
+def _direct_core_base(core: Any, core_pipeline: Any):
+    """Return an immutable closure over the true internal core implementation."""
+    internal = getattr(core_pipeline, "_core_try_entries_and_rotations", None)
+    if not callable(internal):
+        raise RuntimeError("core_internal_entry_callable_missing")
+
+    def direct_core(long_signals, short_signals, params, market, new_entries_allowed=True, entry_block_reason=None):
+        return internal(
+            core,
+            long_signals,
+            short_signals,
+            params,
+            market,
+            new_entries_allowed=new_entries_allowed,
+            entry_block_reason=entry_block_reason,
+        )
+
+    direct_core._core_entry_pipeline_non_wrapper_patched = True  # type: ignore[attr-defined]
+    direct_core._core_entry_pipeline_version = getattr(core_pipeline, "VERSION", None)  # type: ignore[attr-defined]
+    direct_core._entry_pipeline_direct_core_base = True  # type: ignore[attr-defined]
+    direct_core._entry_pipeline_direct_core_target = "core_entry_pipeline._core_try_entries_and_rotations"  # type: ignore[attr-defined]
+    return direct_core
 
 
 def _breakout_overlay(core: Any, base_fn: Any):
@@ -101,6 +132,8 @@ def _breakout_overlay(core: Any, base_fn: Any):
                     "breakout_participation": signal.get("breakout_participation"),
                 }
 
+        # Call the captured direct core closure only. Never resolve the public
+        # app callable here; that public callable may point to X-Ray/composed.
         entries, rotations, blocked_entries = base_fn(
             long_signals,
             short_signals,
@@ -136,6 +169,7 @@ def _breakout_overlay(core: Any, base_fn: Any):
                 "positions_count": len((core.portfolio.get("positions", {}) or {})),
                 "max_positions": int((params or {}).get("max_positions", 0) or 0),
                 "max_new_entries_per_cycle": int(getattr(core, "MAX_NEW_ENTRIES_PER_CYCLE", 0)),
+                "direct_core_base": True,
             }
         except Exception:
             pass
@@ -146,6 +180,8 @@ def _breakout_overlay(core: Any, base_fn: Any):
     composed._paper_exposure_debug_original = base_fn  # type: ignore[attr-defined]
     composed._core_entry_pipeline_version = getattr(base_fn, "_core_entry_pipeline_version", None)  # type: ignore[attr-defined]
     composed._core_entry_pipeline_non_wrapper_patched = bool(getattr(base_fn, "_core_entry_pipeline_non_wrapper_patched", False))  # type: ignore[attr-defined]
+    composed._entry_pipeline_direct_core_base = True  # type: ignore[attr-defined]
+    composed._entry_pipeline_direct_core_target = getattr(base_fn, "_entry_pipeline_direct_core_target", None)  # type: ignore[attr-defined]
     return composed
 
 
@@ -169,10 +205,12 @@ def enforce(core: Any = None) -> Dict[str, Any]:
             "stable_fast_path": True,
             "core_authoritative": True,
             "paper_exposure_composed": True,
+            "direct_core_base": True,
+            "recursion_safe": True,
             "stack": [
                 "entry_pipeline_xray_outer",
                 "paper_exposure_rotation_overlay",
-                "core_entry_pipeline_authoritative",
+                "direct_core_entry_pipeline_closure",
                 "risk_on_starter_valve_internal",
             ],
             "authority_changed": False,
@@ -182,16 +220,13 @@ def enforce(core: Any = None) -> Dict[str, Any]:
 
     try:
         import core_entry_pipeline as core_pipeline
-        core_pipeline.apply(core)
-        base = getattr(core, "try_entries_and_rotations", None)
-        if not callable(base) or not getattr(base, "_core_entry_pipeline_non_wrapper_patched", False):
-            raise RuntimeError("core_entry_pipeline_not_authoritative_after_apply")
+        base = _direct_core_base(core, core_pipeline)
     except Exception as exc:
         payload = {
             "status": "error",
             "overall": "warn",
             "version": VERSION,
-            "reason": f"core_apply_failed:{type(exc).__name__}:{exc}",
+            "reason": f"direct_core_capture_failed:{type(exc).__name__}:{exc}",
             "before": before,
         }
         _save_payload(core, payload)
@@ -235,11 +270,13 @@ def enforce(core: Any = None) -> Dict[str, Any]:
         "stack": [
             "entry_pipeline_xray_outer",
             "paper_exposure_rotation_overlay",
-            "core_entry_pipeline_authoritative",
+            "direct_core_entry_pipeline_closure",
             "risk_on_starter_valve_internal",
         ],
         "core_authoritative": bool(after.get("core_entry_pipeline_patched")),
         "paper_exposure_composed": after.get("paper_exposure_version") == VERSION,
+        "direct_core_base": bool(after.get("direct_core_base")),
+        "recursion_safe": bool(after.get("direct_core_base")),
         "authority_changed": False,
         "diagnostic_and_composition_only": True,
         "does_not_change_thresholds": True,
@@ -269,6 +306,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         state = getattr(core, "portfolio", {}) or {}
     latest = state.get("entry_pipeline_composition_guard") if isinstance(state, dict) else {}
     current = getattr(core, "try_entries_and_rotations", None)
+    inner = _inner_callable(current)
     return {
         "status": "ok",
         "overall": "pass",
@@ -276,8 +314,10 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "version": VERSION,
         "generated_local": _now(core),
         "current_callable": _meta(current),
-        "inner_callable": _meta(_inner_callable(current)),
+        "inner_callable": _meta(inner),
         "stack_stable": _is_stable(current),
+        "direct_core_base": bool(getattr(inner, "_entry_pipeline_direct_core_base", False)),
+        "recursion_safe": bool(getattr(inner, "_entry_pipeline_direct_core_base", False)),
         "latest": latest if isinstance(latest, dict) else {},
         "authority_changed": False,
     }
