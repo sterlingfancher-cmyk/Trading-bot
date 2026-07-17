@@ -1,4 +1,4 @@
-# Automated Trading Project Handoff — Updated July 15, 2026
+# Automated Trading Project Handoff — Updated July 17, 2026
 
 ## Standing Rule
 
@@ -14,68 +14,94 @@ Every code/configuration update must update this file in the same work session w
 - ML live authority: none
 - Strict stronger-authority benchmark: 150 execution rows and 100 observed outcomes
 
-## Latest Runtime Evidence — July 15, 2026, 15:31:10 CDT
+## Latest Runtime Evidence — July 17, 2026, 12:52:31 CDT
 
-The operator supplied a passing infrastructure/self-check payload, but X-Ray showed the composed entry path was functionally failing on meaningful candidate cycles:
+The operator supplied a passing infrastructure/self-check payload, but the entry X-Ray proved that the prior recursion repair did not eliminate the actual helper-level cycle:
 
 - `overall: pass`
 - No required HTTP failures or warnings
-- Open positions: DELL, QQQ, SNDK
-- Equity: 10937.58
-- Cash: 9672.49
-- Realized PnL today: 0.0
-- Unrealized PnL: +79.91
-- Daily/intraday drawdown: 1.02%
-- Self-defense inactive
-- X-Ray active-callsite invocations: 68
-- Meaningful cycles: 19
-- Active-callsite errors: 19
-- Repeated exception: `RecursionError: maximum recursion depth exceeded while calling a Python object`
-- Last meaningful candidate: HUT
+- Cash/equity: 10868.73
+- Open positions: 0
+- Realized PnL today: +11.08
+- Wins today: 2
+- Losses today: 3
+- Total realized PnL: +868.76
+- Execution rows: 87
+- Observed outcomes: 54
+- Early paper Phase 3A ready: true
+- X-Ray active-callsite invocations: 186
+- Meaningful cycles: 48
+- Active-callsite errors: 47
+- Fresh repeated exception through 12:49:01 CDT: `RecursionError: maximum recursion depth exceeded while calling a Python object`
+- Last meaningful candidate: NBIS
 - Last meaningful path: scanner signal -> active entry call -> prepared candidate -> no final row visible -> recursion error
-- Risk-on starter valve still had no candidate evaluations because execution failed before reaching the participation helper
+- Risk-on starter telemetry remained empty because execution failed before the participation result completed
 
-The service remained available because X-Ray caught and recorded the exception. Infrastructure health was good, but meaningful entry execution was broken.
+The composition metadata reported `direct_core_base: true`, but the internal participation helper chain was cyclic. The service remained available because X-Ray caught the exception.
 
-## Latest Code Update — Recursion-Safe Entry Composition
+## Latest Code Update — Deterministic Participation Valve Chain
 
 ### Root cause
 
-The prior composition guard rebuilt the stack by calling `core_entry_pipeline.apply(core)` and then reading `core.try_entries_and_rotations` back from the public app module. In a runtime containing X-Ray and paper-exposure wrappers, that public callable could already belong to the wrapper chain. The exposure closure could therefore resolve back into the composed/X-Ray path and recurse.
+The extended-leader starter module and risk-on starter module both patch `core_entry_pipeline._participation_valve_ok` and store the current callable in module-global `_ORIGINAL_FN`.
+
+Repeated startup/watchdog patching could produce this cycle:
+
+1. Extended overlay stores the risk-on overlay as its original.
+2. Risk-on overlay stores the extended overlay as its original.
+3. A candidate reaches the participation helper.
+4. Each overlay calls the other indefinitely.
+5. Python raises `RecursionError`.
+
+This explains why the outer entry stack could be structurally correct while meaningful candidate cycles still failed.
 
 ### Fix
 
-`entry_pipeline_composition_guard.py` now captures an immutable direct closure around:
+`entry_pipeline_composition_guard.py` now owns and verifies the participation-helper chain. It installs the chain deterministically:
 
-`core_entry_pipeline._core_try_entries_and_rotations(core, ...)`
+1. Clean base participation-valve implementation
+2. Extended-leader starter overlay
+3. Risk-on starter overlay
 
-The paper-exposure overlay calls only that captured closure. It never resolves or calls public `app.try_entries_and_rotations` from inside the composed wrapper.
+The clean base implementation is created directly from `core_entry_pipeline` constants and helper functions. It does not reference either overlay.
 
-Corrected stack:
+The guard sets:
+
+- `extended_leader_starter_valve._ORIGINAL_FN = clean_base`
+- `risk_on_starter_participation_valve._ORIGINAL_FN = extended_overlay`
+- `core_entry_pipeline._participation_valve_ok = risk_on_overlay`
+
+Each layer receives fixed chain metadata. Repeated watchdog calls use a stable fast path when the outer helper already has the correct chain version and role. Neither overlay dynamically recaptures the other.
+
+### Corrected runtime stack
 
 1. `entry_pipeline_xray` outer diagnostic wrapper
 2. `paper_exposure_rotation` overlay
 3. direct closure over `core_entry_pipeline._core_try_entries_and_rotations`
-4. risk-on starter valve on the core participation helper
+4. clean base participation valve
+5. extended-leader starter overlay
+6. risk-on starter overlay
 
-### File changed
+### Files changed
 
 - `entry_pipeline_composition_guard.py`
 - `PROJECT_HANDOFF.md`
 
-### New version
+### New versions
 
-- `entry-pipeline-composition-guard-2026-07-15-v3-recursion-safe`
+- `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
+- `participation-valve-chain-2026-07-17-v1`
 
 ### Commits
 
-- `daac00d02a969cde5fcbaa8c033a7be034bbc78a`
-  - Replaced public-callable composition with an immutable direct-core closure.
-  - Added `_entry_pipeline_direct_core_base` metadata.
-  - Added `direct_core_base` and `recursion_safe` status fields.
-  - Stable fast path now requires the direct-core-base marker.
-  - Retained paper exposure, X-Ray outer wrapping, and risk-on starter helper patching.
-- Handoff commit: recorded by the commit that updates this file in the same work session.
+- `ac423cb488aaf0753340c88caab3f8114d80193e`
+  - Added a clean non-overlay participation-valve base.
+  - Added deterministic base -> extended -> risk-on composition.
+  - Added chain roles and version markers.
+  - Added cycle-free status checks.
+  - Runs helper-chain repair before the outer-stack stable fast path.
+  - Preserved the direct-core entry closure and paper-exposure overlay.
+- Handoff commit: the commit that updates this file in the same work session.
 
 ### Routes
 
@@ -89,31 +115,34 @@ Corrected stack:
 
 Composition route/self-check should show:
 
-- Version: `entry-pipeline-composition-guard-2026-07-15-v3-recursion-safe`
+- Version: `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
 - `stack_stable: true`
 - `direct_core_base: true`
 - `recursion_safe: true`
-- Inner/composed callable metadata:
-  - `core_entry_pipeline_patched: true`
-  - populated `core_entry_pipeline_version`
-  - `paper_exposure_version: entry-pipeline-composition-guard-2026-07-15-v3-recursion-safe`
-  - `direct_core_base: true`
+- `participation_valve_chain_version: participation-valve-chain-2026-07-17-v1`
+- `participation_valve_chain_cycle_free: true`
+- participation callable role: `risk_on_outer`
+- latest chain status showing:
+  - clean base role
+  - extended middle role
+  - risk-on outer role
+  - `cycle_free: true`
 
-X-Ray should remain outermost and continue showing:
+X-Ray should remain outermost:
 
 - Version: `entry-pipeline-xray-2026-07-14-v3-composition-errors`
 - Patch target: `app.try_entries_and_rotations`
-- Wrapped callable pointing to the recursion-safe composed function
-- preserved latest and last-meaningful cycle telemetry
+- Wrapped callable pointing to the v4 composed function
+- Preserved latest and last-meaningful cycle telemetry
 
 After a fresh open-market candidate cycle:
 
-- no new `RecursionError` rows should appear
-- active-callsite error counter should stop increasing due to recursion
-- prepared candidates should produce either entries, explicit blocked rows, or participation-valve telemetry
-- risk-on starter telemetry should begin recording evaluations when a quality failure matches an allowed starter reason
+- no new `RecursionError` timestamps should appear after redeploy
+- active-callsite recursion-error counter should stop increasing
+- prepared candidates should produce entries, explicit blocker rows, or starter-valve telemetry
+- risk-on starter telemetry should begin recording evaluations when quality failures reach the helper
 
-Historical `recent_errors` can remain in state until naturally replaced by newer telemetry; validation should focus on whether new recursion timestamps stop appearing after the redeploy.
+Historical `recent_errors` may remain in state until naturally replaced. Validation must compare timestamps and counters before and after redeploy.
 
 ## Safety / Authority Impact
 
@@ -129,10 +158,11 @@ Historical `recent_errors` can remain in state until naturally replaced by newer
 - No risk-halt bypass
 - No drawdown-control bypass
 - No trend, volume, or relative-edge bypass
-- Existing paper-exposure position limits and breakout rotation policy remain available
+- Existing base, extended-leader, and risk-on starter policies retain their prior thresholds and limits
 
 ## Prior Composition and X-Ray Versions
 
+- `entry-pipeline-composition-guard-2026-07-15-v3-recursion-safe`
 - `entry-pipeline-composition-guard-2026-07-14-v2-stable-stack`
 - `entry-pipeline-xray-2026-07-14-v3-composition-errors`
 - `usercustomize-entry-pipeline-composition-2026-07-14-v24-stable-watchdog`
@@ -140,17 +170,17 @@ Historical `recent_errors` can remain in state until naturally replaced by newer
 
 Prior key commits:
 
+- `daac00d02a969cde5fcbaa8c033a7be034bbc78a` — direct-core outer composition repair
 - `627bfeed8b1927a26a281a33ef3a38b446210bf3` — stable composition guard v2
 - `9ba549feaa3eb0e28e23bd013157d7a391cc0376` — X-Ray v3 with error details and meaningful-cycle retention
 - `06f7189179076f656642371250d613a90807c2e6` — stable startup/watchdog ordering
-- `679cb4275177a0ff052cd428d6af3288f6e088c5` — prior completed handoff
 
 ## State and Reporting Notes
 
-- X-Ray preserves both the latest cycle and the latest meaningful cycle.
-- Historical recursion errors will remain visible in recent-error history until replaced; use timestamps to distinguish pre-fix from post-fix errors.
+- X-Ray preserves both the latest cycle and latest meaningful cycle.
+- Historical recursion errors remain visible until replaced; use timestamps to distinguish pre-fix and post-fix errors.
 - The persistent TEM post-harvest row still reports `reason_not_available_in_state_snapshot`; this remains diagnostic debt rather than a risk/authority issue.
-- Execution rows and observed outcomes previously moved backward in state. Continue watching for stale-state writes or reconciliation changes. Do not run repair routes unless a specific malformed-state condition is confirmed.
+- Execution rows and observed outcomes have previously moved backward in state. Continue watching for stale-state writes or reconciliation changes. Do not run repair routes unless a specific malformed-state condition is confirmed.
 
 ## Validation Procedure
 
@@ -163,12 +193,13 @@ Confirm:
 - `overall: pass`
 - `failed_required: []`
 - no new warnings
-- composition version is `entry-pipeline-composition-guard-2026-07-15-v3-recursion-safe`
+- composition version is `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
+- `participation_valve_chain_cycle_free: true`
 - `direct_core_base: true`
 - `recursion_safe: true`
 - X-Ray remains patched and outermost
 - positions, PnL, and risk state remain coherent
 
-During the next open-market candidate cycle, verify that no new recursion errors are appended and that candidate results become entries, explicit blocker rows, or starter-valve evaluations.
+During the next open-market candidate cycle, verify that no new recursion errors are appended and candidate results become entries, explicit blocker rows, or starter-valve evaluations.
 
 Do not run mutating repair or execution endpoints as part of routine validation.
