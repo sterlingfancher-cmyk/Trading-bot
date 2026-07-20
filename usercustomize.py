@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-14-v24-stable-watchdog"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-20-v25-reason-sanitizer"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -36,6 +36,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/extended-leader-starter-valve-status", "category": "governance", "required": False},
             {"path": "/paper/risk-on-starter-participation-status", "category": "governance", "required": False},
             {"path": "/paper/entry-pipeline-composition-status", "category": "governance", "required": False},
+            {"path": "/paper/starter-valve-reason-sanitizer-status", "category": "governance", "required": False},
             {"path": "/paper/entry-pipeline-xray-status", "category": "governance", "required": False},
             {"path": "/paper/controlled-redeployment-starter-sleeve-status", "category": "governance", "required": False},
             {"path": "/paper/quality-blocker-diagnostics-status", "category": "governance", "required": False},
@@ -94,6 +95,7 @@ MODULES = (
     ("extended_leader_starter_valve", "app_and_module"),
     ("risk_on_starter_participation_valve", "app_and_module"),
     ("entry_pipeline_composition_guard", "app_and_module"),
+    ("starter_valve_reason_sanitizer", "app_and_module"),
     ("entry_pipeline_xray", "app_and_module"),
     ("controlled_redeployment_starter_sleeve", "app_and_module"),
     ("quality_blocker_diagnostics", "app_and_module"),
@@ -113,10 +115,12 @@ def _register_auxiliary_routes(flask_app: Any, module_hint: Any | None = None) -
 
 
 def _repair_entry_stack(flask_app: Any, core: Any) -> None:
-    # Extended-leader helper is idempotent. The composition guard owns core
-    # restoration and paper-exposure composition; X-Ray remains outermost.
+    # Composition guard owns the deterministic core/valve stack. The sanitizer is
+    # re-applied after composition so blocker detail mappings cannot duplicate the
+    # positional reason argument. X-Ray remains outermost.
     _register_module(flask_app, core, "extended_leader_starter_valve", route_args="app_and_module")
     _register_module(flask_app, core, "entry_pipeline_composition_guard", route_args="app_and_module")
+    _register_module(flask_app, core, "starter_valve_reason_sanitizer", route_args="app_and_module")
     _register_module(flask_app, core, "entry_pipeline_xray", route_args="app_and_module")
 
 
