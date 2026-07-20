@@ -1,4 +1,4 @@
-# Automated Trading Project Handoff — Updated July 17, 2026
+# Automated Trading Project Handoff — Updated July 20, 2026
 
 ## Standing Rule
 
@@ -14,66 +14,130 @@ Every code/configuration update must update this file in the same work session w
 - ML live authority: none
 - Strict stronger-authority benchmark: 150 execution rows and 100 observed outcomes
 
-## Latest Runtime Evidence — July 17, 2026, 12:52:31 CDT
+## Latest Runtime Evidence — July 20, 2026, 12:20:38 CDT
 
-The operator supplied a passing infrastructure/self-check payload, but the entry X-Ray proved that the prior recursion repair did not eliminate the actual helper-level cycle:
+The operator supplied a passing self-check. The deterministic valve chain was active and cycle-free, and no new recursion errors were present. Meaningful entry cycles were instead failing with a new reporting-layer exception:
 
 - `overall: pass`
-- No required HTTP failures or warnings
-- Cash/equity: 10868.73
-- Open positions: 0
-- Realized PnL today: +11.08
-- Wins today: 2
-- Losses today: 3
-- Total realized PnL: +868.76
-- Execution rows: 87
-- Observed outcomes: 54
-- Early paper Phase 3A ready: true
-- X-Ray active-callsite invocations: 186
-- Meaningful cycles: 48
-- Active-callsite errors: 47
-- Fresh repeated exception through 12:49:01 CDT: `RecursionError: maximum recursion depth exceeded while calling a Python object`
-- Last meaningful candidate: NBIS
-- Last meaningful path: scanner signal -> active entry call -> prepared candidate -> no final row visible -> recursion error
-- Risk-on starter telemetry remained empty because execution failed before the participation result completed
+- `failed_required: []`
+- Composition version: `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
+- Participation chain: `participation-valve-chain-2026-07-17-v1`
+- `participation_valve_chain_cycle_free: true`
+- `recursion_safe: true`
+- X-Ray active-callsite errors: 10
+- Repeated exception through 12:01:39 CDT: `_patched_participation_valve_ok.<locals>.blocked() got multiple values for argument 'reason'`
+- Risk-on starter telemetry remained empty because the exception occurred before a blocker result could be persisted
+- Market mode during the latest scanner snapshot: `crash_warning`
+- Risk score: 17
+- Open positions: DELL, QQQ, SNDK
+- Equity: 10837.88
+- Cash: 9672.49
+- Unrealized PnL: -19.78
+- Total realized PnL: +857.68
 
-The composition metadata reported `direct_core_base: true`, but the internal participation helper chain was cyclic. The service remained available because X-Ray caught the exception.
-
-## Latest Code Update — Deterministic Participation Valve Chain
+## Latest Code Update — Starter Valve Reason Sanitizer
 
 ### Root cause
 
-The extended-leader starter module and risk-on starter module both patch `core_entry_pipeline._participation_valve_ok` and store the current callable in module-global `_ORIGINAL_FN`.
+Both starter overlays use a local helper shaped like:
 
-Repeated startup/watchdog patching could produce this cycle:
+`blocked(reason, **extra)`
 
-1. Extended overlay stores the risk-on overlay as its original.
-2. Risk-on overlay stores the extended overlay as its original.
-3. A candidate reaches the participation helper.
-4. Each overlay calls the other indefinitely.
-5. Python raises `RecursionError`.
+Some call sites passed:
 
-This explains why the outer entry stack could be structurally correct while meaningful candidate cycles still failed.
+`blocked(info.get("reason", fallback), **info)`
+
+When `info` was a normal dictionary containing its own `reason` key, Python received `reason` once positionally and once through keyword expansion, raising `TypeError`.
+
+Affected paths:
+
+- `risk_on_starter_participation_valve._quality_block_allowed`
+- `risk_on_starter_participation_valve._risk_ok`
+- `extended_leader_starter_valve._risk_ok`
 
 ### Fix
 
-`entry_pipeline_composition_guard.py` now owns and verifies the participation-helper chain. It installs the chain deterministically:
+Added `starter_valve_reason_sanitizer.py`.
 
-1. Clean base participation-valve implementation
-2. Extended-leader starter overlay
-3. Risk-on starter overlay
+The sanitizer wraps the three tuple-returning helper functions and converts blocker-detail dictionaries into a reason-safe mapping:
 
-The clean base implementation is created directly from `core_entry_pipeline` constants and helper functions. It does not reference either overlay.
+- `mapping.get("reason")` still returns the original reason for the positional argument.
+- The `reason` key is absent from mapping expansion, so `**mapping` cannot pass it a second time.
+- All other detail fields remain available for telemetry.
+- No decision rule, threshold, sizing factor, or authority setting is changed.
 
-The guard sets:
+`usercustomize.py` now loads and reapplies the sanitizer immediately after deterministic entry-stack composition and before X-Ray remains outermost.
 
-- `extended_leader_starter_valve._ORIGINAL_FN = clean_base`
-- `risk_on_starter_participation_valve._ORIGINAL_FN = extended_overlay`
-- `core_entry_pipeline._participation_valve_ok = risk_on_overlay`
+### Files changed
 
-Each layer receives fixed chain metadata. Repeated watchdog calls use a stable fast path when the outer helper already has the correct chain version and role. Neither overlay dynamically recaptures the other.
+- `starter_valve_reason_sanitizer.py`
+- `usercustomize.py`
+- `PROJECT_HANDOFF.md`
 
-### Corrected runtime stack
+### Versions
+
+- `starter-valve-reason-sanitizer-2026-07-20-v1`
+- `usercustomize-entry-pipeline-composition-2026-07-20-v25-reason-sanitizer`
+- Existing composition remains `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
+- Existing helper chain remains `participation-valve-chain-2026-07-17-v1`
+
+### Commits
+
+- `fc002ce9a7daabcbcb951d298b7d0cc17c7da3ac`
+  - Added reason-safe mapping and helper wrappers.
+  - Prevents duplicate `reason` keyword expansion in both starter overlays.
+- `536b5dbd4704e8ad6dcc7a502632069df3a607d5`
+  - Loads the sanitizer after composition.
+  - Reapplies it from the watchdog entry-stack repair path.
+  - Adds optional sanitizer status route to self-check governance endpoints.
+- Handoff commit: the commit that updates this file in the same work session.
+
+### Routes
+
+- Routine: `https://trading-bot-clean.up.railway.app/paper/self-check`
+- Sanitizer: `https://trading-bot-clean.up.railway.app/paper/starter-valve-reason-sanitizer-status`
+- Composition: `https://trading-bot-clean.up.railway.app/paper/entry-pipeline-composition-status`
+- X-Ray: `https://trading-bot-clean.up.railway.app/paper/entry-pipeline-xray-status`
+- Risk-on starter valve: `https://trading-bot-clean.up.railway.app/paper/risk-on-starter-participation-status`
+
+## Expected Runtime Evidence After Redeploy
+
+Routine self-check should show:
+
+- `overall: pass`
+- `failed_required: []`
+- composition remains v4 and cycle-free
+- sanitizer version `starter-valve-reason-sanitizer-2026-07-20-v1`
+- `duplicate_reason_kwarg_prevented: true`
+- `logic_changed: false`
+- `authority_changed: false`
+
+After a fresh meaningful candidate cycle:
+
+- no new `TypeError` with `multiple values for argument 'reason'`
+- active-callsite error counter should stop increasing from this exception
+- prepared candidates should return entries or explicit blocked rows
+- participation-valve telemetry should record blocked or allowed evaluations when candidates reach the helper
+- bear/crash-warning candidates should be cleanly blocked by risk controls rather than terminated by an exception
+
+Historical X-Ray errors may remain until replaced; compare timestamps and counters after redeploy.
+
+## Safety / Authority Impact
+
+- Reporting/argument-sanitization repair only
+- No threshold changes
+- No sizing changes
+- No candidate-list changes
+- No order-placement changes
+- No live authority added
+- No ML authority added
+- No cooldown bypass
+- No self-defense bypass
+- No risk-halt bypass
+- No drawdown-control bypass
+- No trend, volume, relative-edge, futures-bias, or market-regime bypass
+
+## Current Runtime Stack
 
 1. `entry_pipeline_xray` outer diagnostic wrapper
 2. `paper_exposure_rotation` overlay
@@ -81,125 +145,28 @@ Each layer receives fixed chain metadata. Repeated watchdog calls use a stable f
 4. clean base participation valve
 5. extended-leader starter overlay
 6. risk-on starter overlay
+7. reason-safe blocker detail wrappers on overlay helper results
 
-### Files changed
+## Prior Key Repairs
 
-- `entry_pipeline_composition_guard.py`
-- `PROJECT_HANDOFF.md`
-
-### New versions
-
-- `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
-- `participation-valve-chain-2026-07-17-v1`
-
-### Commits
-
-- `ac423cb488aaf0753340c88caab3f8114d80193e`
-  - Added a clean non-overlay participation-valve base.
-  - Added deterministic base -> extended -> risk-on composition.
-  - Added chain roles and version markers.
-  - Added cycle-free status checks.
-  - Runs helper-chain repair before the outer-stack stable fast path.
-  - Preserved the direct-core entry closure and paper-exposure overlay.
-- Handoff commit: the commit that updates this file in the same work session.
-
-### Routes
-
-- Routine: `https://trading-bot-clean.up.railway.app/paper/self-check`
-- Composition: `https://trading-bot-clean.up.railway.app/paper/entry-pipeline-composition-status`
-- X-Ray: `https://trading-bot-clean.up.railway.app/paper/entry-pipeline-xray-status`
-- Risk-on starter valve: `https://trading-bot-clean.up.railway.app/paper/risk-on-starter-participation-status`
-- Core pipeline: `https://trading-bot-clean.up.railway.app/paper/core-entry-pipeline-status`
-
-## Expected Runtime Evidence After Redeploy
-
-Composition route/self-check should show:
-
-- Version: `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
-- `stack_stable: true`
-- `direct_core_base: true`
-- `recursion_safe: true`
-- `participation_valve_chain_version: participation-valve-chain-2026-07-17-v1`
-- `participation_valve_chain_cycle_free: true`
-- participation callable role: `risk_on_outer`
-- latest chain status showing:
-  - clean base role
-  - extended middle role
-  - risk-on outer role
-  - `cycle_free: true`
-
-X-Ray should remain outermost:
-
-- Version: `entry-pipeline-xray-2026-07-14-v3-composition-errors`
-- Patch target: `app.try_entries_and_rotations`
-- Wrapped callable pointing to the v4 composed function
-- Preserved latest and last-meaningful cycle telemetry
-
-After a fresh open-market candidate cycle:
-
-- no new `RecursionError` timestamps should appear after redeploy
-- active-callsite recursion-error counter should stop increasing
-- prepared candidates should produce entries, explicit blocker rows, or starter-valve telemetry
-- risk-on starter telemetry should begin recording evaluations when quality failures reach the helper
-
-Historical `recent_errors` may remain in state until naturally replaced. Validation must compare timestamps and counters before and after redeploy.
-
-## Safety / Authority Impact
-
-- Composition repair only
-- No global threshold changes
-- No sizing changes
-- No candidate-list changes
-- No direct order placement added
-- No live authority added
-- No ML authority added
-- No cooldown bypass
-- No self-defense bypass
-- No risk-halt bypass
-- No drawdown-control bypass
-- No trend, volume, or relative-edge bypass
-- Existing base, extended-leader, and risk-on starter policies retain their prior thresholds and limits
-
-## Prior Composition and X-Ray Versions
-
-- `entry-pipeline-composition-guard-2026-07-15-v3-recursion-safe`
-- `entry-pipeline-composition-guard-2026-07-14-v2-stable-stack`
-- `entry-pipeline-xray-2026-07-14-v3-composition-errors`
-- `usercustomize-entry-pipeline-composition-2026-07-14-v24-stable-watchdog`
-- `one-test-policy-2026-07-14-entry-pipeline-composition-v3`
-
-Prior key commits:
-
+- `ac423cb488aaf0753340c88caab3f8114d80193e` — deterministic, cycle-free base -> extended -> risk-on participation chain
 - `daac00d02a969cde5fcbaa8c033a7be034bbc78a` — direct-core outer composition repair
-- `627bfeed8b1927a26a281a33ef3a38b446210bf3` — stable composition guard v2
 - `9ba549feaa3eb0e28e23bd013157d7a391cc0376` — X-Ray v3 with error details and meaningful-cycle retention
 - `06f7189179076f656642371250d613a90807c2e6` — stable startup/watchdog ordering
 
 ## State and Reporting Notes
 
 - X-Ray preserves both the latest cycle and latest meaningful cycle.
-- Historical recursion errors remain visible until replaced; use timestamps to distinguish pre-fix and post-fix errors.
+- Historical recursion and TypeError records remain visible until replaced; use timestamps to distinguish pre-fix and post-fix errors.
 - The persistent TEM post-harvest row still reports `reason_not_available_in_state_snapshot`; this remains diagnostic debt rather than a risk/authority issue.
 - Execution rows and observed outcomes have previously moved backward in state. Continue watching for stale-state writes or reconciliation changes. Do not run repair routes unless a specific malformed-state condition is confirmed.
 
 ## Validation Procedure
 
-After Railway redeploys, run:
+After Railway redeploys, run only:
 
 `https://trading-bot-clean.up.railway.app/paper/self-check`
 
-Confirm:
-
-- `overall: pass`
-- `failed_required: []`
-- no new warnings
-- composition version is `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
-- `participation_valve_chain_cycle_free: true`
-- `direct_core_base: true`
-- `recursion_safe: true`
-- X-Ray remains patched and outermost
-- positions, PnL, and risk state remain coherent
-
-During the next open-market candidate cycle, verify that no new recursion errors are appended and candidate results become entries, explicit blocker rows, or starter-valve evaluations.
+Confirm service health, sanitizer presence, cycle-free composition, coherent positions/PnL/risk state, and no newly timestamped duplicate-reason TypeError after the next meaningful candidate cycle.
 
 Do not run mutating repair or execution endpoints as part of routine validation.
