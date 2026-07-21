@@ -15,83 +15,75 @@ Every code/configuration update must update this file in the same work session w
 - ML live authority: none
 - Strict stronger-authority benchmark: 150 execution rows and 100 observed outcomes
 
-## Latest Runtime Evidence — July 21, 2026, 12:19:41 CDT
+## Latest Runtime Evidence — July 21, 2026, 12:35:36 CDT
 
-The latest operator-supplied self-check passed:
+The first compact daily response successfully reduced payload size but exposed a source-extraction defect:
 
-- `overall: pass`
-- `failed_required: []`
-- Entry Pipeline X-Ray was outermost.
-- `stack_stable: true`
-- `direct_core_base: true`
-- `recursion_safe: true`
-- `participation_valve_chain_cycle_free: true`
-- X-Ray invocations advanced to 84 while active-callsite errors remained at 10.
-- The newest duplicate-reason TypeError remained historical at July 20, 12:01:39 CDT; no new occurrence was present.
-- Self-defense was inactive.
-- Equity: 10866.55
-- Cash: 10111.46
-- Open positions: DELL and QQQ
-- Realized total: +733.97
-- Unrealized PnL: +132.59
-- Scanner signals: 42
-- Market mode remained risk-off/bear in the latest meaningful scanner snapshot, so blocked long entries were appropriate.
-- Phase 3A early paper advisory readiness was true, with live authority still off.
+- `type: daily_self_check`
+- `version: daily-self-check-compactor-2026-07-21-v1`
+- `daily_response_compact: true`
+- Entry pipeline remained healthy:
+  - `current_callable: entry_pipeline_xray.wrapped`
+  - `inner_callable: entry_pipeline_composition_guard.composed`
+  - `stack_stable: true`
+  - `direct_core_base: true`
+  - `recursion_safe: true`
+  - `participation_valve_chain_cycle_free: true`
+- X-Ray invocations advanced to 85 while active-callsite errors remained at 10.
+- The latest duplicate-reason TypeError remained historical at July 20, 12:01:39 CDT.
+- Scanner and Phase 3A advisory fields remained visible.
 
-The remaining operator problem was response size: the routine self-check duplicated large X-Ray, blocker, dashboard, decision-audit, and operator-summary structures, making daily copy/paste impractical.
+However, critical compact fields were incorrectly null or zero:
 
-## Latest Code Update — Compact Daily Self-Check
+- account equity, cash, PnL, wins/losses, and execution rows were null;
+- open positions were incorrectly reported as zero;
+- self-defense and drawdown fields were null;
+- service status, checked paths, full diagnostics URL, and blocker coverage were missing.
 
-### Purpose
+This was a reporting-source problem only. It did not indicate that positions were closed or that account state was missing.
 
-Keep `/paper/self-check` as the single daily validation URL while reducing its response to operator-critical fields. Preserve the existing full diagnostic payload behind `/paper/full-self-check` for intentional troubleshooting.
+## Latest Code Update — Compact Daily Authoritative Fallbacks
 
-### Implementation
+### Root cause
 
-Added `daily_self_check_compactor.py`.
+The v1 compactor primarily read fields from `dashboard`, `truth_summary`, and `operator_summary`. Earlier wrappers can omit or replace those objects before the final compactor executes. The v1 fallback then used `len({})`, which silently converted a missing position source into `open_positions_count: 0`.
 
-For light/mobile-safe/daily mode it returns a compact payload containing:
+### Fix
 
-- overall health and required failures;
-- up to three current warnings;
-- equity, cash, position symbols, PnL, wins/losses, and execution-row count;
-- self-defense, daily-loss, and drawdown state;
-- scanner signal/entry/rejection counts;
-- post-harvest status;
-- the top five blocker summaries only;
-- blocker reason coverage and missing-detail count;
-- entry-pipeline stability, recursion safety, direct-core status, helper-chain status, callable names, invocation/error counters, and only the latest error summary;
-- starter-valve status;
-- Phase 3A advisory readiness and one next action;
-- a direct full-diagnostics URL.
+Updated `daily_self_check_compactor.py` to version:
 
-The compactor does not remove or alter internal checks. The same diagnostic modules still run before the response is compacted. It only removes duplicated verbose structures from the returned daily JSON.
+`daily-self-check-compactor-2026-07-21-v2-authoritative-fallbacks`
 
-`usercustomize.py` now loads and reapplies the compactor after every other self-check promoter so later wrappers cannot expand the routine response again.
+The compactor now:
+
+1. Reads the authoritative runtime state using `core.load_state()` and falls back to `core.portfolio`.
+2. Sources account fields from, in order:
+   - compact status/performance snapshots;
+   - truth/operator summaries;
+   - persisted state performance;
+   - persisted trade-journal summary;
+   - direct state totals.
+3. Sources position symbols from performance, persisted state, or status.
+4. Never reports zero positions unless an actual position source is present and empty.
+5. Sources self-defense and drawdown fields from status risk controls or persisted risk controls.
+6. Sources scanner counts and blocker coverage from status, decision audit, blocker audit, or persisted scanner/audit state.
+7. Always constructs the full diagnostics URL from the Railway base URL when the source payload omits it.
+8. Reconstructs checked paths from result rows when needed.
+9. Emits `compact_source_fields_missing` with an explicit list instead of silently returning critical null fields.
+10. Unwraps any older compactor layer before installing v2 so wrappers do not accumulate after redeploy.
 
 ### Files changed
 
 - `daily_self_check_compactor.py`
-- `usercustomize.py`
 - `PROJECT_HANDOFF.md`
-
-### Versions
-
-- `daily-self-check-compactor-2026-07-21-v1`
-- `usercustomize-entry-pipeline-composition-2026-07-21-v27-daily-self-check-compact`
-- Existing ownership guard: `entry-pipeline-ownership-guard-2026-07-20-v1`
-- Existing composition: `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
-- Existing participation chain: `participation-valve-chain-2026-07-17-v1`
-- Existing sanitizer: `starter-valve-reason-sanitizer-2026-07-20-v1`
 
 ### Commits
 
-- `8557d89f91fbe786a974f4e0f4e930cf8c9b7eb7`
-  - Added compact daily response builder and optional status route.
-  - Preserves full diagnostics for non-light modes.
-- `fdd59aea5b69fb8cc251589473a0eaab41361864`
-  - Loads the compactor last at startup and during watchdog passes.
-  - Adds compactor status to optional governance checks.
+- `33b9dc9bad6c69ed8e7e4daeb0df5a5d007939b4`
+  - Added authoritative state/status/trade-journal fallbacks.
+  - Prevented false zero-position reporting.
+  - Added explicit missing-source warnings.
+  - Guaranteed daily and full-diagnostics URLs.
 - Handoff commit: the commit updating this file in the same work session.
 
 ### Routes
@@ -105,13 +97,20 @@ The compactor does not remove or alter internal checks. The same diagnostic modu
 The daily route should return:
 
 - `type: daily_self_check`
-- `version: daily-self-check-compactor-2026-07-21-v1`
+- `version: daily-self-check-compactor-2026-07-21-v2-authoritative-fallbacks`
 - `daily_response_compact: true`
-- `full_diagnostics_url` populated
-- compact sections named `health`, `account`, `risk`, `scanner`, `entry_pipeline`, `starter_valve`, and `ml`
-- no duplicated `dashboard`, full X-Ray objects, complete rejected-signal arrays, complete blocker arrays, `results`, or verbose operator-summary structures
+- `source_fallbacks_used: true`
+- `full_diagnostics_url: https://trading-bot-clean.up.railway.app/paper/full-self-check`
+- populated `health.service`
+- populated `account.equity` and `account.cash`
+- position symbols and a correct non-fabricated `open_positions_count`
+- populated realized/unrealized PnL and execution-row fields when present in state
+- populated self-defense and drawdown fields
+- populated scanner signal count
+- blocker coverage when available in the persisted audit
+- no `compact_source_fields_missing` warning when authoritative state is complete
 
-The full route should continue returning the complete diagnostic payload unchanged.
+The response must remain compact and must not restore the duplicated dashboard, full X-Ray history, complete rejected-signal arrays, complete blocker arrays, or result objects.
 
 ## Safety / Authority Impact
 
@@ -148,10 +147,11 @@ The full route should continue returning the complete diagnostic payload unchang
 - `ac423cb488aaf0753340c88caab3f8114d80193e` — deterministic, cycle-free participation chain
 - `daac00d02a969cde5fcbaa8c033a7be034bbc78a` — direct-core composition repair
 - `9ba549feaa3eb0e28e23bd013157d7a391cc0376` — X-Ray v3 error and meaningful-cycle telemetry
+- `8557d89f91fbe786a974f4e0f4e930cf8c9b7eb7` — initial compact daily response
 
 ## State and Reporting Notes
 
-- Historical X-Ray errors remain visible until aged out; compare timestamps and counters rather than treating the presence of an old row as a new failure.
+- Historical X-Ray errors remain visible until aged out; compare timestamps and counters rather than treating an old row as a new failure.
 - The persistent TEM post-harvest row with `reason_not_available_in_state_snapshot` remains diagnostic debt, not a risk/authority issue.
 - Execution rows and observed outcomes have previously moved backward in state. Continue monitoring stale-state writes and reconciliation.
 - Do not run repair routes unless a specific malformed-state condition is confirmed.
@@ -162,6 +162,6 @@ After Railway redeploys, run only:
 
 `https://trading-bot-clean.up.railway.app/paper/self-check`
 
-Confirm the compact daily response, coherent account/risk state, stable entry pipeline, no newly timestamped recursion or duplicate-reason error, and the populated full-diagnostics URL.
+Confirm the v2 compact version, populated account/risk/health fields, accurate positions, full-diagnostics URL, stable entry pipeline, and no newly timestamped recursion or duplicate-reason error.
 
-Use `/paper/full-self-check` only when the compact response reports `warn`/`fail`, a new error timestamp, or missing critical fields. Do not run mutating repair or execution endpoints during routine validation.
+Use `/paper/full-self-check` only when the compact response reports `warn`/`fail`, a new error timestamp, or `compact_source_fields_missing`. Do not run mutating repair or execution endpoints during routine validation.
