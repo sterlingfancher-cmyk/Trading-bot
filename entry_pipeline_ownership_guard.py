@@ -1,12 +1,12 @@
 """Own and repair the public paper entry callable.
 
 The deterministic composition guard owns the inner callable and Entry Pipeline
-X-Ray owns the outer diagnostic wrapper.  paper_exposure_rotation may still run
-its legacy public-wrapper patch later in startup and displace both layers.  This
-module disables that legacy public patch, repairs the composed stack, reapplies
-X-Ray, and persists drift telemetry.
+X-Ray owns the outer diagnostic wrapper. This guard disables the legacy public
+paper-exposure patch and repairs the stack only when drift is detected.
 
-No candidate, threshold, sizing, risk-control, broker, or ML authority changes.
+Inspection is read-only. Persistence occurs only for installation, drift,
+repair, or error events. No candidate, threshold, sizing, risk-control, broker,
+or ML authority changes.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict
 
-VERSION = "entry-pipeline-ownership-guard-2026-07-20-v1"
+VERSION = "entry-pipeline-ownership-guard-2026-07-21-v2-read-only-inspection"
 OWNER_TOKEN = "composition-guard-inner+xray-outer"
 REGISTERED_APP_IDS: set[int] = set()
 _PATCHED = False
@@ -77,22 +77,8 @@ def _state(core: Any) -> Dict[str, Any]:
             return row
     except Exception:
         pass
-    try:
-        row = getattr(core, "portfolio", {}) or {}
-        return row if isinstance(row, dict) else {}
-    except Exception:
-        return {}
-
-
-def _save(core: Any, state: Dict[str, Any]) -> None:
-    try:
-        core.save_state(state)
-        core.portfolio = state
-    except Exception:
-        try:
-            core.portfolio = state
-        except Exception:
-            pass
+    row = getattr(core, "portfolio", {}) or {}
+    return row if isinstance(row, dict) else {}
 
 
 def _disable_legacy_public_patch() -> bool:
@@ -105,8 +91,6 @@ def _disable_legacy_public_patch() -> bool:
             return False
 
         def ownership_managed_patch(_core: Any) -> bool:
-            # The composition guard already includes paper-exposure diagnostics.
-            # Never replace app.try_entries_and_rotations from this legacy path.
             return False
 
         ownership_managed_patch._entry_pipeline_ownership_guard_version = VERSION  # type: ignore[attr-defined]
@@ -118,7 +102,90 @@ def _disable_legacy_public_patch() -> bool:
         return False
 
 
-def enforce(core: Any = None) -> Dict[str, Any]:
+def _persist_event(core: Any, event: Dict[str, Any]) -> Dict[str, Any]:
+    def updater(state: Dict[str, Any]) -> Dict[str, Any]:
+        telemetry = state.get("entry_pipeline_ownership_guard")
+        if not isinstance(telemetry, dict):
+            telemetry = {}
+        counters = telemetry.get("counters")
+        if not isinstance(counters, dict):
+            counters = {}
+        counters["checks_total"] = int(counters.get("checks_total") or 0) + 1
+        if event.get("drift_detected"):
+            counters["drift_detected_total"] = int(counters.get("drift_detected_total") or 0) + 1
+            telemetry["last_drift_local"] = event.get("generated_local")
+            telemetry["last_displaced_callable"] = event.get("before")
+        if event.get("drift_repaired"):
+            counters["drift_repaired_total"] = int(counters.get("drift_repaired_total") or 0) + 1
+            telemetry["last_repair_local"] = event.get("generated_local")
+        if event.get("error"):
+            counters["errors_total"] = int(counters.get("errors_total") or 0) + 1
+            telemetry["last_error_local"] = event.get("generated_local")
+        telemetry.update({
+            "version": VERSION,
+            "owner_token": OWNER_TOKEN,
+            "updated_local": event.get("generated_local"),
+            "legacy_public_patch_disabled": bool(_LEGACY_PATCH_DISABLED),
+            "current_callable": event.get("current_callable"),
+            "inner_callable": event.get("inner_callable"),
+            "owned": bool(event.get("owned")),
+            "last_error": event.get("error"),
+            "counters": counters,
+        })
+        state["entry_pipeline_ownership_guard"] = telemetry
+        return state
+
+    update_state = getattr(core, "update_state", None)
+    if callable(update_state):
+        try:
+            return update_state(updater, source="entry_pipeline_ownership_guard")
+        except Exception as exc:
+            return {"status": "warn", "written": False, "error": f"transactional_update_failed:{type(exc).__name__}:{exc}"}
+
+    state = _state(core)
+    updated = updater(state)
+    try:
+        core.save_state(updated)
+        core.portfolio = updated
+        return {"status": "ok", "written": True, "fallback": "save_state"}
+    except Exception as exc:
+        return {"status": "warn", "written": False, "error": f"save_failed:{type(exc).__name__}:{exc}"}
+
+
+def inspect(core: Any = None) -> Dict[str, Any]:
+    core = core or _mod()
+    if core is None:
+        return {"status": "pending", "version": VERSION, "reason": "app_module_not_ready"}
+    current = getattr(core, "try_entries_and_rotations", None)
+    inner = _inner(current)
+    owned = _owned(current)
+    state = _state(core)
+    telemetry = state.get("entry_pipeline_ownership_guard")
+    if not isinstance(telemetry, dict):
+        telemetry = {}
+    return {
+        "status": "ok" if owned else "warn",
+        "overall": "pass" if owned else "warn",
+        "type": "entry_pipeline_ownership_guard_status",
+        "version": VERSION,
+        "generated_local": _now(core),
+        "owner_token": OWNER_TOKEN,
+        "legacy_public_patch_disabled": bool(_LEGACY_PATCH_DISABLED),
+        "owned": bool(owned),
+        "drift_detected": not owned,
+        "current_callable": _meta(current),
+        "inner_callable": _meta(inner),
+        "counters": telemetry.get("counters") or {},
+        "last_drift_local": telemetry.get("last_drift_local"),
+        "last_repair_local": telemetry.get("last_repair_local"),
+        "last_error": telemetry.get("last_error"),
+        "inspection_mutates_runtime": False,
+        "authority_changed": False,
+        "logic_changed": False,
+    }
+
+
+def enforce(core: Any = None, *, force: bool = False) -> Dict[str, Any]:
     global _PATCHED
     core = core or _mod()
     if core is None:
@@ -129,18 +196,19 @@ def enforce(core: Any = None) -> Dict[str, Any]:
     before = _meta(before_fn)
     drift_detected = not _owned(before_fn)
 
-    composition = {}
+    composition: Dict[str, Any] = {}
     xray_patched = False
     error = None
-    try:
-        import entry_pipeline_composition_guard as composition_guard
-        composition = composition_guard.enforce(core)
-        import starter_valve_reason_sanitizer as sanitizer
-        sanitizer.apply(core)
-        import entry_pipeline_xray as xray
-        xray_patched = bool(xray._patch(core))
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
+    if drift_detected or force:
+        try:
+            import entry_pipeline_composition_guard as composition_guard
+            composition = composition_guard.enforce(core)
+            import starter_valve_reason_sanitizer as sanitizer
+            sanitizer.apply(core)
+            import entry_pipeline_xray as xray
+            xray_patched = bool(xray._patch(core))
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
 
     current = getattr(core, "try_entries_and_rotations", None)
     inner = _inner(current)
@@ -152,59 +220,35 @@ def enforce(core: Any = None) -> Dict[str, Any]:
         inner._entry_pipeline_owner_token = OWNER_TOKEN  # type: ignore[attr-defined]
         inner._entry_pipeline_ownership_guard_version = VERSION  # type: ignore[attr-defined]
 
-    state = _state(core)
-    telemetry = state.setdefault("entry_pipeline_ownership_guard", {})
-    if not isinstance(telemetry, dict):
-        telemetry = {}
-        state["entry_pipeline_ownership_guard"] = telemetry
-    counters = telemetry.setdefault("counters", {})
-    if not isinstance(counters, dict):
-        counters = {}
-        telemetry["counters"] = counters
-    counters["checks_total"] = int(counters.get("checks_total") or 0) + 1
-    if drift_detected:
-        counters["drift_detected_total"] = int(counters.get("drift_detected_total") or 0) + 1
-        telemetry["last_drift_local"] = _now(core)
-        telemetry["last_displaced_callable"] = before
-    if drift_detected and owned_after:
-        counters["drift_repaired_total"] = int(counters.get("drift_repaired_total") or 0) + 1
-        telemetry["last_repair_local"] = _now(core)
-
-    telemetry.update({
-        "version": VERSION,
-        "owner_token": OWNER_TOKEN,
-        "updated_local": _now(core),
-        "legacy_public_patch_disabled": bool(_LEGACY_PATCH_DISABLED),
-        "current_callable": _meta(current),
-        "inner_callable": _meta(inner),
-        "owned": bool(owned_after),
-        "last_error": error,
-    })
-    _save(core, state)
-    _PATCHED = bool(owned_after)
-
-    return {
-        "status": "ok" if owned_after and not error else "warn",
-        "overall": "pass" if owned_after and not error else "warn",
-        "type": "entry_pipeline_ownership_guard_status",
-        "version": VERSION,
+    event = {
         "generated_local": _now(core),
-        "owner_token": OWNER_TOKEN,
-        "legacy_public_patch_disabled": bool(_LEGACY_PATCH_DISABLED),
-        "disabled_this_call": bool(disabled_this_call),
-        "drift_detected": bool(drift_detected),
-        "drift_repaired": bool(drift_detected and owned_after),
-        "owned": bool(owned_after),
         "before": before,
         "current_callable": _meta(current),
         "inner_callable": _meta(inner),
-        "composition": composition if isinstance(composition, dict) else {},
-        "xray_patched_this_call": bool(xray_patched),
-        "counters": counters,
+        "owned": bool(owned_after),
+        "drift_detected": bool(drift_detected),
+        "drift_repaired": bool(drift_detected and owned_after),
         "error": error,
-        "authority_changed": False,
-        "logic_changed": False,
     }
+    persist = bool(disabled_this_call or drift_detected or force or error)
+    persistence = _persist_event(core, event) if persist else {"status": "ok", "written": False, "no_change": True}
+    _PATCHED = bool(owned_after)
+
+    result = inspect(core)
+    result.update({
+        "disabled_this_call": bool(disabled_this_call),
+        "drift_detected": bool(drift_detected),
+        "drift_repaired": bool(drift_detected and owned_after),
+        "composition": composition,
+        "xray_patched_this_call": bool(xray_patched),
+        "repair_attempted": bool(drift_detected or force),
+        "persistence": persistence,
+        "error": error,
+    })
+    if error or not owned_after:
+        result["status"] = "warn"
+        result["overall"] = "warn"
+    return result
 
 
 def apply(core: Any = None) -> Dict[str, Any]:
@@ -216,10 +260,7 @@ def apply_runtime_overrides(core: Any = None) -> Dict[str, Any]:
 
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
-    core = core or _mod()
-    if core is None:
-        return {"status": "pending", "version": VERSION}
-    return enforce(core)
+    return inspect(core)
 
 
 def register_routes(flask_app: Any, core: Any = None) -> None:
@@ -234,7 +275,7 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
         flask_app.add_url_rule(
             "/paper/entry-pipeline-ownership-status",
             "entry_pipeline_ownership_status",
-            lambda: jsonify(enforce(core or _mod())),
+            lambda: jsonify(inspect(core or _mod())),
         )
     REGISTERED_APP_IDS.add(id(flask_app))
     enforce(core or _mod())
