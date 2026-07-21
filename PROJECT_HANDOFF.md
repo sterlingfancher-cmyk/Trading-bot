@@ -53,167 +53,112 @@ Entry-pipeline structure:
 - current callable: `entry_pipeline_xray.wrapped`
 - inner callable: `entry_pipeline_composition_guard.composed`
 
-The duplicate-reason TypeError remains historical at July 20, 12:01:39 CDT. Active-callsite invocations/errors remain 85/10, so no new occurrence is present.
+The duplicate-reason TypeError remains historical at July 20, 12:01:39 CDT. Scanner count comparison remains correctly non-assertive without shared cycle identity: decision 54, blocker audit 42, difference 12, `same_cycle_comparison: false`, `source_mismatch: null`.
 
-Scanner reporting is now correctly non-assertive without shared cycle identity:
+## Current Core Reliability Versions
 
-- decision count: 54
-- blocker-audit count: 42
-- count difference: 12
-- `same_cycle_comparison: false`
-- `source_mismatch: null`
-- `snapshot_alignment: unverified_without_shared_cycle_id`
+- Daily serializer: `daily-self-check-compactor-2026-07-21-v4-source-contracts`
+- State transaction manager: `state-transaction-manager-2026-07-21-v1`
+- Entry ownership guard: `entry-pipeline-ownership-guard-2026-07-21-v2-read-only-inspection`
+- Runtime reliability overlay: `runtime-reliability-overlay-2026-07-21-v2-entry-contract`
 
-This is informational only and no longer creates a false health warning.
+The runtime framework is stable. Broad reliability patching is paused unless a concrete failure or measurable operational need appears.
 
-## Current Daily Serializer
+## Active Workstream — Scanner v2
 
-Version:
-
-`daily-self-check-compactor-2026-07-21-v4-source-contracts`
-
-It provides terminal allowlisted reporting, normalized source contracts, account/risk truth, structured pipeline status, starter-valve status, and Phase 3A advisory status.
-
-## Transactional State Foundation
+### Milestone 1: expanded shadow universe
 
 Version:
 
-`state-transaction-manager-2026-07-21-v1`
+`scanner-v2-shadow-universe-2026-07-21-v1`
 
-The runtime exposes:
+A new advisory-only module defines a broader candidate taxonomy across:
 
-`core.update_state(updater, source=..., expected_revision=...)`
+- robotics and automation;
+- defense and aerospace;
+- energy leaders;
+- precious metals;
+- healthcare leaders;
+- quantum computing;
+- broad liquid indexes and sector ETFs.
 
-The transaction manager performs locked read-modify-write updates with:
+The module compares the expanded shadow set against the current executable universe and reports:
 
-- monotonic `_state_revision`;
-- optimistic conflict detection;
-- backup plus atomic replacement;
-- no-write behavior for unchanged state;
-- update-source and timestamp metadata;
-- read-only `/paper/state-transaction-status`.
+- basket counts;
+- total shadow symbols;
+- current-universe overlap;
+- new shadow candidates;
+- authority and mutation assertions.
 
-## Entry Ownership Reliability
+Route:
 
-Version:
+`/paper/scanner-v2-shadow-universe-status`
 
-`entry-pipeline-ownership-guard-2026-07-21-v2-read-only-inspection`
+The route is registered as an optional governance endpoint in `one_link_check` through `usercustomize.py`.
 
-Ownership status is read-only. Repair and persistence happen only on installation, actual drift, explicit repair, or error. Healthy checks no longer write the complete state.
+### Safety boundary
 
-## Runtime Reliability Overlay
+Milestone 1 is strictly observational:
 
-Version:
+- `core.UNIVERSE` is not mutated;
+- `scan_signals` is not patched;
+- no order can be placed by this module;
+- no threshold is lowered;
+- no sizing or risk limit changes;
+- no ML authority changes;
+- no live authority changes.
 
-`runtime-reliability-overlay-2026-07-21-v2-entry-contract`
+The initial direct executable-universe expansion was not applied. The safe implementation sequence is to gather shadow availability, liquidity, overlap, and eventual outcome evidence before proposing any candidate promotion into the executable universe.
 
-The overlay performs four authority-neutral functions:
+### Files changed
 
-1. Entry Pipeline X-Ray persistence uses `core.update_state()` when available.
-2. X-Ray status inspection is read-only.
-3. Scanner count comparison is cycle-aware and does not label unaligned snapshots as a confirmed mismatch.
-4. Compact entry-pipeline structural fields are normalized from the dedicated read-only composition inspector.
+- `scanner_v2_shadow_universe.py`
+- `usercustomize.py`
+- `PROJECT_HANDOFF.md`
 
-The compatibility layer restores, when absent from X-Ray telemetry:
+### Commits
 
-- `entry_pipeline.stack_stable`;
-- `entry_pipeline.participation_valve_chain_cycle_free`;
-- `entry_pipeline.recursion_safe`;
-- `entry_pipeline.direct_core_base`.
+- `227ac0d4d559e0aff1140456b48bbc54ad6fd36b` — add advisory-only Scanner v2 shadow universe.
+- `78c239dd97f0f2a32f39ee46660ff9c6a0ea9c77` — register the shadow route and optional self-check endpoint.
+- Handoff commit: the commit updating this file.
 
-It removes only a resolved compact-source warning and promotes `overall` back to `pass` only when no warnings or failed required paths remain. Genuine runtime, route, risk, or source failures remain visible.
+## Scanner v2 Next Steps
 
-## System-Wide Audit Progress
+Proceed in this order:
 
-Full report:
+1. Validate the new route after Railway redeploys.
+2. Add shadow data-quality and liquidity evaluation using the existing provider interfaces, without altering the executable universe.
+3. Add composite opportunity-score attribution in shadow mode so each candidate exposes trend, relative strength, volume, momentum, market alignment, and risk components.
+4. Add regime-aware shadow weighting and compare rankings across bull, bear, and sideways conditions.
+5. Record candidate-to-entry and candidate-to-outcome attribution against the current rule engine.
+6. Only after evidence supports improvement, prepare a separately reviewed paper-only promotion gate for selected shadow candidates.
+7. Add crypto candidates later as a separate provider and volatility-handling milestone; BTC, ETH, and SOL must not be forced through equity-only data assumptions.
 
-`SYSTEM_WIDE_AUDIT_2026-07-21.md`
+## Remaining Project Priorities
 
-Completed:
+### Shared cycle identity
 
-1. Added transactional state mutation with monotonic revision support.
-2. Made entry ownership inspection read-only.
-3. Removed healthy ownership no-op writes.
-4. Reduced watchdog pressure after startup convergence.
-5. Migrated X-Ray telemetry persistence to transactional updates.
-6. Made X-Ray status inspection read-only.
-7. Prevented unaligned scanner snapshots from producing a false health warning.
-8. Restored compact structural fields from their dedicated read-only authority.
-9. Revalidated the compact runtime as pass/ok with zero warnings.
+Propagate one immutable `cycle_id` through scanner output, decision audit, blocked-entry audit, X-Ray, entries, rotations, and post-harvest. This remains the next observability priority after the initial Scanner v2 shadow instrumentation is stable.
 
-## Next-Phase Recommendations
+### Phase 3A ML advisory evaluation
 
-Infrastructure is stable enough to pause broad reliability patching. Future infrastructure changes should be narrowly scoped, regression-tested, and justified by a concrete failure or measurable operational benefit.
+Continue ML in advisory-only paper mode. Rule thresholds and hard risk controls remain authoritative. Log ML-versus-rules disagreement and subsequent outcomes; no greater ML authority should be considered before the evidence benchmark is met and repeatable improvement is demonstrated.
 
-### Priority 1 — Shared cycle identity
+### Evidence accumulation
 
-Propagate one immutable `cycle_id` from the cycle coordinator through:
-
-- scanner output;
-- decision audit;
-- blocked-entry reason audit;
-- X-Ray telemetry;
-- entries;
-- rotations;
-- post-harvest diagnostics.
-
-Acceptance criteria:
-
-- every producer reports the same cycle ID for one engine cycle;
-- same-cycle count comparisons become deterministic;
-- cross-cycle snapshots are explicitly rejected from mismatch calculations;
-- no trading, risk, sizing, or execution behavior changes.
-
-### Priority 2 — Improve opportunity quality and participation
-
-Shift engineering attention from diagnostics to measurable paper-trading performance:
-
-- evaluate scanner-universe breadth and data-quality limits;
-- increase valid opportunities without weakening risk, extension, quality, volume, relative-edge, futures-bias, cooldown, or self-defense controls;
-- measure candidate-to-entry conversion by regime and blocker category;
-- separate insufficient opportunity flow from intentional risk blocking.
-
-Any scanner or participation change must be tested against a baseline and must not be justified solely by increasing trade count.
-
-### Priority 3 — Phase 3A ML advisory evaluation
-
-Continue ML in advisory-only paper mode:
-
-- retain rule thresholds and risk controls as authoritative;
-- log ML-versus-rules disagreement and subsequent outcomes;
-- evaluate incremental precision, recall, expectancy, drawdown, and false-positive cost;
-- prevent ML from bypassing any hard risk or eligibility gate.
-
-No greater ML authority should be considered until the evidence benchmark is met and advisory results show repeatable improvement over rules alone.
-
-### Priority 4 — Evidence accumulation before authority changes
-
-Current evidence is 83 execution rows, below the stronger-authority benchmark of 150 execution rows and 100 observed outcomes.
-
-Before considering any live or stronger ML authority:
+Current evidence is 83 execution rows. Before considering live or stronger ML authority:
 
 - reach at least 150 execution rows;
 - reach at least 100 observed outcomes;
-- validate results across multiple market regimes;
+- validate across multiple market regimes;
 - confirm acceptable drawdown and loss clustering;
-- confirm no new runtime, state-integrity, recursion, or duplicate-reason failures;
 - retain paper-only operation until a separate explicit approval decision.
-
-### Deferred architectural work
-
-The following remain valid but should not displace performance work unless they become operationally necessary:
-
-1. Migrate additional high-risk diagnostic writers to `core.update_state()`.
-2. Consolidate disk and `core.portfolio` snapshot authority.
-3. Move non-critical diagnostics out of the primary trading-state document.
-4. Replace accumulated runtime monkeypatching with one declarative pipeline builder.
-5. Add concurrency and source-contract regression tests.
 
 ## Safety / Authority Policy
 
-Current and recommended work must preserve:
+All work must preserve:
 
-- all internal risk checks;
+- internal risk checks;
 - existing sizing limits;
 - cooldowns;
 - self-defense and drawdown halts;
@@ -222,43 +167,33 @@ Current and recommended work must preserve:
 - no ML execution authority;
 - no automatic promotion to live trading.
 
-## Current Intended Entry Stack
-
-1. `entry_pipeline_xray` outer diagnostic wrapper
-2. composition-owned paper-exposure overlay
-3. direct closure over `core_entry_pipeline._core_try_entries_and_rotations`
-4. clean base participation valve
-5. extended-leader starter overlay
-6. risk-on starter overlay
-7. reason-safe blocker detail wrappers
-8. entry-pipeline ownership guard
-9. terminal daily route serializer
-10. runtime reliability reporting overlay
-
 ## Validation Procedure
 
-For routine validation, run only:
+After Railway redeploys, run:
 
 `https://trading-bot-clean.up.railway.app/paper/self-check`
 
-Confirm:
+Confirm the existing baseline remains:
 
 - `overall: pass`;
 - `status: ok`;
 - `health.warnings: []`;
-- `version: daily-self-check-compactor-2026-07-21-v4-source-contracts`;
-- `terminal_compaction_applied: true`;
-- `source_contracts_normalized: true`;
-- `cycle_aware_scanner_comparison: true`;
-- `runtime_reliability_overlay_version: runtime-reliability-overlay-2026-07-21-v2-entry-contract`;
-- `entry_pipeline.stack_stable: true`;
-- `entry_pipeline.recursion_safe: true`;
-- `entry_pipeline.direct_core_base: true`;
-- `entry_pipeline.participation_valve_chain_cycle_free: true`;
-- no newly timestamped recursion or duplicate-reason error.
+- stable entry-pipeline fields remain true;
+- no newly timestamped runtime error.
+
+Then inspect the new non-mutating route:
+
+`https://trading-bot-clean.up.railway.app/paper/scanner-v2-shadow-universe-status`
+
+Expected fields:
+
+- `status: ok`;
+- `overall: pass`;
+- `version: scanner-v2-shadow-universe-2026-07-21-v1`;
+- `mode: shadow_advisory_only`;
+- `core_universe_mutated: false`;
+- `scan_signals_patched: false`;
+- positive `shadow_symbol_count`;
+- populated overlap and new-shadow-candidate counts.
 
 Use `/paper/full-self-check` only for fail, missing critical fields, or a newly timestamped runtime error. Do not run mutating repair or execution endpoints during routine validation.
-
-## Latest Documentation Commit
-
-This handoff update records the validated pass state and establishes the prioritized next-phase roadmap. No runtime trading code, risk controls, thresholds, sizing, scanner behavior, execution behavior, live authority, or ML authority changed in this documentation-only update.
