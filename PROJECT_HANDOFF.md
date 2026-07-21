@@ -15,28 +15,26 @@ Every code/configuration update must update this file in the same work session w
 - ML live authority: none
 - Strict stronger-authority benchmark: 150 execution rows and 100 observed outcomes
 
-## Latest Runtime Evidence — July 21, 2026, 18:30:59
+## Latest Runtime Evidence — July 21, 2026, 18:38:48
 
-The compact self-check remained healthy:
+The cycle-aware scanner patch deployed successfully:
 
-- status: `ok`
-- overall: `pass`
-- cash: 10111.46
-- equity: 10864.08
-- positions: DELL and QQQ
-- execution rows: 83
-- realized total: +733.97
-- unrealized PnL: +131.58
-- wins/losses: 34/16
-- self-defense inactive
-- intraday drawdown: 0.047%
-- entry stack stable, recursion-safe, direct-core-based, and cycle-free
-- ML Phase 3A paper advisory gate open
-- live ML authority remains none
+- `cycle_aware_scanner_comparison: true`
+- `source_mismatch: null`
+- `same_cycle_comparison: false`
+- `snapshot_alignment: unverified_without_shared_cycle_id`
+- raw decision/blocker counts remained visible at 54/42
+- runtime overlay v1 was active
 
-The duplicate-reason TypeError remained historical at July 20, 12:01:39 CDT. Active-callsite invocations/errors remained 85/10, so no new occurrence was observed.
+Account, risk, ML, current callable, inner callable, recursion safety, and direct-core status remained healthy. The historical duplicate-reason TypeError remained timestamped July 20, 12:01:39 CDT with no new occurrence.
 
-The only warning was a 54-versus-42 scanner count comparison between decision audit and blocker audit. Those producers did not yet expose a shared cycle ID, so the prior warning could not prove a same-cycle data disagreement.
+One compact-source regression appeared after X-Ray status became read-only:
+
+- `entry_pipeline.stack_stable` became null;
+- `entry_pipeline.participation_valve_chain_cycle_free` became null;
+- the compact response downgraded to warn with `compact_source_fields_missing`.
+
+The runtime call chain itself remained intact. The regression was isolated to serializer source normalization because the dedicated composition guard still owns and can inspect those structural fields.
 
 ## Current Daily Serializer
 
@@ -73,53 +71,40 @@ Version:
 
 Ownership status is read-only. Repair and persistence happen only on installation, actual drift, explicit repair, or error. Healthy checks no longer write the complete state.
 
-## Latest Update — Transactional X-Ray and Cycle-Aware Scanner Reporting
+## Latest Update — Compact Entry Contract Compatibility
 
 ### Runtime reliability overlay
 
-Added:
+Updated to:
 
-`runtime-reliability-overlay-2026-07-21-v1`
+`runtime-reliability-overlay-2026-07-21-v2-entry-contract`
 
-The overlay performs three authority-neutral repairs:
+The overlay now performs four authority-neutral functions:
 
-1. Entry Pipeline X-Ray persistence now uses `core.update_state()` when available instead of a stale whole-state `load_state()` / `save_state()` sequence.
-2. X-Ray `status_payload()` is replaced with a read-only inspector. A GET status request no longer installs, patches, composes, repairs, or persists runtime wrappers.
-3. Scanner count comparison is cycle-aware:
-   - counts are compared as a true mismatch only when both sources expose the same cycle ID;
-   - different or partial cycle IDs are labelled as unaligned snapshots;
-   - when neither producer exposes a cycle ID, `source_mismatch` is `null` and `snapshot_alignment` is `unverified_without_shared_cycle_id`;
-   - raw decision-audit and blocker-audit counts remain visible, along with `count_difference`;
-   - the false `scanner_source_snapshot_mismatch` health warning is removed unless same-cycle evidence exists.
+1. Entry Pipeline X-Ray persistence uses `core.update_state()` when available.
+2. X-Ray status inspection remains read-only.
+3. Scanner count comparison remains cycle-aware and does not label unaligned snapshots as a confirmed mismatch.
+4. Missing compact entry-pipeline structural fields are normalized from the dedicated read-only `entry_pipeline_composition_guard.status_payload()` source.
 
-The compact daily payload gains:
+The compatibility layer restores, when absent from X-Ray telemetry:
 
-- `cycle_aware_scanner_comparison: true`
-- `runtime_reliability_overlay_version`
-- `scanner.decision_cycle_id`
-- `scanner.blocker_cycle_id`
-- `scanner.same_cycle_comparison`
-- `scanner.count_difference`
-- `scanner.snapshot_alignment`
+- `entry_pipeline.stack_stable`;
+- `entry_pipeline.participation_valve_chain_cycle_free`;
+- `entry_pipeline.recursion_safe`;
+- `entry_pipeline.direct_core_base`.
 
-### Runtime loader
-
-Updated `usercustomize.py` to:
-
-`usercustomize-entry-pipeline-composition-2026-07-21-v30-runtime-reliability`
-
-The runtime reliability overlay is loaded after the terminal daily serializer so its read-only X-Ray inspection and cycle-aware scanner normalization remain final. The watchdog reasserts it after the compactor during low-frequency drift checks.
+It removes only the resolved `entry_pipeline.stack_stable` item from `compact_source_fields_missing`. It promotes `overall: warn` back to `pass` only when no warnings or failed required paths remain. It does not mask genuine runtime, route, risk, or source failures.
 
 ### Files changed
 
 - `runtime_reliability_overlay.py`
-- `usercustomize.py`
 - `PROJECT_HANDOFF.md`
 
 ### Commits
 
 - `4ccc6c22bbe3425f017f6f6f1c411499079d57c0` — transactional X-Ray persistence, read-only X-Ray status, and cycle-aware scanner reporting.
 - `bf6450c11ed612f3e1364e20f5b61bf51b946a46` — load the reliability overlay after the terminal serializer.
+- `280bc3e485300f35188be54173cf4d6a964ed1f2` — normalize compact entry stability fields from the read-only composition inspector.
 - Handoff commit: the commit updating this file.
 
 ## System-Wide Audit
@@ -139,6 +124,7 @@ Completed:
 5. Migrated X-Ray telemetry persistence to transactional updates.
 6. Made X-Ray status inspection read-only.
 7. Prevented unaligned scanner snapshots from producing a false health warning.
+8. Restored compact structural fields from their dedicated read-only authority.
 
 Remaining:
 
@@ -187,10 +173,10 @@ Confirm:
 - `terminal_compaction_applied: true`;
 - `source_contracts_normalized: true`;
 - `cycle_aware_scanner_comparison: true`;
-- `runtime_reliability_overlay_version: runtime-reliability-overlay-2026-07-21-v1`;
-- no verbose structures outside the compact allowlist;
-- populated account, risk, pipeline, starter, and ML fields;
-- stable entry stack;
+- `runtime_reliability_overlay_version: runtime-reliability-overlay-2026-07-21-v2-entry-contract`;
+- `entry_pipeline.stack_stable: true`;
+- `entry_pipeline.participation_valve_chain_cycle_free: true`;
+- `overall: pass` and `status: ok` when no other warning is present;
 - no newly timestamped recursion or duplicate-reason error;
 - scanner count difference remains visible but does not create a mismatch warning unless the two producers report the same cycle ID.
 
