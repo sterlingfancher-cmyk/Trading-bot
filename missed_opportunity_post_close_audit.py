@@ -10,11 +10,20 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, Iterable, List, Set
 
-VERSION = "missed-opportunity-post-close-audit-2026-07-21-v1"
+VERSION = "missed-opportunity-post-close-audit-2026-07-21-v2-failure-modes"
 REGISTERED_APP_IDS: set[int] = set()
 DEFAULT_SYMBOLS = ["BE", "NVTS", "STX", "NUAI", "CRWV", "ONDS"]
 DEFAULT_MOVE_THRESHOLD_PCT = 8.0
 MAX_SYMBOLS = 40
+
+THEME_MAP = {
+    "BE": "power_electrification",
+    "NVTS": "semiconductor_power_and_components",
+    "STX": "ai_data_center_infrastructure",
+    "NUAI": "power_electrification",
+    "CRWV": "ai_data_center_infrastructure",
+    "ONDS": "autonomy_drones_and_sensing",
+}
 
 
 def _mod() -> Any | None:
@@ -139,10 +148,10 @@ def _universe(core: Any, state: Dict[str, Any]) -> Set[str]:
         "SCAN_UNIVERSE", "LONG_WATCHLIST", "SHORT_WATCHLIST",
     ):
         try:
-            symbols |= _flatten_symbols(getattr(core, attr, None))
             raw = getattr(core, attr, None)
             if isinstance(raw, (list, tuple, set)):
                 symbols |= set(_unique(raw))
+            symbols |= _flatten_symbols(raw)
         except Exception:
             pass
     for key in ("universe", "watchlist", "scanner_universe", "symbols", "long_symbols", "short_symbols"):
@@ -155,14 +164,8 @@ def _universe(core: Any, state: Dict[str, Any]) -> Set[str]:
 
 def _fetch_daily_snapshot(symbol: str) -> Dict[str, Any]:
     empty = {
-        "symbol": symbol,
-        "data_available": False,
-        "price": None,
-        "previous_close": None,
-        "pct_change": None,
-        "volume": None,
-        "avg_volume_20d": None,
-        "volume_ratio": None,
+        "symbol": symbol, "data_available": False, "price": None, "previous_close": None,
+        "pct_change": None, "volume": None, "avg_volume_20d": None, "volume_ratio": None,
         "data_error": None,
     }
     try:
@@ -199,9 +202,7 @@ def _fetch_daily_snapshot(symbol: str) -> Dict[str, Any]:
         avg_volume = sum(prior_volumes) / len(prior_volumes) if prior_volumes else None
         volume_ratio = volume / avg_volume if volume is not None and avg_volume else None
         return {
-            "symbol": symbol,
-            "data_available": True,
-            "price": round(price, 4),
+            "symbol": symbol, "data_available": True, "price": round(price, 4),
             "previous_close": round(previous, 4),
             "pct_change": round(pct_change, 4) if pct_change is not None else None,
             "volume": int(volume) if volume is not None else None,
@@ -212,6 +213,18 @@ def _fetch_daily_snapshot(symbol: str) -> Dict[str, Any]:
     except Exception as exc:
         empty["data_error"] = f"snapshot_failed:{type(exc).__name__}"
         return empty
+
+
+def _classification(in_universe: bool, seen: bool, in_position: bool) -> str:
+    if in_position:
+        return "captured_position"
+    if not in_universe and not seen:
+        return "universe_coverage_miss"
+    if in_universe and not seen:
+        return "universe_present_but_no_observation"
+    if seen:
+        return "seen_but_not_entered"
+    return "outside_observed_pipeline"
 
 
 def build_audit(core: Any = None, symbols: Iterable[Any] | None = None, force_market_data: bool = False,
@@ -253,49 +266,54 @@ def build_audit(core: Any = None, symbols: Iterable[Any] | None = None, force_ma
             "data_error": "market_data_not_requested; add force=1",
         }
         pct_change = _safe_float(snapshot.get("pct_change"))
+        in_universe = symbol in universe
+        seen = bool(section_hits)
+        in_position = symbol in positions
         rows.append({
             "symbol": symbol,
-            "in_executable_universe": symbol in universe,
-            "in_open_positions": symbol in positions,
-            "scanner_or_audit_seen": bool(section_hits),
+            "theme_cluster": THEME_MAP.get(symbol, "unclassified"),
+            "in_executable_universe": in_universe,
+            "in_open_positions": in_position,
+            "scanner_or_audit_seen": seen,
             "section_hits": section_hits,
             "record_count": len(records),
             "records": records[:12],
             "observed_reasons": reasons[:12],
             "market_snapshot": snapshot,
             "meets_move_threshold": bool(pct_change is not None and pct_change >= move_threshold_pct),
-            "diagnostic_classification": (
-                "captured_position" if symbol in positions else
-                "seen_but_not_entered" if section_hits else
-                "outside_observed_pipeline"
+            "diagnostic_classification": _classification(in_universe, seen, in_position),
+            "recommended_diagnostic_next_step": (
+                "evaluate for shadow-universe coverage and liquidity" if not in_universe else
+                "inspect scanner iteration, data availability, and persistence path" if not seen else
+                "review ranking and blockers"
             ),
         })
 
+    classes = [row["diagnostic_classification"] for row in rows]
     summary = {
         "symbols_requested": len(selected),
         "in_executable_universe": sum(1 for row in rows if row["in_executable_universe"]),
         "seen_by_scanner_or_audit": sum(1 for row in rows if row["scanner_or_audit_seen"]),
-        "outside_observed_pipeline": sum(1 for row in rows if row["diagnostic_classification"] == "outside_observed_pipeline"),
-        "seen_but_not_entered": sum(1 for row in rows if row["diagnostic_classification"] == "seen_but_not_entered"),
-        "captured_positions": sum(1 for row in rows if row["diagnostic_classification"] == "captured_position"),
+        "universe_coverage_misses": classes.count("universe_coverage_miss"),
+        "universe_present_but_no_observation": classes.count("universe_present_but_no_observation"),
+        "outside_observed_pipeline": classes.count("outside_observed_pipeline"),
+        "seen_but_not_entered": classes.count("seen_but_not_entered"),
+        "captured_positions": classes.count("captured_position"),
         "market_data_requested": bool(force_market_data),
         "move_threshold_pct": float(move_threshold_pct),
         "threshold_movers_confirmed": sum(1 for row in rows if row["meets_move_threshold"]),
+        "theme_clusters": sorted({row["theme_cluster"] for row in rows}),
     }
     return {
         "status": "ok", "overall": "pass", "type": "missed_opportunity_post_close_audit",
         "version": VERSION, "generated_local": _now(core), "mode": "advisory_post_close_only",
         "summary": summary, "rows": rows,
         "authority": {
-            "core_universe_mutated": False,
-            "scan_signals_patched": False,
-            "places_orders": False,
-            "changes_thresholds": False,
-            "changes_risk_or_sizing": False,
-            "changes_ml_authority": False,
-            "changes_live_authority": False,
+            "core_universe_mutated": False, "scan_signals_patched": False, "places_orders": False,
+            "changes_thresholds": False, "changes_risk_or_sizing": False,
+            "changes_ml_authority": False, "changes_live_authority": False,
         },
-        "next_use": "Use repeated post-close audits to distinguish universe misses, timing misses, ranking misses, and intentional blocker outcomes before changing scanner authority.",
+        "next_use": "Use repeated post-close audits to quantify universe coverage misses separately from scanner observation and ranking misses before changing scanner authority.",
     }
 
 
@@ -303,17 +321,13 @@ def lightweight_status(core: Any = None) -> Dict[str, Any]:
     return {
         "status": "ok" if (core or _mod()) is not None else "pending",
         "overall": "pass" if (core or _mod()) is not None else "pending",
-        "type": "missed_opportunity_post_close_audit",
-        "version": VERSION,
-        "mode": "advisory_post_close_only",
-        "default_symbols": DEFAULT_SYMBOLS,
+        "type": "missed_opportunity_post_close_audit", "version": VERSION,
+        "mode": "advisory_post_close_only", "default_symbols": DEFAULT_SYMBOLS,
         "default_move_threshold_pct": DEFAULT_MOVE_THRESHOLD_PCT,
         "heavy_market_data_deferred": True,
         "authority": {
-            "core_universe_mutated": False,
-            "scan_signals_patched": False,
-            "places_orders": False,
-            "changes_thresholds": False,
+            "core_universe_mutated": False, "scan_signals_patched": False,
+            "places_orders": False, "changes_thresholds": False,
             "changes_risk_or_sizing": False,
         },
     }
@@ -338,7 +352,7 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
 
     def route():
         raw_symbols = str(request.args.get("symbols", "")).strip()
-        symbols = _unique(raw_symbols.split(",")) if raw_symbols else DEFAULT_SYMBOLS
+        symbols = raw_symbols.split(",") if raw_symbols else DEFAULT_SYMBOLS
         force = str(request.args.get("force", "0")).lower() in {"1", "true", "yes", "on"}
         threshold = _safe_float(request.args.get("threshold"), DEFAULT_MOVE_THRESHOLD_PCT) or DEFAULT_MOVE_THRESHOLD_PCT
         return jsonify(build_audit(core or _mod(), symbols=symbols, force_market_data=force, move_threshold_pct=threshold))
@@ -347,9 +361,3 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
     if path not in existing:
         flask_app.add_url_rule(path, "missed_opportunity_post_close_audit_status", route)
     REGISTERED_APP_IDS.add(id(flask_app))
-
-
-try:
-    apply(_mod())
-except Exception:
-    pass
