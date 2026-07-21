@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v27-daily-self-check-compact"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v28-terminal-daily-serializer"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -119,9 +119,6 @@ def _register_auxiliary_routes(flask_app: Any, module_hint: Any | None = None) -
 
 
 def _repair_entry_stack(flask_app: Any, core: Any) -> None:
-    # Composition owns the deterministic inner stack, sanitizer protects blocker
-    # detail expansion, X-Ray remains outermost, and ownership guard is the final
-    # authority that disables legacy public wrapping and repairs runtime drift.
     _register_module(flask_app, core, "extended_leader_starter_valve", route_args="app_and_module")
     _register_module(flask_app, core, "entry_pipeline_composition_guard", route_args="app_and_module")
     _register_module(flask_app, core, "starter_valve_reason_sanitizer", route_args="app_and_module")
@@ -144,10 +141,10 @@ def _watchdog() -> None:
                 _register_module(flask_app, core, "ml_pre3a_shadow_validation", route_args="app_and_module")
                 _register_module(flask_app, core, "ml_phase3a_early_paper_gate", route_args="app_and_module")
                 _register_module(flask_app, core, "ml_vs_rules_shadow_log", route_args="app_and_module")
-                # Reassert final entry ownership after all runtime modules run.
                 _register_module(flask_app, core, "entry_pipeline_ownership_guard", route_args="app_and_module")
-                # Compact reporting must be the last self-check wrapper so later
-                # diagnostic promoters cannot expand the daily response again.
+                # Final route-level reassertion, not merely a function wrapper.
+                # This replaces Flask's daily view function with the terminal
+                # allowlisted serializer after every other runtime module runs.
                 _register_module(flask_app, core, "daily_self_check_compactor", route_args="app_and_module")
         except Exception:
             pass
