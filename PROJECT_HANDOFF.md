@@ -25,7 +25,7 @@ Routine validation remains `/paper/self-check`; use `/paper/full-self-check` onl
 
 ### Milestone 1 — Expanded shadow universe
 
-Current version:
+Version:
 
 `scanner-v2-shadow-universe-2026-07-21-v2-leadership-clusters`
 
@@ -46,19 +46,11 @@ Route:
 
 ### Milestone 2 — Missed-opportunity post-close audit
 
-Current version:
+Version:
 
 `missed-opportunity-post-close-audit-2026-07-21-v2-failure-modes`
 
-The first forced post-close audit confirmed all six symbols exceeded the 8% move threshold. Five were outside the executable universe and unseen: BE, NVTS, NUAI, CRWV, and ONDS. STX was in the executable universe but had no persisted scanner, decision, blocker, or audit observation.
-
-The audit distinguishes:
-
-- `universe_coverage_miss`
-- `universe_present_but_no_observation`
-- `seen_but_not_entered`
-- `captured_position`
-- `outside_observed_pipeline`
+The forced audit confirmed all six symbols exceeded the 8% move threshold. Five were outside the executable universe and unseen: BE, NVTS, NUAI, CRWV, and ONDS. STX was in the executable universe but had no persisted scanner, decision, blocker, or audit observation.
 
 Route:
 
@@ -70,42 +62,68 @@ Forced example:
 
 ### Milestone 3 — Shadow liquidity, data quality, and observation trace
 
-Current version:
+Version:
 
 `scanner-v2-shadow-quality-trace-2026-07-21-v1`
 
-A new advisory-only trace evaluates selected symbols against the current shadow quality floors:
+The forced quality trace established:
 
-- minimum price: 3.00
-- minimum average daily volume: 350,000
-- minimum average dollar volume: 5,000,000
+- all six names passed the current shadow liquidity floors;
+- all six exceeded minimum price, average-volume, and average-dollar-volume requirements;
+- five remain `universe_coverage_miss`;
+- STX remains `universe_present_but_no_observation`;
+- no symbol had persisted scanner, decision, blocker, dynamic-universe, journal, or post-harvest records.
 
-When deliberately called with `force=1`, it reports:
-
-- current price;
-- one-day and five-day change;
-- current volume;
-- 20-day average volume;
-- relative volume;
-- average dollar volume;
-- whether the symbol passes the shadow liquidity floor.
-
-It also traces persisted scanner, decision, blocker, dynamic-universe, journal, and post-harvest sections and classifies each symbol as:
-
-- `universe_coverage_miss`;
-- `universe_present_but_no_observation`;
-- `observed_without_records`;
-- `observed_with_records`.
-
-This directly addresses the STX failure mode without altering scanner execution. For a universe-present symbol with no observation, the recommended next trace is candidate-lifecycle persistence inside `scan_signals`.
+This evidence shows the primary issue is discovery/observation rather than tradability.
 
 Route:
 
 `/paper/scanner-v2-shadow-quality-trace-status`
 
-Forced six-symbol example:
+Forced example:
 
 `/paper/scanner-v2-shadow-quality-trace-status?symbols=BE,NVTS,STX,NUAI,CRWV,ONDS&force=1`
+
+### Milestone 4 — Advisory composite scoring and theme leadership
+
+Version:
+
+`scanner-v2-shadow-composite-score-2026-07-21-v1`
+
+A new advisory-only module scores selected shadow candidates using explicit, inspectable components:
+
+- one-day momentum;
+- five-day trend;
+- relative volume;
+- liquidity;
+- continuation strength;
+- extension penalty;
+- reversal penalty.
+
+The module also aggregates symbol scores into theme-leadership diagnostics using:
+
+- average member score;
+- positive breadth;
+- count of strong members;
+- top-ranked members by cluster.
+
+The scoring output is observational only. It does not promote symbols, alter `core.UNIVERSE`, patch `scan_signals`, change risk or sizing, lower thresholds, place orders, or grant ML/live authority.
+
+Route:
+
+`/paper/scanner-v2-shadow-composite-score-status`
+
+Forced six-symbol example:
+
+`/paper/scanner-v2-shadow-composite-score-status?symbols=BE,NVTS,STX,NUAI,CRWV,ONDS&force=1`
+
+Expected output includes:
+
+- `ranked_candidates`;
+- per-symbol `components` and `weights`;
+- `composite_score`;
+- `theme_leadership`;
+- all authority mutation flags false.
 
 ## Safety Boundary
 
@@ -132,35 +150,35 @@ Executable-universe expansion remains deferred until repeated evidence supports 
   - `e8295b01a1e21b7e20850196a812c4925488ab1f` — separate universe and observation failure modes.
 - `scanner_v2_shadow_quality_trace.py`
   - `c4321dba229a0b3d12020e4464597f810014ae5a` — add shadow liquidity/data-quality and observation trace.
+- `scanner_v2_shadow_composite_score.py`
+  - `00214d50538fbc065402c02e6c75cc4d7856debd` — add advisory composite scoring and theme leadership.
 - `usercustomize.py`
-  - `f1e902d8eb25760f5c8a5ca23989950d8ca8c961` — register the new optional route and module.
+  - `f1e902d8eb25760f5c8a5ca23989950d8ca8c961` — register quality trace.
+  - `4bb58524b1a5cff2ef695729c40633edadb82f4e` — register composite scoring route.
 - `PROJECT_HANDOFF.md`
-  - this commit records Milestone 3, validation links, and the revised next sequence.
+  - this commit records the validated quality findings and Milestone 4.
 
 ## Scanner v2 Next Steps
 
 Proceed in this order:
 
 1. Validate `/paper/self-check` after Railway redeploys.
-2. Validate all three Scanner v2 advisory routes and confirm current versions.
-3. Run the forced shadow-quality trace for BE, NVTS, STX, NUAI, CRWV, and ONDS.
-4. Confirm which universe misses pass the existing liquidity/data-quality floors.
-5. Confirm whether STX remains `universe_present_but_no_observation` after redeployment and a subsequent scanner cycle.
-6. If STX remains unobserved, add advisory candidate-lifecycle persistence around scanner iteration, data retrieval, prefilter exclusion, signal creation, and audit write stages.
-7. Add composite opportunity-score attribution in shadow mode: trend, relative strength, volume, momentum, market alignment, extension risk, liquidity, and quality.
-8. Add theme-leadership scoring so multiple strong members can elevate a cluster without automatically making any symbol executable.
-9. Accumulate repeated post-close samples across multiple sessions and regimes.
-10. Add candidate-to-entry and candidate-to-outcome attribution against the current rule engine.
-11. Only after repeated evidence supports improvement, prepare a separately reviewed paper-only promotion gate for selected shadow candidates.
-12. Add BTC, ETH, and SOL later through a separate provider and crypto-specific volatility milestone.
+2. Validate the new lightweight composite route and confirm version `scanner-v2-shadow-composite-score-2026-07-21-v1`.
+3. Run the forced six-symbol composite report and review candidate ranking, component attribution, extension/reversal penalties, and theme-leadership scores.
+4. Instrument advisory candidate-lifecycle persistence for STX and other executable-universe names that leave no scanner record. Trace scanner iteration, data retrieval, prefilter exclusion, signal creation, and audit persistence without changing trade authority.
+5. Expand the forced composite sample across the full shadow leadership baskets and multiple sessions.
+6. Record repeated candidate-to-entry and candidate-to-outcome attribution against the current rule engine.
+7. Add regime-aware shadow weighting only after the unweighted baseline is captured.
+8. Only after repeated evidence demonstrates improved capture without unacceptable false positives, extension chasing, drawdown, or loss clustering, prepare a separately reviewed paper-only promotion gate.
+9. Add BTC, ETH, and SOL later through a separate provider and crypto-specific volatility milestone.
 
-No filter should be relaxed solely because a stock finished strongly. Changes must show improved opportunity capture without unacceptable extension chasing, false positives, drawdown, or loss clustering.
+No filter should be relaxed solely because a stock finished strongly.
 
 ## Remaining Project Priorities
 
 ### Shared cycle identity
 
-Propagate one immutable `cycle_id` through scanner output, decision audit, blocked-entry audit, X-Ray, entries, rotations, and post-harvest after the Scanner v2 shadow instrumentation is stable.
+Propagate one immutable `cycle_id` through scanner output, decision audit, blocked-entry audit, X-Ray, entries, rotations, and post-harvest after Scanner v2 shadow instrumentation is stable.
 
 ### Phase 3A ML advisory evaluation
 
@@ -180,36 +198,21 @@ Confirm:
 - stable entry-pipeline fields remain true;
 - no newly timestamped runtime error.
 
-Then inspect:
+Then inspect the lightweight route:
 
-`https://trading-bot-clean.up.railway.app/paper/scanner-v2-shadow-universe-status`
-
-Expected version:
-
-`scanner-v2-shadow-universe-2026-07-21-v2-leadership-clusters`
-
-Inspect:
-
-`https://trading-bot-clean.up.railway.app/paper/missed-opportunity-post-close-audit-status`
-
-Expected version:
-
-`missed-opportunity-post-close-audit-2026-07-21-v2-failure-modes`
-
-Inspect the lightweight new route:
-
-`https://trading-bot-clean.up.railway.app/paper/scanner-v2-shadow-quality-trace-status`
+`https://trading-bot-clean.up.railway.app/paper/scanner-v2-shadow-composite-score-status`
 
 Expected:
 
 - `status: ok`;
 - `overall: pass`;
-- `version: scanner-v2-shadow-quality-trace-2026-07-21-v1`;
+- `version: scanner-v2-shadow-composite-score-2026-07-21-v1`;
 - `mode: advisory_shadow_only`;
+- `market_data_requested: false`;
 - all authority mutation flags false.
 
 For deliberate post-close analysis, use:
 
-`https://trading-bot-clean.up.railway.app/paper/scanner-v2-shadow-quality-trace-status?symbols=BE,NVTS,STX,NUAI,CRWV,ONDS&force=1`
+`https://trading-bot-clean.up.railway.app/paper/scanner-v2-shadow-composite-score-status?symbols=BE,NVTS,STX,NUAI,CRWV,ONDS&force=1`
 
-Review each row's `observation_classification`, `section_hits`, `records`, `market_snapshot`, `shadow_liquidity_pass`, and `recommended_next_trace`.
+Review `ranked_candidates`, each row's `components`, `weights`, `composite_score`, and `theme_leadership`.
