@@ -15,26 +15,56 @@ Every code/configuration update must update this file in the same work session w
 - ML live authority: none
 - Strict stronger-authority benchmark: 150 execution rows and 100 observed outcomes
 
-## Latest Runtime Evidence — July 21, 2026, 18:38:48
+## Latest Validated Runtime Evidence — July 21, 2026, 19:07:46
 
-The cycle-aware scanner patch deployed successfully:
+The compact self-check passed with no warnings:
 
+- `overall: pass`
+- `status: ok`
+- `health.warnings: []`
+- `terminal_compaction_applied: true`
+- `source_contracts_normalized: true`
 - `cycle_aware_scanner_comparison: true`
-- `source_mismatch: null`
+- `runtime_reliability_overlay_version: runtime-reliability-overlay-2026-07-21-v2-entry-contract`
+
+Account and performance snapshot:
+
+- cash: 10111.46
+- equity: 10864.08
+- positions: DELL and QQQ
+- execution rows: 83
+- realized total: +733.97
+- unrealized PnL: +131.58
+- wins/losses: 34/16
+
+Risk snapshot:
+
+- self-defense inactive
+- daily loss: 0.0%
+- intraday drawdown: 0.047%
+- feedback loop clear
+
+Entry-pipeline structure:
+
+- `stack_stable: true`
+- `recursion_safe: true`
+- `direct_core_base: true`
+- `participation_valve_chain_cycle_free: true`
+- current callable: `entry_pipeline_xray.wrapped`
+- inner callable: `entry_pipeline_composition_guard.composed`
+
+The duplicate-reason TypeError remains historical at July 20, 12:01:39 CDT. Active-callsite invocations/errors remain 85/10, so no new occurrence is present.
+
+Scanner reporting is now correctly non-assertive without shared cycle identity:
+
+- decision count: 54
+- blocker-audit count: 42
+- count difference: 12
 - `same_cycle_comparison: false`
+- `source_mismatch: null`
 - `snapshot_alignment: unverified_without_shared_cycle_id`
-- raw decision/blocker counts remained visible at 54/42
-- runtime overlay v1 was active
 
-Account, risk, ML, current callable, inner callable, recursion safety, and direct-core status remained healthy. The historical duplicate-reason TypeError remained timestamped July 20, 12:01:39 CDT with no new occurrence.
-
-One compact-source regression appeared after X-Ray status became read-only:
-
-- `entry_pipeline.stack_stable` became null;
-- `entry_pipeline.participation_valve_chain_cycle_free` became null;
-- the compact response downgraded to warn with `compact_source_fields_missing`.
-
-The runtime call chain itself remained intact. The regression was isolated to serializer source normalization because the dedicated composition guard still owns and can inspect those structural fields.
+This is informational only and no longer creates a false health warning.
 
 ## Current Daily Serializer
 
@@ -71,20 +101,18 @@ Version:
 
 Ownership status is read-only. Repair and persistence happen only on installation, actual drift, explicit repair, or error. Healthy checks no longer write the complete state.
 
-## Latest Update — Compact Entry Contract Compatibility
+## Runtime Reliability Overlay
 
-### Runtime reliability overlay
-
-Updated to:
+Version:
 
 `runtime-reliability-overlay-2026-07-21-v2-entry-contract`
 
-The overlay now performs four authority-neutral functions:
+The overlay performs four authority-neutral functions:
 
 1. Entry Pipeline X-Ray persistence uses `core.update_state()` when available.
-2. X-Ray status inspection remains read-only.
-3. Scanner count comparison remains cycle-aware and does not label unaligned snapshots as a confirmed mismatch.
-4. Missing compact entry-pipeline structural fields are normalized from the dedicated read-only `entry_pipeline_composition_guard.status_payload()` source.
+2. X-Ray status inspection is read-only.
+3. Scanner count comparison is cycle-aware and does not label unaligned snapshots as a confirmed mismatch.
+4. Compact entry-pipeline structural fields are normalized from the dedicated read-only composition inspector.
 
 The compatibility layer restores, when absent from X-Ray telemetry:
 
@@ -93,27 +121,13 @@ The compatibility layer restores, when absent from X-Ray telemetry:
 - `entry_pipeline.recursion_safe`;
 - `entry_pipeline.direct_core_base`.
 
-It removes only the resolved `entry_pipeline.stack_stable` item from `compact_source_fields_missing`. It promotes `overall: warn` back to `pass` only when no warnings or failed required paths remain. It does not mask genuine runtime, route, risk, or source failures.
+It removes only a resolved compact-source warning and promotes `overall` back to `pass` only when no warnings or failed required paths remain. Genuine runtime, route, risk, or source failures remain visible.
 
-### Files changed
-
-- `runtime_reliability_overlay.py`
-- `PROJECT_HANDOFF.md`
-
-### Commits
-
-- `4ccc6c22bbe3425f017f6f6f1c411499079d57c0` — transactional X-Ray persistence, read-only X-Ray status, and cycle-aware scanner reporting.
-- `bf6450c11ed612f3e1364e20f5b61bf51b946a46` — load the reliability overlay after the terminal serializer.
-- `280bc3e485300f35188be54173cf4d6a964ed1f2` — normalize compact entry stability fields from the read-only composition inspector.
-- Handoff commit: the commit updating this file.
-
-## System-Wide Audit
+## System-Wide Audit Progress
 
 Full report:
 
 `SYSTEM_WIDE_AUDIT_2026-07-21.md`
-
-### Remediation progress
 
 Completed:
 
@@ -125,28 +139,88 @@ Completed:
 6. Made X-Ray status inspection read-only.
 7. Prevented unaligned scanner snapshots from producing a false health warning.
 8. Restored compact structural fields from their dedicated read-only authority.
+9. Revalidated the compact runtime as pass/ok with zero warnings.
 
-Remaining:
+## Next-Phase Recommendations
 
-1. Propagate one shared cycle ID through scanner, blocker audit, X-Ray, entries, rotations, and post-harvest at the producers.
-2. Migrate additional diagnostic writers to `core.update_state()`.
-3. Consolidate disk and `core.portfolio` snapshot authority.
-4. Move non-critical diagnostics out of the primary trading-state document.
-5. Replace accumulated runtime monkeypatching with one declarative pipeline builder.
-6. Add concurrency and source-contract regression tests.
+Infrastructure is stable enough to pause broad reliability patching. Future infrastructure changes should be narrowly scoped, regression-tested, and justified by a concrete failure or measurable operational benefit.
 
-## Safety / Authority Impact
+### Priority 1 — Shared cycle identity
 
-These changes affect persistence and diagnostics only:
+Propagate one immutable `cycle_id` from the cycle coordinator through:
 
-- no internal risk check removed;
-- no threshold changes;
-- no sizing changes;
-- no scanner/candidate changes;
-- no order-placement changes;
-- no live authority added;
-- no ML execution authority added;
-- no cooldown, self-defense, risk-halt, drawdown, regime, trend, volume, relative-edge, extension, quality, or futures-bias bypass.
+- scanner output;
+- decision audit;
+- blocked-entry reason audit;
+- X-Ray telemetry;
+- entries;
+- rotations;
+- post-harvest diagnostics.
+
+Acceptance criteria:
+
+- every producer reports the same cycle ID for one engine cycle;
+- same-cycle count comparisons become deterministic;
+- cross-cycle snapshots are explicitly rejected from mismatch calculations;
+- no trading, risk, sizing, or execution behavior changes.
+
+### Priority 2 — Improve opportunity quality and participation
+
+Shift engineering attention from diagnostics to measurable paper-trading performance:
+
+- evaluate scanner-universe breadth and data-quality limits;
+- increase valid opportunities without weakening risk, extension, quality, volume, relative-edge, futures-bias, cooldown, or self-defense controls;
+- measure candidate-to-entry conversion by regime and blocker category;
+- separate insufficient opportunity flow from intentional risk blocking.
+
+Any scanner or participation change must be tested against a baseline and must not be justified solely by increasing trade count.
+
+### Priority 3 — Phase 3A ML advisory evaluation
+
+Continue ML in advisory-only paper mode:
+
+- retain rule thresholds and risk controls as authoritative;
+- log ML-versus-rules disagreement and subsequent outcomes;
+- evaluate incremental precision, recall, expectancy, drawdown, and false-positive cost;
+- prevent ML from bypassing any hard risk or eligibility gate.
+
+No greater ML authority should be considered until the evidence benchmark is met and advisory results show repeatable improvement over rules alone.
+
+### Priority 4 — Evidence accumulation before authority changes
+
+Current evidence is 83 execution rows, below the stronger-authority benchmark of 150 execution rows and 100 observed outcomes.
+
+Before considering any live or stronger ML authority:
+
+- reach at least 150 execution rows;
+- reach at least 100 observed outcomes;
+- validate results across multiple market regimes;
+- confirm acceptable drawdown and loss clustering;
+- confirm no new runtime, state-integrity, recursion, or duplicate-reason failures;
+- retain paper-only operation until a separate explicit approval decision.
+
+### Deferred architectural work
+
+The following remain valid but should not displace performance work unless they become operationally necessary:
+
+1. Migrate additional high-risk diagnostic writers to `core.update_state()`.
+2. Consolidate disk and `core.portfolio` snapshot authority.
+3. Move non-critical diagnostics out of the primary trading-state document.
+4. Replace accumulated runtime monkeypatching with one declarative pipeline builder.
+5. Add concurrency and source-contract regression tests.
+
+## Safety / Authority Policy
+
+Current and recommended work must preserve:
+
+- all internal risk checks;
+- existing sizing limits;
+- cooldowns;
+- self-defense and drawdown halts;
+- regime, trend, volume, relative-edge, extension, quality, and futures-bias gates;
+- paper-only broker authority;
+- no ML execution authority;
+- no automatic promotion to live trading.
 
 ## Current Intended Entry Stack
 
@@ -163,21 +237,28 @@ These changes affect persistence and diagnostics only:
 
 ## Validation Procedure
 
-After Railway redeploys, run only:
+For routine validation, run only:
 
 `https://trading-bot-clean.up.railway.app/paper/self-check`
 
 Confirm:
 
+- `overall: pass`;
+- `status: ok`;
+- `health.warnings: []`;
 - `version: daily-self-check-compactor-2026-07-21-v4-source-contracts`;
 - `terminal_compaction_applied: true`;
 - `source_contracts_normalized: true`;
 - `cycle_aware_scanner_comparison: true`;
 - `runtime_reliability_overlay_version: runtime-reliability-overlay-2026-07-21-v2-entry-contract`;
 - `entry_pipeline.stack_stable: true`;
+- `entry_pipeline.recursion_safe: true`;
+- `entry_pipeline.direct_core_base: true`;
 - `entry_pipeline.participation_valve_chain_cycle_free: true`;
-- `overall: pass` and `status: ok` when no other warning is present;
-- no newly timestamped recursion or duplicate-reason error;
-- scanner count difference remains visible but does not create a mismatch warning unless the two producers report the same cycle ID.
+- no newly timestamped recursion or duplicate-reason error.
 
 Use `/paper/full-self-check` only for fail, missing critical fields, or a newly timestamped runtime error. Do not run mutating repair or execution endpoints during routine validation.
+
+## Latest Documentation Commit
+
+This handoff update records the validated pass state and establishes the prioritized next-phase roadmap. No runtime trading code, risk controls, thresholds, sizing, scanner behavior, execution behavior, live authority, or ML authority changed in this documentation-only update.
