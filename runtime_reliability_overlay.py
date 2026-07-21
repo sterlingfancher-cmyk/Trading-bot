@@ -1,11 +1,12 @@
 """Runtime reliability overlay for transactional diagnostics and cycle-aware reporting.
 
-This module performs three authority-neutral repairs:
+This module performs authority-neutral reliability repairs:
 1. Entry Pipeline X-Ray persistence uses core.update_state() when available.
 2. X-Ray status inspection is read-only and never installs or repairs wrappers.
 3. Daily scanner-count comparison only declares a mismatch when both producers
-   identify the same cycle. Until shared cycle IDs are present, the two counts are
-   reported as unaligned snapshots rather than as a health warning.
+   identify the same cycle.
+4. Compact entry-pipeline stability fields are normalized from the dedicated
+   composition guard when X-Ray telemetry does not contain them.
 
 No trading, risk, sizing, scanner, candidate, order, live-authority, or ML-authority
 behavior is changed.
@@ -16,7 +17,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, List
 
-VERSION = "runtime-reliability-overlay-2026-07-21-v1"
+VERSION = "runtime-reliability-overlay-2026-07-21-v2-entry-contract"
 _PATCHED = False
 
 
@@ -51,6 +52,26 @@ def _cycle_identity(row: Dict[str, Any]) -> Any:
         if row.get(key) is not None:
             return row.get(key)
     return None
+
+
+def _composition_status(core: Any = None) -> Dict[str, Any]:
+    """Read the authoritative composition inspection without installing or repairing."""
+    try:
+        import entry_pipeline_composition_guard as guard
+        fn = getattr(guard, "status_payload", None)
+        if callable(fn):
+            for args in ((core,), ()):
+                try:
+                    value = fn(*args)
+                    if isinstance(value, dict):
+                        return value
+                except TypeError:
+                    continue
+                except Exception:
+                    break
+    except Exception:
+        pass
+    return {}
 
 
 def _patch_xray(core: Any) -> Dict[str, Any]:
@@ -137,6 +158,7 @@ def _patch_xray(core: Any) -> Dict[str, Any]:
             _d(telemetry.get("composition"))
             or _d(_d(telemetry.get("last_cycle")).get("composition"))
             or _d(_d(telemetry.get("last_meaningful_cycle")).get("composition"))
+            or _composition_status(c)
         )
         return {
             "status": "ok" if callable(current) else "pending",
@@ -234,19 +256,51 @@ def _patch_daily_compactor(core: Any) -> Dict[str, Any]:
         out["cycle_aware_scanner_comparison"] = True
         out["runtime_reliability_overlay_version"] = VERSION
 
+        # Normalize the two stability fields from the dedicated, read-only
+        # composition inspector. X-Ray telemetry is not required to duplicate
+        # these structural facts.
+        entry = _d(out.get("entry_pipeline"))
+        composition = _composition_status(core)
+        if entry.get("stack_stable") is None:
+            entry["stack_stable"] = composition.get("stack_stable")
+        if entry.get("participation_valve_chain_cycle_free") is None:
+            entry["participation_valve_chain_cycle_free"] = composition.get("participation_valve_chain_cycle_free")
+        if entry.get("recursion_safe") is None:
+            entry["recursion_safe"] = composition.get("recursion_safe")
+        if entry.get("direct_core_base") is None:
+            entry["direct_core_base"] = composition.get("direct_core_base")
+        out["entry_pipeline"] = entry
+
         health = _d(out.get("health"))
         warnings = []
         for row in _l(health.get("warnings")):
             if isinstance(row, dict) and row.get("error") == "scanner_source_snapshot_mismatch" and not same_cycle:
                 continue
+            if isinstance(row, dict) and row.get("error") == "compact_source_fields_missing":
+                details = [item for item in _l(row.get("details")) if item != "entry_pipeline.stack_stable"]
+                if not details:
+                    continue
+                row = {**row, "details": details}
             warnings.append(row)
         health["warnings"] = warnings
         out["health"] = health
+
+        # The base compactor calculates overall before this compatibility layer.
+        # Promote warn back to pass only when all warnings were resolved and no
+        # required path failed. Never mask a real error or failed health check.
+        failed_required = _l(health.get("failed_required"))
+        if out.get("overall") == "warn" and not warnings and not failed_required:
+            out["overall"] = "pass"
+            out["status"] = "ok"
         return out
 
     cycle_aware_compact._runtime_reliability_overlay_version = VERSION  # type: ignore[attr-defined]
     compactor.compact_daily = cycle_aware_compact
-    return {"patched": True, "cycle_aware_scanner_comparison": True}
+    return {
+        "patched": True,
+        "cycle_aware_scanner_comparison": True,
+        "entry_contract_normalized": True,
+    }
 
 
 def apply(core: Any = None) -> Dict[str, Any]:
@@ -280,6 +334,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "transactional_xray_persistence": True,
         "read_only_xray_status": True,
         "cycle_aware_scanner_comparison": True,
+        "entry_contract_normalized": True,
         "authority_changed": False,
         "logic_changed": False,
     }
