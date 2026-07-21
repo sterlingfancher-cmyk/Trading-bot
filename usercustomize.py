@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v34-shadow-composite-score"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v35-scanner-v2-confidence-lifecycle"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -35,6 +35,8 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/missed-opportunity-post-close-audit-status", "category": "governance", "required": False},
             {"path": "/paper/scanner-v2-shadow-quality-trace-status", "category": "governance", "required": False},
             {"path": "/paper/scanner-v2-shadow-composite-score-status", "category": "governance", "required": False},
+            {"path": "/paper/scanner-v2-theme-confidence-status", "category": "governance", "required": False},
+            {"path": "/paper/scanner-v2-candidate-lifecycle-trace-status", "category": "governance", "required": False},
             {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False},
             {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False},
             {"path": "/paper/extended-leader-starter-valve-status", "category": "governance", "required": False},
@@ -103,6 +105,8 @@ MODULES = (
     ("missed_opportunity_post_close_audit", "app_and_module"),
     ("scanner_v2_shadow_quality_trace", "app_and_module"),
     ("scanner_v2_shadow_composite_score", "app_and_module"),
+    ("scanner_v2_theme_confidence_overlay", "app_and_module"),
+    ("scanner_v2_candidate_lifecycle_trace", "app_and_module"),
     ("regime_flip_entry_guard", "app_and_module"),
     ("core_entry_pipeline", "app_and_module"),
     ("extended_leader_starter_valve", "app_and_module"),
@@ -139,8 +143,6 @@ def _repair_entry_stack(flask_app: Any, core: Any) -> None:
 
 
 def _watchdog() -> None:
-    # Fast startup convergence, then low-frequency drift checks. Healthy ownership
-    # checks are read/no-op and do not write state.
     for iteration in range(1200):
         try:
             _patch_self_check_endpoints()
@@ -148,21 +150,21 @@ def _watchdog() -> None:
             flask_app = getattr(core, "app", None) if core is not None else None
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, core)
-                _register_module(flask_app, core, "state_transaction_manager", route_args="app_and_module")
-                _register_module(flask_app, core, "symbol_hygiene_guard", route_args="app_and_module")
-                _register_module(flask_app, core, "scanner_v2_shadow_universe", route_args="app_and_module")
-                _register_module(flask_app, core, "missed_opportunity_post_close_audit", route_args="app_and_module")
-                _register_module(flask_app, core, "scanner_v2_shadow_quality_trace", route_args="app_and_module")
-                _register_module(flask_app, core, "scanner_v2_shadow_composite_score", route_args="app_and_module")
+                for name in (
+                    "state_transaction_manager", "symbol_hygiene_guard",
+                    "scanner_v2_shadow_universe", "missed_opportunity_post_close_audit",
+                    "scanner_v2_shadow_quality_trace", "scanner_v2_shadow_composite_score",
+                    "scanner_v2_theme_confidence_overlay", "scanner_v2_candidate_lifecycle_trace",
+                ):
+                    _register_module(flask_app, core, name, route_args="app_and_module")
                 _repair_entry_stack(flask_app, core)
-                _register_module(flask_app, core, "controlled_redeployment_starter_sleeve", route_args="app_and_module")
-                _register_module(flask_app, core, "quality_blocker_diagnostics", route_args="app_and_module")
-                _register_module(flask_app, core, "ml_pre3a_shadow_validation", route_args="app_and_module")
-                _register_module(flask_app, core, "ml_phase3a_early_paper_gate", route_args="app_and_module")
-                _register_module(flask_app, core, "ml_vs_rules_shadow_log", route_args="app_and_module")
-                _register_module(flask_app, core, "entry_pipeline_ownership_guard", route_args="app_and_module")
-                _register_module(flask_app, core, "daily_self_check_compactor", route_args="app_and_module")
-                _register_module(flask_app, core, "runtime_reliability_overlay", route_args="app_and_module")
+                for name in (
+                    "controlled_redeployment_starter_sleeve", "quality_blocker_diagnostics",
+                    "ml_pre3a_shadow_validation", "ml_phase3a_early_paper_gate",
+                    "ml_vs_rules_shadow_log", "entry_pipeline_ownership_guard",
+                    "daily_self_check_compactor", "runtime_reliability_overlay",
+                ):
+                    _register_module(flask_app, core, name, route_args="app_and_module")
         except Exception:
             pass
         time.sleep(0.5 if iteration < 60 else 30.0)
