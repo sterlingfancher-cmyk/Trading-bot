@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v33-shadow-quality-trace"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v34-shadow-composite-score"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -34,6 +34,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/scanner-v2-shadow-universe-status", "category": "governance", "required": False},
             {"path": "/paper/missed-opportunity-post-close-audit-status", "category": "governance", "required": False},
             {"path": "/paper/scanner-v2-shadow-quality-trace-status", "category": "governance", "required": False},
+            {"path": "/paper/scanner-v2-shadow-composite-score-status", "category": "governance", "required": False},
             {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False},
             {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False},
             {"path": "/paper/extended-leader-starter-valve-status", "category": "governance", "required": False},
@@ -101,6 +102,7 @@ MODULES = (
     ("scanner_v2_shadow_universe", "app_and_module"),
     ("missed_opportunity_post_close_audit", "app_and_module"),
     ("scanner_v2_shadow_quality_trace", "app_and_module"),
+    ("scanner_v2_shadow_composite_score", "app_and_module"),
     ("regime_flip_entry_guard", "app_and_module"),
     ("core_entry_pipeline", "app_and_module"),
     ("extended_leader_starter_valve", "app_and_module"),
@@ -151,6 +153,7 @@ def _watchdog() -> None:
                 _register_module(flask_app, core, "scanner_v2_shadow_universe", route_args="app_and_module")
                 _register_module(flask_app, core, "missed_opportunity_post_close_audit", route_args="app_and_module")
                 _register_module(flask_app, core, "scanner_v2_shadow_quality_trace", route_args="app_and_module")
+                _register_module(flask_app, core, "scanner_v2_shadow_composite_score", route_args="app_and_module")
                 _repair_entry_stack(flask_app, core)
                 _register_module(flask_app, core, "controlled_redeployment_starter_sleeve", route_args="app_and_module")
                 _register_module(flask_app, core, "quality_blocker_diagnostics", route_args="app_and_module")
