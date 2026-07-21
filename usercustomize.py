@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v30-runtime-reliability"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v31-scanner-v2-shadow"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -31,6 +31,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/blocked-entry-reason-audit-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-selfcheck-overlay-status", "category": "governance", "required": False},
             {"path": "/paper/dynamic-universe-builder-status", "category": "governance", "required": False},
+            {"path": "/paper/scanner-v2-shadow-universe-status", "category": "governance", "required": False},
             {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False},
             {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False},
             {"path": "/paper/extended-leader-starter-valve-status", "category": "governance", "required": False},
@@ -95,6 +96,7 @@ MODULES = (
     ("blocked_entry_reason_audit", "app_and_module"),
     ("blocked_entry_reason_selfcheck_overlay", "app_and_module"),
     ("dynamic_universe_builder", "app_and_module"),
+    ("scanner_v2_shadow_universe", "app_and_module"),
     ("regime_flip_entry_guard", "app_and_module"),
     ("core_entry_pipeline", "app_and_module"),
     ("extended_leader_starter_valve", "app_and_module"),
@@ -142,6 +144,7 @@ def _watchdog() -> None:
                 _register_auxiliary_routes(flask_app, core)
                 _register_module(flask_app, core, "state_transaction_manager", route_args="app_and_module")
                 _register_module(flask_app, core, "symbol_hygiene_guard", route_args="app_and_module")
+                _register_module(flask_app, core, "scanner_v2_shadow_universe", route_args="app_and_module")
                 _repair_entry_stack(flask_app, core)
                 _register_module(flask_app, core, "controlled_redeployment_starter_sleeve", route_args="app_and_module")
                 _register_module(flask_app, core, "quality_blocker_diagnostics", route_args="app_and_module")
