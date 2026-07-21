@@ -1,4 +1,4 @@
-"""Scanner v2 shadow universe, milestone 1.
+"""Scanner v2 shadow universe, milestone 2.
 
 Builds a broader candidate taxonomy for paper diagnostics only. It does not
 mutate core.UNIVERSE, patch scan_signals, place orders, change thresholds,
@@ -10,11 +10,27 @@ import datetime as dt
 import os
 from typing import Any, Dict, Iterable, List
 
-VERSION = "scanner-v2-shadow-universe-2026-07-21-v1"
+VERSION = "scanner-v2-shadow-universe-2026-07-21-v2-leadership-clusters"
 ENABLED = os.environ.get("SCANNER_V2_SHADOW_UNIVERSE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 REGISTERED_APP_IDS: set[int] = set()
 
 SHADOW_BASKETS: Dict[str, List[str]] = {
+    "ai_data_center_infrastructure": [
+        "CRWV", "NVDA", "AMD", "AVGO", "SMCI", "VRT", "ANET", "DELL", "HPE", "CIEN",
+        "ORCL", "NTNX", "DDOG", "NET", "MU", "STX", "WDC", "SNDK",
+    ],
+    "power_electrification": [
+        "BE", "GEV", "VST", "CEG", "NRG", "ETN", "PWR", "EME", "FIX", "POWL", "IESC",
+        "NUAI", "FLNC", "STEM", "EOSE",
+    ],
+    "semiconductor_power_and_components": [
+        "NVTS", "ON", "MCHP", "MPWR", "ADI", "NXPI", "QCOM", "TXN", "WOLF", "ACLS", "UCTT",
+        "AMAT", "LRCX", "KLAC", "ASML", "TER",
+    ],
+    "autonomy_drones_and_sensing": [
+        "ONDS", "AVAV", "KTOS", "ACHR", "JOBY", "RKLB", "LUNR", "ASTS", "RDW", "BKSY",
+        "CGNX", "SYM", "ZBRA",
+    ],
     "robotics_automation": ["ROK", "TER", "CGNX", "PATH", "SYM", "ISRG", "ZBRA", "EMR", "HON", "ABB"],
     "defense_aerospace": ["LMT", "RTX", "NOC", "GD", "LHX", "HII", "KTOS", "AVAV", "LDOS", "BA"],
     "energy_leaders": ["XOM", "CVX", "COP", "EOG", "OXY", "SLB", "HAL", "FANG", "MPC", "VLO", "LNG", "XLE"],
@@ -23,6 +39,8 @@ SHADOW_BASKETS: Dict[str, List[str]] = {
     "quantum_compute": ["IONQ", "RGTI", "QBTS", "QUBT", "ARQQ", "IBM", "GOOG", "MSFT"],
     "broad_index_liquid": ["SPY", "QQQ", "IWM", "DIA", "RSP", "SMH", "SOXX", "ARKK"],
 }
+
+CONFIRMED_MISSED_MOVERS = ["BE", "NVTS", "STX", "NUAI", "CRWV", "ONDS"]
 
 
 def _unique(values: Iterable[Any]) -> List[str]:
@@ -42,6 +60,12 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
     existing_set = set(existing_universe)
     overlap = [symbol for symbol in shadow_symbols if symbol in existing_set]
     new_shadow_candidates = [symbol for symbol in shadow_symbols if symbol not in existing_set]
+    confirmed_overlap = [symbol for symbol in CONFIRMED_MISSED_MOVERS if symbol in existing_set]
+    confirmed_outside = [symbol for symbol in CONFIRMED_MISSED_MOVERS if symbol not in existing_set]
+    symbol_baskets = {
+        symbol: [name for name, symbols in SHADOW_BASKETS.items() if symbol in symbols]
+        for symbol in CONFIRMED_MISSED_MOVERS
+    }
     return {
         "status": "ok",
         "overall": "pass",
@@ -57,6 +81,10 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "new_shadow_candidate_count": len(new_shadow_candidates),
         "overlap_symbols": overlap,
         "new_shadow_candidates": new_shadow_candidates,
+        "confirmed_missed_movers": CONFIRMED_MISSED_MOVERS,
+        "confirmed_missed_mover_baskets": symbol_baskets,
+        "confirmed_missed_movers_in_universe": confirmed_overlap,
+        "confirmed_missed_movers_outside_universe": confirmed_outside,
         "authority_changed": False,
         "core_universe_mutated": False,
         "scan_signals_patched": False,
@@ -66,7 +94,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "does_not_change_risk_limits": True,
         "does_not_change_ml_authority": True,
         "does_not_grant_live_authority": True,
-        "next_gate": "collect overlap, availability, liquidity, and outcome evidence before proposing promotion into the executable universe",
+        "next_gate": "add shadow liquidity and opportunity scoring, then compare repeated post-close outcomes before any executable-universe promotion",
     }
 
 
