@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v28-terminal-daily-serializer"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v29-transactional-state"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -39,6 +39,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/starter-valve-reason-sanitizer-status", "category": "governance", "required": False},
             {"path": "/paper/entry-pipeline-xray-status", "category": "governance", "required": False},
             {"path": "/paper/entry-pipeline-ownership-status", "category": "governance", "required": False},
+            {"path": "/paper/state-transaction-status", "category": "state", "required": False},
             {"path": "/paper/daily-self-check-compactor-status", "category": "governance", "required": False},
             {"path": "/paper/controlled-redeployment-starter-sleeve-status", "category": "governance", "required": False},
             {"path": "/paper/quality-blocker-diagnostics-status", "category": "governance", "required": False},
@@ -83,6 +84,7 @@ MODULES = (
     ("journal_truth", "app_and_module"),
     ("live_volatility", "app_and_module"),
     ("self_check", "app_and_module"),
+    ("state_transaction_manager", "app_and_module"),
     ("breakout_participation_layer", "app_only"),
     ("fmp_limited_access_guard", "app_and_module"),
     ("fmp_cached_profile_label_guard", "app_and_module"),
@@ -127,13 +129,16 @@ def _repair_entry_stack(flask_app: Any, core: Any) -> None:
 
 
 def _watchdog() -> None:
-    for _ in range(1200):
+    # Fast startup convergence, then low-frequency drift checks. Healthy ownership
+    # checks are now read/no-op and do not write state.
+    for iteration in range(1200):
         try:
             _patch_self_check_endpoints()
             core = _mod()
             flask_app = getattr(core, "app", None) if core is not None else None
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, core)
+                _register_module(flask_app, core, "state_transaction_manager", route_args="app_and_module")
                 _register_module(flask_app, core, "symbol_hygiene_guard", route_args="app_and_module")
                 _repair_entry_stack(flask_app, core)
                 _register_module(flask_app, core, "controlled_redeployment_starter_sleeve", route_args="app_and_module")
@@ -142,13 +147,10 @@ def _watchdog() -> None:
                 _register_module(flask_app, core, "ml_phase3a_early_paper_gate", route_args="app_and_module")
                 _register_module(flask_app, core, "ml_vs_rules_shadow_log", route_args="app_and_module")
                 _register_module(flask_app, core, "entry_pipeline_ownership_guard", route_args="app_and_module")
-                # Final route-level reassertion, not merely a function wrapper.
-                # This replaces Flask's daily view function with the terminal
-                # allowlisted serializer after every other runtime module runs.
                 _register_module(flask_app, core, "daily_self_check_compactor", route_args="app_and_module")
         except Exception:
             pass
-        time.sleep(0.1)
+        time.sleep(0.5 if iteration < 60 else 30.0)
 
 
 try:
