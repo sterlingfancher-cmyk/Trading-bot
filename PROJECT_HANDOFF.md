@@ -1,4 +1,4 @@
-# Automated Trading Project Handoff — Updated July 20, 2026
+# Automated Trading Project Handoff — Updated July 21, 2026
 
 ## Standing Rule
 
@@ -8,68 +8,128 @@ Every code/configuration update must update this file in the same work session w
 
 - Repository: `sterlingfancher-cmyk/Trading-bot`
 - Railway base URL: `https://trading-bot-clean.up.railway.app`
-- Routine test: `https://trading-bot-clean.up.railway.app/paper/self-check`
+- Routine daily test: `https://trading-bot-clean.up.railway.app/paper/self-check`
+- Full diagnostics: `https://trading-bot-clean.up.railway.app/paper/full-self-check`
 - Operating mode: paper only
 - Live trade authority: none
 - ML live authority: none
 - Strict stronger-authority benchmark: 150 execution rows and 100 observed outcomes
 
-## Latest Runtime Evidence — July 20, 2026, 15:21:01 CDT
+## Latest Runtime Evidence — July 21, 2026, 12:19:41 CDT
 
-The duplicate-reason TypeError repair succeeded:
+The latest operator-supplied self-check passed:
 
-- No new `_patched_participation_valve_ok.<locals>.blocked() got multiple values for argument 'reason'` timestamps appeared after 12:01:39 CDT.
-- X-Ray active-callsite error count remained 10 while invocation count advanced from 41 to 44.
-- The deterministic participation helper chain remained cycle-free.
-
-A separate runtime composition drift was then observed:
-
-- Persisted composition at 15:21:02 CDT showed the correct v4 stack.
-- Live status at 15:21:07 CDT showed `paper_exposure_rotation.patched_try_entries_and_rotations` as the public callable.
-- `stack_stable: false`
-- `direct_core_base: false`
-- `recursion_safe: false` in the live callable status
-- The helper chain itself still reported `participation_valve_chain_cycle_free: true`.
-
-This proved that the legacy `paper_exposure_rotation._patch_try_entries` path could run after composition/X-Ray and replace `app.try_entries_and_rotations`.
-
-Risk behavior remained appropriate:
-
-- Market mode: `crash_warning`
-- Regime: bear
-- Risk score: 17
-- Self-defense active after a realized daily loss near 1.14%
-- Open positions: DELL and QQQ
-- Equity: 10829.14
+- `overall: pass`
+- `failed_required: []`
+- Entry Pipeline X-Ray was outermost.
+- `stack_stable: true`
+- `direct_core_base: true`
+- `recursion_safe: true`
+- `participation_valve_chain_cycle_free: true`
+- X-Ray invocations advanced to 84 while active-callsite errors remained at 10.
+- The newest duplicate-reason TypeError remained historical at July 20, 12:01:39 CDT; no new occurrence was present.
+- Self-defense was inactive.
+- Equity: 10866.55
 - Cash: 10111.46
-- Realized today: -123.71
-- Total realized: +733.97
-- Unrealized: +95.18
+- Open positions: DELL and QQQ
+- Realized total: +733.97
+- Unrealized PnL: +132.59
+- Scanner signals: 42
+- Market mode remained risk-off/bear in the latest meaningful scanner snapshot, so blocked long entries were appropriate.
+- Phase 3A early paper advisory readiness was true, with live authority still off.
 
-No risk control should be loosened because of this composition repair.
+The remaining operator problem was response size: the routine self-check duplicated large X-Ray, blocker, dashboard, decision-audit, and operator-summary structures, making daily copy/paste impractical.
 
-## Latest Code Update — Entry Pipeline Ownership Guard
+## Latest Code Update — Compact Daily Self-Check
 
-### Root cause
+### Purpose
 
-`paper_exposure_rotation.apply_runtime_overrides()` always called its legacy `_patch_try_entries()` function. When the current public callable was X-Ray rather than the inner composed function, the legacy marker check did not recognize the stack as already managed. It then wrapped and replaced the public callable, displacing both X-Ray and the composition-owned direct-core metadata.
+Keep `/paper/self-check` as the single daily validation URL while reducing its response to operator-critical fields. Preserve the existing full diagnostic payload behind `/paper/full-self-check` for intentional troubleshooting.
 
-### Fix
+### Implementation
 
-Added `entry_pipeline_ownership_guard.py` as the final runtime authority for `app.try_entries_and_rotations`.
+Added `daily_self_check_compactor.py`.
 
-It performs four functions:
+For light/mobile-safe/daily mode it returns a compact payload containing:
 
-1. Replaces `paper_exposure_rotation._patch_try_entries` with an ownership-managed no-op. Paper exposure retains its bucket, aggression, sector-limit, and rotation helper patches, but it may no longer replace the public entry callable.
-2. Calls `entry_pipeline_composition_guard.enforce()` to restore the deterministic inner stack.
-3. Reapplies the starter-valve reason sanitizer and Entry Pipeline X-Ray so X-Ray remains outermost.
-4. Persists drift telemetry including counters, detection and repair timestamps, and metadata for the displaced callable.
+- overall health and required failures;
+- up to three current warnings;
+- equity, cash, position symbols, PnL, wins/losses, and execution-row count;
+- self-defense, daily-loss, and drawdown state;
+- scanner signal/entry/rejection counts;
+- post-harvest status;
+- the top five blocker summaries only;
+- blocker reason coverage and missing-detail count;
+- entry-pipeline stability, recursion safety, direct-core status, helper-chain status, callable names, invocation/error counters, and only the latest error summary;
+- starter-valve status;
+- Phase 3A advisory readiness and one next action;
+- a direct full-diagnostics URL.
 
-Ownership token:
+The compactor does not remove or alter internal checks. The same diagnostic modules still run before the response is compacted. It only removes duplicated verbose structures from the returned daily JSON.
 
-`composition-guard-inner+xray-outer`
+`usercustomize.py` now loads and reapplies the compactor after every other self-check promoter so later wrappers cannot expand the routine response again.
 
-Expected owned stack:
+### Files changed
+
+- `daily_self_check_compactor.py`
+- `usercustomize.py`
+- `PROJECT_HANDOFF.md`
+
+### Versions
+
+- `daily-self-check-compactor-2026-07-21-v1`
+- `usercustomize-entry-pipeline-composition-2026-07-21-v27-daily-self-check-compact`
+- Existing ownership guard: `entry-pipeline-ownership-guard-2026-07-20-v1`
+- Existing composition: `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
+- Existing participation chain: `participation-valve-chain-2026-07-17-v1`
+- Existing sanitizer: `starter-valve-reason-sanitizer-2026-07-20-v1`
+
+### Commits
+
+- `8557d89f91fbe786a974f4e0f4e930cf8c9b7eb7`
+  - Added compact daily response builder and optional status route.
+  - Preserves full diagnostics for non-light modes.
+- `fdd59aea5b69fb8cc251589473a0eaab41361864`
+  - Loads the compactor last at startup and during watchdog passes.
+  - Adds compactor status to optional governance checks.
+- Handoff commit: the commit updating this file in the same work session.
+
+### Routes
+
+- Daily compact: `https://trading-bot-clean.up.railway.app/paper/self-check`
+- Full diagnostics: `https://trading-bot-clean.up.railway.app/paper/full-self-check`
+- Compactor status: `https://trading-bot-clean.up.railway.app/paper/daily-self-check-compactor-status`
+
+## Expected Runtime Evidence After Redeploy
+
+The daily route should return:
+
+- `type: daily_self_check`
+- `version: daily-self-check-compactor-2026-07-21-v1`
+- `daily_response_compact: true`
+- `full_diagnostics_url` populated
+- compact sections named `health`, `account`, `risk`, `scanner`, `entry_pipeline`, `starter_valve`, and `ml`
+- no duplicated `dashboard`, full X-Ray objects, complete rejected-signal arrays, complete blocker arrays, `results`, or verbose operator-summary structures
+
+The full route should continue returning the complete diagnostic payload unchanged.
+
+## Safety / Authority Impact
+
+- Reporting-only change
+- No internal check removed
+- No threshold changes
+- No sizing changes
+- No scanner or candidate changes
+- No order-placement changes
+- No live authority added
+- No ML authority added
+- No cooldown bypass
+- No self-defense bypass
+- No risk-halt bypass
+- No drawdown-control bypass
+- No market-regime, futures-bias, trend, volume, relative-edge, extension, or quality bypass
+
+## Current Runtime Stack
 
 1. `entry_pipeline_xray` outer diagnostic wrapper
 2. composition-owned paper-exposure overlay
@@ -78,98 +138,22 @@ Expected owned stack:
 5. extended-leader starter overlay
 6. risk-on starter overlay
 7. reason-safe blocker detail wrappers
-
-`usercustomize.py` now loads the ownership guard after X-Ray and reasserts it again after all other runtime modules during every watchdog pass.
-
-### Files changed
-
-- `entry_pipeline_ownership_guard.py`
-- `usercustomize.py`
-- `PROJECT_HANDOFF.md`
-
-### Versions
-
-- `entry-pipeline-ownership-guard-2026-07-20-v1`
-- `usercustomize-entry-pipeline-composition-2026-07-20-v26-ownership-guard`
-- Existing composition: `entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
-- Existing participation chain: `participation-valve-chain-2026-07-17-v1`
-- Existing sanitizer: `starter-valve-reason-sanitizer-2026-07-20-v1`
-
-### Commits
-
-- `f3ecc3db1eebc0a645fd7806e54112ca4f660969`
-  - Added ownership enforcement, legacy public-wrapper suppression, drift detection, drift repair, and status route.
-- `49614d128f337f69b49b9e0224383ca6a171b8eb`
-  - Added ownership guard to startup and watchdog ordering.
-  - Reasserts ownership after all other runtime modules execute.
-  - Added ownership status to optional self-check governance endpoints.
-- Handoff commit: the commit that updates this file in the same work session.
-
-### Routes
-
-- Routine: `https://trading-bot-clean.up.railway.app/paper/self-check`
-- Ownership: `https://trading-bot-clean.up.railway.app/paper/entry-pipeline-ownership-status`
-- Composition: `https://trading-bot-clean.up.railway.app/paper/entry-pipeline-composition-status`
-- X-Ray: `https://trading-bot-clean.up.railway.app/paper/entry-pipeline-xray-status`
-- Sanitizer: `https://trading-bot-clean.up.railway.app/paper/starter-valve-reason-sanitizer-status`
-
-## Expected Runtime Evidence After Redeploy
-
-Routine self-check should show the public callable as X-Ray, not `paper_exposure_rotation.patched_try_entries_and_rotations`.
-
-Ownership telemetry should report:
-
-- Version: `entry-pipeline-ownership-guard-2026-07-20-v1`
-- `owner_token: composition-guard-inner+xray-outer`
-- `legacy_public_patch_disabled: true`
-- `owned: true`
-- `current_callable.xray_version` populated
-- `inner_callable.composition_version: entry-pipeline-composition-guard-2026-07-17-v4-valve-chain`
-- `inner_callable.direct_core_base: true`
-- `drift_detected_total` and `drift_repaired_total` available in counters
-
-Composition/X-Ray should report:
-
-- `stack_stable: true`
-- `direct_core_base: true`
-- `recursion_safe: true`
-- `participation_valve_chain_cycle_free: true`
-- X-Ray current callable outermost
-- no new duplicate-reason TypeError timestamps
-- no new recursion timestamps
-
-Historical X-Ray errors may remain in state. Validation must compare timestamps and counters after redeploy.
-
-## Safety / Authority Impact
-
-- Runtime composition and diagnostics repair only
-- No threshold changes
-- No sizing changes
-- No candidate-list changes
-- No order-placement changes
-- No live authority added
-- No ML authority added
-- No cooldown bypass
-- No self-defense bypass
-- No risk-halt bypass
-- No drawdown-control bypass
-- No trend, volume, relative-edge, futures-bias, or market-regime bypass
-- Paper exposure helper policies remain active; only its independent public-callable wrapper is disabled
+8. ownership guard reassertion after other runtime modules
+9. daily self-check compactor as the final reporting wrapper
 
 ## Prior Key Repairs
 
+- `f3ecc3db1eebc0a645fd7806e54112ca4f660969` — entry-pipeline ownership and drift repair guard
 - `fc002ce9a7daabcbcb951d298b7d0cc17c7da3ac` — duplicate-reason sanitizer
 - `ac423cb488aaf0753340c88caab3f8114d80193e` — deterministic, cycle-free participation chain
 - `daac00d02a969cde5fcbaa8c033a7be034bbc78a` — direct-core composition repair
-- `9ba549feaa3eb0e28e23bd013157d7a391cc0376` — X-Ray v3 with error and meaningful-cycle telemetry
-- `06f7189179076f656642371250d613a90807c2e6` — prior startup/watchdog ordering
+- `9ba549feaa3eb0e28e23bd013157d7a391cc0376` — X-Ray v3 error and meaningful-cycle telemetry
 
 ## State and Reporting Notes
 
-- X-Ray preserves both latest and latest meaningful cycles.
-- Historical recursion and TypeError records remain visible until replaced; use timestamps to distinguish pre-fix and post-fix errors.
-- The persistent TEM post-harvest row still reports `reason_not_available_in_state_snapshot`; this remains diagnostic debt rather than a risk/authority issue.
-- Execution rows and observed outcomes have previously moved backward in state. Continue monitoring for stale-state writes or reconciliation changes.
+- Historical X-Ray errors remain visible until aged out; compare timestamps and counters rather than treating the presence of an old row as a new failure.
+- The persistent TEM post-harvest row with `reason_not_available_in_state_snapshot` remains diagnostic debt, not a risk/authority issue.
+- Execution rows and observed outcomes have previously moved backward in state. Continue monitoring stale-state writes and reconciliation.
 - Do not run repair routes unless a specific malformed-state condition is confirmed.
 
 ## Validation Procedure
@@ -178,6 +162,6 @@ After Railway redeploys, run only:
 
 `https://trading-bot-clean.up.railway.app/paper/self-check`
 
-Confirm service health, ownership guard presence, X-Ray outermost, stable direct-core composition, cycle-free participation chain, coherent positions/PnL/risk state, and no newly timestamped recursion or duplicate-reason errors.
+Confirm the compact daily response, coherent account/risk state, stable entry pipeline, no newly timestamped recursion or duplicate-reason error, and the populated full-diagnostics URL.
 
-Do not run mutating repair or execution endpoints as part of routine validation.
+Use `/paper/full-self-check` only when the compact response reports `warn`/`fail`, a new error timestamp, or missing critical fields. Do not run mutating repair or execution endpoints during routine validation.
