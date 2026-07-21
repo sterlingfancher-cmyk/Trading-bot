@@ -15,139 +15,107 @@ Every code/configuration update must update this file in the same work session w
 - ML live authority: none
 - Strict stronger-authority benchmark: 150 execution rows and 100 observed outcomes
 
-## Latest Runtime Evidence — July 21, 2026, 12:43:56 CDT
+## Latest Runtime Evidence — July 21, 2026, 12:53:41 CDT
 
-The v2 authoritative fallbacks corrected account and risk truth:
+The v3 terminal route was successfully installed and prevented verbose payload expansion:
 
-- cash: 10111.46
-- equity: 10864.08
-- positions: DELL and QQQ
-- open positions: 2
-- realized total: +733.97
-- unrealized PnL: +130.12
-- execution rows: 83
-- wins/losses: 34/16
-- self-defense inactive
-- intraday drawdown: 0.06%
+- `terminal_compaction_applied: true`
+- compact account truth was correct;
+- cash: 10111.46;
+- equity: 10864.08;
+- positions: DELL and QQQ;
+- realized total: +733.97;
+- unrealized PnL: +130.12;
+- execution rows: 83;
+- wins/losses: 34/16;
+- self-defense inactive;
+- intraday drawdown: 0.06%;
+- starter valve populated;
+- full diagnostics URL populated.
 
-The trading pipeline remained healthy:
+The latest duplicate-reason TypeError remained historical at July 20, 12:01:39 CDT. Active-callsite errors remained at 10 while invocations remained at 85.
 
-- X-Ray outermost
-- composition guard inner callable
-- stable stack
-- direct-core base active
-- recursion safe
-- participation chain cycle-free
-- invocations advanced to 85 while active-callsite errors remained 10
-- latest duplicate-reason TypeError remained historical at July 20, 12:01:39 CDT
+The route serializer was structurally complete, but source normalization was incomplete:
 
-The remaining defect was reporting order. Legacy promoters appended `dashboard`, full X-Ray, decision-audit, operator-summary, and starter-summary objects after compaction. Some compact fields also read incomplete intermediate sources, and scanner counts mixed decision-audit and blocker-audit snapshots.
+- persisted X-Ray state used `composition`, while the serializer expected `composition_status`;
+- native decision audit nested scanner fields under `latest_cycle`;
+- ML readiness could come from the Phase 3A gate rather than flattened decision-audit fields;
+- this produced false null pipeline/ML fields and a false daily warning.
 
-## Latest Code Update — Terminal Daily Serializer
+## Latest Code Update — Source-Contract Normalization
 
-### Root cause
+### Version
 
-A function wrapper was not a strong enough final boundary. Runtime modules could still wrap or mutate `self_check.run_self_check` after the compactor, restoring verbose structures or leaving compact fields sourced from incomplete intermediate objects.
+`daily-self-check-compactor-2026-07-21-v4-source-contracts`
 
-### Fix
+### Fixes
 
-Updated `daily_self_check_compactor.py` to:
-
-`daily-self-check-compactor-2026-07-21-v3-terminal-serializer`
-
-The daily check is now a route-level terminal serializer:
-
-1. Flask's `paper_self_check` and `paper_smoke_test` view functions are replaced directly.
-2. The terminal view calls the unwrapped `self_check.run_mobile_self_check()` builder rather than the shared wrapper chain.
-3. A brand-new dictionary is returned from an explicit allowlist; no source payload is mutated or merged.
-4. Verbose keys such as `dashboard`, `operator_summary`, full X-Ray history, full decision audit, complete blocker arrays, and endpoint result arrays cannot survive serialization.
-5. Pipeline status falls back directly to `entry_pipeline_xray.status_payload()`.
-6. Starter-valve status falls back directly to `risk_on_starter_participation_valve.status_payload()`.
-7. Decision/ML status falls back directly to `decision_audit_consolidation.build_payload()`.
-8. Blocker summaries fall back directly to `blocked_entry_reason_audit.status_payload()`.
-9. Scanner counts are source-labelled:
-   - `signals_found` uses decision audit;
-   - `blocker_audit_signals_found` is reported separately;
-   - `source_mismatch` identifies non-aligned snapshots instead of silently mixing them.
-10. Critical account, risk, pipeline, starter, and ML fields are validated before return. Missing fields produce `compact_source_fields_missing` and elevate status to warn.
-11. The output includes `terminal_compaction_applied: true`.
-
-Updated `usercustomize.py` to:
-
-`usercustomize-entry-pipeline-composition-2026-07-21-v28-terminal-daily-serializer`
-
-The watchdog now reasserts the terminal Flask route after every other runtime module, not merely a final function wrapper.
+1. Normalizes X-Ray composition from `composition_status`, persisted `composition`, `last_cycle.composition`, or `last_meaningful_cycle.composition`.
+2. Supports diagnostic status functions that use either a no-argument contract or a core-runtime argument.
+3. Normalizes native decision audit fields from `latest_cycle`, `post_harvest`, `risk_book`, and `ml_shadow`.
+4. Reads structured Phase 3A readiness from `ml_phase3a_early_paper_gate` rather than depending on recommendation text.
+5. Preserves decision-audit and blocker-audit signal counts as separate source-labelled values.
+6. Keeps the terminal allowlist and route-level replacement.
+7. Adds `source_contracts_normalized: true`.
+8. Keeps reporting-only authority: no trading, threshold, sizing, candidate, order, risk-control, live-authority, or ML-authority changes.
 
 ### Files changed
 
 - `daily_self_check_compactor.py`
-- `usercustomize.py`
+- `SYSTEM_WIDE_AUDIT_2026-07-21.md`
 - `PROJECT_HANDOFF.md`
 
 ### Commits
 
-- `06e0bc313f1be33502105707676f1fe90371c269`
-  - Added terminal route serializer, explicit allowlist, direct module fallbacks, critical-field validation, and source-labelled scanner counts.
-- `06a6ba1392e3214aea5bcb52ec98667b82125cc0`
-  - Reasserts the terminal daily Flask view after all runtime modules.
-- Handoff commit: the commit updating this file in the same work session.
+- `cd5cce24c77c840405914f3cc18e8b762ca09c54`
+  - Normalized X-Ray, decision-audit, blocker-audit, starter-valve, and ML source contracts.
+  - Eliminated false compact warnings caused by schema differences.
+- `b8bb500f0ec67cf7151296e90ab65b62481ac826`
+  - Added the system-wide architecture and reliability audit.
+- Handoff commit: the commit updating this file.
 
-## Expected Daily Response After Redeploy
+## System-Wide Audit
 
-The daily route should include only these top-level sections/fields:
+Full report:
 
-- `status`
-- `overall`
-- `type`
-- `version`
-- `generated_local`
-- `daily_response_compact`
-- `terminal_compaction_applied`
-- `source_fallbacks_used`
-- `full_diagnostics_url`
-- `routine_test_url`
-- `health`
-- `account`
-- `risk`
-- `scanner`
-- `entry_pipeline`
-- `starter_valve`
-- `ml`
-- `note`
+`SYSTEM_WIDE_AUDIT_2026-07-21.md`
 
-Required identity fields:
+### Highest-priority findings
 
-- `type: daily_self_check`
-- `version: daily-self-check-compactor-2026-07-21-v3-terminal-serializer`
-- `daily_response_compact: true`
-- `terminal_compaction_applied: true`
+1. **State writes are atomic but not transactional.** Independent modules can load the same revision and later overwrite each other's subtree updates with stale whole-state saves.
+2. **The startup watchdog creates write amplification.** It runs every 0.1 seconds for 1,200 iterations and repeatedly invokes ownership/status modules; the ownership guard saves state even when no drift exists.
+3. **Some status GET paths have side effects.** Status builders can patch or enforce runtime wrappers and can write telemetry, so observation can alter the system being observed.
+4. **State authority is split.** Some modules prefer disk, while others prefer `core.portfolio`, producing valid but different snapshots.
+5. **Scanner telemetry lacks a common cycle ID.** Decision audit, blocker audit, X-Ray, and post-harvest counts can refer to different cycles.
+6. **Broad exception suppression hides failures.** Many patch, registration, and persistence errors are silently ignored.
+7. **Runtime ownership remains monkeypatch-heavy.** A single declarative pipeline builder would be safer than repeated public-callable replacement.
+8. **Diagnostic telemetry writes the whole trading state.** Non-critical diagnostics can participate in stale-state overwrite risk.
 
-The following must not appear:
+### Audit remediation order
 
-- `dashboard`
-- `operator_summary`
-- `decision_audit_summary`
-- `entry_pipeline_xray_summary`
-- `risk_on_starter_participation_summary`
-- complete rejected-signal arrays
-- full recent-error arrays
-- endpoint `results`
-
-Expected populated compact fields include account truth, risk controls, pipeline stability/callable names, starter-valve status, Phase 3A advisory status, and the full-diagnostics URL.
+1. Add transactional state mutation with a monotonic state revision.
+2. Make stable ownership checks read-only and slow the watchdog.
+3. Separate `inspect`, `install`, and `repair` APIs.
+4. Propagate one cycle ID through scanner, blocker, X-Ray, entries, rotations, and post-harvest.
+5. Move diagnostic telemetry away from whole-state writes.
+6. Consolidate disk/in-memory state authority and ML readiness authority.
+7. Replace public monkeypatch accumulation with one declarative entry-pipeline builder.
+8. Add source-contract and concurrency tests.
 
 ## Safety / Authority Impact
 
-- Reporting-only change
-- No internal risk check removed
-- No threshold changes
-- No sizing changes
-- No scanner/candidate changes
-- No order-placement changes
-- No live authority added
-- No ML authority added
-- No cooldown, self-defense, risk-halt, drawdown, regime, trend, volume, relative-edge, extension, quality, or futures-bias bypass
+The v4 repair and audit documentation are reporting/governance changes only:
 
-## Current Runtime Stack
+- no internal risk check removed;
+- no threshold changes;
+- no sizing changes;
+- no scanner/candidate changes;
+- no order-placement changes;
+- no live authority added;
+- no ML execution authority added;
+- no cooldown, self-defense, risk-halt, drawdown, regime, trend, volume, relative-edge, extension, quality, or futures-bias bypass.
+
+## Current Intended Entry Stack
 
 1. `entry_pipeline_xray` outer diagnostic wrapper
 2. composition-owned paper-exposure overlay
@@ -156,8 +124,8 @@ Expected populated compact fields include account truth, risk controls, pipeline
 5. extended-leader starter overlay
 6. risk-on starter overlay
 7. reason-safe blocker detail wrappers
-8. entry-pipeline ownership guard reassertion
-9. terminal daily route serializer reassertion
+8. entry-pipeline ownership guard
+9. terminal daily route serializer
 
 ## Validation Procedure
 
@@ -167,10 +135,14 @@ After Railway redeploys, run only:
 
 Confirm:
 
-- v3 terminal serializer identity fields;
+- `version: daily-self-check-compactor-2026-07-21-v4-source-contracts`;
+- `terminal_compaction_applied: true`;
+- `source_contracts_normalized: true`;
 - no verbose structures outside the compact allowlist;
 - populated account, risk, pipeline, starter, and ML fields;
-- `scanner.signal_count_source: decision_audit`;
-- stable pipeline and no newly timestamped recursion or duplicate-reason error.
+- stable entry stack;
+- no newly timestamped recursion or duplicate-reason error.
 
-Use `/paper/full-self-check` only for warn/fail, a new error timestamp, or `compact_source_fields_missing`. Do not run mutating repair or execution endpoints during routine validation.
+A scanner source mismatch may remain until shared cycle IDs are implemented. It should not by itself change engine health.
+
+Use `/paper/full-self-check` only for fail, missing critical fields, or a newly timestamped runtime error. Do not run mutating repair or execution endpoints during routine validation.
