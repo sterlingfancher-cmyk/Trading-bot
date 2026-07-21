@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-20-v26-ownership-guard"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v27-daily-self-check-compact"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -39,6 +39,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/starter-valve-reason-sanitizer-status", "category": "governance", "required": False},
             {"path": "/paper/entry-pipeline-xray-status", "category": "governance", "required": False},
             {"path": "/paper/entry-pipeline-ownership-status", "category": "governance", "required": False},
+            {"path": "/paper/daily-self-check-compactor-status", "category": "governance", "required": False},
             {"path": "/paper/controlled-redeployment-starter-sleeve-status", "category": "governance", "required": False},
             {"path": "/paper/quality-blocker-diagnostics-status", "category": "governance", "required": False},
             {"path": "/paper/ml-pre3a-shadow-status", "category": "governance", "required": False},
@@ -104,6 +105,7 @@ MODULES = (
     ("ml_pre3a_shadow_validation", "app_and_module"),
     ("ml_phase3a_early_paper_gate", "app_and_module"),
     ("ml_vs_rules_shadow_log", "app_and_module"),
+    ("daily_self_check_compactor", "app_and_module"),
 )
 
 
@@ -142,8 +144,11 @@ def _watchdog() -> None:
                 _register_module(flask_app, core, "ml_pre3a_shadow_validation", route_args="app_and_module")
                 _register_module(flask_app, core, "ml_phase3a_early_paper_gate", route_args="app_and_module")
                 _register_module(flask_app, core, "ml_vs_rules_shadow_log", route_args="app_and_module")
-                # Reassert final ownership after all other runtime modules run.
+                # Reassert final entry ownership after all runtime modules run.
                 _register_module(flask_app, core, "entry_pipeline_ownership_guard", route_args="app_and_module")
+                # Compact reporting must be the last self-check wrapper so later
+                # diagnostic promoters cannot expand the daily response again.
+                _register_module(flask_app, core, "daily_self_check_compactor", route_args="app_and_module")
         except Exception:
             pass
         time.sleep(0.1)
