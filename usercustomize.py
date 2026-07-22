@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-21-v35-scanner-v2-confidence-lifecycle"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-22-v36-shared-cycle-identity"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -37,6 +37,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/scanner-v2-shadow-composite-score-status", "category": "governance", "required": False},
             {"path": "/paper/scanner-v2-theme-confidence-status", "category": "governance", "required": False},
             {"path": "/paper/scanner-v2-candidate-lifecycle-trace-status", "category": "governance", "required": False},
+            {"path": "/paper/shared-cycle-identity-status", "category": "governance", "required": False},
             {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False},
             {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False},
             {"path": "/paper/extended-leader-starter-valve-status", "category": "governance", "required": False},
@@ -92,6 +93,7 @@ MODULES = (
     ("live_volatility", "app_and_module"),
     ("self_check", "app_and_module"),
     ("state_transaction_manager", "app_and_module"),
+    ("shared_cycle_identity", "app_and_module"),
     ("breakout_participation_layer", "app_only"),
     ("fmp_limited_access_guard", "app_and_module"),
     ("fmp_cached_profile_label_guard", "app_and_module"),
@@ -151,7 +153,7 @@ def _watchdog() -> None:
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, core)
                 for name in (
-                    "state_transaction_manager", "symbol_hygiene_guard",
+                    "state_transaction_manager", "shared_cycle_identity", "symbol_hygiene_guard",
                     "scanner_v2_shadow_universe", "missed_opportunity_post_close_audit",
                     "scanner_v2_shadow_quality_trace", "scanner_v2_shadow_composite_score",
                     "scanner_v2_theme_confidence_overlay", "scanner_v2_candidate_lifecycle_trace",
