@@ -54,7 +54,7 @@ However, cumulative account metrics moved backward from the morning snapshot:
 - losses: `18 -> 17`
 - realized total: `970.14 -> 854.03`
 
-This is treated as a state provenance/persistence consistency defect, not a trading-strategy signal. Possible causes include an older state snapshot, a different state path, backup fallback, worker-local memory divergence, or recalculation from a different source contract.
+The execution-row and outcome-counter decreases remain state provenance/persistence consistency evidence. Net realized P&L is now treated as contextual rather than monotonic because legitimate losing exits can reduce it.
 
 ## Runtime Reliability v3
 
@@ -72,24 +72,26 @@ Route: `/paper/cycle-alignment-status`
 
 The afternoon test confirms the cycle-alignment milestone is working. Decision and blocker producers now report the same cycle, and same-cycle count comparison is active.
 
-## State Provenance and Monotonicity Monitor
+## State Provenance and Monotonicity Monitor v2
 
-Version: `state-provenance-monitor-2026-07-23-v1`
+Version: `state-provenance-monitor-2026-07-23-v2`
 
 Route: `/paper/state-provenance-status`
 
-The monitor:
+The v2 monitor:
 
 - wraps `load_state` passively and returns the original state unchanged;
-- records state revision, state update timestamp/source, persistence mode, file path, file size, modification time, and a short SHA-256 identity;
-- records execution rows, wins, losses, realized total, equity, and position count;
-- maintains persistent high-water marks in a separate sidecar file beside the state file;
-- flags backward movement in revision, execution rows, wins, losses, or realized total;
-- reports whether the latest read appears to come from the primary state file or a backup fallback based on state I/O telemetry;
-- never restores, overwrites, merges, or modifies trading state;
-- does not change positions, signals, risk, sizing, orders, ML authority, or live authority.
+- treats only state revision, execution rows, wins, and losses as monotonic counters;
+- records realized total, equity, and position count as context-only metrics;
+- reports deltas from the previous observation;
+- reports state-file hash and path changes between observations;
+- serializes sidecar read/compute/write operations under a re-entrant lock;
+- uses process- and thread-specific temporary files for atomic sidecar replacement;
+- exposes sidecar persistence failures as warnings instead of silently reporting success;
+- maintains persistent high-water marks in a separate diagnostic sidecar;
+- never restores, overwrites, merges, or modifies trading state.
 
-The sidecar file is `state_provenance_status.json` in the active state directory. It is diagnostic only and is not used as a trading-state source.
+The sidecar file remains `state_provenance_status.json` in the active state directory. It is diagnostic only and is not used as a trading-state source.
 
 ## Safety and Authority Boundary
 
@@ -112,11 +114,20 @@ Current work preserves:
 - `cycle_alignment_overlay.py`
   - `a95fab9d449723e13270ec3b4d53d2b164fb8360`
 - `state_provenance_monitor.py`
-  - `966a10e42c283f63e99e28c0c538137aa13cdc57`
+  - v1: `966a10e42c283f63e99e28c0c538137aa13cdc57`
+  - v2 branch commit: `9ce6ddc4e03c38a7c9c4f5e103c2fbbad7f0892b`
 - `usercustomize.py`
   - state provenance registration: `28a0d407638e9e7451d8c004036b8752820f4959`
 - `PROJECT_HANDOFF.md`
-  - this commit documents the afternoon regression evidence and validation contract.
+  - updated in the same branch to document v2 semantics, validation, and safety impact.
+
+## Validation Status
+
+- Source branch: `agent/state-provenance-v2`
+- Base commit: `cd42d0d6637ccb79a2f795140eb5b805a5a7b38b`
+- Python syntax validation: passed for `state_provenance_monitor.py`
+- Deployment validation: not completed because the Railway hostname could not be resolved from the execution environment during this work session.
+- `/paper/full-self-check` was not used because no deployed compact self-check result was available to justify escalation.
 
 ## Validation After Merge and Railway Redeploy
 
@@ -130,31 +141,37 @@ Run:
 
 Expected provenance fields:
 
-- `version: state-provenance-monitor-2026-07-23-v1`
+- `version: state-provenance-monitor-2026-07-23-v2`
 - `current.metrics.state_revision`
 - `current.metrics.execution_rows`
 - `current.metrics.wins_total`
 - `current.metrics.losses_total`
 - `current.metrics.realized_total`
+- `current.metric_deltas_from_previous`
 - `current.state_file.path`
 - `current.state_file.sha256_prefix`
+- `current.state_file_identity_changed`
+- `current.state_file_path_changed`
 - `current.source_hint.source`
 - `current.persistence_mode`
 - `high_water_marks`
+- `monotonic_fields`
+- `context_only_fields`
+- `sidecar_persistence.ok`
 - `regression_detected`
 - `regressions`
 - all authority fields false
 
-The first observation establishes a deployment-local high-water baseline. Subsequent observations should reveal whether cumulative metrics regress again and whether the file identity, revision, state path, or source hint changes at the same time.
+The first observation establishes a deployment-local high-water baseline. Subsequent observations should reveal whether append-only counters regress and whether file identity, revision, state path, source hint, or sidecar persistence changes at the same time.
 
 Use `/paper/full-self-check` only for a failed routine check, missing critical fields, a newly timestamped runtime error, or an unexpected warning.
 
 ## Next Steps
 
-1. Merge the state provenance branch after diff review.
-2. Validate the provenance and transaction routes after Railway redeploy.
-3. Capture at least two observations around a normal paper cycle.
-4. If a regression is detected, compare revision, state path, file hash, source hint, and backup event before considering any restoration behavior.
+1. Review and merge the v2 diagnostic branch.
+2. Validate `/paper/self-check` first after Railway redeploy.
+3. Validate the provenance route and capture at least two observations around a normal paper cycle.
+4. If an append-only counter regresses, compare revision, state path, file hash, source hint, transaction status, and backup event before considering restoration behavior.
 5. Do not automatically restore or merge state until the precise source of divergence is proven.
 6. Resume the remaining single missing blocker-reason attribution after state consistency is understood.
 
