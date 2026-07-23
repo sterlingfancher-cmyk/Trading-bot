@@ -1,6 +1,6 @@
 """Diagnostic-only state provenance and monotonicity monitor.
 
-Tracks state source metadata, revision, file identity, and cumulative metric high-water
+Tracks state source metadata, revision, file identity, and cumulative counter high-water
 marks in a sidecar file. It detects backward movement without mutating trading state,
 positions, signals, risk controls, sizing, orders, or authority.
 """
@@ -14,7 +14,7 @@ import sys
 import threading
 from typing import Any, Dict
 
-VERSION = "state-provenance-monitor-2026-07-23-v1"
+VERSION = "state-provenance-monitor-2026-07-23-v2"
 _REGISTERED_APP_IDS: set[int] = set()
 _PATCHED_MODULE_IDS: set[int] = set()
 _LOCK = threading.RLock()
@@ -101,17 +101,25 @@ def _read_sidecar(path: str) -> Dict[str, Any]:
         return {}
 
 
-def _write_sidecar(path: str, payload: Dict[str, Any]) -> None:
+def _write_sidecar(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    result = {"ok": False, "path": path, "error": None}
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, sort_keys=True, default=str)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
-    except Exception:
-        pass
+        result["ok"] = True
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"[:300]
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+    return result
 
 
 def _source_hint(core: Any, state_path: str) -> Dict[str, Any]:
@@ -130,6 +138,18 @@ def _source_hint(core: Any, state_path: str) -> Dict[str, Any]:
     return hint
 
 
+def _metric_deltas(current: Dict[str, Any], previous: Dict[str, Any]) -> Dict[str, Any]:
+    prior_metrics = previous.get("metrics") if isinstance(previous.get("metrics"), dict) else {}
+    deltas: Dict[str, Any] = {}
+    for field, value in current.items():
+        prior = prior_metrics.get(field)
+        if isinstance(value, (int, float)) and isinstance(prior, (int, float)):
+            deltas[field] = round(float(value) - float(prior), 6)
+        else:
+            deltas[field] = None
+    return deltas
+
+
 def observe(core: Any = None, state: Dict[str, Any] | None = None, trigger: str = "status") -> Dict[str, Any]:
     global _LAST
     core = core or _mod()
@@ -145,59 +165,87 @@ def observe(core: Any = None, state: Dict[str, Any] | None = None, trigger: str 
     state_path = _state_path(core)
     sidecar_path = _sidecar_path(core)
     current = _metrics(state)
-    prior_doc = _read_sidecar(sidecar_path)
-    high = prior_doc.get("high_water_marks") if isinstance(prior_doc.get("high_water_marks"), dict) else {}
-    previous = prior_doc.get("last_observation") if isinstance(prior_doc.get("last_observation"), dict) else {}
-
-    monotonic_fields = ("state_revision", "execution_rows", "wins_total", "losses_total", "realized_total")
-    regressions = []
-    next_high: Dict[str, Any] = dict(high)
-    for field in monotonic_fields:
-        value = current.get(field)
-        prior_high = high.get(field)
-        if prior_high is not None and value is not None and float(value) < float(prior_high):
-            regressions.append({"field": field, "current": value, "high_water": prior_high, "delta": round(float(value) - float(prior_high), 6)})
-        if value is not None and (prior_high is None or float(value) > float(prior_high)):
-            next_high[field] = value
-
     file_meta = _file_meta(state_path)
     source = _source_hint(core, state_path)
-    observation = {
-        "generated_local": _now(),
-        "trigger": trigger,
-        "metrics": current,
-        "state_file": file_meta,
-        "source_hint": source,
-        "state_updated_local": state.get("_state_updated_local"),
-        "state_update_source": state.get("_state_update_source"),
-        "persistence_mode": getattr(core, "STATE_PERSISTENCE_MODE", None),
-    }
-    payload = {
-        "status": "warn" if regressions else "ok",
-        "overall": "warn" if regressions else "pass",
-        "type": "state_provenance_status",
-        "version": VERSION,
-        "generated_local": observation["generated_local"],
-        "regression_detected": bool(regressions),
-        "regressions": regressions,
-        "current": observation,
-        "previous_observation": previous,
-        "high_water_marks": next_high,
-        "sidecar_file": sidecar_path,
-        "authority": {
-            "changes_trading_logic": False,
-            "changes_risk_or_sizing": False,
-            "changes_orders": False,
-            "changes_state_payload": False,
-            "changes_ml_authority": False,
-            "changes_live_authority": False,
-        },
-        "next_action": "Inspect state path/source and backup fallback if a regression is detected; do not overwrite trading state from this monitor.",
-    }
-    _write_sidecar(sidecar_path, {"version": VERSION, "high_water_marks": next_high, "last_observation": observation, "last_regressions": regressions})
+
     with _LOCK:
+        prior_doc = _read_sidecar(sidecar_path)
+        high = prior_doc.get("high_water_marks") if isinstance(prior_doc.get("high_water_marks"), dict) else {}
+        previous = prior_doc.get("last_observation") if isinstance(prior_doc.get("last_observation"), dict) else {}
+
+        # These are append-only/state-generation counters. Net realized P&L is intentionally
+        # excluded because legitimate losing exits can reduce it.
+        monotonic_fields = ("state_revision", "execution_rows", "wins_total", "losses_total")
+        regressions = []
+        next_high: Dict[str, Any] = dict(high)
+        for field in monotonic_fields:
+            value = current.get(field)
+            prior_high = high.get(field)
+            if prior_high is not None and value is not None and float(value) < float(prior_high):
+                regressions.append({"field": field, "current": value, "high_water": prior_high, "delta": round(float(value) - float(prior_high), 6)})
+            if value is not None and (prior_high is None or float(value) > float(prior_high)):
+                next_high[field] = value
+
+        previous_file = previous.get("state_file") if isinstance(previous.get("state_file"), dict) else {}
+        identity_changed = bool(
+            previous_file.get("sha256_prefix")
+            and file_meta.get("sha256_prefix")
+            and previous_file.get("sha256_prefix") != file_meta.get("sha256_prefix")
+        )
+        path_changed = bool(previous_file.get("path") and previous_file.get("path") != file_meta.get("path"))
+        observation = {
+            "generated_local": _now(),
+            "trigger": trigger,
+            "metrics": current,
+            "metric_deltas_from_previous": _metric_deltas(current, previous),
+            "state_file": file_meta,
+            "state_file_identity_changed": identity_changed,
+            "state_file_path_changed": path_changed,
+            "source_hint": source,
+            "state_updated_local": state.get("_state_updated_local"),
+            "state_update_source": state.get("_state_update_source"),
+            "persistence_mode": getattr(core, "STATE_PERSISTENCE_MODE", None),
+        }
+        sidecar_doc = {
+            "version": VERSION,
+            "high_water_marks": next_high,
+            "last_observation": observation,
+            "last_regressions": regressions,
+        }
+        persistence = _write_sidecar(sidecar_path, sidecar_doc)
+        warnings = []
+        if not persistence.get("ok"):
+            warnings.append({"type": "sidecar_persistence_failed", "error": persistence.get("error")})
+        status = "warn" if regressions or warnings else "ok"
+        overall = "warn" if regressions or warnings else "pass"
+        payload = {
+            "status": status,
+            "overall": overall,
+            "type": "state_provenance_status",
+            "version": VERSION,
+            "generated_local": observation["generated_local"],
+            "regression_detected": bool(regressions),
+            "regressions": regressions,
+            "warnings": warnings,
+            "current": observation,
+            "previous_observation": previous,
+            "high_water_marks": next_high,
+            "monotonic_fields": list(monotonic_fields),
+            "context_only_fields": ["realized_total", "equity", "positions_count"],
+            "sidecar_file": sidecar_path,
+            "sidecar_persistence": persistence,
+            "authority": {
+                "changes_trading_logic": False,
+                "changes_risk_or_sizing": False,
+                "changes_orders": False,
+                "changes_state_payload": False,
+                "changes_ml_authority": False,
+                "changes_live_authority": False,
+            },
+            "next_action": "Inspect state path/source, file identity, and backup fallback if an append-only counter regresses; do not overwrite trading state from this monitor.",
+        }
         _LAST = payload
-    return payload
+        return payload
 
 
 def install(core: Any = None) -> Dict[str, Any]:
