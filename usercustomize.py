@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-23-v38-cycle-alignment"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-23-v39-state-provenance"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -40,6 +40,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/shared-cycle-identity-status", "category": "governance", "required": False},
             {"path": "/paper/cycle-alignment-status", "category": "governance", "required": False},
             {"path": "/paper/provider-health-status", "category": "market_data", "required": False},
+            {"path": "/paper/state-provenance-status", "category": "state", "required": False},
             {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False},
             {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False},
             {"path": "/paper/extended-leader-starter-valve-status", "category": "governance", "required": False},
@@ -95,6 +96,7 @@ MODULES = (
     ("live_volatility", "app_and_module"),
     ("self_check", "app_and_module"),
     ("state_transaction_manager", "app_and_module"),
+    ("state_provenance_monitor", "app_and_module"),
     ("shared_cycle_identity", "app_and_module"),
     ("market_data_resilience", "app_and_module"),
     ("breakout_participation_layer", "app_only"),
@@ -157,7 +159,7 @@ def _watchdog() -> None:
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, core)
                 for name in (
-                    "state_transaction_manager", "shared_cycle_identity", "market_data_resilience", "symbol_hygiene_guard",
+                    "state_transaction_manager", "state_provenance_monitor", "shared_cycle_identity", "market_data_resilience", "symbol_hygiene_guard",
                     "scanner_v2_shadow_universe", "missed_opportunity_post_close_audit",
                     "scanner_v2_shadow_quality_trace", "scanner_v2_shadow_composite_score",
                     "scanner_v2_theme_confidence_overlay", "scanner_v2_candidate_lifecycle_trace",
