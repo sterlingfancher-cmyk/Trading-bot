@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-22-v37-market-data-resilience"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-23-v38-cycle-alignment"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -38,6 +38,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/scanner-v2-theme-confidence-status", "category": "governance", "required": False},
             {"path": "/paper/scanner-v2-candidate-lifecycle-trace-status", "category": "governance", "required": False},
             {"path": "/paper/shared-cycle-identity-status", "category": "governance", "required": False},
+            {"path": "/paper/cycle-alignment-status", "category": "governance", "required": False},
             {"path": "/paper/provider-health-status", "category": "market_data", "required": False},
             {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False},
             {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False},
@@ -126,6 +127,7 @@ MODULES = (
     ("ml_vs_rules_shadow_log", "app_and_module"),
     ("daily_self_check_compactor", "app_and_module"),
     ("runtime_reliability_overlay", "app_and_module"),
+    ("cycle_alignment_overlay", "app_and_module"),
 )
 
 
@@ -166,7 +168,7 @@ def _watchdog() -> None:
                     "controlled_redeployment_starter_sleeve", "quality_blocker_diagnostics",
                     "ml_pre3a_shadow_validation", "ml_phase3a_early_paper_gate",
                     "ml_vs_rules_shadow_log", "entry_pipeline_ownership_guard",
-                    "daily_self_check_compactor", "runtime_reliability_overlay",
+                    "daily_self_check_compactor", "runtime_reliability_overlay", "cycle_alignment_overlay",
                 ):
                     _register_module(flask_app, core, name, route_args="app_and_module")
         except Exception:
