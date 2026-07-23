@@ -21,99 +21,75 @@ Continue sequential diagnostic, observability, reliability, documentation, and a
 
 ## July 23 Morning Baseline
 
-The July 23 compact self-check generated at `2026-07-23 15:28:59` passed with:
+The morning compact self-check passed with equity `10970.12`, realized total `970.14`, 88 execution rows, 36 wins, 18 losses, zero open positions, stable recursion-safe entry composition, no current pipeline error, and 54 matching decision/blocker signals. Cycle IDs were missing at that time.
 
-- `overall: pass`
-- `status: ok`
-- service running with no required-path failures or warnings
-- cash/equity: `10970.12`
-- realized today: `112.74`
-- realized total: `970.14`
-- execution rows: `88`
-- wins/losses: `36 / 18`
-- open positions: `0`
-- entry pipeline stable, recursion-safe, and direct-core based
-- no newly timestamped entry-pipeline error
-- ML remains advisory-only with no live authority
+## July 23 Afternoon Baseline
 
-Scanner reporting showed:
+The afternoon compact self-check generated at `2026-07-23 18:30:47` passed with:
 
-- decision signals: `54`
-- blocker-audit signals: `54`
-- count difference: `0`
-- reason coverage: `97.44%`
-- missing reason rows: `1`
+- equity: `11005.46`
+- cash: `9812.33`
+- open positions: `DELL`, `SNDK`
+- unrealized P&L: `151.44`
+- realized today: `-3.65`
+- realized total: `854.03`
+- execution rows: `83`
+- wins/losses: `34 / 17`
+- stable, recursion-safe entry pipeline
+- no required-path failures or warnings
+- ML advisory-only, no live authority
 
-The remaining observability defect was explicit:
+Cycle alignment was successfully validated:
 
-- `decision_cycle_id: null`
-- `blocker_cycle_id: null`
-- `same_cycle_comparison: false`
-- `snapshot_alignment: unverified_without_shared_cycle_id`
+- matching decision/blocker ID: `cycle-20260723T182756095055Z-1b50f934`
+- `same_cycle_comparison: true`
+- `snapshot_alignment: same_cycle`
+- `count_difference: 0`
+- `source_mismatch: false`
 
-The test also contained stale-looking cross-cycle telemetry: the starter valve's last reason referenced too many positions while the current account had zero positions, and historical blocker rows referenced self-defense while the current risk snapshot reported the feedback loop clear. These are treated as freshness/cycle-alignment issues, not evidence for changing trading rules.
+However, cumulative account metrics moved backward from the morning snapshot:
 
-## Runtime Reliability v3 — Market Data Guard
+- execution rows: `88 -> 83`
+- wins: `36 -> 34`
+- losses: `18 -> 17`
+- realized total: `970.14 -> 854.03`
+
+This is treated as a state provenance/persistence consistency defect, not a trading-strategy signal. Possible causes include an older state snapshot, a different state path, backup fallback, worker-local memory divergence, or recalculation from a different source contract.
+
+## Runtime Reliability v3
 
 Version: `market-data-resilience-2026-07-22-v1`
 
 Route: `/paper/provider-health-status`
 
-Behavior:
+The guard bounds yfinance requests, records per-symbol latency/outcomes, opens a short circuit after repeated failures, and preserves the legacy unavailable-data contract. It does not alter strategy, thresholds, sizing, risk, orders, executable universe, ML authority, or live authority.
 
-- bounds the core yfinance request timeout at 8 seconds by default;
-- records per-symbol timing and outcomes;
-- tracks successes, failures, timeouts, empty responses, and circuit skips;
-- opens a short circuit after repeated provider failures;
-- preserves the legacy unavailable-data contract by returning `None` on failed/empty downloads;
-- does not alter signals, thresholds, sizing, risk, order logic, executable universe, ML authority, or live authority.
-
-The July 23 routine self-check passed after deployment. Direct provider-health validation remains required because the compact self-check does not expose provider counters.
-
-## Shared Cycle Identity
-
-Base version: `shared-cycle-identity-2026-07-22-v1`
-
-Route: `/paper/shared-cycle-identity-status`
-
-The base module creates one immutable cycle ID at scanner invocation and stamps transactional state updates. The morning evidence showed that two diagnostic producers bypass that transactional path:
-
-- `decision_audit_consolidation.build_payload` writes directly to in-memory diagnostic state;
-- `blocked_entry_reason_audit.build_payload` is a derived read-only producer.
-
-Therefore the scanner-generated ID existed at runtime but was not reaching the compact decision/blocker comparison.
-
-## Cycle Alignment Overlay — July 23
+## Cycle Alignment v2
 
 Version: `cycle-alignment-overlay-2026-07-23-v1`
 
 Route: `/paper/cycle-alignment-status`
 
-The overlay:
+The afternoon test confirms the cycle-alignment milestone is working. Decision and blocker producers now report the same cycle, and same-cycle count comparison is active.
 
-- stamps the decision-audit payload and its latest-cycle section with the scanner runtime cycle ID;
-- stamps the derived blocker-audit payload with the matching decision/scanner runtime cycle ID;
-- repairs the outer daily compactor after the runtime reliability wrapper has executed;
-- reports non-null decision and blocker cycle IDs when a scanner cycle exists;
-- compares counts only when the producer IDs match;
-- reports the metadata source for each ID (`producer`, runtime fallback, or unavailable);
-- augments the shared-cycle status route with producer-level cycle IDs;
-- preserves the runtime reliability wrapper marker to prevent watchdog wrapper accumulation.
+## State Provenance and Monotonicity Monitor
 
-This is metadata/reporting behavior only. It does not change scanner arguments or results, candidate selection, thresholds, entries, exits, risk controls, sizing, orders, ML authority, or live authority.
+Version: `state-provenance-monitor-2026-07-23-v1`
 
-## Current Scanner v2 Modules
+Route: `/paper/state-provenance-status`
 
-1. `scanner-v2-shadow-universe-2026-07-21-v2-leadership-clusters`
-2. `missed-opportunity-post-close-audit-2026-07-21-v2-failure-modes`
-3. `scanner-v2-shadow-quality-trace-2026-07-21-v1`
-4. `scanner-v2-shadow-composite-score-2026-07-21-v1`
-5. `scanner-v2-theme-confidence-overlay-2026-07-21-v1`
-6. `scanner-v2-candidate-lifecycle-trace-2026-07-21-v1`
-7. `shared-cycle-identity-2026-07-22-v1`
-8. `cycle-alignment-overlay-2026-07-23-v1`
+The monitor:
 
-Executable-universe expansion remains deferred until repeated paper evidence supports a separately reviewed promotion gate.
+- wraps `load_state` passively and returns the original state unchanged;
+- records state revision, state update timestamp/source, persistence mode, file path, file size, modification time, and a short SHA-256 identity;
+- records execution rows, wins, losses, realized total, equity, and position count;
+- maintains persistent high-water marks in a separate sidecar file beside the state file;
+- flags backward movement in revision, execution rows, wins, losses, or realized total;
+- reports whether the latest read appears to come from the primary state file or a backup fallback based on state I/O telemetry;
+- never restores, overwrites, merges, or modifies trading state;
+- does not change positions, signals, risk, sizing, orders, ML authority, or live authority.
+
+The sidecar file is `state_provenance_status.json` in the active state directory. It is diagnostic only and is not used as a trading-state source.
 
 ## Safety and Authority Boundary
 
@@ -126,7 +102,8 @@ Current work preserves:
 - no sizing or risk-control changes;
 - no executable-universe mutation;
 - no scanner-result modification;
-- all existing cooldown, self-defense, drawdown, regime, trend, volume, relative-edge, extension, quality, and futures-bias controls.
+- no automatic state restoration;
+- no mutation of account history or current positions.
 
 ## Files and Commits
 
@@ -134,54 +111,51 @@ Current work preserves:
   - `b3f9d86bdceb23b43bcaf3817bc5634582abfb4b`
 - `cycle_alignment_overlay.py`
   - `a95fab9d449723e13270ec3b4d53d2b164fb8360`
+- `state_provenance_monitor.py`
+  - `966a10e42c283f63e99e28c0c538137aa13cdc57`
 - `usercustomize.py`
-  - Runtime Reliability registration: `3e034bdc1100653472a80d5fc255195601082515`
-  - Cycle alignment registration: `2e85f1dbe3c14f372b9fe4c4cf5a375bad2be9b2`
+  - state provenance registration: `28a0d407638e9e7451d8c004036b8752820f4959`
 - `PROJECT_HANDOFF.md`
-  - this branch commit documents the July 23 baseline and cycle-alignment repair.
+  - this commit documents the afternoon regression evidence and validation contract.
 
 ## Validation After Merge and Railway Redeploy
 
-Run in this order:
+Run:
 
 1. `https://trading-bot-clean.up.railway.app/paper/self-check`
-2. `https://trading-bot-clean.up.railway.app/paper/cycle-alignment-status`
-3. `https://trading-bot-clean.up.railway.app/paper/shared-cycle-identity-status`
-4. `https://trading-bot-clean.up.railway.app/paper/provider-health-status`
+2. `https://trading-bot-clean.up.railway.app/paper/state-provenance-status`
+3. `https://trading-bot-clean.up.railway.app/paper/state-transaction-status`
+4. `https://trading-bot-clean.up.railway.app/paper/cycle-alignment-status`
+5. `https://trading-bot-clean.up.railway.app/paper/provider-health-status`
 
-Expected cycle-alignment fields after at least one normal scanner cycle:
+Expected provenance fields:
 
-- `cycle_alignment_overlay_version: cycle-alignment-overlay-2026-07-23-v1`
-- non-null `scanner.decision_cycle_id`
-- non-null `scanner.blocker_cycle_id`
-- `scanner.same_cycle_comparison: true`
-- `scanner.snapshot_alignment: same_cycle`
-- `scanner.count_difference: 0` when both producers still report 54 signals
-- `scanner.source_mismatch: false` when counts match
-- installation flags true on `/paper/cycle-alignment-status`
-- producer IDs visible on `/paper/shared-cycle-identity-status`
+- `version: state-provenance-monitor-2026-07-23-v1`
+- `current.metrics.state_revision`
+- `current.metrics.execution_rows`
+- `current.metrics.wins_total`
+- `current.metrics.losses_total`
+- `current.metrics.realized_total`
+- `current.state_file.path`
+- `current.state_file.sha256_prefix`
+- `current.source_hint.source`
+- `current.persistence_mode`
+- `high_water_marks`
+- `regression_detected`
+- `regressions`
+- all authority fields false
 
-Expected provider-health fields:
-
-- `status: ok`
-- `overall: pass`
-- `installed: true`
-- `request_timeout_seconds: 8.0` unless overridden
-- authority fields false
-- bounded recent events and no single-symbol 30-second worker stall
+The first observation establishes a deployment-local high-water baseline. Subsequent observations should reveal whether cumulative metrics regress again and whether the file identity, revision, state path, or source hint changes at the same time.
 
 Use `/paper/full-self-check` only for a failed routine check, missing critical fields, a newly timestamped runtime error, or an unexpected warning.
 
 ## Next Steps
 
-Proceed autonomously in this order:
-
-1. Merge the cycle-alignment branch after diff review.
-2. Validate the four routes above after Railway redeploy.
-3. Confirm producer-level cycle IDs remain aligned across at least two normal cycles.
-4. Replace the remaining single `reason_detail_missing` row with its explicit underlying blocker source.
-5. Add freshness metadata to last-known starter-valve and blocker summaries so historical telemetry cannot be mistaken for current account state.
-6. Continue candidate lifecycle and opportunity-attribution evidence collection.
-7. Keep strategy, thresholds, sizing, risk, ML authority, and live authority unchanged until evidence supports a separately reviewed proposal.
+1. Merge the state provenance branch after diff review.
+2. Validate the provenance and transaction routes after Railway redeploy.
+3. Capture at least two observations around a normal paper cycle.
+4. If a regression is detected, compare revision, state path, file hash, source hint, and backup event before considering any restoration behavior.
+5. Do not automatically restore or merge state until the precise source of divergence is proven.
+6. Resume the remaining single missing blocker-reason attribution after state consistency is understood.
 
 No filter should be relaxed solely because a stock finished strongly.
