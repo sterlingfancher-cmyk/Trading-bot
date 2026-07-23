@@ -1,4 +1,4 @@
-# Automated Trading Project Handoff — Updated July 22, 2026
+# Automated Trading Project Handoff — Updated July 23, 2026
 
 ## Standing Rule
 
@@ -6,21 +6,7 @@ Every code or configuration update must update this file in the same work sessio
 
 ## Autonomous Engineering Workflow
 
-Continue sequential diagnostic, observability, reliability, documentation, and advisory-only milestones without waiting for approval after each successful validation. Select the next engineering task from current evidence, update this handoff, and validate the deployment after each milestone.
-
-Pause for user approval before any change that would alter:
-
-- executable-universe membership;
-- scanner or signal results;
-- entry or exit logic;
-- thresholds;
-- risk controls or position sizing;
-- order placement;
-- ML decision authority;
-- live-trading authority;
-- or a material architecture decision with multiple reasonable behavioral outcomes.
-
-Provide the user a completion update after each implemented milestone with commits, validation route, safety impact, and next action.
+Continue sequential diagnostic, observability, reliability, documentation, and advisory-only milestones without waiting for approval after each successful validation. Pause for approval before changing executable-universe membership, scanner or signal results, entry/exit logic, thresholds, risk controls, position sizing, order placement, ML decision authority, live-trading authority, or a material architecture decision with multiple reasonable behavioral outcomes.
 
 ## Repository and Deployment
 
@@ -33,97 +19,101 @@ Provide the user a completion update after each implemented milestone with commi
 - ML live authority: none
 - Stronger-authority benchmark: 150 execution rows and 100 observed outcomes
 
-## Latest Runtime Baseline
+## July 23 Morning Baseline
 
-The July 22 mid-day compact self-check passed with `overall: pass`, `status: ok`, no warnings, stable recursion-safe direct-core entry pipeline, paper equity of 10893.98, 85 execution rows, 35 wins, 17 losses, and no newly timestamped runtime error. The historical duplicate-reason TypeError remains dated July 20 and is not new.
+The July 23 compact self-check generated at `2026-07-23 15:28:59` passed with:
 
-Railway later recorded a `/paper/run` Gunicorn worker timeout while the runtime was blocked inside `run_cycle`, together with yfinance/curl timeout and HTTP 401 failures for individual symbols. This shifted the immediate engineering priority from deeper Scanner v2 work to bounded market-data reliability.
+- `overall: pass`
+- `status: ok`
+- service running with no required-path failures or warnings
+- cash/equity: `10970.12`
+- realized today: `112.74`
+- realized total: `970.14`
+- execution rows: `88`
+- wins/losses: `36 / 18`
+- open positions: `0`
+- entry pipeline stable, recursion-safe, and direct-core based
+- no newly timestamped entry-pipeline error
+- ML remains advisory-only with no live authority
 
-Use `/paper/full-self-check` only for fail, missing critical fields, or a newly timestamped runtime error.
+Scanner reporting showed:
 
-## Scanner v2 Evidence
+- decision signals: `54`
+- blocker-audit signals: `54`
+- count difference: `0`
+- reason coverage: `97.44%`
+- missing reason rows: `1`
 
-The July 21 missed-opportunity sample included BE, NVTS, STX, NUAI, CRWV, and ONDS.
-
-Validated findings:
-
-- all six exceeded the 8% daily-move threshold;
-- all six passed minimum price, average-volume, and average-dollar-volume floors;
-- BE, NVTS, NUAI, CRWV, and ONDS were executable-universe coverage misses;
-- STX was in the executable universe but had no persisted scanner, decision, blocker, or audit observation;
-- the primary issue is discovery and observation, not basic tradability.
-
-## Current Scanner v2 Modules
-
-1. `scanner-v2-shadow-universe-2026-07-21-v2-leadership-clusters`
-   - Route: `/paper/scanner-v2-shadow-universe-status`
-2. `missed-opportunity-post-close-audit-2026-07-21-v2-failure-modes`
-   - Route: `/paper/missed-opportunity-post-close-audit-status`
-3. `scanner-v2-shadow-quality-trace-2026-07-21-v1`
-   - Route: `/paper/scanner-v2-shadow-quality-trace-status`
-4. `scanner-v2-shadow-composite-score-2026-07-21-v1`
-   - Route: `/paper/scanner-v2-shadow-composite-score-status`
-5. `scanner-v2-theme-confidence-overlay-2026-07-21-v1`
-   - Route: `/paper/scanner-v2-theme-confidence-status`
-   - Requires at least two scored members before treating a theme as confirmed leadership.
-6. `scanner-v2-candidate-lifecycle-trace-2026-07-21-v1`
-   - Route: `/paper/scanner-v2-candidate-lifecycle-trace-status`
-   - Pass-through scan instrumentation; does not alter scanner arguments or results.
-7. `shared-cycle-identity-2026-07-22-v1`
-   - Route: `/paper/shared-cycle-identity-status`
-   - Creates one immutable cycle ID at scanner invocation.
-   - Propagates cycle metadata through transactional scanner, decision, blocker, X-Ray, journal, rotation, and post-harvest state updates.
-   - Stamps only records changed during the associated cycle.
-   - Does not alter scanner inputs/results, candidates, thresholds, risk, sizing, orders, ML authority, or live authority.
-
-## Runtime Reliability v3 — Market Data Guard
-
-Version:
-
-`market-data-resilience-2026-07-22-v1`
-
-Route:
-
-`/paper/provider-health-status`
-
-Behavior:
-
-- wraps the core `download_prices` helper used by the paper runtime;
-- passes a bounded yfinance timeout, default 8 seconds;
-- disables yfinance internal threaded fan-out for the guarded request;
-- returns `None` on timeout, HTTP/provider error, or empty data, preserving the legacy unavailable-data contract;
-- records per-symbol duration, status, period, interval, and bounded recent events;
-- tracks successes, failures, timeouts, empty responses, and circuit skips;
-- opens a short 60-second circuit after three consecutive failures by default;
-- skips additional provider calls while the circuit is open so one failing provider cannot consume the entire Gunicorn worker budget;
-- resets the failure streak and closes the circuit after a successful response.
-
-Environment controls:
-
-- `MARKET_DATA_REQUEST_TIMEOUT_SECONDS` default `8`
-- `MARKET_DATA_FAILURE_THRESHOLD` default `3`
-- `MARKET_DATA_CIRCUIT_OPEN_SECONDS` default `60`
-- `MARKET_DATA_MAX_EVENTS` default `200`
-
-This milestone changes failure timing and provider availability handling only. It does not change signal formulas, thresholds, sizing, risk controls, order logic, executable universe, ML authority, or live authority.
-
-## Shared Cycle Identity Milestone
-
-The July 22 update addresses the compact self-check fields:
+The remaining observability defect was explicit:
 
 - `decision_cycle_id: null`
 - `blocker_cycle_id: null`
 - `same_cycle_comparison: false`
 - `snapshot_alignment: unverified_without_shared_cycle_id`
 
-Expected behavior after Railway redeploy and at least one normal scanner/entry cycle:
+The test also contained stale-looking cross-cycle telemetry: the starter valve's last reason referenced too many positions while the current account had zero positions, and historical blocker rows referenced self-defense while the current risk snapshot reported the feedback loop clear. These are treated as freshness/cycle-alignment issues, not evidence for changing trading rules.
 
-- scanner-generated cycle ID is available in `/paper/shared-cycle-identity-status`;
-- decision and blocker audit records receive the same immutable `cycle_id` when written during that cycle;
-- `/paper/self-check` can move toward `same_cycle_comparison: true` and verified same-cycle alignment;
-- count mismatches are evaluated only when producer records belong to the same cycle.
+## Runtime Reliability v3 — Market Data Guard
 
-This is an observability metadata change only.
+Version: `market-data-resilience-2026-07-22-v1`
+
+Route: `/paper/provider-health-status`
+
+Behavior:
+
+- bounds the core yfinance request timeout at 8 seconds by default;
+- records per-symbol timing and outcomes;
+- tracks successes, failures, timeouts, empty responses, and circuit skips;
+- opens a short circuit after repeated provider failures;
+- preserves the legacy unavailable-data contract by returning `None` on failed/empty downloads;
+- does not alter signals, thresholds, sizing, risk, order logic, executable universe, ML authority, or live authority.
+
+The July 23 routine self-check passed after deployment. Direct provider-health validation remains required because the compact self-check does not expose provider counters.
+
+## Shared Cycle Identity
+
+Base version: `shared-cycle-identity-2026-07-22-v1`
+
+Route: `/paper/shared-cycle-identity-status`
+
+The base module creates one immutable cycle ID at scanner invocation and stamps transactional state updates. The morning evidence showed that two diagnostic producers bypass that transactional path:
+
+- `decision_audit_consolidation.build_payload` writes directly to in-memory diagnostic state;
+- `blocked_entry_reason_audit.build_payload` is a derived read-only producer.
+
+Therefore the scanner-generated ID existed at runtime but was not reaching the compact decision/blocker comparison.
+
+## Cycle Alignment Overlay — July 23
+
+Version: `cycle-alignment-overlay-2026-07-23-v1`
+
+Route: `/paper/cycle-alignment-status`
+
+The overlay:
+
+- stamps the decision-audit payload and its latest-cycle section with the scanner runtime cycle ID;
+- stamps the derived blocker-audit payload with the matching decision/scanner runtime cycle ID;
+- repairs the outer daily compactor after the runtime reliability wrapper has executed;
+- reports non-null decision and blocker cycle IDs when a scanner cycle exists;
+- compares counts only when the producer IDs match;
+- reports the metadata source for each ID (`producer`, runtime fallback, or unavailable);
+- augments the shared-cycle status route with producer-level cycle IDs;
+- preserves the runtime reliability wrapper marker to prevent watchdog wrapper accumulation.
+
+This is metadata/reporting behavior only. It does not change scanner arguments or results, candidate selection, thresholds, entries, exits, risk controls, sizing, orders, ML authority, or live authority.
+
+## Current Scanner v2 Modules
+
+1. `scanner-v2-shadow-universe-2026-07-21-v2-leadership-clusters`
+2. `missed-opportunity-post-close-audit-2026-07-21-v2-failure-modes`
+3. `scanner-v2-shadow-quality-trace-2026-07-21-v1`
+4. `scanner-v2-shadow-composite-score-2026-07-21-v1`
+5. `scanner-v2-theme-confidence-overlay-2026-07-21-v1`
+6. `scanner-v2-candidate-lifecycle-trace-2026-07-21-v1`
+7. `shared-cycle-identity-2026-07-22-v1`
+8. `cycle-alignment-overlay-2026-07-23-v1`
+
+Executable-universe expansion remains deferred until repeated paper evidence supports a separately reviewed promotion gate.
 
 ## Safety and Authority Boundary
 
@@ -136,45 +126,40 @@ Current work preserves:
 - no sizing or risk-control changes;
 - no executable-universe mutation;
 - no scanner-result modification;
-- existing cooldown, self-defense, drawdown, regime, trend, volume, relative-edge, extension, quality, and futures-bias controls.
-
-Executable-universe expansion remains deferred until repeated evidence supports a separately reviewed paper-only promotion gate.
+- all existing cooldown, self-defense, drawdown, regime, trend, volume, relative-edge, extension, quality, and futures-bias controls.
 
 ## Files and Commits
 
-- `scanner_v2_shadow_universe.py`
-  - `227ac0d4d559e0aff1140456b48bbc54ad6fd36b`
-  - `50d84797c093aa6aeb90c1b0fd9b5da5027eb7aa`
-- `missed_opportunity_post_close_audit.py`
-  - `fbdfab96d46a834efa0844da8a428032640a283d`
-  - `e8295b01a1e21b7e20850196a812c4925488ab1f`
-- `scanner_v2_shadow_quality_trace.py`
-  - `c4321dba229a0b3d12020e4464597f810014ae5a`
-- `scanner_v2_shadow_composite_score.py`
-  - `00214d50538fbc065402c02e6c75cc4d7856debd`
-- `scanner_v2_candidate_lifecycle_trace.py`
-  - `fd2a2df4d0a11e6dd48332b5ff7038c3f309bb13`
-- `scanner_v2_theme_confidence_overlay.py`
-  - `31b96cf50e0876bc97ce002610a795c1eb2a2f59`
-- `shared_cycle_identity.py`
-  - `964d32c3370468c4532e11ce87e11ffae32f0c3c`
 - `market_data_resilience.py`
   - `b3f9d86bdceb23b43bcaf3817bc5634582abfb4b`
+- `cycle_alignment_overlay.py`
+  - `a95fab9d449723e13270ec3b4d53d2b164fb8360`
 - `usercustomize.py`
-  - `147101f2c34a3be6b33611549271fc8d5d730757`
-  - `54c49869cd90ce6812821ad3cb75bdf7249fe9d8`
-  - `3e034bdc1100653472a80d5fc255195601082515`
+  - Runtime Reliability registration: `3e034bdc1100653472a80d5fc255195601082515`
+  - Cycle alignment registration: `2e85f1dbe3c14f372b9fe4c4cf5a375bad2be9b2`
 - `PROJECT_HANDOFF.md`
-  - this branch update documents Runtime Reliability v3.
+  - this branch commit documents the July 23 baseline and cycle-alignment repair.
 
-## Validation
+## Validation After Merge and Railway Redeploy
 
-After the branch is merged and Railway redeploys, run:
+Run in this order:
 
 1. `https://trading-bot-clean.up.railway.app/paper/self-check`
-2. `https://trading-bot-clean.up.railway.app/paper/provider-health-status`
-3. Trigger one authenticated `/paper/run` using the `X-Run-Key` header rather than a query-string key.
-4. Re-run `/paper/provider-health-status` and inspect durations, statuses, counters, and circuit state.
+2. `https://trading-bot-clean.up.railway.app/paper/cycle-alignment-status`
+3. `https://trading-bot-clean.up.railway.app/paper/shared-cycle-identity-status`
+4. `https://trading-bot-clean.up.railway.app/paper/provider-health-status`
+
+Expected cycle-alignment fields after at least one normal scanner cycle:
+
+- `cycle_alignment_overlay_version: cycle-alignment-overlay-2026-07-23-v1`
+- non-null `scanner.decision_cycle_id`
+- non-null `scanner.blocker_cycle_id`
+- `scanner.same_cycle_comparison: true`
+- `scanner.snapshot_alignment: same_cycle`
+- `scanner.count_difference: 0` when both producers still report 54 signals
+- `scanner.source_mismatch: false` when counts match
+- installation flags true on `/paper/cycle-alignment-status`
+- producer IDs visible on `/paper/shared-cycle-identity-status`
 
 Expected provider-health fields:
 
@@ -182,26 +167,21 @@ Expected provider-health fields:
 - `overall: pass`
 - `installed: true`
 - `request_timeout_seconds: 8.0` unless overridden
-- `authority` fields all false
-- bounded `recent_events`
-- no Gunicorn worker timeout caused by a single 30-second yfinance symbol request
+- authority fields false
+- bounded recent events and no single-symbol 30-second worker stall
 
-Expected legacy behavior:
-
-- failed or empty symbol downloads remain unavailable and are skipped by downstream logic;
-- successful symbols continue through unchanged;
-- strategy, thresholds, sizing, risk, order, ML, and live authority remain unchanged.
+Use `/paper/full-self-check` only for a failed routine check, missing critical fields, a newly timestamped runtime error, or an unexpected warning.
 
 ## Next Steps
 
 Proceed autonomously in this order:
 
-1. Merge the Runtime Reliability v3 branch after diff review.
-2. Validate `/paper/self-check` and `/paper/provider-health-status` after Railway redeploy.
-3. Trigger a controlled authenticated paper run and confirm the worker completes within the platform timeout.
-4. Inspect whether any direct yfinance calls outside `core.download_prices` remain on the critical run path; guard only those proven to be runtime-critical.
-5. Add phase-level run-cycle timing only if provider telemetry does not fully explain remaining latency.
-6. Resume shared-cycle alignment and blocker taxonomy work after runtime completion is stable.
+1. Merge the cycle-alignment branch after diff review.
+2. Validate the four routes above after Railway redeploy.
+3. Confirm producer-level cycle IDs remain aligned across at least two normal cycles.
+4. Replace the remaining single `reason_detail_missing` row with its explicit underlying blocker source.
+5. Add freshness metadata to last-known starter-valve and blocker summaries so historical telemetry cannot be mistaken for current account state.
+6. Continue candidate lifecycle and opportunity-attribution evidence collection.
 7. Keep strategy, thresholds, sizing, risk, ML authority, and live authority unchanged until evidence supports a separately reviewed proposal.
 
 No filter should be relaxed solely because a stock finished strongly.
