@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-23-v39-state-provenance"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-24-v40-missing-reason-trace"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -30,6 +30,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/symbol-hygiene-guard-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-audit-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-selfcheck-overlay-status", "category": "governance", "required": False},
+            {"path": "/paper/missing-reason-trace-status", "category": "governance", "required": False},
             {"path": "/paper/dynamic-universe-builder-status", "category": "governance", "required": False},
             {"path": "/paper/scanner-v2-shadow-universe-status", "category": "governance", "required": False},
             {"path": "/paper/missed-opportunity-post-close-audit-status", "category": "governance", "required": False},
@@ -128,6 +129,7 @@ MODULES = (
     ("ml_phase3a_early_paper_gate", "app_and_module"),
     ("ml_vs_rules_shadow_log", "app_and_module"),
     ("daily_self_check_compactor", "app_and_module"),
+    ("missing_reason_trace_overlay", "app_and_module"),
     ("runtime_reliability_overlay", "app_and_module"),
     ("cycle_alignment_overlay", "app_and_module"),
 )
@@ -170,7 +172,7 @@ def _watchdog() -> None:
                     "controlled_redeployment_starter_sleeve", "quality_blocker_diagnostics",
                     "ml_pre3a_shadow_validation", "ml_phase3a_early_paper_gate",
                     "ml_vs_rules_shadow_log", "entry_pipeline_ownership_guard",
-                    "daily_self_check_compactor", "runtime_reliability_overlay", "cycle_alignment_overlay",
+                    "daily_self_check_compactor", "missing_reason_trace_overlay", "runtime_reliability_overlay", "cycle_alignment_overlay",
                 ):
                     _register_module(flask_app, core, name, route_args="app_and_module")
         except Exception:
