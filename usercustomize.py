@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-24-v40-missing-reason-trace"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-24-v41-blocked-entry-source-contract"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -30,6 +30,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/symbol-hygiene-guard-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-audit-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-selfcheck-overlay-status", "category": "governance", "required": False},
+            {"path": "/paper/blocked-entry-source-contract-status", "category": "governance", "required": False},
             {"path": "/paper/missing-reason-trace-status", "category": "governance", "required": False},
             {"path": "/paper/dynamic-universe-builder-status", "category": "governance", "required": False},
             {"path": "/paper/scanner-v2-shadow-universe-status", "category": "governance", "required": False},
@@ -107,6 +108,7 @@ MODULES = (
     ("spacex_direct_overlay", "app_and_module"),
     ("symbol_hygiene_guard", "app_and_module"),
     ("blocked_entry_reason_audit", "app_and_module"),
+    ("blocked_entry_source_contract_guard", "app_and_module"),
     ("blocked_entry_reason_selfcheck_overlay", "app_and_module"),
     ("dynamic_universe_builder", "app_and_module"),
     ("scanner_v2_shadow_universe", "app_and_module"),
@@ -162,6 +164,7 @@ def _watchdog() -> None:
                 _register_auxiliary_routes(flask_app, core)
                 for name in (
                     "state_transaction_manager", "state_provenance_monitor", "shared_cycle_identity", "market_data_resilience", "symbol_hygiene_guard",
+                    "blocked_entry_source_contract_guard",
                     "scanner_v2_shadow_universe", "missed_opportunity_post_close_audit",
                     "scanner_v2_shadow_quality_trace", "scanner_v2_shadow_composite_score",
                     "scanner_v2_theme_confidence_overlay", "scanner_v2_candidate_lifecycle_trace",
