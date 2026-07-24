@@ -6,7 +6,7 @@ import os
 import threading
 from typing import Any, Dict, List
 
-VERSION = "run-report-guard-2026-05-14"
+VERSION = "run-report-guard-2026-07-24-v2"
 _APPLIED: set[int] = set()
 _LOCK = threading.RLock()
 _LAST: Dict[str, Any] = {}
@@ -31,6 +31,15 @@ def _inline_enabled() -> bool:
     return str(os.environ.get("RUN_CYCLE_INLINE_REPORTS", "false")).lower() in {"1", "true", "yes", "on"}
 
 
+def _lock_timeout_seconds() -> float:
+    raw = os.environ.get("RUN_CYCLE_GUARD_LOCK_TIMEOUT_SECONDS", "2.0")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = 2.0
+    return max(0.1, min(value, 10.0))
+
+
 def _deferred(core: Any, report_type: str, args: tuple, kwargs: dict) -> Dict[str, Any]:
     item = {
         "status": "deferred",
@@ -48,6 +57,25 @@ def _deferred(core: Any, report_type: str, args: tuple, kwargs: dict) -> Dict[st
     return item
 
 
+def _busy_payload(core: Any, timeout_seconds: float) -> Dict[str, Any]:
+    return {
+        "status": "cycle_busy",
+        "ok": False,
+        "version": VERSION,
+        "generated_local": _now(core),
+        "retryable": True,
+        "lock_timeout_seconds": timeout_seconds,
+        "reason": "Another run_cycle invocation is already active; this request was not allowed to wait until the Gunicorn worker timed out.",
+        "normal_test_link": "/paper/self-check",
+        "run_status_link": "/paper/run-report-guard-status",
+        "safety": {
+            "cycle_executed": False,
+            "orders_placed_by_this_request": False,
+            "strategy_changed": False,
+        },
+    }
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     if core is None or not hasattr(core, "run_cycle"):
         return {"status": "not_applied", "version": VERSION, "reason": "core_or_run_cycle_missing"}
@@ -63,6 +91,14 @@ def apply(core: Any = None) -> Dict[str, Any]:
         global _LAST
         if _inline_enabled():
             return original(*args, **kwargs)
+
+        timeout_seconds = _lock_timeout_seconds()
+        acquired = _LOCK.acquire(timeout=timeout_seconds)
+        if not acquired:
+            payload = _busy_payload(core, timeout_seconds)
+            _LAST = dict(payload)
+            return payload
+
         original_store = getattr(core, "store_compiled_report", None)
         deferred: List[Dict[str, Any]] = []
 
@@ -71,29 +107,36 @@ def apply(core: Any = None) -> Dict[str, Any]:
             deferred.append(item)
             return item
 
-        with _LOCK:
-            try:
-                if callable(original_store):
-                    core.store_compiled_report = store_stub
-                result = original(*args, **kwargs)
-                if isinstance(result, dict):
-                    result["run_report_guard"] = {
-                        "version": VERSION,
-                        "inline_report_compilation": False,
-                        "normal_test_link": "/paper/self-check",
-                        "report_links": ["/paper/intraday-report", "/paper/risk-review", "/paper/report/today", "/paper/end-of-day-report"],
-                    }
-                    if deferred:
-                        result["compiled_report"] = deferred[-1]
-                        result["deferred_reports_count"] = len(deferred)
-                _LAST = {"status": "ok", "version": VERSION, "generated_local": _now(core), "deferred_reports_count": len(deferred)}
-                return result
-            finally:
-                if callable(original_store):
-                    try:
-                        core.store_compiled_report = original_store
-                    except Exception:
-                        pass
+        try:
+            if callable(original_store):
+                core.store_compiled_report = store_stub
+            result = original(*args, **kwargs)
+            if isinstance(result, dict):
+                result["run_report_guard"] = {
+                    "version": VERSION,
+                    "inline_report_compilation": False,
+                    "lock_timeout_seconds": timeout_seconds,
+                    "normal_test_link": "/paper/self-check",
+                    "report_links": ["/paper/intraday-report", "/paper/risk-review", "/paper/report/today", "/paper/end-of-day-report"],
+                }
+                if deferred:
+                    result["compiled_report"] = deferred[-1]
+                    result["deferred_reports_count"] = len(deferred)
+            _LAST = {
+                "status": "ok",
+                "version": VERSION,
+                "generated_local": _now(core),
+                "deferred_reports_count": len(deferred),
+                "lock_timeout_seconds": timeout_seconds,
+            }
+            return result
+        finally:
+            if callable(original_store):
+                try:
+                    core.store_compiled_report = original_store
+                except Exception:
+                    pass
+            _LOCK.release()
 
     wrapped_run_cycle._run_report_guard = True
     core.run_cycle = wrapped_run_cycle
@@ -113,6 +156,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "generated_local": _now(core),
         "installed": bool(core is not None and id(core) in _APPLIED),
         "inline_report_compilation": _inline_enabled(),
+        "lock_timeout_seconds": _lock_timeout_seconds(),
         "normal_test_link": "/paper/self-check",
         "recent_deferred_reports": list(_RECENT),
         "last_status": _LAST,
