@@ -1,4 +1,4 @@
-# Automated Trading Project Handoff — Updated July 23, 2026
+# Automated Trading Project Handoff — Updated July 24, 2026
 
 ## Standing Rule
 
@@ -19,42 +19,40 @@ Continue sequential diagnostic, observability, reliability, documentation, and a
 - ML live authority: none
 - Stronger-authority benchmark: 150 execution rows and 100 observed outcomes
 
-## July 23 Morning Baseline
+## July 23 Baselines
 
-The morning compact self-check passed with equity `10970.12`, realized total `970.14`, 88 execution rows, 36 wins, 18 losses, zero open positions, stable recursion-safe entry composition, no current pipeline error, and 54 matching decision/blocker signals. Cycle IDs were missing at that time.
+The July 23 morning compact self-check passed with equity `10970.12`, realized total `970.14`, 88 execution rows, 36 wins, 18 losses, zero open positions, stable recursion-safe entry composition, no current pipeline error, and 54 matching decision/blocker signals.
 
-## July 23 Afternoon Baseline
-
-The afternoon compact self-check generated at `2026-07-23 18:30:47` passed with:
-
-- equity: `11005.46`
-- cash: `9812.33`
-- open positions: `DELL`, `SNDK`
-- unrealized P&L: `151.44`
-- realized today: `-3.65`
-- realized total: `854.03`
-- execution rows: `83`
-- wins/losses: `34 / 17`
-- stable, recursion-safe entry pipeline
-- no required-path failures or warnings
-- ML advisory-only, no live authority
-
-Cycle alignment was successfully validated:
-
-- matching decision/blocker ID: `cycle-20260723T182756095055Z-1b50f934`
-- `same_cycle_comparison: true`
-- `snapshot_alignment: same_cycle`
-- `count_difference: 0`
-- `source_mismatch: false`
-
-However, cumulative account metrics moved backward from the morning snapshot:
+The afternoon compact self-check generated at `2026-07-23 18:30:47` also passed, with matching same-cycle decision and blocker counts, but cumulative append-only counters moved backward:
 
 - execution rows: `88 -> 83`
 - wins: `36 -> 34`
 - losses: `18 -> 17`
-- realized total: `970.14 -> 854.03`
 
-The execution-row and outcome-counter decreases remain state provenance/persistence consistency evidence. Net realized P&L is now treated as contextual rather than monotonic because legitimate losing exits can reduce it.
+Net realized P&L also changed, but it is contextual rather than monotonic because legitimate losing exits can reduce it.
+
+## July 24 Morning Validation
+
+The compact self-check generated at `2026-07-24 15:19:30` passed:
+
+- equity: `10954.26`
+- cash: `10954.26`
+- open positions: `0`
+- realized today: `100.25`
+- realized total: `954.28`
+- execution rows: `85`
+- wins/losses: `35 / 18`
+- entry pipeline stable and recursion-safe
+- no required-path failures or warnings
+- decision/blocker cycle ID: `cycle-20260724T151539135164Z-93656e7c`
+- same-cycle comparison: `true`
+- count difference: `0`
+- source mismatch: `false`
+- blocker reason coverage: `96.55%`
+- missing reason rows: `1`
+- ML remains advisory-only with no live authority
+
+The compact test passed, so `/paper/full-self-check` was not warranted.
 
 ## Runtime Reliability v3
 
@@ -70,7 +68,7 @@ Version: `cycle-alignment-overlay-2026-07-23-v1`
 
 Route: `/paper/cycle-alignment-status`
 
-The afternoon test confirms the cycle-alignment milestone is working. Decision and blocker producers now report the same cycle, and same-cycle count comparison is active.
+Decision and blocker producers report the same cycle, and same-cycle count comparison is active.
 
 ## State Provenance and Monotonicity Monitor v2
 
@@ -87,11 +85,27 @@ The v2 monitor:
 - reports state-file hash and path changes between observations;
 - serializes sidecar read/compute/write operations under a re-entrant lock;
 - uses process- and thread-specific temporary files for atomic sidecar replacement;
-- exposes sidecar persistence failures as warnings instead of silently reporting success;
+- exposes sidecar persistence failures as warnings;
 - maintains persistent high-water marks in a separate diagnostic sidecar;
 - never restores, overwrites, merges, or modifies trading state.
 
 The sidecar file remains `state_provenance_status.json` in the active state directory. It is diagnostic only and is not used as a trading-state source.
+
+## Missing Blocker-Reason Trace v1
+
+Version: `missing-reason-trace-2026-07-24-v1`
+
+Route: `/paper/missing-reason-trace-status`
+
+The trace overlay addresses the remaining single missing blocker-reason row without fabricating a reason. It:
+
+- reads the existing blocked-entry reason audit;
+- exposes a bounded sample containing symbol, source, source key, placeholder, and category;
+- adds `missing_reason_symbols`, `missing_reason_sample`, and `missing_reason_trace_version` to the compact scanner section;
+- identifies which producer contract omitted terminal reason detail;
+- does not alter scanner results, blocker decisions, thresholds, filters, risk, sizing, orders, executable universe, ML authority, or live authority.
+
+The next routine compact test should identify the exact source of the remaining placeholder. Repair the producer contract only after that evidence is visible; do not infer or synthesize a trading reason.
 
 ## Safety and Authority Boundary
 
@@ -105,39 +119,46 @@ Current work preserves:
 - no executable-universe mutation;
 - no scanner-result modification;
 - no automatic state restoration;
-- no mutation of account history or current positions.
+- no mutation of account history or current positions;
+- no fabricated blocker attribution.
 
 ## Files and Commits
 
-- `market_data_resilience.py`
-  - `b3f9d86bdceb23b43bcaf3817bc5634582abfb4b`
-- `cycle_alignment_overlay.py`
-  - `a95fab9d449723e13270ec3b4d53d2b164fb8360`
 - `state_provenance_monitor.py`
-  - v1: `966a10e42c283f63e99e28c0c538137aa13cdc57`
   - v2 branch commit: `9ce6ddc4e03c38a7c9c4f5e103c2fbbad7f0892b`
+- `missing_reason_trace_overlay.py`
+  - initial trace overlay: `f42f4c985a7f1a7695c6cafdc46584ab379a63d8`
 - `usercustomize.py`
-  - state provenance registration: `28a0d407638e9e7451d8c004036b8752820f4959`
+  - missing-reason trace registration: `e0cbdd54775e2e6f17ced686b4e31e3f619d159f`
 - `PROJECT_HANDOFF.md`
-  - updated in the same branch to document v2 semantics, validation, and safety impact.
+  - updated in the same branch with July 24 runtime evidence and the trace validation contract.
 
 ## Validation Status
 
 - Source branch: `agent/state-provenance-v2`
 - Base commit: `cd42d0d6637ccb79a2f795140eb5b805a5a7b38b`
-- Python syntax validation: passed for `state_provenance_monitor.py`
-- Deployment validation: not completed because the Railway hostname could not be resolved from the execution environment during this work session.
-- `/paper/full-self-check` was not used because no deployed compact self-check result was available to justify escalation.
+- Morning deployed `/paper/self-check`: passed
+- `/paper/full-self-check`: not used because the compact check passed without missing critical fields, required-path failures, runtime errors, or warnings
+- Source-level safety review: trace overlay is read-only and bounded
+- Deployment validation for the new branch changes remains pending merge and Railway redeploy
 
 ## Validation After Merge and Railway Redeploy
 
-Run:
+Run in this order:
 
 1. `https://trading-bot-clean.up.railway.app/paper/self-check`
 2. `https://trading-bot-clean.up.railway.app/paper/state-provenance-status`
-3. `https://trading-bot-clean.up.railway.app/paper/state-transaction-status`
-4. `https://trading-bot-clean.up.railway.app/paper/cycle-alignment-status`
-5. `https://trading-bot-clean.up.railway.app/paper/provider-health-status`
+3. `https://trading-bot-clean.up.railway.app/paper/missing-reason-trace-status`
+4. `https://trading-bot-clean.up.railway.app/paper/state-transaction-status`
+5. `https://trading-bot-clean.up.railway.app/paper/cycle-alignment-status`
+6. `https://trading-bot-clean.up.railway.app/paper/provider-health-status`
+
+Expected compact scanner fields:
+
+- `missing_reason_rows`
+- `missing_reason_symbols`
+- `missing_reason_sample`
+- `missing_reason_trace_version: missing-reason-trace-2026-07-24-v1`
 
 Expected provenance fields:
 
@@ -162,17 +183,15 @@ Expected provenance fields:
 - `regressions`
 - all authority fields false
 
-The first observation establishes a deployment-local high-water baseline. Subsequent observations should reveal whether append-only counters regress and whether file identity, revision, state path, source hint, or sidecar persistence changes at the same time.
-
 Use `/paper/full-self-check` only for a failed routine check, missing critical fields, a newly timestamped runtime error, or an unexpected warning.
 
 ## Next Steps
 
-1. Review and merge the v2 diagnostic branch.
+1. Review and merge draft PR #6.
 2. Validate `/paper/self-check` first after Railway redeploy.
-3. Validate the provenance route and capture at least two observations around a normal paper cycle.
-4. If an append-only counter regresses, compare revision, state path, file hash, source hint, transaction status, and backup event before considering restoration behavior.
-5. Do not automatically restore or merge state until the precise source of divergence is proven.
-6. Resume the remaining single missing blocker-reason attribution after state consistency is understood.
+3. Capture the new `missing_reason_sample` and repair only the identified diagnostic producer contract.
+4. Capture at least two state-provenance observations around a normal paper cycle.
+5. If an append-only counter regresses, compare revision, state path, file hash, source hint, transaction status, and backup event before considering restoration behavior.
+6. Do not automatically restore or merge state until the precise source of divergence is proven.
 
 No filter should be relaxed solely because a stock finished strongly.
