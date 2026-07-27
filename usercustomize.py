@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-27-v42-recursion-stop"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-27-v43-fast-self-check"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -54,6 +54,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/state-transaction-status", "category": "state", "required": False},
             {"path": "/paper/runtime-reliability-status", "category": "governance", "required": False},
             {"path": "/paper/daily-self-check-compactor-status", "category": "governance", "required": False},
+            {"path": "/paper/fast-self-check-status", "category": "governance", "required": False},
             {"path": "/paper/controlled-redeployment-starter-sleeve-status", "category": "governance", "required": False},
             {"path": "/paper/quality-blocker-diagnostics-status", "category": "governance", "required": False},
             {"path": "/paper/ml-pre3a-shadow-status", "category": "governance", "required": False},
@@ -134,6 +135,7 @@ MODULES = (
     ("missing_reason_trace_overlay", "app_and_module"),
     ("runtime_reliability_overlay", "app_and_module"),
     ("cycle_alignment_overlay", "app_and_module"),
+    ("fast_self_check_override", "app_and_module"),
 )
 
 
@@ -179,6 +181,7 @@ def _watchdog() -> None:
                     "ml_pre3a_shadow_validation", "ml_phase3a_early_paper_gate",
                     "ml_vs_rules_shadow_log", "entry_pipeline_ownership_guard",
                     "daily_self_check_compactor", "missing_reason_trace_overlay", "runtime_reliability_overlay", "cycle_alignment_overlay",
+                    "fast_self_check_override",
                 ):
                     _register_module(flask_app, core, name, route_args="app_and_module")
         except Exception:
