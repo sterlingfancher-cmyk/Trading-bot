@@ -11,7 +11,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, Iterable, List, Set
 
-VERSION = "scanner-v2-candidate-lifecycle-trace-2026-07-21-v1"
+VERSION = "scanner-v2-candidate-lifecycle-trace-2026-07-27-v2-recursion-guard"
 DEFAULT_SYMBOLS = ["BE", "NVTS", "STX", "NUAI", "CRWV", "ONDS"]
 REGISTERED_APP_IDS: set[int] = set()
 PATCHED_MODULE_IDS: set[int] = set()
@@ -46,6 +46,24 @@ def _unique(values: Iterable[Any]) -> List[str]:
     return out
 
 
+def _chain_has_marker(fn: Any, marker: str, limit: int = 80) -> bool:
+    seen: set[int] = set()
+    current = fn
+    link_attrs = (
+        "_scanner_v2_lifecycle_trace_original",
+        "_shared_cycle_identity_original",
+        "__wrapped__",
+    )
+    for _ in range(limit):
+        if not callable(current) or id(current) in seen:
+            return False
+        seen.add(id(current))
+        if bool(getattr(current, marker, False)):
+            return True
+        current = next((getattr(current, attr, None) for attr in link_attrs if callable(getattr(current, attr, None))), None)
+    return False
+
+
 def _result_symbols(result: Any) -> Dict[str, List[str]]:
     long_symbols: List[str] = []
     short_symbols: List[str] = []
@@ -73,7 +91,7 @@ def _result_symbols(result: Any) -> Dict[str, List[str]]:
 
 def _patch_scan_signals(core: Any) -> bool:
     current = getattr(core, "scan_signals", None)
-    if not callable(current) or getattr(current, "_scanner_v2_lifecycle_trace_patched", False):
+    if not callable(current) or _chain_has_marker(current, "_scanner_v2_lifecycle_trace_patched"):
         return False
     original = current
 
@@ -127,7 +145,8 @@ def _patch_scan_signals(core: Any) -> bool:
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
     core = core or _mod()
-    patched = bool(getattr(getattr(core, "scan_signals", None), "_scanner_v2_lifecycle_trace_patched", False)) if core is not None else False
+    current = getattr(core, "scan_signals", None) if core is not None else None
+    patched = _chain_has_marker(current, "_scanner_v2_lifecycle_trace_patched") if callable(current) else False
     return {
         "status": "ok" if core is not None else "pending",
         "overall": "pass" if core is not None else "pending",
@@ -145,7 +164,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "places_orders": False,
             "alters_scan_result": False,
         },
-        "next_gate": "Use the next completed scanner cycle to confirm whether STX reaches scan invocation and whether it exits with no signal.",
+        "next_gate": "Confirm one completed scanner cycle without recursion.",
     }
 
 
