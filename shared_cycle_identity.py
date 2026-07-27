@@ -13,7 +13,7 @@ import threading
 import uuid
 from typing import Any, Dict
 
-VERSION = "shared-cycle-identity-2026-07-22-v1"
+VERSION = "shared-cycle-identity-2026-07-27-v2-recursion-guard"
 _REGISTERED_APP_IDS: set[int] = set()
 _PATCHED_MODULE_IDS: set[int] = set()
 _LOCK = threading.RLock()
@@ -59,6 +59,25 @@ def _active_cycle(core: Any) -> str | None:
     return str(value) if value else None
 
 
+def _chain_has_marker(fn: Any, marker: str, expected: Any = None, limit: int = 80) -> bool:
+    seen: set[int] = set()
+    current = fn
+    link_attrs = (
+        "_shared_cycle_identity_original",
+        "_scanner_v2_lifecycle_trace_original",
+        "__wrapped__",
+    )
+    for _ in range(limit):
+        if not callable(current) or id(current) in seen:
+            return False
+        seen.add(id(current))
+        value = getattr(current, marker, None)
+        if value is not None and (expected is None or value == expected):
+            return True
+        current = next((getattr(current, attr, None) for attr in link_attrs if callable(getattr(current, attr, None))), None)
+    return False
+
+
 def _stamp_row(row: Any, cycle_id: str) -> bool:
     if not isinstance(row, dict):
         return False
@@ -91,7 +110,7 @@ def _patch_update_state(core: Any) -> bool:
     current = getattr(core, "update_state", None)
     if not callable(current):
         return False
-    if getattr(current, "_shared_cycle_identity_version", None) == VERSION:
+    if _chain_has_marker(current, "_shared_cycle_identity_version", VERSION):
         return True
     original = current
 
@@ -126,7 +145,7 @@ def _patch_scan_signals(core: Any) -> bool:
     current = getattr(core, "scan_signals", None)
     if not callable(current):
         return False
-    if getattr(current, "_shared_cycle_identity_version", None) == VERSION:
+    if _chain_has_marker(current, "_shared_cycle_identity_version", VERSION):
         return True
     original = current
 
@@ -212,7 +231,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "same_cycle_alignment": aligned,
         "latest_runtime": dict(_LAST),
         "authority": _authority(),
-        "next_gate": "Confirm decision and blocker audits receive the same cycle_id after a completed scanner/entry cycle.",
+        "next_gate": "Confirm one completed scanner cycle without recursion and verify decision/blocker cycle alignment.",
     }
 
 
