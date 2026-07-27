@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-27-v43-fast-self-check"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-27-v44-dynamic-recursion-guard"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -33,6 +33,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/blocked-entry-source-contract-status", "category": "governance", "required": False},
             {"path": "/paper/missing-reason-trace-status", "category": "governance", "required": False},
             {"path": "/paper/dynamic-universe-builder-status", "category": "governance", "required": False},
+            {"path": "/paper/dynamic-universe-recursion-guard-status", "category": "governance", "required": False},
             {"path": "/paper/scanner-v2-shadow-universe-status", "category": "governance", "required": False},
             {"path": "/paper/missed-opportunity-post-close-audit-status", "category": "governance", "required": False},
             {"path": "/paper/scanner-v2-shadow-quality-trace-status", "category": "governance", "required": False},
@@ -111,6 +112,7 @@ MODULES = (
     ("blocked_entry_reason_audit", "app_and_module"),
     ("blocked_entry_source_contract_guard", "app_and_module"),
     ("blocked_entry_reason_selfcheck_overlay", "app_and_module"),
+    ("dynamic_universe_recursion_guard", "app_and_module"),
     ("dynamic_universe_builder", "app_and_module"),
     ("scanner_v2_shadow_universe", "app_and_module"),
     ("missed_opportunity_post_close_audit", "app_and_module"),
@@ -164,9 +166,9 @@ def _watchdog() -> None:
             flask_app = getattr(core, "app", None) if core is not None else None
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, core)
-                # Do not repeatedly apply scan_signals wrappers here. They are installed
-                # once through MODULES and are chain-idempotent. Reapplying competing
-                # wrappers caused an alternating recursive stack.
+                # Scanner wrappers are installed once through MODULES. Reapplying
+                # dynamic_universe_builder, shared_cycle_identity, or lifecycle tracing
+                # can form a recursive scan_signals chain when another wrapper is outermost.
                 for name in (
                     "state_transaction_manager", "state_provenance_monitor", "market_data_resilience", "symbol_hygiene_guard",
                     "blocked_entry_source_contract_guard",
