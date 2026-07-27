@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-24-v41-blocked-entry-source-contract"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-27-v42-recursion-stop"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -162,12 +162,15 @@ def _watchdog() -> None:
             flask_app = getattr(core, "app", None) if core is not None else None
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, core)
+                # Do not repeatedly apply scan_signals wrappers here. They are installed
+                # once through MODULES and are chain-idempotent. Reapplying competing
+                # wrappers caused an alternating recursive stack.
                 for name in (
-                    "state_transaction_manager", "state_provenance_monitor", "shared_cycle_identity", "market_data_resilience", "symbol_hygiene_guard",
+                    "state_transaction_manager", "state_provenance_monitor", "market_data_resilience", "symbol_hygiene_guard",
                     "blocked_entry_source_contract_guard",
                     "scanner_v2_shadow_universe", "missed_opportunity_post_close_audit",
                     "scanner_v2_shadow_quality_trace", "scanner_v2_shadow_composite_score",
-                    "scanner_v2_theme_confidence_overlay", "scanner_v2_candidate_lifecycle_trace",
+                    "scanner_v2_theme_confidence_overlay",
                 ):
                     _register_module(flask_app, core, name, route_args="app_and_module")
                 _repair_entry_stack(flask_app, core)
