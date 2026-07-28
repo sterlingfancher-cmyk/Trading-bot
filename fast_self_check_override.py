@@ -4,7 +4,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict
 
-VERSION = "fast-self-check-override-2026-07-27-v1"
+VERSION = "fast-self-check-override-2026-07-28-v2-runner-telemetry"
 _PATCHED_APP_IDS: set[int] = set()
 
 
@@ -46,6 +46,11 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
     decision = _dict(portfolio.get("decision_audit"))
     last_error = auto.get("last_error")
 
+    last_attempt = auto.get("last_attempt_local") or auto.get("last_attempt_ts")
+    last_run = auto.get("last_run_local") or auto.get("last_run_ts")
+    last_success = auto.get("last_successful_run_local") or auto.get("last_successful_run_ts")
+    last_skip = auto.get("last_skip_local") or auto.get("last_skip_ts")
+
     return {
         "status": "ok" if core is not None else "pending",
         "overall": "pass" if core is not None and not last_error else ("warn" if core is not None else "pending"),
@@ -70,11 +75,20 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
         },
         "auto_runner": {
             "enabled": auto.get("enabled"),
+            "thread_started": auto.get("thread_started"),
             "interval_seconds": auto.get("interval_seconds"),
-            "last_run": auto.get("last_run"),
-            "last_success": auto.get("last_success"),
+            "last_attempt": last_attempt,
+            "last_attempt_source": auto.get("last_attempt_source"),
+            "last_run": last_run,
+            "last_run_source": auto.get("last_run_source"),
+            "last_success": last_success,
+            "last_success_source": auto.get("last_successful_run_source"),
+            "last_skip": last_skip,
+            "last_skip_reason": auto.get("last_skip_reason"),
+            "market_open_now": auto.get("market_open_now"),
             "last_error": last_error,
             "last_error_present": bool(last_error),
+            "telemetry_source": "portfolio.auto_runner canonical *_local fields",
         },
         "risk": {
             "halted": risk.get("halted"),
@@ -88,6 +102,8 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
             "signals_found": scanner.get("signals_found") or decision.get("signals_found"),
             "entries_count": decision.get("entries_count"),
             "cycle_id": scanner.get("cycle_id") or decision.get("cycle_id"),
+            "last_updated_local": scanner.get("last_updated_local"),
+            "last_cycle_source": scanner.get("last_cycle_source"),
         },
         "entry_pipeline": {
             "callable": getattr(getattr(core, "scan_signals", None), "__qualname__", None) if core is not None else None,
