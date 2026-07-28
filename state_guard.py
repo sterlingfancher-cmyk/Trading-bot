@@ -1,16 +1,8 @@
 """Deploy-safe persistent state recovery guard.
 
-This module runs before app.py is imported by wsgi.py. Its job is to prevent a
-Railway deploy/startup cycle from continuing with a suspiciously small or reset
-/data/state.json when a larger valid backup exists.
-
-Design principles:
-- Never restores over an active-looking state with open positions.
-- Restores only when the current state looks materially smaller/weaker than the
-  largest backup.
-- Saves the current file to a timestamped pre-restore backup before replacing it.
-- Writes recovery metadata to /data/state_recovery_status.json, not state.json.
-- Exposes /paper/state-recovery-status for verification after deploy.
+This module runs before app.py is imported by wsgi.py. It may restore a damaged or
+truncated state file, but it must never roll a paper account backward to a backup
+with fewer executions or older runner telemetry.
 """
 from __future__ import annotations
 
@@ -20,7 +12,7 @@ import os
 import shutil
 from typing import Any, Dict
 
-VERSION = "state-recovery-guard-2026-05-08"
+VERSION = "state-recovery-guard-2026-07-28-v2-monotonic"
 
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 STATE_FILENAME = os.environ.get("STATE_FILENAME", os.environ.get("STATE_FILE", "state.json"))
@@ -75,6 +67,24 @@ def _write_json(path: str, payload: Dict[str, Any]) -> bool:
         return False
 
 
+def _timestamp_rank(state: Dict[str, Any]) -> float:
+    """Best monotonic runner timestamp available in a state snapshot."""
+    ar = state.get("auto_runner") if isinstance(state.get("auto_runner"), dict) else {}
+    for key in (
+        "last_successful_run_ts",
+        "last_run_ts",
+        "last_attempt_ts",
+        "last_skip_ts",
+    ):
+        try:
+            value = float(ar.get(key) or 0.0)
+            if value > 0:
+                return value
+        except Exception:
+            pass
+    return 0.0
+
+
 def _state_quality(state: Dict[str, Any], path: str = "") -> Dict[str, Any]:
     trades = state.get("trades", []) if isinstance(state.get("trades"), list) else []
     history = state.get("history", []) if isinstance(state.get("history"), list) else []
@@ -92,7 +102,8 @@ def _state_quality(state: Dict[str, Any], path: str = "") -> Dict[str, Any]:
     score += min(len(recent_trades), 10)
     score += min(len(history), 100) // 10
     score += 3 if reports else 0
-    score += 5 if positions else 0
+    # Open positions are operational state, not evidence that a snapshot is newer.
+    # They intentionally do not increase recovery quality.
 
     return {
         "path": path,
@@ -107,6 +118,7 @@ def _state_quality(state: Dict[str, Any], path: str = "") -> Dict[str, Any]:
         "positions_count": len(positions),
         "scanner_audit_present": bool(scanner),
         "has_account_fields": has_account,
+        "runner_timestamp_rank": _timestamp_rank(state),
     }
 
 
@@ -118,40 +130,62 @@ def _is_restore_candidate(current_q: Dict[str, Any], backup_q: Dict[str, Any]) -
     if current_q.get("positions_count", 0) > 0:
         return {"should_restore": False, "reason": "current_state_has_open_positions"}
 
+    current_trades = int(current_q.get("trades_count", 0) or 0)
+    backup_trades = int(backup_q.get("trades_count", 0) or 0)
+    current_runner_ts = float(current_q.get("runner_timestamp_rank", 0.0) or 0.0)
+    backup_runner_ts = float(backup_q.get("runner_timestamp_rank", 0.0) or 0.0)
+
+    # Hard monotonicity rules: recovery may repair corruption, never rewrite history.
+    if backup_trades < current_trades:
+        return {
+            "should_restore": False,
+            "reason": "backup_has_fewer_trades_than_current",
+            "current_trades": current_trades,
+            "backup_trades": backup_trades,
+        }
+    if current_runner_ts > 0 and backup_runner_ts > 0 and backup_runner_ts < current_runner_ts:
+        return {
+            "should_restore": False,
+            "reason": "backup_runner_telemetry_is_older",
+            "current_runner_timestamp_rank": current_runner_ts,
+            "backup_runner_timestamp_rank": backup_runner_ts,
+        }
+
     current_size = int(current_q.get("size_bytes", 0) or 0)
     backup_size = int(backup_q.get("size_bytes", 0) or 0)
     current_score = int(current_q.get("score", 0) or 0)
     backup_score = int(backup_q.get("score", 0) or 0)
-
     size_ratio = current_size / backup_size if backup_size > 0 else 1.0
-    backup_has_more_trades = int(backup_q.get("trades_count", 0) or 0) > int(current_q.get("trades_count", 0) or 0)
+    backup_has_more_trades = backup_trades > current_trades
     backup_has_more_history = int(backup_q.get("history_count", 0) or 0) > int(current_q.get("history_count", 0) or 0)
+    backup_is_newer = backup_runner_ts > current_runner_ts
     score_edge = backup_score - current_score
     materially_smaller = size_ratio < MIN_RESTORE_SIZE_RATIO
-    materially_better = score_edge >= MIN_SCORE_EDGE or backup_has_more_trades or backup_has_more_history
+    materially_better = backup_has_more_trades or backup_is_newer or (score_edge >= MIN_SCORE_EDGE and backup_has_more_history)
 
     if materially_smaller and materially_better:
         return {
             "should_restore": True,
-            "reason": "current_state_smaller_and_backup_higher_quality",
+            "reason": "current_state_smaller_and_backup_monotonically_newer",
             "size_ratio": round(size_ratio, 4),
             "score_edge": score_edge,
             "backup_has_more_trades": backup_has_more_trades,
             "backup_has_more_history": backup_has_more_history,
+            "backup_is_newer": backup_is_newer,
         }
 
     return {
         "should_restore": False,
-        "reason": "current_state_not_weak_enough_to_restore",
+        "reason": "current_state_not_weak_or_backup_not_newer",
         "size_ratio": round(size_ratio, 4),
         "score_edge": score_edge,
         "backup_has_more_trades": backup_has_more_trades,
         "backup_has_more_history": backup_has_more_history,
+        "backup_is_newer": backup_is_newer,
     }
 
 
 def preflight_recover() -> Dict[str, Any]:
-    """Run before app.py import to recover state.json from the largest valid backup."""
     global _LAST_STATUS
     current = _load_json(STATE_FILE)
     backup = _load_json(STATE_BACKUP_LARGEST)
@@ -174,7 +208,9 @@ def preflight_recover() -> Dict[str, Any]:
         "decision": decision,
         "restored": False,
         "pre_restore_backup_file": None,
-        "warning": "This guard restores only before app import and only when current state is weak, position-free, and a stronger larger backup exists.",
+        "monotonic_trade_guard": True,
+        "monotonic_runner_timestamp_guard": True,
+        "positions_do_not_increase_backup_quality": True,
     }
 
     if decision.get("should_restore"):
@@ -224,8 +260,6 @@ def register_routes(flask_app: Any) -> None:
     _REGISTERED_APP_IDS.add(id(flask_app))
 
 
-# Run on import as a fallback. wsgi.py also calls preflight_recover explicitly
-# before importing app.py.
 try:
     preflight_recover()
 except Exception:
