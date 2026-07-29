@@ -23,10 +23,18 @@ def post_worker_init(worker):
     try:
         import app as core
         import run_report_guard
+        import performance_risk_activation_guard
+
         run_report_guard.apply(core)
         run_report_guard.register_routes(core.app, core)
+        performance_risk_activation_guard.start_watchdog(core)
+        performance_risk_activation_guard.register_routes(core.app, core)
         diagnostics.register_routes(core.app, core)
-        diagnostics.record_module_event("gunicorn.worker", "diagnostics_registered")
+        diagnostics.record_module_event(
+            "gunicorn.worker",
+            "diagnostics_and_risk_activation_registered",
+            error=performance_risk_activation_guard.VERSION,
+        )
     except Exception as exc:
         diagnostics.record_exception(exc, source="gunicorn.post_worker_init", module="app")
 
