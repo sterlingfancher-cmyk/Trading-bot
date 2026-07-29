@@ -27,6 +27,7 @@ def post_worker_init(worker):
         import regime_integrity_underdeployment
         import regime_integrity_cache_guard
         import bear_soft_pause_short_recovery
+        import bear_recovery_stack_contract
 
         run_report_guard.apply(core)
         run_report_guard.register_routes(core.app, core)
@@ -37,15 +38,18 @@ def post_worker_init(worker):
         performance_risk_activation_guard.register_routes(core.app, core)
         bear_soft_pause_short_recovery.start_watchdog(core)
         bear_soft_pause_short_recovery.register_routes(core.app, core)
+        bear_recovery_stack_contract.start_watchdog(core)
+        bear_recovery_stack_contract.register_routes(core.app, core)
         diagnostics.register_routes(core.app, core)
         diagnostics.record_module_event(
             "gunicorn.worker",
-            "diagnostics_risk_regime_and_bear_recovery_registered",
+            "diagnostics_risk_regime_bear_recovery_and_stack_contract_registered",
             error=(
                 f"{performance_risk_activation_guard.VERSION};"
                 f"{regime_integrity_underdeployment.VERSION};"
                 f"{regime_integrity_cache_guard.VERSION};"
-                f"{bear_soft_pause_short_recovery.VERSION}"
+                f"{bear_soft_pause_short_recovery.VERSION};"
+                f"{bear_recovery_stack_contract.VERSION}"
             ),
         )
     except Exception as exc:
