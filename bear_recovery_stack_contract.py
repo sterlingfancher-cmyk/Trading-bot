@@ -7,9 +7,9 @@ Desired public entry stack:
         -> breakout/composition guard
           -> direct core entry pipeline
 
-This module reconciles the existing recurring composition and ownership guards with
-the newer bear-recovery layer. It does not create signals, place orders directly,
-or change live/ML authority, thresholds, or hard risk limits.
+This module reconciles the recurring composition and ownership guards with the
+bear-recovery layer. It does not create signals, place orders directly, or
+change live/ML authority, thresholds, signal generation, or hard risk limits.
 """
 from __future__ import annotations
 
@@ -18,14 +18,13 @@ import threading
 import time
 from typing import Any, Dict, List
 
-VERSION = "bear-recovery-stack-contract-2026-07-29-v1"
+VERSION = "bear-recovery-stack-contract-2026-07-29-v2"
 WATCHDOG_FAST_ITERATIONS = 60
 WATCHDOG_MAX_ITERATIONS = 1200
 
 _LOCK = threading.RLock()
 _REGISTERED_APPS: set[int] = set()
 _WATCHDOG_STARTED: set[int] = set()
-_LAST_INSTALL: Dict[str, Any] = {}
 _LAST_ENFORCE: Dict[str, Any] = {}
 
 
@@ -60,10 +59,10 @@ def _xray_prior(fn: Any) -> Any:
 
 
 def _composition_inner(fn: Any) -> Any:
-    """Return the deterministic composition callable beneath known outer guards."""
+    """Strip every known bear/X-ray outer layer and return the composition base."""
     current = fn
     seen: set[int] = set()
-    for _ in range(12):
+    for _ in range(24):
         if not callable(current) or id(current) in seen:
             break
         seen.add(id(current))
@@ -80,29 +79,76 @@ def _composition_inner(fn: Any) -> Any:
 
 
 def _xray_callable(fn: Any) -> Any:
-    """Return the X-ray wrapper directly beneath the bear gate."""
+    """Return the wrapper directly below the single expected bear outer gate."""
     prior = _bear_prior(fn)
     return prior if callable(prior) else fn
 
 
 def _ownership_inner(fn: Any) -> Any:
-    xray = _xray_callable(fn)
-    prior = _xray_prior(xray)
-    return prior if callable(prior) else xray
+    """Return the deterministic composition callable for ownership inspection."""
+    return _composition_inner(fn)
+
+
+def _wrapper_counts(fn: Any) -> Dict[str, int]:
+    current = fn
+    seen: set[int] = set()
+    bear_count = 0
+    xray_count = 0
+    depth = 0
+    for _ in range(24):
+        if not callable(current) or id(current) in seen:
+            break
+        seen.add(id(current))
+        depth += 1
+        if getattr(current, "_bear_soft_pause_short_recovery_guard", False):
+            bear_count += 1
+        if getattr(current, "_entry_pipeline_xray_version", None):
+            xray_count += 1
+        prior = _bear_prior(current)
+        if callable(prior):
+            current = prior
+            continue
+        prior = _xray_prior(current)
+        if callable(prior):
+            current = prior
+            continue
+        break
+    return {
+        "known_wrapper_depth": depth,
+        "bear_wrapper_count": bear_count,
+        "xray_wrapper_count": xray_count,
+    }
 
 
 def _owned(fn: Any) -> bool:
-    """Require bear outer -> X-ray -> deterministic composition."""
+    """Require exactly bear outer -> X-ray -> deterministic composition."""
     if not callable(fn):
         return False
     if not getattr(fn, "_bear_soft_pause_short_recovery_guard", False):
         return False
+
     xray = _xray_callable(fn)
     if not callable(xray) or not getattr(xray, "_entry_pipeline_xray_version", None):
         return False
-    inner = _ownership_inner(fn)
+    if getattr(xray, "_bear_soft_pause_short_recovery_guard", False):
+        return False
+
+    direct_below_xray = _xray_prior(xray)
+    if not callable(direct_below_xray):
+        return False
+    if getattr(direct_below_xray, "_bear_soft_pause_short_recovery_guard", False):
+        return False
+    if getattr(direct_below_xray, "_entry_pipeline_xray_version", None):
+        return False
+
+    counts = _wrapper_counts(fn)
+    if counts["bear_wrapper_count"] != 1 or counts["xray_wrapper_count"] != 1:
+        return False
+
+    inner = _composition_inner(fn)
     return bool(
         callable(inner)
+        and inner is direct_below_xray
         and getattr(inner, "_entry_pipeline_direct_core_base", False)
         and getattr(inner, "_paper_exposure_composition_version", None)
         and getattr(inner, "_core_entry_pipeline_non_wrapper_patched", False)
@@ -147,9 +193,7 @@ def _scanner_snapshot(core: Any) -> Dict[str, Any]:
         if isinstance(row, dict)
     ]
     rejected_shorts = [
-        row
-        for row in rejected
-        if str(row.get("side") or "").lower() == "short"
+        row for row in rejected if str(row.get("side") or "").lower() == "short"
     ]
     return {
         "last_run_local": auto.get("last_run_local"),
@@ -169,7 +213,7 @@ def _scanner_snapshot(core: Any) -> Dict[str, Any]:
 
 
 def _patch_contract_modules(core: Any) -> Dict[str, Any]:
-    """Patch helper contracts without rebuilding trading logic."""
+    """Patch helper contracts without changing trading logic."""
     import entry_pipeline_composition_guard as composition
     import entry_pipeline_ownership_guard as ownership
     import bear_soft_pause_short_recovery as bear
@@ -189,61 +233,69 @@ def _patch_contract_modules(core: Any) -> Dict[str, Any]:
         patched["ownership_predicate"] = True
 
     original_meta = getattr(ownership, "_meta", None)
-    if not getattr(original_meta, "_bear_recovery_stack_contract", False):
+    if not getattr(original_meta, "_bear_recovery_stack_contract_v2", False):
         def ownership_meta(fn: Any) -> Dict[str, Any]:
-            base = {}
+            base: Dict[str, Any] = {}
             try:
                 base = original_meta(fn) if callable(original_meta) else {}
             except Exception:
                 base = {}
             base.update(_meta(fn))
+            base.update(_wrapper_counts(fn))
             return base
 
-        ownership_meta._bear_recovery_stack_contract = True
+        ownership_meta._bear_recovery_stack_contract_v2 = True
         ownership_meta._bear_recovery_stack_contract_original = original_meta
         ownership._meta = ownership_meta
         patched["ownership_meta"] = True
 
     current_enforce = getattr(ownership, "enforce", None)
     if callable(current_enforce) and not getattr(
-        current_enforce, "_bear_recovery_stack_contract", False
+        current_enforce, "_bear_recovery_stack_contract_v2", False
     ):
+        original_enforce = getattr(
+            current_enforce, "_bear_recovery_stack_contract_original", current_enforce
+        )
+
         def contract_enforce(
             supplied_core: Any = None,
             *,
             force: bool = False,
-            __prior=current_enforce,
+            __prior=original_enforce,
         ) -> Dict[str, Any]:
             target = supplied_core or core
-
-            # Normalize an incomplete bear wrapper before the legacy ownership
-            # repair adds X-ray. This prevents bear -> X-ray -> bear nesting.
             current_public = getattr(target, "try_entries_and_rotations", None)
-            if getattr(
-                current_public, "_bear_soft_pause_short_recovery_guard", False
-            ):
-                direct_below_bear = _bear_prior(current_public)
-                if callable(direct_below_bear) and not getattr(
-                    direct_below_bear, "_entry_pipeline_xray_version", None
-                ):
-                    target.try_entries_and_rotations = direct_below_bear
+            already_owned = _owned(current_public)
+            normalized = False
+            normalized_from = _meta(current_public)
+
+            if force or not already_owned:
+                base = _composition_inner(current_public)
+                if callable(base):
+                    target.try_entries_and_rotations = base
+                    normalized = base is not current_public
 
             prior_result: Dict[str, Any] = {}
             try:
-                row = __prior(target, force=force)
+                row = __prior(target, force=bool(force or normalized))
                 prior_result = row if isinstance(row, dict) else {}
             except TypeError:
                 row = __prior(target)
                 prior_result = row if isinstance(row, dict) else {}
+
             bear.install(target)
+            final_public = getattr(target, "try_entries_and_rotations", None)
             final = ownership.inspect(target)
             final["contract_version"] = VERSION
             final["prior_ownership_result"] = prior_result
+            final["normalized_before_rebuild"] = normalized
+            final["normalized_from"] = normalized_from
+            final["final_wrapper_counts"] = _wrapper_counts(final_public)
             final["bear_recovery_reapplied"] = True
             return final
 
-        contract_enforce._bear_recovery_stack_contract = True
-        contract_enforce._bear_recovery_stack_contract_original = current_enforce
+        contract_enforce._bear_recovery_stack_contract_v2 = True
+        contract_enforce._bear_recovery_stack_contract_original = original_enforce
         ownership.enforce = contract_enforce
         ownership.apply = contract_enforce
         ownership.apply_runtime_overrides = contract_enforce
@@ -265,14 +317,12 @@ def enforce(core: Any) -> Dict[str, Any]:
     with _LOCK:
         module_patch = _patch_contract_modules(core)
         import entry_pipeline_ownership_guard as ownership
-        import bear_soft_pause_short_recovery as bear
 
         ownership_result = ownership.enforce(core)
-        bear.install(core)
 
         current = getattr(core, "try_entries_and_rotations", None)
         xray = _xray_callable(current)
-        inner = _ownership_inner(current)
+        inner = _composition_inner(current)
         owned = _owned(current)
         _LAST_ENFORCE = {
             "status": "ok" if owned else "warn",
@@ -280,6 +330,10 @@ def enforce(core: Any) -> Dict[str, Any]:
             "version": VERSION,
             "generated_local": _now(core),
             "owned": owned,
+            "entry_guard_active": bool(
+                getattr(current, "_bear_soft_pause_short_recovery_guard", False)
+            ),
+            "wrapper_counts": _wrapper_counts(current),
             "public_entry_callable": _meta(current),
             "xray_callable": _meta(xray),
             "composition_callable": _meta(inner),
@@ -293,8 +347,7 @@ def enforce(core: Any) -> Dict[str, Any]:
             ],
         }
         try:
-            state = _state(core)
-            state["bear_recovery_stack_contract"] = dict(_LAST_ENFORCE)
+            _state(core)["bear_recovery_stack_contract"] = dict(_LAST_ENFORCE)
         except Exception:
             pass
         return dict(_LAST_ENFORCE)
@@ -303,7 +356,7 @@ def enforce(core: Any) -> Dict[str, Any]:
 def status_payload(core: Any) -> Dict[str, Any]:
     current = getattr(core, "try_entries_and_rotations", None) if core else None
     xray = _xray_callable(current)
-    inner = _ownership_inner(current)
+    inner = _composition_inner(current)
     owned = _owned(current)
     return {
         "status": "ok" if core is not None and owned else "warn",
@@ -315,6 +368,7 @@ def status_payload(core: Any) -> Dict[str, Any]:
         "entry_guard_active": bool(
             getattr(current, "_bear_soft_pause_short_recovery_guard", False)
         ),
+        "wrapper_counts": _wrapper_counts(current),
         "public_entry_callable": _meta(current),
         "xray_callable": _meta(xray),
         "composition_callable": _meta(inner),
