@@ -4,7 +4,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict
 
-VERSION = "fast-self-check-override-2026-07-28-v2-runner-telemetry"
+VERSION = "fast-self-check-override-2026-07-29-v3-risk-ladder"
 _PATCHED_APP_IDS: set[int] = set()
 
 
@@ -40,6 +40,7 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
     auto = _dict(portfolio.get("auto_runner"))
     perf = _performance(portfolio)
     risk = _dict(portfolio.get("risk_controls"))
+    feedback = _dict(portfolio.get("feedback_loop"))
     positions = _dict(portfolio.get("positions"))
     trades = portfolio.get("trades")
     scanner = _dict(portfolio.get("scanner_audit"))
@@ -95,8 +96,18 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
             "halt_reason": risk.get("halt_reason"),
             "self_defense_active": risk.get("self_defense_active"),
             "self_defense_reason": risk.get("self_defense_reason"),
+            "daily_loss_fraction": risk.get("daily_loss_fraction"),
             "daily_loss_pct": risk.get("daily_loss_pct"),
+            "intraday_drawdown_fraction": risk.get("intraday_drawdown_fraction"),
             "intraday_drawdown_pct": risk.get("intraday_drawdown_pct"),
+            "realized_loss_fraction": risk.get("realized_loss_fraction"),
+            "realized_loss_pct": risk.get("realized_loss_pct"),
+            "risk_ladder": risk.get("risk_ladder", {}),
+            "controlled_restart": feedback.get("controlled_restart", {}),
+            "telemetry_units": {
+                "*_fraction": "decimal fraction; 0.01 equals 1%",
+                "*_pct": "display percentage; 1.0 equals 1%",
+            },
         },
         "scanner": {
             "signals_found": scanner.get("signals_found") or decision.get("signals_found"),
@@ -113,6 +124,8 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
             "status": "/paper/status",
             "full_self_check": "/paper/full-self-check",
             "fast_self_check_status": "/paper/fast-self-check-status",
+            "performance_risk_calibration": "/paper/performance-risk-calibration-status",
+            "plateau_diagnostic": "/paper/plateau-diagnostic",
         },
         "authority": {
             "changes_strategy": False,
@@ -136,7 +149,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
     def fast_view():
         return jsonify(build_payload(core or _mod()))
 
-    fast_view._fast_self_check_override_version = VERSION  # type: ignore[attr-defined]
+    fast_view._fast_self_check_override_version = VERSION
     for endpoint in ("paper_self_check", "paper_smoke_test"):
         if endpoint in flask_app.view_functions:
             flask_app.view_functions[endpoint] = fast_view
