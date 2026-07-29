@@ -1,4 +1,4 @@
-# Automated Trading Project Handoff — Updated July 24, 2026
+# Automated Trading Project Handoff — Updated July 29, 2026
 
 ## Engineering Constitution
 
@@ -7,317 +7,514 @@
 3. Deterministic behavior before adaptive behavior.
 4. Diagnostics before optimization.
 5. Backtests do not replace live paper validation.
-6. New capability must improve measurable performance without weakening risk controls.
+6. New capability must improve measurable performance without weakening hard risk controls.
 7. Machine learning remains advisory until sufficient execution history, observed outcomes, out-of-sample evidence, and regime stability justify greater influence.
 8. Significant changes must be traceable, reversible, and validated before becoming the new baseline.
-9. No filter, threshold, or risk control may be relaxed solely because a stock finished strongly.
-10. State must never be automatically restored, merged, or rewritten until the precise source of divergence is proven.
+9. No filter, threshold, risk control, or extension guard may be relaxed merely to force deployment.
+10. Runtime callable ownership must be deterministic; competing wrappers and watchdog races are defects.
 
 ## Standing Rule
 
-Every code or configuration update must update this file in the same work session with files changed, versions, commits, routes, safety impact, validation status, and next action.
+Every code or configuration update must update this handoff in the same work session with files changed, versions, commits, routes, safety impact, validation status, and next action.
 
 ## Always Resume Here
 
-- Highest-priority unfinished milestone: validate bounded run-cycle guard commit `d1915e5a79282d0f6ccd541c6024421cf8ad86cd` on Railway.
-- First endpoint: `https://trading-bot-clean.up.railway.app/paper/self-check`.
-- Then inspect: `https://trading-bot-clean.up.railway.app/paper/run-report-guard-status`.
-- Manual-cycle validation: invoke `/paper/run` once only when no other cycle is expected; confirm it either completes normally or returns `status: cycle_busy` promptly instead of reaching Gunicorn timeout.
-- Next diagnostic evidence: confirm compact output exposes `missing_reason_symbols`, `missing_reason_sample`, and `missing_reason_trace_version`.
-- Next likely code change after validation: repair only the diagnostic producer contract identified by `missing_reason_sample`; do not infer or synthesize a blocker reason.
-- Parallel evidence task: capture at least two deployment-local state-provenance observations around a normal paper cycle.
-- Advancement condition: compact validation passes, manual run no longer hangs on guard contention, blocker attribution reaches 100%, and append-only counters remain consistent without unexplained source changes.
-- Escalation condition: use `/paper/full-self-check` only after a failed compact check, missing critical fields, a newly timestamped runtime error, or an unexpected warning.
+- Repository: `sterlingfancher-cmyk/Trading-bot`
+- Railway base URL: `https://trading-bot-clean.up.railway.app`
+- Operating mode: paper only.
+- Live-trading authority: none.
+- ML execution authority: none; advisory only.
+- Current highest-priority milestone: validate the final Entry Pipeline X-Ray/bear-recovery ownership guard after Railway redeploy.
+- First endpoint:
+  - `https://trading-bot-clean.up.railway.app/paper/entry-pipeline-xray-bear-ownership-status`
+- Then validate:
+  - `https://trading-bot-clean.up.railway.app/paper/bear-recovery-stack-status`
+  - `https://trading-bot-clean.up.railway.app/paper/bear-short-recovery-status`
+  - `https://trading-bot-clean.up.railway.app/paper/regime-integrity-status`
+- Expected final ownership:
+  - one bear-recovery wrapper;
+  - one Entry Pipeline X-Ray wrapper;
+  - deterministic breakout/composition callable beneath X-Ray;
+  - direct core entry pipeline beneath composition;
+  - no wrapper oscillation after repeated checks.
+- Do not lower the `0.014` bear-recovery short floor, bypass extension protection, or add risk-off longs to manufacture activity.
 
 ## Executive Status Dashboard
 
 | Item | Current status |
 |---|---|
-| Project phase | Reliability, observability, and ML data-readiness validation |
-| Overall health | Yellow — deployment boots, but `/paper/run` experienced a guard-lock worker timeout; bounded recovery is committed and awaiting Railway validation |
-| Repository | `sterlingfancher-cmyk/Trading-bot` |
-| Default branch | `main` |
-| Latest reliability commit | `d1915e5a79282d0f6ccd541c6024421cf8ad86cd` |
-| Prior merged diagnostics | PR #6, merge commit `9998c597ef91b5d6edce47cdf481efcb6ac4cc90` |
-| Railway base URL | `https://trading-bot-clean.up.railway.app` |
-| Operating mode | Paper only |
-| Live trade authority | None |
-| ML authority | Advisory only; no execution or live authority |
-| Stronger-authority benchmark | At least 150 execution rows and 100 observed outcomes, plus satisfactory validation evidence |
-| Active reliability issue | Concurrent/background `run_cycle` could hold the report guard while manual `/paper/run` waited until Gunicorn killed the sync worker |
-| Active data issue | One blocker row lacks terminal reason detail |
-| State-consistency issue | Prior backward movement in append-only counters requires deployment-local provenance observation |
-| Immediate milestone | Validate bounded guard behavior, then continue missing-reason and provenance work |
+| Project phase | Paper performance calibration, regime integrity, and underdeployment repair |
+| Overall health | Yellow pending final Railway ownership validation |
+| Account snapshot used in this sprint | Cash/equity `$10,734.80`; no open exposure |
+| Lifetime exits | 52 |
+| Lifetime win rate | 67.31% |
+| Lifetime net realized P&L | `+$734.82` |
+| Lifetime profit factor | `3.1781` |
+| Recent 20 exits | 15 wins / 5 losses; `+$681.29`; PF `3.4278` |
+| Original plateau driver | Underdeployment: signals existed but entry permissions and wrapper ownership prevented execution |
+| Current market evidence | Confirmed bear at latest supplied runtime check; risk-off, short bias |
+| Soft-pause state | Realized loss `1.144%`, above the `1.00%` soft pause but below hard limits |
+| Hard realized/intraday halt | `2.50%` |
+| Absolute daily-loss ceiling | `3.00%` |
+| Controlled bear recovery | One qualifying short, 50% allocation factor, no rotations |
+| Bear-recovery short floor | Normal short floor `0.012` plus `0.002` safety premium = `0.014` |
+| Risk-off long exception | None |
+| Latest source fix | Entry Pipeline X-Ray bear-ownership guard |
+| Final runtime validation | Pending Railway redeploy and endpoint evidence |
 
-## Autonomous Engineering Workflow
+## July 29 Performance and Risk Calibration
 
-Continue sequential diagnostic, observability, reliability, documentation, and advisory-only milestones without waiting for approval after each successful validation. Pause for approval before changing executable-universe membership, scanner or signal results, entry/exit logic, thresholds, risk controls, position sizing, order placement, ML decision authority, live-trading authority, or a material architecture decision with multiple reasonable behavioral outcomes.
+### Runtime evidence reviewed
 
-## Autonomous Operations Manual
+The strategy itself showed positive expectancy rather than a strategy-quality collapse:
 
-Whenever work resumes:
+- 52 completed exits, 35 wins and 17 losses;
+- lifetime win rate `67.31%`;
+- gross profit `$1,072.18`;
+- gross loss `-$337.36`;
+- net realized profit `+$734.82`;
+- lifetime profit factor `3.1781`;
+- average win `$30.63`;
+- average loss `-$19.84`;
+- payoff ratio `1.5437`;
+- expectancy `+$14.13` per completed exit;
+- recent 20 exits: `75%` win rate, `+$681.29`, profit factor `3.4278`, expectancy `+$34.06`.
 
-1. Read this handoff before inspecting or modifying code.
-2. Start from **Always Resume Here**, not from an assumed project state.
-3. Confirm the deployed commit and runtime evidence before diagnosing source code.
-4. Inspect existing diagnostics and producer contracts before adding another overlay.
-5. Form an evidence-backed hypothesis and make the smallest safe change that resolves or isolates the defect.
-6. Preserve the Safety and Authority Boundary unless the user explicitly authorizes behavioral change.
-7. Validate in the documented endpoint order.
-8. Treat compact validation as the routine gate; reserve full diagnostics for escalation conditions.
-9. Update this handoff in the same work session with files, versions, commits, routes, evidence, safety impact, and next action.
-10. Advance automatically to the next advisory-only milestone after successful validation.
-11. Stop and request approval before any strategy, risk, execution, universe, ML-authority, live-authority, or material architectural change.
+The evidence supported preserving the profitable strategy while repairing deployment and risk-governance defects.
 
-## Repository and Deployment
+### Performance-risk ladder
 
-- Repository: `sterlingfancher-cmyk/Trading-bot`
-- Railway base URL: `https://trading-bot-clean.up.railway.app`
-- Routine daily test: `/paper/self-check`
-- Full diagnostics: `/paper/full-self-check`
-- Run guard status: `/paper/run-report-guard-status`
-- State provenance: `/paper/state-provenance-status`
-- Missing-reason trace: `/paper/missing-reason-trace-status`
-- Operating mode: paper only
-- Live trade authority: none
-- ML live authority: none
-- Stronger-authority benchmark: 150 execution rows and 100 observed outcomes, subject to the ML validation gates below
+The active paper risk policy is:
 
-## July 24 Runtime Incident — Manual Run Worker Timeout
+- `1.00%` realized-loss soft pause;
+- controlled restart only under explicitly eligible conditions;
+- `2.50%` hard realized-loss halt;
+- `2.50%` hard intraday-drawdown halt;
+- `3.00%` absolute daily-loss ceiling;
+- restart sizing capped at 50%;
+- no rotations during controlled recovery.
 
-Railway booted successfully at `2026-07-24 15:59:23 +0000` with Gunicorn 26.0.0, one sync worker, and the persistent volume mounted. At `2026-07-24 17:50:32 +0000`, request `GET /paper/run` exceeded the Gunicorn worker timeout. The traceback ended while `run_report_guard.wrapped_run_cycle` was waiting at `with _LOCK`.
+Initial controlled restart was long-oriented and limited to `risk_on` or `constructive` markets. That policy correctly refused risk-off recovery longs but initially blocked the short sleeve globally.
 
-### Root-cause assessment
+### Calibration files and commits
 
-`run_report_guard.py` used a process-wide re-entrant lock around the entire `run_cycle` call while temporarily replacing `store_compiled_report`. A background or concurrent cycle could therefore hold the lock while the manual request waited without a bound. Because Gunicorn was using one sync worker, the waiting HTTP request eventually triggered `WORKER TIMEOUT`, `SystemExit`, and worker replacement.
+- `performance_risk_calibration.py`
+  - version: `performance-risk-calibration-2026-07-29-v1`
+  - commit: `838ec3b23a6e573177e1fd51dd2917e8adda4c25`
+- `usercustomize.py`
+  - calibration registration commit: `c5a188597074ae8c83e59f78e6e11903b47a3ec4`
+- `fast_self_check_override.py`
+  - calibration visibility commit: `1432b21dbd1d2725c1693da317ca7accd98f7746`
 
-### Reliability fix
+## Performance-Risk Activation Ownership Repair
 
-Version: `run-report-guard-2026-07-24-v2`
+### Root cause
 
-Commit: `d1915e5a79282d0f6ccd541c6024421cf8ad86cd`
+`core_entry_pipeline.py` replaced `app.try_entries_and_rotations` after the calibration wrapper was installed. The calibration module also used an early `_PATCHED` return, so it did not reacquire final ownership.
 
-The guard now:
+### Repair
 
-- preserves one-cycle-at-a-time serialization for the global report-store substitution;
-- attempts lock acquisition for a bounded period, default `2.0` seconds;
-- clamps configurable `RUN_CYCLE_GUARD_LOCK_TIMEOUT_SECONDS` between `0.1` and `10.0` seconds;
-- returns an explicit `status: cycle_busy`, `retryable: true` payload when another cycle owns the guard;
-- confirms the rejected request did not execute a cycle or place orders;
-- exposes lock timeout and last status on `/paper/run-report-guard-status`;
-- preserves deferred inline-report behavior for a successfully acquired cycle.
+`performance_risk_activation_guard.py` was added to:
 
-### Safety impact
+- wrap the active feedback and entry callables after core initialization;
+- recompute live restart state;
+- preserve hard halts;
+- allow at most the configured controlled-restart entry count;
+- filter to the required score;
+- prevent rotations;
+- remain paper-only and avoid direct order placement.
 
-No scanner results, signals, entries, exits, thresholds, risk controls, sizing, orders, executable universe, state payload, ML authority, or live authority were changed. The only behavioral difference is that a concurrent manual invocation fails fast and safely instead of occupying the HTTP worker until forced termination.
+### Commits
 
-## Milestone Roadmap
+- activation guard: `8dba35127a9656826020a5239bf146778628c5da`
+- initial Gunicorn activation: `85d06eb45e476ba9d50a27ab1479f694984a5c6c`
 
-| Milestone | Status | Evidence / exit condition |
-|---|---|---|
-| Core paper-trading infrastructure | Complete | Deployed paper service and persistent operating history |
-| Runtime market-data resilience | Complete | `market-data-resilience-2026-07-22-v1`; provider-health route available |
-| Recursion-safe entry composition | Complete | Repeated compact checks report stable composition |
-| Decision/blocker cycle alignment | Complete | Same-cycle comparison true and count difference zero |
-| Bounded run-cycle guard v2 | Implemented; deployment validation pending | Manual run completes or returns `cycle_busy` promptly; no Gunicorn timeout |
-| State provenance monitor v2 | Implemented; deployment validation pending | Require multiple normal-cycle observations |
-| Missing blocker-reason trace v1 | Implemented; deployment validation pending | Require exact producer sample, then 100% reason attribution |
-| Diagnostic producer-contract repair | In progress | Repair only the source identified by trace evidence |
-| State persistence consistency | In progress | Append-only counters stable or divergence source proven |
-| ML data collection and lineage | In progress | Execution and decision records remain attributable, durable, and internally consistent |
-| ML dataset readiness gate | Planned | Sufficient rows/outcomes, complete labels, stable feature contracts, leakage review |
-| Offline model training pipeline | Planned | Reproducible train/validation/test process with versioned data and models |
-| Out-of-sample and walk-forward testing | Planned | Improvement survives unseen data and multiple market regimes |
-| Shadow advisory inference | Planned | Model runs beside deterministic engine without affecting decisions |
-| Controlled ML influence | Future; approval required | Demonstrated incremental value and bounded deterministic safeguards |
-| Live-trading readiness | Future; approval required | Operational, risk, execution, and governance gates all satisfied |
+### Route
 
-## Current Sprint
+- `/paper/performance-risk-activation-status`
 
-### Objective
+Runtime evidence confirmed both feedback and entry activation wrappers were active before the later composition race was discovered.
 
-Validate the bounded run-cycle recovery, complete PR #6 deployment diagnostics, close the remaining blocker-attribution gap, and establish trustworthy state and ML-data provenance.
+## Underdeployment Investigation
 
-### Work items
+### Primary structural dead zone
 
-1. Confirm Railway deploys commit `d1915e5a79282d0f6ccd541c6024421cf8ad86cd`.
-2. Validate `/paper/self-check`.
-3. Validate `/paper/run-report-guard-status` reports version `run-report-guard-2026-07-24-v2` and bounded lock timeout.
-4. Confirm a manual `/paper/run` does not hang; concurrent contention must return `cycle_busy` promptly.
-5. Confirm state-provenance v2 and missing-reason trace v1 return expected fields.
-6. Capture `missing_reason_sample` and identify the exact diagnostic producer contract.
-7. Repair only that producer contract, with no scanner-result or trading-behavior change.
-8. Revalidate until blocker reason coverage is 100%.
-9. Capture at least two state-provenance observations around a normal paper cycle.
-10. If an append-only counter regresses, compare revision, path, file hash, source hint, persistence mode, transaction status, and backup event before considering restoration.
-11. Confirm retained records are suitable for the next ML data-readiness review.
+The core `risk_off` parameters disabled longs and enabled shorts only when `bear_confirmed` was true. Before the regime repair, the system could report `risk_off` while failing bear confirmation, leaving neither side tradable.
 
-### Definition of done
+### Macro-history defect
 
-- Railway is running the intended latest commit.
-- Compact self-check passes without missing critical fields, runtime errors, or unexpected warnings.
-- Manual `/paper/run` cannot wait indefinitely on the report guard.
-- `missing_reason_rows` equals zero and reason coverage is 100%.
-- No fabricated blocker reason is introduced.
-- State revision, execution rows, wins, and losses behave consistently across observed cycles, or divergence is precisely attributed.
-- ML remains advisory-only with all authority fields false.
-- This handoff contains final validation evidence and the next active milestone.
+The regime engine requested approximately 30 calendar days of daily data while its trend classifier required at least 30 daily bars. That usually produced only 20–22 market sessions and could leave SPY and QQQ trends `unknown`.
 
-## Machine Learning Roadmap
+### Final-mode defect
 
-### ML-0 — Governance and authority boundary
+The engine assigned market mode before applying all futures, breadth, and precious-metals adjustments. The displayed final risk score and the active mode could therefore disagree.
 
-**Status:** Active and enforced.
+### Entry-floor attribution
 
-- Deterministic strategy remains the source of truth.
-- ML may score, rank, explain, or advise, but may not place orders or override deterministic risk controls.
-- No increase in ML authority occurs automatically.
+The long floor was fully reconstructed as `0.042`:
 
-### ML-1 — Data integrity, lineage, and labeling
+- defensive base: `0.016`;
+- two losses today: `+0.008`;
+- one stop-loss exit: `+0.012`;
+- rising VIX: `+0.002`;
+- bearish futures: `+0.004`;
+- no hidden external wrapper adjustment.
 
-**Status:** In progress.
+The controlled-restart long floor was `0.048`, adding the configured `0.006` restart premium. This was not the immediate blocker because longs were correctly disabled in confirmed risk-off conditions.
 
-Required records include every evaluated candidate and cycle; entries taken and blocked; terminal blocker reason and producer; market regime and data provenance; feature values and contract version; entry, exit, holding period, exit reason, realized outcome, and risk context; and identifiers joining decisions, executions, positions, and outcomes.
+## Regime Integrity Repair
 
-Current dependencies:
+### Implemented behavior
 
-- close the final missing blocker-reason row;
-- prove state and execution-history persistence consistency;
-- preserve cycle alignment and source attribution;
-- ensure cycle concurrency and request timeouts do not corrupt or ambiguously duplicate records.
+`regime_integrity_underdeployment.py` and its cache guard now:
 
-**Exit gate:** Dataset is internally consistent, attributable, durable, and free of known critical labeling gaps.
+- request enough macro history for valid trend classification;
+- expose actual bar counts for every macro symbol;
+- rebuild SPY and QQQ trend states from sufficient data;
+- calculate five-day SPY, QQQ, VIX, and Treasury-rate changes;
+- provide an auditable risk-score component ledger;
+- recompute final market mode, regime, and trade permission after confirmation layers;
+- require all bear-confirmation tests before enabling the short sleeve;
+- avoid adding a risk-off long exception;
+- preserve the normal market-data cache.
 
-### ML-2 — Dataset readiness and feature governance
+### Runtime validation supplied
 
-**Status:** Planned.
+The repaired runtime showed:
 
-- Establish a versioned training-table contract.
-- Separate decision-time features from future labels.
-- Review target leakage, survivorship bias, duplicates, stale prices, and regime imbalance.
-- Define train, validation, test, and walk-forward partitions.
-- Document feature definitions and missing-value handling.
+- SPY trend: down;
+- QQQ trend: down;
+- SPY five-day return: `-1.97%`;
+- QQQ five-day return: `-5.77%`;
+- VIX five-day change: `+17.83%`;
+- all five bear-confirmation tests true;
+- final risk score: `0`;
+- final mode: `risk_off`;
+- final regime: `bear`;
+- trade permission: `short_bias`;
+- longs disabled;
+- shorts enabled;
+- prior permission dead zone eliminated.
 
-**Minimum maturity benchmark:** At least 150 execution rows and 100 observed outcomes. This is necessary but not sufficient.
+### Commits
 
-### ML-3 — Reproducible offline training pipeline
+- regime repair: `136f74a2078cf1b95b9f2a171a4b07c8e9e8cf56`
+- initial startup registration: `a06d0020d640686a4de2894ed383ea3fe85051fd`
+- market-cache preservation: `a713b04d8cf1910ccb71dfe51df396558c20704f`
+- final worker activation: `0106e574973668a4dff4bed424653898fed33331`
 
-**Status:** Planned.
+### Routes
 
-Version dataset snapshots, feature contracts, hyperparameters, model artifacts, and reports; establish deterministic seeds; begin with interpretable baselines; compare against deterministic strategy and simple heuristics.
+- `/paper/regime-integrity-status`
+- `/paper/underdeployment-xray?force=1`
 
-### ML-4 — Out-of-sample, walk-forward, and regime validation
+## Side-Aware Bear Soft-Pause Recovery
 
-**Status:** Planned.
+### Policy conflict found
 
-Evaluate classification quality, calibration, expectancy, drawdown, risk-adjusted performance, tail behavior, regime stability, provider degradation sensitivity, turnover, and concentration.
+After regime repair, the market correctly authorized shorts, but the long-oriented soft-pause governor still applied a global `block_new_entries`. This prevented the valid short sleeve from reaching execution.
 
-### ML-5 — Shadow advisory inference
+### Implemented recovery policy
 
-**Status:** Planned.
+`bear_soft_pause_short_recovery.py` permits one reduced-size short only when:
 
-Run inference beside the deterministic engine, record recommendations without influencing trades, compare counterfactual recommendations with outcomes, and monitor drift, latency, missing features, and model/data-version mismatches.
+- the soft pause is active;
+- market mode is `risk_off`;
+- trade permission is `short_bias`;
+- `bear_confirmed` is true;
+- the regular market session is open;
+- no hard halt is active;
+- no late-day block is active;
+- no profit guard is active;
+- the short score is at least `0.014`;
+- the daily recovery-short allowance has not been used.
 
-### ML-6 — Controlled production influence
+The recovery position uses at most a `0.50` allocation factor. Longs remain blocked and rotations remain disabled.
 
-**Status:** Future and requires explicit approval.
+### Commits
 
-Potential bounded uses include ranking otherwise eligible candidates, limited confidence weighting, offline parameter recommendations, or a small experimental paper-only sleeve. Hard risk controls remain deterministic.
+- recovery policy: `599dcc98355eb9ba4c46920576d1c4eb26f4ecfe`
+- worker activation: `4e4b27463d28652aae294ebd49c8976bfaa7b93d`
 
-### ML-7 — Autonomous optimization research
+### Route
 
-**Status:** Future and requires explicit approval.
+- `/paper/bear-short-recovery-status`
 
-Candidate-model generation, champion/challenger evaluation, drift-triggered retraining proposals, portfolio research, and ensemble or reinforcement-learning research only after simpler methods and governance mature. No autonomous promotion to trading authority is permitted.
+## Entry-Pipeline Ownership and Wrapper-Race Repairs
+
+### Race sequence
+
+The recovery policy was correct, but multiple recurring composition layers competed for `app.try_entries_and_rotations`:
+
+1. the breakout/composition guard rebuilt the deterministic core stack;
+2. Entry Pipeline X-Ray wrapped the active callable;
+3. bear recovery wrapped the active callable;
+4. later recurring repairs could displace the bear owner or create duplicate wrappers;
+5. status could briefly show a passing `last_enforce` while the current public callable had already drifted.
+
+Observed invalid stacks included:
+
+- breakout composition as the public callable, with bear recovery displaced;
+- bear recovery -> X-Ray -> bear recovery -> composition;
+- X-Ray -> bear recovery -> X-Ray -> composition.
+
+### Deterministic stack contract
+
+The required stack is now:
+
+1. bear soft-pause short recovery — outer risk owner;
+2. Entry Pipeline X-Ray — one diagnostic wrapper;
+3. breakout/composition guard;
+4. direct core entry pipeline.
+
+`bear_recovery_stack_contract.py` v2:
+
+- strips all known bear and X-Ray outer wrappers to the deterministic composition base;
+- rebuilds exactly one X-Ray and one bear owner;
+- counts wrappers explicitly;
+- requires one bear wrapper and one X-Ray wrapper;
+- integrates with the legacy composition and ownership guards;
+- records scanner evidence separately from ownership evidence.
+
+### Stack-contract commits
+
+- initial contract: `61287a0b8dd6f89a073a17e11904a72723901340`
+- initial Gunicorn registration: `0bc442df367e482fa3526a92d096db04f6be7bbb`
+- duplicate-wrapper edge-case repair: `38a3c935c844716f11f12ab426573e3e83707cf7`
+- v2 normalization contract: `5f3b023dab814cc32b2f6137043d44fc63293dc5`
+- recurring `usercustomize` final-owner ordering: `fddebd39f4fcf2d57f023ce81d916f0936e3c4a3`
+
+### Final X-Ray producer fix
+
+The final supplied runtime payload showed that `entry_pipeline_xray._patch()` still inspected only the public callable. When bear recovery was outermost, it could not see the valid X-Ray immediately beneath it and added another X-Ray above the risk owner.
+
+`entry_pipeline_xray_bear_ownership_guard.py` now:
+
+- makes X-Ray's own patcher aware of the outer bear owner;
+- refuses to add X-Ray above an active bear gate;
+- treats bear recovery -> X-Ray as already patched;
+- delegates malformed bear-owned stacks to the deterministic stack contract;
+- normalizes existing duplicate wrappers at startup;
+- maintains a watchdog for patch-contract persistence;
+- remains composition-only and paper-only.
+
+### Final ownership commits
+
+- X-Ray bear-ownership producer guard: `6589dd791c85575214af103df4414e678441daff`
+- Gunicorn registration: `8f071f172aec72273288abf92c50fd4697db1856`
+
+### Routes
+
+- `/paper/bear-recovery-stack-status`
+- `/paper/entry-pipeline-xray-bear-ownership-status`
+- `/paper/entry-pipeline-xray-status`
+- `/paper/entry-pipeline-ownership-status`
+- `/paper/entry-pipeline-composition-status`
+
+## Latest Scanner Evidence
+
+The latest supplied cycle had zero executable signals. Two potential shorts were rejected before entry:
+
+- `UCTT`: score `0.011313`, rejected as `extended_below_5m_ma20`;
+- `RIOT`: score `0.009508`, rejected as `extended_below_5m_ma20`.
+
+Both were below the bear-recovery requirement of `0.014`. Remaining in cash was therefore correct. No threshold or extension guard should be weakened based on this sample.
 
 ## Safety and Authority Boundary
 
-Current work preserves:
+The July 29 changes preserve:
 
-- no live authority;
+- paper-only operation;
+- no direct order placement by the new guards;
+- no live-trading authority;
 - no ML execution authority;
-- no unauthorized order placement;
-- no threshold changes;
-- no sizing or risk-control changes;
-- no executable-universe mutation;
-- no scanner-result modification;
-- no automatic state restoration;
-- no mutation of account history or current positions;
-- no fabricated blocker attribution.
+- no risk-off long exception;
+- no change to executable-universe membership;
+- no change to scanner signal generation;
+- no lowering of ordinary entry thresholds;
+- no weakening of extension or chase protection;
+- one 50%-size bear-recovery short at most during the soft pause;
+- 2.50% hard realized-loss and intraday-drawdown halts;
+- 3.00% absolute daily-loss ceiling;
+- no rotations during controlled bear recovery.
 
 ## Validation Order After Railway Redeploy
 
-1. `/paper/self-check`
-2. `/paper/run-report-guard-status`
-3. `/paper/state-provenance-status`
-4. `/paper/missing-reason-trace-status`
-5. `/paper/state-transaction-status`
-6. `/paper/cycle-alignment-status`
-7. `/paper/provider-health-status`
-8. A single controlled `/paper/run` validation when no concurrent cycle is expected
+### 1. Final X-Ray ownership producer guard
 
-Use `/paper/full-self-check` only for a failed routine check, missing critical fields, a newly timestamped runtime error, or an unexpected warning.
+`/paper/entry-pipeline-xray-bear-ownership-status`
 
-## Engineering Decision Log
+Expected:
 
-### 2026-07-23 — Cycle alignment over cross-cycle comparison
+- `version: entry-pipeline-xray-bear-ownership-2026-07-29-v1`;
+- `overall: pass`;
+- `xray_patch_guard_active: true`;
+- `valid_xray_below_bear: true`;
+- nested stack contract `owned: true`;
+- wrapper counts: one bear and one X-Ray.
 
-Compare decision and blocker diagnostics only when they share the same cycle identifier because cross-cycle counts can differ legitimately.
+### 2. Deterministic bear-recovery stack
 
-### 2026-07-23 — Separate monotonic counters from contextual metrics
+`/paper/bear-recovery-stack-status`
 
-Monitor state revision, execution rows, wins, and losses as append-only; treat realized P&L, equity, and positions as contextual.
+Expected:
 
-### 2026-07-24 — Trace missing blocker attribution without fabrication
+- `version: bear-recovery-stack-contract-2026-07-29-v2`;
+- `overall: pass`;
+- `owned: true`;
+- `entry_guard_active: true`;
+- `wrapper_counts.bear_wrapper_count: 1`;
+- `wrapper_counts.xray_wrapper_count: 1`;
+- public callable is bear recovery;
+- X-Ray callable is immediately below bear recovery;
+- composition callable has its composition and core versions populated.
 
-Expose exact symbol/source evidence rather than synthesizing a reason.
+### 3. Bear soft-pause recovery
 
-### 2026-07-24 — Promote handoff to operating manual
+`/paper/bear-short-recovery-status`
 
-Maintain dashboard, resume point, roadmap, sprint, ML roadmap, operations manual, decision log, and backlog.
+Expected while the supplied bear and soft-pause conditions remain valid:
 
-### 2026-07-24 — Bound report-guard contention
+- `overall: pass`;
+- `entry_guard_active: true`;
+- `feedback_guard_active: true`;
+- `recovery_live.active: true`;
+- longs false;
+- shorts true;
+- rotations false;
+- required short score `0.014`;
+- allocation factor `0.5`;
+- one recovery short remaining until used.
 
-Preserve serialized report substitution but reject concurrent run requests after a short bounded wait. This prevents sync-worker starvation while avoiding overlapping mutation of the global report-store function.
+A changed market can legitimately make recovery inactive. In that case, inspect the explicit eligibility reasons rather than treating inactivity as an ownership failure.
 
-## Technical Debt and Enhancement Backlog
+### 4. Regime integrity
 
-### Active / highest priority
+`/paper/regime-integrity-status`
 
-- Validate bounded run-cycle guard v2 on Railway.
-- Validate PR #6 diagnostics on Railway.
-- Eliminate the final missing blocker-reason row through producer-contract repair.
-- Collect multiple state-provenance observations and resolve any source divergence.
-- Confirm decision/execution/outcome records meet ML-1 lineage requirements.
+Expected:
 
-### Next
+- `overall: pass`;
+- `market_guard_active: true`;
+- version `regime-integrity-underdeployment-2026-07-29-v1`.
 
-- Formalize the versioned ML training-table contract.
-- Add dataset-readiness diagnostics for missing labels, duplicates, join failures, feature availability, and regime distribution.
-- Define offline baseline models and evaluation metrics.
-- Establish reproducible train/validation/test and walk-forward partitions.
+### 5. Underdeployment X-Ray
 
-### Future; explicit approval required
+`/paper/underdeployment-xray?force=1`
 
-- Changes to scanner thresholds, entries, exits, risk, sizing, executable universe, or order behavior.
-- ML influence over candidate ranking or confidence.
-- Experimental capital allocation controlled by ML.
-- Crypto-engine expansion or cross-asset portfolio optimization.
-- Any live-trading authority.
+Use only when a fresh regime and entry-floor attribution snapshot is needed. Confirm:
 
-## Files and Commits
+- sufficient macro bar counts;
+- final mode recomputed after confirmation layers;
+- bear tests individually visible;
+- long and short permissions consistent with the final regime;
+- no unexplained external score-floor adjustment.
 
-- `run_report_guard.py`
-  - bounded lock-wait recovery v2: `d1915e5a79282d0f6ccd541c6024421cf8ad86cd`
-- `state_provenance_monitor.py`
-  - v2 branch commit: `9ce6ddc4e03c38a7c9c4f5e103c2fbbad7f0892b`
-- `missing_reason_trace_overlay.py`
-  - initial trace overlay: `f42f4c985a7f1a7695c6cafdc46584ab379a63d8`
-- `usercustomize.py`
-  - missing-reason trace registration: `e0cbdd54775e2e6f17ced686b4e31e3f619d159f`
-- PR #6
-  - merged commit: `9998c597ef91b5d6edce47cdf481efcb6ac4cc90`
+### 6. Compact system check
+
+`/paper/self-check`
+
+Use `/paper/full-self-check` only after a failed compact check, missing critical fields, a newly timestamped runtime error, or an unexpected warning.
+
+## Previous Reliability Work Still in Force
+
+The July 24 bounded run-cycle guard remains part of the reliability baseline:
+
+- file: `run_report_guard.py`;
+- version: `run-report-guard-2026-07-24-v2`;
+- commit: `d1915e5a79282d0f6ccd541c6024421cf8ad86cd`;
+- concurrent manual runs must fail promptly with `cycle_busy` rather than waiting until Gunicorn timeout.
+
+Prior merged diagnostics remain relevant:
+
+- PR #6 merge commit: `9998c597ef91b5d6edce47cdf481efcb6ac4cc90`;
+- state provenance v2 branch commit: `9ce6ddc4e03c38a7c9c4f5e103c2fbbad7f0892b`;
+- missing-reason trace: `f42f4c985a7f1a7695c6cafdc46584ab379a63d8`;
+- missing-reason registration: `e0cbdd54775e2e6f17ced686b4e31e3f619d159f`.
+
+## Machine Learning Roadmap
+
+### Current authority
+
+ML remains advisory only. The deterministic strategy, risk engine, and entry pipeline remain authoritative.
+
+### Data-readiness work
+
+Before any stronger ML role:
+
+- decision, blocker, execution, position, and outcome records must remain joinable;
+- feature and regime provenance must be stable;
+- labels must be complete and free from leakage;
+- state persistence must be trustworthy;
+- at least 150 execution rows and 100 observed outcomes are required, but are not sufficient;
+- offline train/validation/test and walk-forward evidence must show incremental value;
+- shadow inference must run without decision authority before controlled influence is considered.
+
+Any ML influence over ranking, sizing, entry permission, or capital requires explicit approval.
+
+## Engineering Decision Log — July 29
+
+### Preserve positive expectancy; repair underdeployment
+
+The performance record was profitable. Changes focused on permissions, data sufficiency, and runtime ownership rather than replacing the strategy.
+
+### No risk-off recovery longs
+
+Confirmed risk-off conditions continue to block new longs. Recovery activity is limited to a genuinely confirmed bear short sleeve.
+
+### Side-aware soft pause
+
+A global soft-pause block was replaced with side-aware permission only for one reduced-size qualifying short. Hard limits were not relaxed.
+
+### Data sufficiency before bear confirmation
+
+SPY and QQQ trend classification must use enough daily bars. Unknown trends caused by an undersized request window are not valid evidence against bear confirmation.
+
+### Final mode after all overlays
+
+Market mode and trade permission must be recomputed after futures, breadth, and defensive confirmation layers.
+
+### One deterministic public entry stack
+
+The public callable must have one risk owner, one diagnostic X-Ray, one composition layer, and one direct core implementation. Multiple watchdogs may inspect or repair this contract but may not compete for different outer ownership.
+
+### Scanner inactivity is not ownership failure
+
+Zero qualifying candidates is legitimate when no symbol passes trend, score, extension, cooldown, and quality controls. Ownership diagnostics and scanner diagnostics must remain distinct.
+
+## Files and Commits — July 29 Sprint
+
+- `performance_risk_calibration.py` — `838ec3b23a6e573177e1fd51dd2917e8adda4c25`
+- `usercustomize.py` — `c5a188597074ae8c83e59f78e6e11903b47a3ec4`
+- `fast_self_check_override.py` — `1432b21dbd1d2725c1693da317ca7accd98f7746`
+- `performance_risk_activation_guard.py` — `8dba35127a9656826020a5239bf146778628c5da`
+- `gunicorn.conf.py` initial activation — `85d06eb45e476ba9d50a27ab1479f694984a5c6c`
+- `regime_integrity_underdeployment.py` — `136f74a2078cf1b95b9f2a171a4b07c8e9e8cf56`
+- regime startup — `a06d0020d640686a4de2894ed383ea3fe85051fd`
+- regime cache preservation — `a713b04d8cf1910ccb71dfe51df396558c20704f`
+- final regime worker activation — `0106e574973668a4dff4bed424653898fed33331`
+- `bear_soft_pause_short_recovery.py` — `599dcc98355eb9ba4c46920576d1c4eb26f4ecfe`
+- bear recovery activation — `4e4b27463d28652aae294ebd49c8976bfaa7b93d`
+- `bear_recovery_stack_contract.py` initial — `61287a0b8dd6f89a073a17e11904a72723901340`
+- stack startup registration — `0bc442df367e482fa3526a92d096db04f6be7bbb`
+- duplicate-stack edge repair — `38a3c935c844716f11f12ab426573e3e83707cf7`
+- stack contract v2 — `5f3b023dab814cc32b2f6137043d44fc63293dc5`
+- recurring final-owner order — `fddebd39f4fcf2d57f023ce81d916f0936e3c4a3`
+- `entry_pipeline_xray_bear_ownership_guard.py` — `6589dd791c85575214af103df4414e678441daff`
+- final Gunicorn registration — `8f071f172aec72273288abf92c50fd4697db1856`
+
+## Definition of Done for This Repair Sequence
+
+- Railway serves `entry-pipeline-xray-bear-ownership-2026-07-29-v1`.
+- The X-Ray bear-ownership route passes.
+- The stack route passes on repeated checks separated by more than one watchdog interval.
+- Wrapper counts remain exactly one bear and one X-Ray.
+- The bear-short recovery route retains entry and feedback ownership.
+- A legitimate zero-candidate cycle remains in cash without weakening score or extension controls.
+- A future qualifying short can pass only under confirmed bear, soft-pause eligibility, 50% sizing, one-entry limit, and all hard-risk constraints.
+- Compact self-check reports no newly timestamped critical error.
+- This handoff is updated with final Railway evidence after validation.
 
 ## Next Action
 
-Validate the Railway redeploy beginning with `/paper/self-check`, then `/paper/run-report-guard-status`. Confirm the latest guard version and that manual cycle contention returns promptly rather than producing another Gunicorn worker timeout.
+After Railway redeploys the latest commits, run `/paper/entry-pipeline-xray-bear-ownership-status` first. Then run `/paper/bear-recovery-stack-status` twice with enough separation to cross a recurring repair interval. The repair is complete only when both checks remain passing with exactly one bear wrapper and one X-Ray wrapper.
