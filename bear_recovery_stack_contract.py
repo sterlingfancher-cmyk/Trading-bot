@@ -215,6 +215,19 @@ def _patch_contract_modules(core: Any) -> Dict[str, Any]:
             __prior=current_enforce,
         ) -> Dict[str, Any]:
             target = supplied_core or core
+
+            # Normalize an incomplete bear wrapper before the legacy ownership
+            # repair adds X-ray. This prevents bear -> X-ray -> bear nesting.
+            current_public = getattr(target, "try_entries_and_rotations", None)
+            if getattr(
+                current_public, "_bear_soft_pause_short_recovery_guard", False
+            ):
+                direct_below_bear = _bear_prior(current_public)
+                if callable(direct_below_bear) and not getattr(
+                    direct_below_bear, "_entry_pipeline_xray_version", None
+                ):
+                    target.try_entries_and_rotations = direct_below_bear
+
             prior_result: Dict[str, Any] = {}
             try:
                 row = __prior(target, force=force)
