@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-29-v46-performance-risk-calibration"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-29-v47-bear-recovery-stack"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -54,6 +54,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/starter-valve-reason-sanitizer-status", "category": "governance", "required": False},
             {"path": "/paper/entry-pipeline-xray-status", "category": "governance", "required": False},
             {"path": "/paper/entry-pipeline-ownership-status", "category": "governance", "required": False},
+            {"path": "/paper/bear-recovery-stack-status", "category": "governance", "required": False},
             {"path": "/paper/state-transaction-status", "category": "state", "required": False},
             {"path": "/paper/runtime-reliability-status", "category": "governance", "required": False},
             {"path": "/paper/daily-self-check-compactor-status", "category": "governance", "required": False},
@@ -132,6 +133,7 @@ MODULES = (
     ("starter_valve_reason_sanitizer", "app_and_module"),
     ("entry_pipeline_xray", "app_and_module"),
     ("entry_pipeline_ownership_guard", "app_and_module"),
+    ("bear_recovery_stack_contract", "app_and_module"),
     ("controlled_redeployment_starter_sleeve", "app_and_module"),
     ("quality_blocker_diagnostics", "app_and_module"),
     ("ml_pre3a_shadow_validation", "app_and_module"),
@@ -160,6 +162,8 @@ def _repair_entry_stack(flask_app: Any, core: Any) -> None:
     _register_module(flask_app, core, "starter_valve_reason_sanitizer", route_args="app_and_module")
     _register_module(flask_app, core, "entry_pipeline_xray", route_args="app_and_module")
     _register_module(flask_app, core, "entry_pipeline_ownership_guard", route_args="app_and_module")
+    # Final owner: normalize to one bear gate -> one X-ray -> composition -> core.
+    _register_module(flask_app, core, "bear_recovery_stack_contract", route_args="app_and_module")
 
 
 def _watchdog() -> None:
@@ -190,6 +194,8 @@ def _watchdog() -> None:
                     "fast_self_check_override",
                 ):
                     _register_module(flask_app, core, name, route_args="app_and_module")
+                # Reassert final ownership after downstream diagnostic modules.
+                _register_module(flask_app, core, "bear_recovery_stack_contract", route_args="app_and_module")
         except Exception:
             pass
         time.sleep(0.5 if iteration < 60 else 30.0)
