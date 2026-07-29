@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-28-v45-state-snapshots"
+VERSION = "usercustomize-entry-pipeline-composition-2026-07-29-v46-performance-risk-calibration"
 _REGISTERED_APP_IDS: set[int] = set()
 
 
@@ -45,6 +45,7 @@ def _patch_self_check_endpoints() -> None:
             {"path": "/paper/provider-health-status", "category": "market_data", "required": False},
             {"path": "/paper/state-provenance-status", "category": "state", "required": False},
             {"path": "/paper/state-snapshot-archive-status", "category": "state", "required": False},
+            {"path": "/paper/performance-risk-calibration-status", "category": "risk", "required": False},
             {"path": "/paper/regime-flip-entry-guard-status", "category": "governance", "required": False},
             {"path": "/paper/core-entry-pipeline-status", "category": "governance", "required": False},
             {"path": "/paper/extended-leader-starter-valve-status", "category": "governance", "required": False},
@@ -101,6 +102,7 @@ MODULES = (
     ("live_volatility", "app_and_module"),
     ("self_check", "app_and_module"),
     ("state_transaction_manager", "app_and_module"),
+    ("performance_risk_calibration", "app_and_module"),
     ("state_snapshot_archive", "app_and_module"),
     ("state_provenance_monitor", "app_and_module"),
     ("shared_cycle_identity", "app_and_module"),
@@ -172,7 +174,7 @@ def _watchdog() -> None:
                 # dynamic_universe_builder, shared_cycle_identity, or lifecycle tracing
                 # can form a recursive scan_signals chain when another wrapper is outermost.
                 for name in (
-                    "state_transaction_manager", "state_snapshot_archive", "state_provenance_monitor", "market_data_resilience", "symbol_hygiene_guard",
+                    "state_transaction_manager", "performance_risk_calibration", "state_snapshot_archive", "state_provenance_monitor", "market_data_resilience", "symbol_hygiene_guard",
                     "blocked_entry_source_contract_guard",
                     "scanner_v2_shadow_universe", "missed_opportunity_post_close_audit",
                     "scanner_v2_shadow_quality_trace", "scanner_v2_shadow_composite_score",
