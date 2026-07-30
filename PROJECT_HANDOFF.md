@@ -11,7 +11,7 @@
 7. Machine learning remains advisory until execution history, outcome labels, out-of-sample evidence, and regime stability justify a stronger role.
 8. Every material change must be traceable, reversible, source-tested, and Railway-validated before becoming the baseline.
 9. Competing wrappers, duplicate callables, recursive patch chains, and false ownership warnings are defects.
-10. Every code or configuration change must update this handoff in the same work session.
+10. Every code or configuration change and every major Railway validation milestone must update this handoff in the same work session.
 
 ## Always Resume Here
 
@@ -28,10 +28,10 @@
 - Lifetime profit factor: `3.1781`.
 - Recent 20 exits: 15 wins, 5 losses, `+$681.29`, PF `3.4278`.
 - July 29 risk calibration, regime integrity, bear-short recovery, and entry-pipeline ownership work is Railway-validated.
-- July 30 opening-surge strategy and chain-aware opening-surge ownership v2 are source-complete and previously Railway-validated.
-- The duplicate breakout scanner ownership repair is committed but has not yet been Railway-validated because the newest deployment failed during Python installation.
-- Current build blocker: `mise` 2026.7.15 rejected the Python 3.11.9 prebuilt package because no GitHub artifact attestation was available.
-- Build fix committed: root `mise.toml` disables only Python GitHub artifact-attestation verification; `runtime.txt` still pins Python 3.11.9.
+- July 30 opening-surge strategy and chain-aware opening-surge ownership v2 are source-complete and Railway-validated.
+- July 30 duplicate breakout-scanner ownership repair is now deployed and passed its first Railway validation at `2026-07-30 14:25:10 CDT`.
+- Railway outage and Python artifact-attestation build failure are resolved by the root `mise.toml` build-only setting.
+- Next operational milestone: validate real opening-surge candidate profiling and promotion during the next eligible `08:45–09:15 CDT` window.
 
 ## Current Hard Risk Ladder
 
@@ -42,12 +42,58 @@
 - Controlled-recovery sizing cap: 50%.
 - No rotations during controlled recovery.
 - Opening-surge temporary loss/drawdown ceiling: `0.50%`.
+- Bear soft-pause short score floor: `0.014`.
 - No confirmed-bear opening long exception.
-- Bear soft-pause short score floor remains `0.014`.
+- No broad defensive-regime long permission.
+
+## Validated Runtime Architecture
+
+### Entry pipeline
+
+Required and validated public stack:
+
+1. `bear_soft_pause_short_recovery` — outer entry-risk owner;
+2. one Entry Pipeline X-Ray wrapper;
+3. deterministic breakout/composition callable;
+4. direct core entry pipeline.
+
+Validated state:
+
+- `owned: true`;
+- `entry_guard_active: true`;
+- exactly one bear wrapper;
+- exactly one X-Ray wrapper;
+- direct-core and composition metadata present;
+- no drift, recursion, or ownership oscillation.
+
+### Scanner pipeline
+
+Required and now validated scanner order:
+
+1. `opening_surge_participation` wrapper;
+2. exactly one `breakout_participation_layer` wrapper;
+3. `market_participation_accelerator` and the remaining core scanner chain.
+
+Railway evidence at `2026-07-30 14:25:10 CDT`:
+
+- version `breakout-scanner-ownership-2026-07-30-v1`;
+- `overall: pass`;
+- `breakout_guard_count: 1`;
+- `breakout_guard_depth: 1`;
+- `opening_surge_guard_count: 1`;
+- `opening_surge_guard_depth: 0`;
+- `opening_surge_above_breakout: true`;
+- `ownership.cycle_detected: false`;
+- `ownership.truncated: false`;
+- `ensure_breakout.patched: false` with reason `breakout_already_present`;
+- `patcher_guard.patched: false` with reason `already_chain_guarded`;
+- normalization removed zero wrappers because the deployed stack was already correct.
+
+The prior duplicate-breakout scanner defect is closed at the first live validation. A repeated status sample after a watchdog interval should remain unchanged and is a persistence check, not a source-repair requirement.
 
 ## July 29 Performance and Risk Calibration
 
-The strategy record showed positive expectancy rather than a strategy-quality collapse. The work preserved the strategy and repaired underdeployment, regime logic, risk governance, and callable ownership.
+The strategy record showed positive expectancy, so the project preserved the strategy and repaired underdeployment, regime logic, risk governance, and callable ownership.
 
 Evidence:
 
@@ -59,7 +105,7 @@ Evidence:
 - lifetime expectancy `+$14.13` per completed exit;
 - recent-20 expectancy `+$34.06`.
 
-Files and commits:
+Key files and commits:
 
 - `performance_risk_calibration.py` — `838ec3b23a6e573177e1fd51dd2917e8adda4c25`
 - `usercustomize.py` calibration registration — `c5a188597074ae8c83e59f78e6e11903b47a3ec4`
@@ -72,7 +118,7 @@ Files and commits:
 
 Root causes repaired:
 
-1. `risk_off` could disable longs while shorts were unavailable because bear confirmation failed.
+1. `risk_off` could disable longs while shorts remained unavailable because bear confirmation failed.
 2. Macro history was too short to satisfy the daily-trend bar requirement.
 3. Market mode was assigned before all futures, breadth, and defensive adjustments.
 4. A long-oriented soft-pause block globally prevented a valid confirmed-bear short sleeve.
@@ -130,13 +176,6 @@ The short uses at most a `0.50` allocation factor. Longs remain blocked and rota
 
 ## Entry-Pipeline Ownership Repair
 
-Required entry stack:
-
-1. bear soft-pause short recovery;
-2. one Entry Pipeline X-Ray;
-3. breakout/composition callable;
-4. direct core entry pipeline.
-
 `bear_recovery_stack_contract.py` v2 normalizes to one bear gate and one X-Ray. `entry_pipeline_xray_bear_ownership_guard.py` prevents X-Ray from wrapping above an already valid bear-owned stack.
 
 Key commits:
@@ -149,33 +188,27 @@ Key commits:
 - X-Ray producer guard — `6589dd791c85575214af103df4414e678441daff`
 - final registration — `8f071f172aec72273288abf92c50fd4697db1856`
 
-Railway passed repeatedly on July 29 and July 30:
+Routes:
 
-- `owned: true`;
-- `entry_guard_active: true`;
-- exactly one bear wrapper;
-- exactly one X-Ray wrapper;
-- direct-core and composition metadata present;
-- no drift, recursion, or repair loop.
-
-The entry-pipeline ownership defect is closed.
+- `/paper/entry-pipeline-xray-bear-ownership-status`
+- `/paper/bear-recovery-stack-status`
 
 ## July 30 Missed-Opening Investigation
 
-At 09:08:52 CDT:
+At `09:08:52 CDT`:
 
 - the market had been open 38.9 minutes;
 - the normal 15-minute warmup had expired;
-- there was no loss, drawdown, hard halt, self-defense, or profit-guard block;
+- no loss, drawdown, hard halt, self-defense, or profit-guard block was active;
 - scanner found 12 signals, six long and six short;
 - mode was `crash_warning`, regime `bear`, risk score `14`;
 - NQ was `+1.439%`, trend up, with `gap_chase_protection`;
 - both `allow_longs` and `allow_shorts` were false;
 - the primary no-entry driver was `longs_disabled_by_regime`.
 
-High-score long examples rejected as `extended_above_5m_ma20` included AMD `0.066916`, ALAB `0.051672`, MU `0.050216`, ACLS `0.048229`, and MRVL `0.039829`.
+High-score longs later rejected as `extended_above_5m_ma20` included AMD `0.066916`, ALAB `0.051672`, MU `0.050216`, ACLS `0.048229`, and MRVL `0.039829`.
 
-The supplied charts showed broad AI compute, semiconductor, crypto-compute, and power-infrastructure strength, including WDC, CORZ, CRWV, LRCX, NBIS, SNDK, RIOT, AMD, BE, and PWR. LRCX and PWR were below their opening prints despite large prior-close gains, proving the repair needed positive post-open follow-through rather than indiscriminate gap buying.
+The supplied charts showed broad AI compute, semiconductor, crypto-compute, and power-infrastructure strength in WDC, CORZ, CRWV, LRCX, NBIS, SNDK, RIOT, AMD, BE, and PWR. LRCX and PWR were below their opening prints despite large prior-close gains, proving the strategy needed positive post-open follow-through rather than indiscriminate gap buying.
 
 Root cause:
 
@@ -193,7 +226,7 @@ Permission requires:
 
 - paper context and regular session open;
 - normal warmup complete;
-- 15–45 minutes after the 08:30 CDT open;
+- 15–45 minutes after the `08:30 CDT` open;
 - mode `crash_warning` or `risk_off`;
 - `bear_confirmed` false;
 - NQ at least `+0.80%`, trend up;
@@ -214,44 +247,23 @@ Candidate requirements:
 - relative volume at least `1.25`, unless post-open move is at least 8%;
 - approved leadership bucket.
 
-At least two candidates must qualify in the same cycle. Up to three candidates may be promoted, but the risk layer permits only one reduced-size opening-surge entry per day. Maximum temporary long allocation supplied to the normal pipeline is 5% of equity before downstream factors.
+At least two candidates must qualify in the same cycle. Up to three may be promoted, but only one reduced-size opening-surge entry is permitted per day. Maximum temporary long allocation supplied to the normal pipeline is 5% of equity before downstream factors.
 
-Universe hints added: WDC, CORZ, CRWV, LRCX, NBIS, SNDK, RIOT, AMD, BE, and PWR. Hints do not make a symbol automatically tradable.
+Universe hints: WDC, CORZ, CRWV, LRCX, NBIS, SNDK, RIOT, AMD, BE, and PWR. Hints do not make a symbol automatically tradable.
 
 Commits and route:
 
 - v1 source — `2351b9b70e22df414aba248abc5e60b03d477431`
 - v1 Gunicorn activation — `3ec95ac24b1eed95367a3fe74813895388cb1a27`
 - v2 chain-aware ownership — `2069a448066c3cc8f9fec0f7497ee024ba6ee8c7`
-- v2 version: `opening-surge-participation-2026-07-30-v2-chain-aware`
-- route: `/paper/opening-surge-participation-status`
+- v2 version — `opening-surge-participation-2026-07-30-v2-chain-aware`
+- route — `/paper/opening-surge-participation-status`
 
-Railway v2 evidence:
+## Duplicate Breakout Scanner Repair
 
-- `overall: pass`;
-- risk guard active, outermost, count `1`, depth `0`;
-- scan guard active, count `1`, depth `1`;
-- scan classification `nested_but_active`;
-- no current-call rewrapping;
-- no callable cycle;
-- no truncated ownership search.
+The opening-surge v2 chain preview exposed two breakout wrappers, one outside and one inside opening surge. The outer wrapper could repeat scanner work and append ordinary breakout signals after opening surge had filtered the long list.
 
-## Duplicate Breakout Scanner Defect
-
-The opening-surge v2 chain preview showed:
-
-1. outer `breakout_participation_layer.patched_scan_signals`;
-2. opening-surge v2 wrapper;
-3. a second `breakout_participation_layer.patched_scan_signals`;
-4. market-participation scanner.
-
-Why it matters:
-
-- duplicate breakout wrappers repeat scanner work and market-data calls;
-- the outer breakout wrapper can append ordinary breakout longs after opening surge has deliberately filtered the long list;
-- that ordering can weaken the narrow `opening_surge_only` contract even though hard risk controls remain downstream.
-
-Repair committed:
+Repair:
 
 - `breakout_scanner_ownership_guard.py`;
 - version `breakout-scanner-ownership-2026-07-30-v1`;
@@ -261,29 +273,29 @@ Repair committed:
 
 The guard is chain-aware, refuses a new breakout wrapper when one already exists, removes only redundant outer breakout wrappers, preserves one breakout layer beneath opening surge, verifies ordering, and detects callable cycles or truncated ownership search.
 
-The route returned 404 on the older Railway worker, proving the repair had not yet deployed. Older opening-surge, entry-stack, auto-runner, and self-check endpoints remained healthy.
+Railway deployment and validation are now successful. The validated chain is:
 
-## Railway Outage and mise Build Failure — July 30
+```text
+opening_surge_participation
+  -> breakout_participation_layer
+    -> market_participation_accelerator
+```
 
-After Railway service recovered, new GitHub-triggered deployments reached the build stage but failed before application startup.
+## Railway Outage and Build Recovery
 
-Observed build failure:
+After Railway recovered from an outage, deployments failed before application startup because `mise` 2026.7.15 required a GitHub artifact attestation that was unavailable for the pinned Python 3.11.9 prebuilt package.
+
+Observed error:
 
 ```text
 mise python@3.11.9 verify GitHub artifact attestations
 mise ERROR No GitHub artifact attestations found for python@3.11.9
 ```
 
-Repository state before the fix:
-
-- `runtime.txt` pinned `python-3.11.9`;
-- no repository `mise.toml` setting disabled unavailable artifact-attestation verification;
-- application code never started, so endpoint behavior could not reflect the newest commits.
-
 Build-only repair:
 
-- new file: `mise.toml`;
-- commit: `4114e77163d921f50aa1d418f4ac709631738046`;
+- root file `mise.toml`;
+- commit `4114e77163d921f50aa1d418f4ac709631738046`;
 - setting:
 
 ```toml
@@ -291,12 +303,9 @@ Build-only repair:
 python.github_attestations = false
 ```
 
-Scope and safety:
+Python remains pinned at 3.11.9 through `runtime.txt`. No dependency, strategy, signal, threshold, sizing, risk, order, live-authority, or ML-authority behavior changed.
 
-- Python remains pinned at 3.11.9 by `runtime.txt`;
-- no dependency version was changed;
-- no strategy, signal, threshold, sizing, risk, order, live-authority, or ML-authority behavior changed;
-- the setting only disables GitHub attestation verification for the prebuilt Python artifact when the upstream artifact has no attestation.
+The successful breakout ownership response proves the build fix allowed the latest application revision to start and register the new route.
 
 ## Safety and Authority Boundary
 
@@ -315,68 +324,18 @@ Current work preserves:
 - no change to the bear soft-pause short policy;
 - no change to the validated entry-pipeline ownership stack.
 
-## Post-Deploy Validation Order
+## Validation Endpoints
 
-### 1. Confirm Railway build completion
-
-The build must pass the Python installation phase and reach application deployment. The prior `No GitHub artifact attestations found` error must be absent.
-
-### 2. Breakout scanner ownership
-
-`/paper/breakout-scanner-ownership-status`
-
-Expected:
-
-- version `breakout-scanner-ownership-2026-07-30-v1`;
-- `overall: pass`;
-- `breakout_guard_count: 1`;
-- `opening_surge_guard_count: 1`;
-- `opening_surge_above_breakout: true`;
-- `ownership.cycle_detected: false`;
-- `ownership.truncated: false`.
-
-The first successful run may report one redundant outer wrapper removed. A second run after at least 60 seconds should report no new removal or rewrapping.
-
-### 3. Opening-surge ownership
-
-`/paper/opening-surge-participation-status`
-
-Expected:
-
-- v2 version;
-- `overall: pass`;
-- one risk guard;
-- one scan guard;
-- no callable cycle;
-- no patch on the current call;
-- classification `outermost` or `nested_but_active`.
-
-Outside the 15–45 minute window, inactive permission is normal.
-
-### 4. Entry-stack regression
-
+- `/paper/breakout-scanner-ownership-status`
+- `/paper/opening-surge-participation-status`
 - `/paper/entry-pipeline-xray-bear-ownership-status`
 - `/paper/bear-recovery-stack-status`
-
-Expected: both pass, `owned: true`, one bear wrapper, one X-Ray wrapper, and no drift.
-
-### 5. Compact system check
-
+- `/paper/bear-short-recovery-status`
+- `/paper/regime-integrity-status`
+- `/paper/underdeployment-xray?force=1`
+- `/paper/no-entry-diagnostic?force=1`
 - `/paper/self-check`
-
-Use `/paper/full-self-check` only after a failed compact check, missing critical fields, a newly timestamped error, or an unexpected warning.
-
-### 6. Next eligible market open
-
-Between 08:45 and 09:15 CDT inspect:
-
-- opening-surge `permission_live.active`;
-- `last_scan.cluster_confirmed`;
-- `last_scan.qualified_symbols`;
-- `last_scan.promoted_symbols`;
-- `/paper/no-entry-diagnostic?force=1`.
-
-Determine whether any promoted candidate was accepted or blocked by normal core timing, quality, cooldown, position, risk, or execution controls. Any accepted opening-surge entry must remain one reduced-size position.
+- `/paper/full-self-check` only when compact checks fail or omit necessary evidence.
 
 ## Definition of Done
 
@@ -386,23 +345,19 @@ Completed:
 - repeated Railway entry-stack validation;
 - July 30 missed-opening evidence and root cause documented;
 - bounded opening-surge strategy implemented;
-- opening-surge v2 chain-aware ownership deployed and validated on the prior worker;
-- duplicate breakout wrapper defect identified from Railway callable evidence;
-- breakout scanner ownership guard implemented, source-tested, and registered;
-- Railway deployment lag and outage documented;
-- Python 3.11.9 mise attestation build failure diagnosed;
-- root `mise.toml` build-only fix committed;
-- canonical handoff updated through the build recovery.
+- opening-surge v2 chain-aware ownership deployed and validated;
+- duplicate breakout wrapper defect identified, repaired, deployed, and live-validated;
+- Railway outage and deployment lag documented;
+- Python 3.11.9 `mise` attestation build failure diagnosed and repaired;
+- canonical handoff updated through the successful breakout-scanner ownership validation.
 
 Pending:
 
-- Railway successfully builds and deploys commit `4114e77163d921f50aa1d418f4ac709631738046` or a later commit containing it;
-- `/paper/breakout-scanner-ownership-status` becomes available and passes;
-- exactly one breakout guard and one opening-surge guard remain stable after a recurring watchdog interval;
-- opening surge remains above breakout;
-- entry ownership and compact self-check remain passing;
-- next eligible opening records real cluster, promotion, and candidate-to-entry evidence.
+- repeat `/paper/breakout-scanner-ownership-status` after a watchdog interval to confirm persistence with the same one-and-one wrapper counts;
+- recheck `/paper/opening-surge-participation-status`, `/paper/bear-recovery-stack-status`, and `/paper/self-check` after the final deployment;
+- during the next eligible `08:45–09:15 CDT` opening, capture real opening-surge `permission_live`, cluster, qualified-symbol, promoted-symbol, and downstream entry/rejection evidence;
+- any accepted opening-surge entry must remain one reduced-size paper position and pass the normal core pipeline.
 
 ## Exact Next Action
 
-Wait for Railway to build the newest `main` revision containing `mise.toml`. Confirm the Python installation no longer fails on GitHub artifact attestations. After the deployment is successful and active, run `/paper/breakout-scanner-ownership-status` first, then `/paper/opening-surge-participation-status`, `/paper/bear-recovery-stack-status`, and `/paper/self-check`. Repeat the two scanner ownership routes after at least 60 seconds.
+Run `/paper/breakout-scanner-ownership-status` again after at least one watchdog interval. It should remain `overall: pass` with one opening-surge guard, one breakout guard, opening surge above breakout, and no cycle or truncation. Then run `/paper/opening-surge-participation-status`, `/paper/bear-recovery-stack-status`, and `/paper/self-check`. The next strategy-validation milestone is the next eligible opening-surge window, not another threshold or risk change.
