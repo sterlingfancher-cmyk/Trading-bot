@@ -29,6 +29,7 @@ def post_worker_init(worker):
         import bear_soft_pause_short_recovery
         import bear_recovery_stack_contract
         import entry_pipeline_xray_bear_ownership_guard
+        import opening_surge_participation
 
         run_report_guard.apply(core)
         run_report_guard.register_routes(core.app, core)
@@ -43,17 +44,20 @@ def post_worker_init(worker):
         bear_recovery_stack_contract.register_routes(core.app, core)
         entry_pipeline_xray_bear_ownership_guard.start_watchdog(core)
         entry_pipeline_xray_bear_ownership_guard.register_routes(core.app, core)
+        opening_surge_participation.start_watchdog(core)
+        opening_surge_participation.register_routes(core.app, core)
         diagnostics.register_routes(core.app, core)
         diagnostics.record_module_event(
             "gunicorn.worker",
-            "diagnostics_risk_regime_bear_recovery_stack_and_xray_ownership_registered",
+            "diagnostics_risk_regime_bear_recovery_stack_xray_and_opening_surge_registered",
             error=(
                 f"{performance_risk_activation_guard.VERSION};"
                 f"{regime_integrity_underdeployment.VERSION};"
                 f"{regime_integrity_cache_guard.VERSION};"
                 f"{bear_soft_pause_short_recovery.VERSION};"
                 f"{bear_recovery_stack_contract.VERSION};"
-                f"{entry_pipeline_xray_bear_ownership_guard.VERSION}"
+                f"{entry_pipeline_xray_bear_ownership_guard.VERSION};"
+                f"{opening_surge_participation.VERSION}"
             ),
         )
     except Exception as exc:
