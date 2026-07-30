@@ -27,10 +27,11 @@
 - Lifetime net realized P&L: `+$734.82`.
 - Lifetime profit factor: `3.1781`.
 - Recent 20 exits: 15 wins, 5 losses, `+$681.29`, PF `3.4278`.
-- July 29 risk calibration, regime integrity, bear-short recovery, and entry-pipeline ownership repairs are Railway-validated.
-- July 30 opening-surge strategy and chain-aware ownership v2 are deployed and initially Railway-validated.
-- One final scanner-composition defect was exposed by the v2 chain preview: duplicate breakout-participation wrappers.
-- Breakout scanner ownership guard source and worker activation are committed; Railway validation is pending.
+- July 29 risk calibration, regime integrity, bear-short recovery, and entry-pipeline ownership work is Railway-validated.
+- July 30 opening-surge strategy and chain-aware opening-surge ownership v2 are deployed and initially Railway-validated.
+- Duplicate breakout-participation wrappers remain visible in the currently running Railway worker.
+- `breakout_scanner_ownership_guard.py` and its Gunicorn registration are committed on `main`, but Railway returned 404 for the new route at 11:01 CDT, proving those commits were not yet running.
+- This handoff commit is documentation-only and is also intended to force Railway to observe a new `main` revision.
 
 ## Current Hard Risk Ladder
 
@@ -141,13 +142,14 @@ Required entry stack:
 Key commits:
 
 - initial contract — `61287a0b8dd6f89a073a17e11904a72723901340`
+- initial registration — `0bc442df367e482fa3526a92d096db04f6be7bbb`
 - duplicate-edge repair — `38a3c935c844716f11f12ab426573e3e83707cf7`
 - v2 contract — `5f3b023dab814cc32b2f6137043d44fc63293dc5`
 - recurring owner order — `fddebd39f4fcf2d57f023ce81d916f0936e3c4a3`
 - X-Ray producer guard — `6589dd791c85575214af103df4414e678441daff`
 - final registration — `8f071f172aec72273288abf92c50fd4697db1856`
 
-Railway passed at 12:36:08 and 12:37:41 CDT on July 29, and again at 10:44:24 CDT on July 30:
+Railway passed at 12:36:08 and 12:37:41 CDT on July 29 and again at 10:44 and 11:02 CDT on July 30:
 
 - `owned: true`;
 - `entry_guard_active: true`;
@@ -185,8 +187,6 @@ Root cause:
 
 ## Opening-Surge Participation Valve
 
-### Strategy design
-
 This is a bounded defensive-dislocation exception, not general defensive-regime long permission.
 
 Permission requires:
@@ -218,7 +218,7 @@ At least two candidates must qualify in the same cycle. Up to three candidates m
 
 Universe hints added: WDC, CORZ, CRWV, LRCX, NBIS, SNDK, RIOT, AMD, BE, and PWR. Hints do not make a symbol automatically tradable.
 
-### V1 and v2 commits
+Commits and route:
 
 - v1 source — `2351b9b70e22df414aba248abc5e60b03d477431`
 - v1 Gunicorn activation — `3ec95ac24b1eed95367a3fe74813895388cb1a27`
@@ -226,41 +226,34 @@ Universe hints added: WDC, CORZ, CRWV, LRCX, NBIS, SNDK, RIOT, AMD, BE, and PWR.
 - v2 version: `opening-surge-participation-2026-07-30-v2-chain-aware`
 - route: `/paper/opening-surge-participation-status`
 
-V2 changes ownership inspection only. The strategy window, thresholds, sizing, candidate rules, and hard-risk limits are unchanged.
-
-### Railway v2 evidence at 10:45:07 CDT
-
-The v2 opening-surge route passed:
+Railway v2 evidence at 10:45 and 11:01 CDT:
 
 - `overall: pass`;
 - risk guard active, outermost, count `1`, depth `0`;
 - scan guard active, count `1`, depth `1`;
 - scan classification `nested_but_active`;
-- `risk_parameters_patched_this_call: false`;
-- `scan_signals_patched_this_call: false`;
+- no current-call rewrapping;
 - no callable cycle;
 - no truncated ownership search.
 
-The scan path was:
+Opening-surge permission was correctly inactive later in the session because it was after the 45-minute window, `bear_confirmed` was true, and NQ/ES intraday trends were down.
+
+## Duplicate Breakout Scanner Defect
+
+The opening-surge v2 chain preview showed:
 
 1. outer `breakout_participation_layer.patched_scan_signals`;
 2. opening-surge v2 wrapper;
-3. another `breakout_participation_layer.patched_scan_signals`;
+3. a second `breakout_participation_layer.patched_scan_signals`;
 4. market-participation scanner.
-
-Opening-surge v2 correctly recognized itself as nested and stopped rewrapping. Permission was correctly inactive because the system was after the opening window, `bear_confirmed` was true, and NQ/ES intraday trends were down.
-
-## Duplicate Breakout Scanner Defect and Repair
-
-The v2 chain preview exposed two breakout-participation wrappers. This is a separate outermost-only ownership defect in `breakout_participation_layer._patch_scan_signals`.
 
 Why it matters:
 
 - duplicate breakout wrappers repeat scanner work and market-data calls;
-- the outer breakout wrapper can append ordinary breakout longs after opening surge has deliberately filtered the long list to opening-surge candidates;
-- that ordering could weaken the narrow `opening_surge_only` contract even though hard risk controls remain downstream.
+- the outer breakout wrapper can append ordinary breakout longs after opening surge has deliberately filtered the long list;
+- that ordering can weaken the narrow `opening_surge_only` contract even though hard risk controls remain downstream.
 
-Repair:
+Repair committed:
 
 - new file: `breakout_scanner_ownership_guard.py`;
 - version: `breakout-scanner-ownership-2026-07-30-v1`;
@@ -275,7 +268,7 @@ The guard:
 - removes only redundant outer breakout wrappers;
 - preserves one breakout layer beneath the opening-surge filter;
 - requires one opening-surge guard and one breakout guard;
-- verifies opening surge is above breakout in the scanner chain;
+- verifies opening surge is above breakout;
 - detects callable cycles and bounded-search truncation;
 - runs a recurring ownership watchdog.
 
@@ -287,6 +280,27 @@ Source validation completed:
 - final opening-surge count was one;
 - opening surge remained above breakout;
 - no strategy threshold, signal criterion, sizing rule, hard-risk limit, live authority, or ML authority changed.
+
+## Railway Evidence at 11:01–11:02 CDT
+
+The requested breakout ownership route returned:
+
+- HTTP 404 / Flask `NotFound`;
+- diagnostics recorded the 404;
+- older endpoints continued returning healthy JSON.
+
+The same worker simultaneously showed:
+
+- opening-surge v2 present and passing;
+- one opening-surge scan guard at depth 1;
+- two breakout wrappers still visible around it;
+- entry stack passing with one bear and one X-Ray;
+- compact self-check passing;
+- auto-runner healthy, last successful cycle 10:56:23 CDT;
+- 18 scanner signals and zero entries;
+- no daily loss, drawdown, halt, or runtime error.
+
+Conclusion: the new breakout ownership source and Gunicorn registration are valid on `main`, but Railway had not deployed commits `19d19b...` and `115e921...` at the time of the 404. No strategy or threshold change is justified from this response.
 
 ## Safety and Authority Boundary
 
@@ -311,7 +325,7 @@ Current work preserves:
 
 `/paper/breakout-scanner-ownership-status`
 
-Expected after Railway deploys `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43` and `115e921ecdfeb50fde4b4b1125787e9bb190352d`:
+Expected after Railway serves the new worker:
 
 - version `breakout-scanner-ownership-2026-07-30-v1`;
 - `overall: pass`;
@@ -321,7 +335,7 @@ Expected after Railway deploys `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43` and `1
 - `ownership.cycle_detected: false`;
 - `ownership.truncated: false`.
 
-The first run may report one redundant outer wrapper removed. Subsequent runs should report no new removal or rewrapping.
+The first successful run may report one redundant outer wrapper removed. A second run after at least 60 seconds should report no new removal or rewrapping.
 
 ### 2. Opening-surge ownership
 
@@ -364,29 +378,6 @@ Between 08:45 and 09:15 CDT inspect:
 
 Determine whether any promoted candidate was accepted or blocked by normal core timing, quality, cooldown, position, risk, or execution controls. Any accepted opening-surge entry must remain one reduced-size position.
 
-## Previous Reliability Work Still in Force
-
-- `run_report_guard.py` v2 — `d1915e5a79282d0f6ccd541c6024421cf8ad86cd`
-- concurrent manual cycles return `cycle_busy` rather than waiting for Gunicorn timeout;
-- PR #6 merge — `9998c597ef91b5d6edce47cdf481efcb6ac4cc90`
-- state provenance v2 — `9ce6ddc4e03c38a7c9c4f5e103c2fbbad7f0892b`
-- missing-reason trace — `f42f4c985a7f1a7695c6cafdc46584ab379a63d8`
-- missing-reason registration — `e0cbdd54775e2e6f17ced686b4e31e3f619d159f`
-
-## Machine Learning Roadmap
-
-ML remains advisory. Before any stronger role:
-
-- decision, blocker, execution, position, and outcome records must remain joinable;
-- feature and regime provenance must remain stable;
-- labels must be complete and leakage-free;
-- persistence must be trustworthy;
-- at least 150 execution rows and 100 observed outcomes are required but not sufficient;
-- train/validation/test and walk-forward evidence must show incremental value;
-- shadow inference must run without decision authority.
-
-Any ML influence over ranking, sizing, entry permission, or capital requires explicit approval.
-
 ## Definition of Done
 
 Completed:
@@ -395,18 +386,19 @@ Completed:
 - repeated Railway entry-stack validation;
 - July 30 missed-opening evidence and root cause documented;
 - bounded opening-surge strategy implemented;
-- opening-surge v2 chain-aware ownership deployed and initially validated;
+- opening-surge v2 chain-aware ownership deployed and validated;
 - duplicate breakout wrapper defect identified from Railway callable evidence;
-- breakout scanner ownership guard implemented, source-tested, activated in Gunicorn, and documented here.
+- breakout scanner ownership guard implemented, source-tested, registered in Gunicorn, and documented;
+- 11:01 deployment-lag evidence documented.
 
 Pending:
 
-- Railway serves the breakout scanner ownership guard;
-- one breakout guard and one opening-surge guard remain stable after a recurring watchdog interval;
+- Railway serves the breakout scanner ownership guard route;
+- exactly one breakout guard and one opening-surge guard remain stable after a recurring watchdog interval;
 - opening surge remains above breakout;
 - entry ownership and compact self-check remain passing;
 - next eligible opening records real cluster, promotion, and candidate-to-entry evidence.
 
 ## Exact Next Action
 
-After Railway deploys commits `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43` and `115e921ecdfeb50fde4b4b1125787e9bb190352d`, run `/paper/breakout-scanner-ownership-status`. Then run `/paper/opening-surge-participation-status`, `/paper/bear-recovery-stack-status`, and `/paper/self-check`. Repeat the breakout and opening-surge ownership routes after at least 60 seconds to prove the scanner stack remains singular and correctly ordered.
+Wait for Railway to deploy the latest `main` revision, including the breakout ownership commits and this handoff commit. Then run `/paper/breakout-scanner-ownership-status` first. If it still returns 404 after Railway shows a completed deployment, manually select the latest deployment in Railway and choose **Redeploy**. After the route passes, run `/paper/opening-surge-participation-status`, `/paper/bear-recovery-stack-status`, and `/paper/self-check`, then repeat the first two ownership routes after at least 60 seconds.
