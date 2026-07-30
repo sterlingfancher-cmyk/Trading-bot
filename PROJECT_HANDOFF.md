@@ -28,10 +28,10 @@
 - Lifetime profit factor: `3.1781`.
 - Recent 20 exits: 15 wins, 5 losses, `+$681.29`, PF `3.4278`.
 - July 29 risk calibration, regime integrity, bear-short recovery, and entry-pipeline ownership work is Railway-validated.
-- July 30 opening-surge strategy and chain-aware opening-surge ownership v2 are deployed and initially Railway-validated.
-- Duplicate breakout-participation wrappers remain visible in the currently running Railway worker.
-- `breakout_scanner_ownership_guard.py` and its Gunicorn registration are committed on `main`, but Railway returned 404 for the new route at 11:01 CDT, proving those commits were not yet running.
-- This handoff commit is documentation-only and is also intended to force Railway to observe a new `main` revision.
+- July 30 opening-surge strategy and chain-aware opening-surge ownership v2 are source-complete and previously Railway-validated.
+- The duplicate breakout scanner ownership repair is committed but has not yet been Railway-validated because the newest deployment failed during Python installation.
+- Current build blocker: `mise` 2026.7.15 rejected the Python 3.11.9 prebuilt package because no GitHub artifact attestation was available.
+- Build fix committed: root `mise.toml` disables only Python GitHub artifact-attestation verification; `runtime.txt` still pins Python 3.11.9.
 
 ## Current Hard Risk Ladder
 
@@ -47,7 +47,7 @@
 
 ## July 29 Performance and Risk Calibration
 
-The strategy record showed positive expectancy rather than a strategy-quality collapse. The response was to preserve the strategy and repair underdeployment, regime logic, risk governance, and callable ownership.
+The strategy record showed positive expectancy rather than a strategy-quality collapse. The work preserved the strategy and repaired underdeployment, regime logic, risk governance, and callable ownership.
 
 Evidence:
 
@@ -149,7 +149,7 @@ Key commits:
 - X-Ray producer guard — `6589dd791c85575214af103df4414e678441daff`
 - final registration — `8f071f172aec72273288abf92c50fd4697db1856`
 
-Railway passed at 12:36:08 and 12:37:41 CDT on July 29 and again at 10:44 and 11:02 CDT on July 30:
+Railway passed repeatedly on July 29 and July 30:
 
 - `owned: true`;
 - `entry_guard_active: true`;
@@ -226,7 +226,7 @@ Commits and route:
 - v2 version: `opening-surge-participation-2026-07-30-v2-chain-aware`
 - route: `/paper/opening-surge-participation-status`
 
-Railway v2 evidence at 10:45 and 11:01 CDT:
+Railway v2 evidence:
 
 - `overall: pass`;
 - risk guard active, outermost, count `1`, depth `0`;
@@ -235,8 +235,6 @@ Railway v2 evidence at 10:45 and 11:01 CDT:
 - no current-call rewrapping;
 - no callable cycle;
 - no truncated ownership search.
-
-Opening-surge permission was correctly inactive later in the session because it was after the 45-minute window, `bear_confirmed` was true, and NQ/ES intraday trends were down.
 
 ## Duplicate Breakout Scanner Defect
 
@@ -255,52 +253,50 @@ Why it matters:
 
 Repair committed:
 
-- new file: `breakout_scanner_ownership_guard.py`;
-- version: `breakout-scanner-ownership-2026-07-30-v1`;
-- source commit: `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43`;
-- Gunicorn activation: `115e921ecdfeb50fde4b4b1125787e9bb190352d`;
-- route: `/paper/breakout-scanner-ownership-status`.
+- `breakout_scanner_ownership_guard.py`;
+- version `breakout-scanner-ownership-2026-07-30-v1`;
+- source commit `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43`;
+- Gunicorn activation `115e921ecdfeb50fde4b4b1125787e9bb190352d`;
+- route `/paper/breakout-scanner-ownership-status`.
 
-The guard:
+The guard is chain-aware, refuses a new breakout wrapper when one already exists, removes only redundant outer breakout wrappers, preserves one breakout layer beneath opening surge, verifies ordering, and detects callable cycles or truncated ownership search.
 
-- makes the breakout patcher chain-aware;
-- refuses a new breakout wrapper when one already exists anywhere in the callable chain;
-- removes only redundant outer breakout wrappers;
-- preserves one breakout layer beneath the opening-surge filter;
-- requires one opening-surge guard and one breakout guard;
-- verifies opening surge is above breakout;
-- detects callable cycles and bounded-search truncation;
-- runs a recurring ownership watchdog.
+The route returned 404 on the older Railway worker, proving the repair had not yet deployed. Older opening-surge, entry-stack, auto-runner, and self-check endpoints remained healthy.
 
-Source validation completed:
+## Railway Outage and mise Build Failure — July 30
 
-- module compiles;
-- simulated `breakout outer -> opening surge -> breakout inner -> core` normalized to `opening surge -> breakout -> core`;
-- final breakout count was one;
-- final opening-surge count was one;
-- opening surge remained above breakout;
-- no strategy threshold, signal criterion, sizing rule, hard-risk limit, live authority, or ML authority changed.
+After Railway service recovered, new GitHub-triggered deployments reached the build stage but failed before application startup.
 
-## Railway Evidence at 11:01–11:02 CDT
+Observed build failure:
 
-The requested breakout ownership route returned:
+```text
+mise python@3.11.9 verify GitHub artifact attestations
+mise ERROR No GitHub artifact attestations found for python@3.11.9
+```
 
-- HTTP 404 / Flask `NotFound`;
-- diagnostics recorded the 404;
-- older endpoints continued returning healthy JSON.
+Repository state before the fix:
 
-The same worker simultaneously showed:
+- `runtime.txt` pinned `python-3.11.9`;
+- no repository `mise.toml` setting disabled unavailable artifact-attestation verification;
+- application code never started, so endpoint behavior could not reflect the newest commits.
 
-- opening-surge v2 present and passing;
-- one opening-surge scan guard at depth 1;
-- two breakout wrappers still visible around it;
-- entry stack passing with one bear and one X-Ray;
-- compact self-check passing;
-- auto-runner healthy, last successful cycle 10:56:23 CDT;
-- 18 scanner signals and zero entries;
-- no daily loss, drawdown, halt, or runtime error.
+Build-only repair:
 
-Conclusion: the new breakout ownership source and Gunicorn registration are valid on `main`, but Railway had not deployed commits `19d19b...` and `115e921...` at the time of the 404. No strategy or threshold change is justified from this response.
+- new file: `mise.toml`;
+- commit: `4114e77163d921f50aa1d418f4ac709631738046`;
+- setting:
+
+```toml
+[settings]
+python.github_attestations = false
+```
+
+Scope and safety:
+
+- Python remains pinned at 3.11.9 by `runtime.txt`;
+- no dependency version was changed;
+- no strategy, signal, threshold, sizing, risk, order, live-authority, or ML-authority behavior changed;
+- the setting only disables GitHub attestation verification for the prebuilt Python artifact when the upstream artifact has no attestation.
 
 ## Safety and Authority Boundary
 
@@ -309,7 +305,7 @@ Current work preserves:
 - paper-only operation;
 - no live broker authority;
 - no ML execution authority;
-- no direct order placement by the ownership guards;
+- no direct order placement by ownership or build guards;
 - no change to the `2.50%` hard realized-loss halt;
 - no change to the `2.50%` hard intraday-drawdown halt;
 - no change to the `3.00%` absolute daily-loss ceiling;
@@ -321,11 +317,15 @@ Current work preserves:
 
 ## Post-Deploy Validation Order
 
-### 1. Breakout scanner ownership
+### 1. Confirm Railway build completion
+
+The build must pass the Python installation phase and reach application deployment. The prior `No GitHub artifact attestations found` error must be absent.
+
+### 2. Breakout scanner ownership
 
 `/paper/breakout-scanner-ownership-status`
 
-Expected after Railway serves the new worker:
+Expected:
 
 - version `breakout-scanner-ownership-2026-07-30-v1`;
 - `overall: pass`;
@@ -337,7 +337,7 @@ Expected after Railway serves the new worker:
 
 The first successful run may report one redundant outer wrapper removed. A second run after at least 60 seconds should report no new removal or rewrapping.
 
-### 2. Opening-surge ownership
+### 3. Opening-surge ownership
 
 `/paper/opening-surge-participation-status`
 
@@ -353,20 +353,20 @@ Expected:
 
 Outside the 15–45 minute window, inactive permission is normal.
 
-### 3. Entry-stack regression
+### 4. Entry-stack regression
 
 - `/paper/entry-pipeline-xray-bear-ownership-status`
 - `/paper/bear-recovery-stack-status`
 
 Expected: both pass, `owned: true`, one bear wrapper, one X-Ray wrapper, and no drift.
 
-### 4. Compact system check
+### 5. Compact system check
 
 - `/paper/self-check`
 
 Use `/paper/full-self-check` only after a failed compact check, missing critical fields, a newly timestamped error, or an unexpected warning.
 
-### 5. Next eligible market open
+### 6. Next eligible market open
 
 Between 08:45 and 09:15 CDT inspect:
 
@@ -386,14 +386,18 @@ Completed:
 - repeated Railway entry-stack validation;
 - July 30 missed-opening evidence and root cause documented;
 - bounded opening-surge strategy implemented;
-- opening-surge v2 chain-aware ownership deployed and validated;
+- opening-surge v2 chain-aware ownership deployed and validated on the prior worker;
 - duplicate breakout wrapper defect identified from Railway callable evidence;
-- breakout scanner ownership guard implemented, source-tested, registered in Gunicorn, and documented;
-- 11:01 deployment-lag evidence documented.
+- breakout scanner ownership guard implemented, source-tested, and registered;
+- Railway deployment lag and outage documented;
+- Python 3.11.9 mise attestation build failure diagnosed;
+- root `mise.toml` build-only fix committed;
+- canonical handoff updated through the build recovery.
 
 Pending:
 
-- Railway serves the breakout scanner ownership guard route;
+- Railway successfully builds and deploys commit `4114e77163d921f50aa1d418f4ac709631738046` or a later commit containing it;
+- `/paper/breakout-scanner-ownership-status` becomes available and passes;
 - exactly one breakout guard and one opening-surge guard remain stable after a recurring watchdog interval;
 - opening surge remains above breakout;
 - entry ownership and compact self-check remain passing;
@@ -401,4 +405,4 @@ Pending:
 
 ## Exact Next Action
 
-Wait for Railway to deploy the latest `main` revision, including the breakout ownership commits and this handoff commit. Then run `/paper/breakout-scanner-ownership-status` first. If it still returns 404 after Railway shows a completed deployment, manually select the latest deployment in Railway and choose **Redeploy**. After the route passes, run `/paper/opening-surge-participation-status`, `/paper/bear-recovery-stack-status`, and `/paper/self-check`, then repeat the first two ownership routes after at least 60 seconds.
+Wait for Railway to build the newest `main` revision containing `mise.toml`. Confirm the Python installation no longer fails on GitHub artifact attestations. After the deployment is successful and active, run `/paper/breakout-scanner-ownership-status` first, then `/paper/opening-surge-participation-status`, `/paper/bear-recovery-stack-status`, and `/paper/self-check`. Repeat the two scanner ownership routes after at least 60 seconds.
