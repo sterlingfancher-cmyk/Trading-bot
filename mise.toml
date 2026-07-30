@@ -1,0 +1,7 @@
+# Railway/mise build compatibility.
+# Python remains pinned by runtime.txt; this only disables GitHub artifact
+# attestation verification for the prebuilt CPython package when attestations
+# are unavailable from the upstream artifact.
+
+[settings]
+python.github_attestations = false
