@@ -29,9 +29,8 @@
 - Recent 20 exits: 15 wins, 5 losses, `+$681.29`, PF `3.4278`.
 - July 29 risk calibration, regime integrity, bear-short recovery, and entry ownership are Railway-validated.
 - July 30 opening-surge ownership and breakout-scanner ownership are Railway-validated.
-- July 31 opening-surge score calibration is source-complete and awaiting Railway validation.
-- Next endpoint after deployment: `/paper/opening-surge-score-calibration-status`.
-- Next strategy milestone: capture a real `08:45–09:15 CDT` opening cycle after the calibration deployment.
+- July 31 two-stage opening-surge score calibration is deployed and Railway-validated.
+- Next operational task: recheck ownership/self-check after the documentation deployment, then capture a real calibrated opening cycle during the next eligible `08:45–09:15 CDT` window.
 
 ## Hard Risk Ladder
 
@@ -71,9 +70,9 @@ Validated state:
 3. `market_participation_accelerator`
 4. remaining scanner chain
 
-Railway evidence on July 30:
+Validated July 30 state:
 
-- `breakout-scanner-ownership-2026-07-30-v1`
+- version `breakout-scanner-ownership-2026-07-30-v1`
 - `overall: pass`
 - one opening-surge guard
 - one breakout guard
@@ -196,7 +195,7 @@ High-score names later labeled extended included AMD `0.066916`, ALAB `0.051672`
 
 The opening-surge valve was created to allow one tightly bounded paper long when current opening tape strongly contradicted a defensive historical label.
 
-## July 31 Opening-Surge Calibration Evidence
+## July 31 Raw-Score Short-Circuit Evidence
 
 At `08:51:09 CDT`, 21.09 minutes after the open:
 
@@ -216,35 +215,31 @@ However:
 - zero promoted names
 - every stored profile stopped at `score_below_opening_surge_floor`
 - top raw scores were BWXT `0.021164`, BE `0.019536`, CVX `0.017632`, HWM `0.017491`, STX `0.016840`, and DELL `0.016539`
-- the fixed raw floor was `0.045`
+- fixed raw floor was `0.045`
 
 Root cause:
 
-The same `0.045` value was being used as both:
+The same `0.045` value was being used as both a pre-profile screen and the effective promoted score. Candidates never reached the existing gap, follow-through, opening-range, near-high, momentum, volume, and bucket tests.
 
-1. a pre-profile screening threshold; and
-2. the effective promoted score.
-
-This short-circuited intraday analysis. Candidates never reached the existing gap, follow-through, opening-range, near-high, momentum, volume, and bucket tests.
-
-The later `10:31:21 CDT` cycle found 28 signals but remained in a deliberate `risk_off` neither-side state. That midday policy was not changed in this calibration. The evidence-supported defect was the opening valve's raw-score short circuit.
+The later `10:31:21 CDT` cycle found 28 signals but remained in a deliberate `risk_off` neither-side state. That midday policy was not changed. The evidence-supported defect was the opening valve's raw-score short circuit.
 
 ## July 31 Two-Stage Opening Score Calibration
 
-New file:
+File and commits:
 
 - `opening_surge_score_calibration.py`
 - version `opening-surge-score-calibration-2026-07-31-v1`
 - source commit `faf6fab8416c14b5e753b0f909edbebe963bdcac`
 - Gunicorn activation `747a737848de7562035c44507ab81abe694cd11e`
+- initial calibration handoff `2bee3f71e6d638c0e1dfd2b19077866af350222c`
 - route `/paper/opening-surge-score-calibration-status`
 
 Behavior:
 
-- raw profile prefilter becomes `0.012`
+- raw profile prefilter is `0.012`
 - existing opening window remains 15–45 minutes
-- existing permission requirements remain unchanged
-- existing gap, follow-through, opening-range, near-high, momentum, relative-volume, bucket, and cluster tests remain unchanged
+- opening permission requirements remain unchanged
+- gap, follow-through, opening-range, near-high, momentum, relative-volume, bucket, and cluster tests remain unchanged
 - candidates that fail structure are not promoted
 - fully structure-confirmed candidates receive an auditable composite score
 - final promoted score floor remains `0.045`
@@ -266,15 +261,35 @@ Composite ledger:
 - calculated score
 - adjusted promoted score
 
-This is not a blanket threshold reduction. It separates candidate profiling from final tradability.
+This is not a blanket entry-threshold reduction. It separates candidate profiling from final tradability.
+
+## Railway Validation — July 31, 10:48:54 CDT
+
+The calibration endpoint returned:
+
+- version `opening-surge-score-calibration-2026-07-31-v1`
+- `overall: pass`
+- `status: ok`
+- `active: true`
+- `patched_this_call: false`
+- profile prefilter `0.012`
+- final structure score floor `0.045`
+- final score cap `0.080`
+- structure base credit `0.018`
+- opening-surge base version `opening-surge-participation-2026-07-30-v2-chain-aware`
+- existing structure tests unchanged
+- existing cluster requirement unchanged
+- existing opening window unchanged
+- paper-only authority preserved
+- no live authority, ML authority, hard-risk, position-limit, or opening-permission change
+
+`last_profile` was empty because deployment and validation occurred after the eligible morning window. That is expected and is not an installation failure.
+
+This closes deployment/installation validation for the two-stage calibration. Real candidate and execution validation remains pending the next eligible opening window.
 
 ## Validation Endpoints
 
-Primary post-deploy:
-
-- `/paper/opening-surge-score-calibration-status`
-
-Then:
+Post-deploy regression checks:
 
 - `/paper/opening-surge-participation-status`
 - `/paper/breakout-scanner-ownership-status`
@@ -306,13 +321,11 @@ Completed:
 - duplicate breakout scanner repair and live validation
 - Railway Python attestation build recovery
 - July 31 raw-score short-circuit diagnosis
-- two-stage score calibration source and startup wiring
+- two-stage score calibration source, startup wiring, deployment, and installation validation
 
 Pending:
 
-- Railway serves `opening-surge-score-calibration-2026-07-31-v1`
-- calibration endpoint passes
-- opening-surge and scanner ownership routes remain passing
+- opening-surge, breakout-scanner, entry-stack, and compact self-check regression checks after the calibration deployment
 - next eligible opening profiles candidates with raw scores at or above `0.012`
 - at least two names must still pass every structure test before promotion
 - any accepted position remains one reduced-size paper entry and clears the normal core pipeline
@@ -320,17 +333,13 @@ Pending:
 
 ## Exact Next Action
 
-After Railway deploys commits `faf6fab8416c14b5e753b0f909edbebe963bdcac` and `747a737848de7562035c44507ab81abe694cd11e`, run:
+Run these after the documentation deployment is active:
 
-`https://trading-bot-clean.up.railway.app/paper/opening-surge-score-calibration-status`
+1. `/paper/opening-surge-participation-status`
+2. `/paper/breakout-scanner-ownership-status`
+3. `/paper/bear-recovery-stack-status`
+4. `/paper/self-check`
 
-Expected:
+Expected: all pass, one opening-surge wrapper, one breakout wrapper, one bear wrapper, one X-Ray wrapper, no cycle, no recursion, and no newly timestamped runtime error.
 
-- version `opening-surge-score-calibration-2026-07-31-v1`
-- `overall: pass`
-- `active: true`
-- `settings.profile_prefilter_score: 0.012`
-- `settings.final_structure_score_floor: 0.045`
-- existing structure tests, cluster requirement, and opening window unchanged
-
-Then recheck opening-surge ownership, breakout-scanner ownership, entry ownership, and compact self-check. The actual candidate-to-entry validation must occur during the next `08:45–09:15 CDT` opening window.
+The actual candidate-to-entry milestone must be evaluated during the next `08:45–09:15 CDT` opening window. At that time, confirm that raw scores at or above `0.012` reach full structure profiling and that only a two-name structurally confirmed cluster can be promoted.
