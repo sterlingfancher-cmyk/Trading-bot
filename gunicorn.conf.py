@@ -30,6 +30,7 @@ def post_worker_init(worker):
         import bear_recovery_stack_contract
         import entry_pipeline_xray_bear_ownership_guard
         import opening_surge_participation
+        import opening_surge_score_calibration
         import breakout_scanner_ownership_guard
 
         run_report_guard.apply(core)
@@ -47,12 +48,14 @@ def post_worker_init(worker):
         entry_pipeline_xray_bear_ownership_guard.register_routes(core.app, core)
         opening_surge_participation.start_watchdog(core)
         opening_surge_participation.register_routes(core.app, core)
+        opening_surge_score_calibration.start_watchdog(core)
+        opening_surge_score_calibration.register_routes(core.app, core)
         breakout_scanner_ownership_guard.start_watchdog(core)
         breakout_scanner_ownership_guard.register_routes(core.app, core)
         diagnostics.register_routes(core.app, core)
         diagnostics.record_module_event(
             "gunicorn.worker",
-            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_and_breakout_scanner_registered",
+            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_score_and_breakout_scanner_registered",
             error=(
                 f"{performance_risk_activation_guard.VERSION};"
                 f"{regime_integrity_underdeployment.VERSION};"
@@ -61,6 +64,7 @@ def post_worker_init(worker):
                 f"{bear_recovery_stack_contract.VERSION};"
                 f"{entry_pipeline_xray_bear_ownership_guard.VERSION};"
                 f"{opening_surge_participation.VERSION};"
+                f"{opening_surge_score_calibration.VERSION};"
                 f"{breakout_scanner_ownership_guard.VERSION}"
             ),
         )
