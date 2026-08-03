@@ -6,6 +6,7 @@ on:
     paths:
       - "performance_audit_lab.py"
       - "performance_audit_lab_v2.py"
+      - "performance_audit_v2_async_route.py"
       - "performance_audit_composition_guard.py"
       - "paper_underdeployment_repair.py"
       - "paper_regime_adaptive_policy.py"
@@ -26,6 +27,7 @@ jobs:
           python -m py_compile \
             performance_audit_lab.py \
             performance_audit_lab_v2.py \
+            performance_audit_v2_async_route.py \
             performance_audit_composition_guard.py \
             paper_underdeployment_repair.py \
             paper_regime_adaptive_policy.py \
