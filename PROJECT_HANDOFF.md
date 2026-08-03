@@ -7,26 +7,25 @@
 - Railway: `https://trading-bot-clean.up.railway.app`
 - Mode: paper only
 - Live broker authority: none
-- ML execution authority: none; advisory only
+- ML execution authority: advisory only
 - Hard-risk ladder unchanged:
   - 1.00% soft realized-loss pause
   - 2.50% hard realized-loss halt
   - 2.50% hard intraday-drawdown halt
   - 3.00% absolute daily-loss ceiling
 
-## Current Account State
+## Current Account Baseline
 
-Latest supplied account snapshot at `2026-08-03 11:42:36 CDT`:
+Latest supplied snapshot at `2026-08-03 11:42:36 CDT`:
 
 - equity: `$10,736.85`
 - cash: `$10,240.9964`
-- one open paper position: `DELL`
+- open paper position: `DELL`
 - unrealized P&L: `+$2.05`
 - realized today: `$0.00`
 - realized lifetime: `+$734.82`
 - completed exits: 52
-- wins: 35
-- losses: 17
+- wins/losses: 35/17
 - prior lifetime profit factor: approximately `3.18`
 
 ## Canonical Scanner Stack
@@ -38,18 +37,17 @@ Required order:
 3. one `market_participation_accelerator`
 4. core scanner
 
-Railway validation at `11:25:02 CDT`:
+Railway validation:
 
 - `overall: pass`
-- opening-surge count 1 at depth 0
-- breakout count 1 at depth 1
-- market-participation count 1 at depth 2
+- one opening-surge wrapper
+- one breakout wrapper
+- one market-participation wrapper
 - `ordered: true`
-- `cycle_detected: false`
-- `truncated: false`
+- no cycle or truncation
 - no rebuild required
 
-Scanner reliability source:
+Source:
 
 - `scanner_runtime_contract.py`
 - version `scanner-runtime-contract-2026-08-03-v1`
@@ -64,13 +62,11 @@ Required order:
 3. deterministic breakout/composition callable
 4. direct core entry pipeline
 
-### Atomic ownership repair
-
-Source:
+Atomic ownership source:
 
 - `entry_pipeline_xray_bear_ownership_guard.py`
 - version `entry-pipeline-xray-bear-ownership-2026-08-03-v2-atomic`
-- final source commit `1786a15e4d0c7fb96adb6e78c057bcde5bac1b62`
+- commit `1786a15e4d0c7fb96adb6e78c057bcde5bac1b62`
 
 Railway validation at `11:41:09–11:41:41 CDT`:
 
@@ -80,104 +76,42 @@ Railway validation at `11:41:09–11:41:41 CDT`:
 - `entry_guard_active: true`
 - bear wrapper count 1
 - X-Ray wrapper count 1
-- known wrapper depth 3
-- no drift
-- no repair required on the status call
-- deterministic composition remains direct-core based
-- neutral staged valve preserved in the canonical participation chain
+- no drift or repair required
+- composition remains direct-core based and recursion-safe
 
-The atomic repair closes the prior watchdog race by serializing stack reconstruction with the bear installer lock.
+This repair changes composition/ownership only. It does not change signals, thresholds, sizing, hard-risk limits, live authority, ML authority, or place orders directly.
 
-Authority boundary:
-
-- composition and ownership only
-- no signal-generation change
-- no threshold change
-- no sizing change
-- no hard-risk change
-- no direct orders
-- no live or ML authority
-
-## Self-Check and Recursion State
+## Recursion and Error Freshness
 
 Earlier August 3 failure:
 
 - scanner recursion at `09:45:34 CDT`
-- error: `maximum recursion depth exceeded while calling a Python object`
+- `maximum recursion depth exceeded while calling a Python object`
 
-Repairs:
+Current status:
 
-- canonical scanner runtime contract
-- successful-cycle error clearing
-- self-check freshness logic
-
-Self-check source:
-
-- `fast_self_check_override.py`
-- version `fast-self-check-override-2026-08-03-v4-error-freshness`
-- commit `b6d32ee66aa59e4a9e20b26b8706d597db32a5c6`
-
-Latest supplied self-check at `11:42:36 CDT`:
-
-- `overall: pass`
+- later successful cycles superseded the failure
 - `last_error: null`
-- `last_error_active: false`
-- `recursion_error_active: false`
-- prior recursion retained only under recovered-error telemetry
-
-## Opening-Surge Participation
-
-Opening-surge ownership:
-
-- chain-aware v2 commit `2069a448066c3cc8f9fec0f7497ee024ba6ee8c7`
-
-Breakout ownership:
-
-- source commit `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43`
-- worker activation `115e921ecdfeb50fde4b4b1125787e9bb190352d`
-
-Two-stage opening score calibration:
-
-- raw profiling prefilter `0.012`
-- final structure score floor `0.045`
-- final cap `0.080`
-- source commit `faf6fab8416c14b5e753b0f909edbebe963bdcac`
-- activation commit `747a737848de7562035c44507ab81abe694cd11e`
+- no active recursion
+- historical failure retained only as recovered-error telemetry
 
 ## Neutral Momentum Starter
 
-### V2 staged two-position policy
+### Staged two-position policy
 
-Source commit:
-
-- `ab10a8ef3fadf956a510f1fcfff4dc22c0201379`
-
-Validated settings:
+Existing limits retained:
 
 - maximum entries per day: 2
 - maximum entries per cycle: 1
-- maximum starter/open-position stage: 2
+- maximum staged starter positions: 2
 - minimum spacing: 900 seconds
 - first-position minimum unrealized return: `-0.50%`
 - maximum combined exposure: `36%`
 - second candidate must differ by sector or strategy bucket
-- starter allocation factor remains `0.18`
-- normal portfolio cap unchanged
-- hard-risk ladder unchanged
+- allocation factor: `0.18`
+- normal portfolio cap and hard-risk ladder unchanged
 
-### Railway evidence that exposed the v2 mode leak
-
-At `11:41:01` and `11:42:12 CDT`, the staged gate evaluated WDC and NBIS while the supplied market mode was `constructive`.
-
-The v2 wrapper returned:
-
-- `second_starter_requires_neutral_mode`
-
-This happened before the original constructive/risk-on starter could evaluate the candidates. The neutral stage constraints should apply only in neutral mode; stronger non-neutral modes must pass through to the pre-existing starter.
-
-The compact self-check at `11:42:36 CDT` separately reported a neutral risk snapshot. These are different telemetry moments and do not invalidate the earlier constructive evaluations.
-
-### V3 neutral-only staging repair
+### Neutral-only staging v3
 
 Source:
 
@@ -185,91 +119,118 @@ Source:
 - version `neutral-momentum-starter-extension-2026-08-03-v3-neutral-only-staging`
 - commit `9be472986c6624139833d48bf4e52201f7416205`
 
-Behavior:
+Reason for v3:
 
-- replaces any older neutral staged wrapper instead of stacking above it
-- replaces any older neutral context wrapper
-- applies spacing, first-position health, diversification, and exposure checks only when market mode is exactly `neutral`
-- for `constructive`, `risk_on`, and other non-neutral modes, calls the pre-existing starter directly
-- records `non_neutral_passthrough` telemetry
-- preserves the two-per-day, one-per-cycle neutral policy and existing `0.18` allocation factor
-- keeps all normal score, rank, quality, cooldown, cash, risk, position, and execution checks downstream
-- does not change the main entry loop, hard-risk limits, live authority, or ML authority
+- v2 incorrectly returned `second_starter_requires_neutral_mode` for WDC and NBIS while their supplied market context was `constructive`
+- this blocked the original constructive/risk-on starter before it could evaluate those candidates
 
-No Gunicorn update is required because the existing worker already imports and watches `neutral_momentum_starter_extension`.
+V3 behavior:
 
-## Current Railway Validation Status
+- neutral staging checks apply only when market mode is exactly `neutral`
+- `constructive`, `risk_on`, and other non-neutral contexts pass through to the original starter
+- old neutral wrappers are replaced instead of stacked
+- normal score, rank, quality, cooldown, cash, risk, position, and execution checks remain downstream
+- no hard-risk, live-authority, ML-authority, main-entry-loop, or direct-order change
 
-Completed and passing:
+Railway validation of v3 remains pending.
 
-- scanner canonical and cycle-free
-- atomic entry stack ownership
-- exactly one bear wrapper
-- exactly one X-Ray wrapper
-- deterministic composition direct-core based
-- neutral staged valve present in canonical participation chain
-- compact self-check passing
-- no active recursion
-- DELL position preserved with positive unrealized P&L
+## Single Routine Test
 
-Pending deployment validation:
+### All-in-one self-check
 
-- neutral starter v3
-- non-neutral passthrough must no longer return `second_starter_requires_neutral_mode`
+Source:
 
-## Post-Deploy Validation
+- `fast_self_check_override.py`
+- version `fast-self-check-override-2026-08-03-v5-all-in-one`
+- commit `b95d8548fb6bfc2b03fa90b9657f1e08da4127d4`
 
-Run:
+Routine test link:
 
-1. `/paper/neutral-momentum-starter-status`
-2. `/paper/entry-pipeline-xray-bear-ownership-status`
-3. `/paper/entry-pipeline-composition-status`
-4. `/paper/bear-recovery-stack-status`
-5. `/paper/self-check`
+- `/paper/self-check`
 
-Expected neutral starter status:
+The single endpoint now runs and summarizes:
+
+1. scanner-stack ownership/order
+2. atomic entry-stack ownership
+3. entry-pipeline composition and recursion safety
+4. bear-recovery stack ownership
+5. neutral starter installation and staged settings
+6. account, auto-runner, risk, error freshness, scanner counts, and open positions
+
+The response remains compact. Each component returns only its key version, pass/warn state, ownership/count fields, and current gate reason.
+
+Top-level summary fields:
+
+- `components_checked`
+- `components_passed`
+- `components_warned`
+- `failing_components`
+- `base_failures`
+- `next_action`
+
+Top-level `overall: pass` requires:
+
+- no active auto-runner error
+- no risk halt
+- no self-defense activation
+- auto-runner/thread not explicitly disabled
+- every component check passing
+
+The endpoint may perform the same bounded composition/ownership repair that the individual ownership endpoints already perform. It does not change trading strategy, thresholds, sizing, risk limits, live authority, or ML authority.
+
+## New Validation Workflow
+
+After Railway deploys the latest commits, run only:
+
+`https://trading-bot-clean.up.railway.app/paper/self-check`
+
+Expected:
+
+- type `all_in_one_self_check`
+- version `fast-self-check-override-2026-08-03-v5-all-in-one`
+- `one_test_complete: true`
+- `components_checked: 5`
+- `components_warned: 0`
+- `failing_components: []`
+- `base_failures: []`
+- top-level `overall: pass`
+
+Expected component results:
+
+- `scanner_stack.overall: pass`
+- `entry_stack_ownership.overall: pass`
+- `entry_composition.overall: pass`
+- `bear_recovery_stack.overall: pass`
+- `neutral_starter.overall: pass`
+
+Expected neutral component after v3 deployment:
 
 - version `neutral-momentum-starter-extension-2026-08-03-v3-neutral-only-staging`
-- `overall: pass`
-- `active: true`
-- `settings.non_neutral_passthrough_unchanged: true`
-- `authority.neutral_stage_applies_only_in_neutral_mode: true`
-- max entries per day 2
-- max entries per cycle 1
-- 900-second spacing
-- first-position floor `-0.50%`
-- combined exposure cap `36%`
+- `neutral_only_staging: true`
+- maximum entries per day 2
+- maximum entries per cycle 1
+- maximum open positions 2
+- minimum spacing 900 seconds
+- combined exposure cap 36%
 
-Expected entry-stack regression:
-
-- atomic ownership version remains v2
-- `owned: true`
-- bear wrapper count 1
-- X-Ray wrapper count 1
-- composition `stack_stable: true`
-- participation chain cycle-free
-- no recursion
-
-After a scanner cycle:
-
-- in neutral mode, `last_evaluation.staged_gate` may report spacing, health, diversification, exposure, prior quality rejection, or stage-two allowance
-- in constructive/risk-on mode, `last_evaluation.staged_gate.reason` should be `non_neutral_passthrough`, with the original starter result preserved
-- it must not report `second_starter_requires_neutral_mode` for a non-neutral market
+Use an individual endpoint only when its component name appears in `failing_components`. Full diagnostics remain available at `/paper/full-self-check` for intentional troubleshooting, not routine testing.
 
 ## Definition of Done
 
-Completed:
+Completed and Railway-validated:
 
-- scanner recursion repair
-- stale-error telemetry repair
+- scanner recursion recovery
+- canonical scanner ownership
+- stale-error telemetry correction
 - first neutral paper entry
-- DELL position opened and managed normally
-- staged two-position neutral policy
-- atomic entry-stack ownership repair
-- exact one-bear/one-X-Ray Railway validation
+- DELL opened and managed normally
+- staged two-position neutral policy v2 installation
+- atomic public entry-stack ownership
+- exactly one bear and one X-Ray wrapper
 
-Pending:
+Completed in source; Railway validation pending:
 
-- Railway validation of neutral starter v3 non-neutral passthrough
-- continued observation of DELL management and exit
-- collection of several staged-neutral outcomes before any further score, size, or window expansion
+- neutral starter v3 non-neutral passthrough
+- all-in-one self-check v5
+
+Do not make another score, size, risk, or window change until the one-link self-check passes and several staged-neutral outcomes are observed.
