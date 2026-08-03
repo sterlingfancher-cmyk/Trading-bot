@@ -8,51 +8,30 @@
 - Mode: paper only
 - Live broker authority: none
 - ML execution authority: none; advisory only
-- Hard-risk ladder remains:
-  - 1.00% realized-loss soft pause
-  - 2.50% realized-loss hard halt
-  - 2.50% intraday-drawdown hard halt
-  - 3.00% absolute daily-equity-loss ceiling
+- Hard-risk ladder remains unchanged:
+  - 1.00% soft realized-loss pause
+  - 2.50% hard realized-loss halt
+  - 2.50% hard intraday-drawdown halt
+  - 3.00% absolute daily-loss ceiling
 
-## Account Baseline
+## Account and Performance Baseline
 
-Latest supplied account snapshot:
+Latest supplied runtime snapshot at `2026-08-03 11:25:37 CDT`:
 
-- cash/equity approximately `$10,734.80`
-- 52 completed exits before the August 3 cycle
-- 35 wins, 17 losses
-- realized total `+$734.82`
-- lifetime paper profit factor previously approximately `3.18`
+- equity: `$10,736.85`
+- cash: `$10,240.9964`
+- one open paper position: `DELL`
+- unrealized P&L: `+$2.05`
+- realized today: `$0.00`
+- realized lifetime: `+$734.82`
+- completed exits: 52
+- wins: 35
+- losses: 17
+- prior lifetime profit factor: approximately `3.18`
 
-The project’s current priority is reliable participation without weakening the proven hard-risk controls.
+The strategy has positive historical paper expectancy. The current engineering objective is reliable participation without loosening the hard-risk ladder.
 
-## Engineering Rules
-
-1. Reliability before performance.
-2. Evidence before modification.
-3. Do not lower hard-risk controls merely to manufacture activity.
-4. Do not add live or ML authority without explicit approval.
-5. Avoid recursive main-loop wrappers; use bounded ownership contracts or narrow internal valves.
-6. Update this handoff after every material code/configuration change and Railway validation milestone.
-
-## Validated Architecture
-
-### Entry stack
-
-Required order:
-
-1. `bear_soft_pause_short_recovery`
-2. one Entry Pipeline X-Ray
-3. deterministic composition/breakout callable
-4. direct core entry pipeline
-
-Prior Railway validation:
-
-- `owned: true`
-- `entry_guard_active: true`
-- exactly one bear wrapper
-- exactly one X-Ray wrapper
-- no entry-stack drift or recursion
+## Canonical Runtime Architecture
 
 ### Scanner stack
 
@@ -61,144 +40,109 @@ Required order:
 1. `opening_surge_participation`
 2. one `breakout_participation_layer`
 3. one `market_participation_accelerator`
-4. deepest core scanner
+4. core scanner
 
-Railway validation at `10:57:00 CDT` on August 3:
+Railway validation at `11:25:02 CDT`:
 
 - `overall: pass`
-- opening surge depth `0`
-- breakout depth `1`
-- market participation depth `2`
+- one opening-surge wrapper at depth 0
+- one breakout wrapper at depth 1
+- one market-participation wrapper at depth 2
 - `ordered: true`
-- one of each approved layer
-- no cycle
-- no truncation
+- `cycle_detected: false`
+- `truncated: false`
 - no rebuild required
 
-## Prior Work Summary
+### Public entry stack
 
-### July 29
+Required order:
+
+1. `bear_soft_pause_short_recovery`
+2. one Entry Pipeline X-Ray
+3. deterministic breakout/composition callable
+4. direct core entry pipeline
+
+This stack is composition/ownership only. It must not change signals, thresholds, sizing, hard-risk limits, live authority, ML authority, or place orders directly.
+
+## July 29–31 Repairs
+
+### Performance and regime reliability
 
 - staged performance-risk ladder
 - regime-integrity repair
 - side-aware bear soft-pause short recovery
 - deterministic entry-stack ownership
 
-### July 30
+### Opening-surge participation
 
-Added the bounded opening-surge sleeve:
+July 30 bounded opening-surge valve:
 
 - 15–45 minutes after open
-- empty-book requirement
-- strong NQ confirmation
+- empty book
+- one reduced-size paper position per day
 - no confirmed-bear long exception
-- gap, follow-through, opening-range, near-high, momentum, volume, bucket, and cluster checks
+- strong NQ confirmation
+- gap, follow-through, opening-range, near-high, momentum, volume, bucket, and cluster tests
 
-Key commits:
+Key versions/commits:
 
-- opening-surge chain-aware ownership: `2069a448066c3cc8f9fec0f7497ee024ba6ee8c7`
+- opening-surge chain-aware v2: `2069a448066c3cc8f9fec0f7497ee024ba6ee8c7`
 - breakout scanner ownership: `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43`
-- breakout worker activation: `115e921ecdfeb50fde4b4b1125787e9bb190352d`
+- worker activation: `115e921ecdfeb50fde4b4b1125787e9bb190352d`
 
-### July 31
-
-Fixed the raw-score short circuit that prevented candidates from reaching structure analysis:
+July 31 two-stage score calibration:
 
 - raw profiling prefilter `0.012`
-- final structure-confirmed floor `0.045`
+- final structurally confirmed score floor `0.045`
 - final score cap `0.080`
-- all existing structure and cluster checks retained
+- structure and cluster tests retained
 
-Key commits:
+Commits:
 
-- score calibration: `faf6fab8416c14b5e753b0f909edbebe963bdcac`
-- worker activation: `747a737848de7562035c44507ab81abe694cd11e`
+- calibration source: `faf6fab8416c14b5e753b0f909edbebe963bdcac`
+- activation: `747a737848de7562035c44507ab81abe694cd11e`
 
-Railway Python build repair:
+## August 3 Scanner Recursion and Neutral Participation
 
-- `mise.toml` commit `4114e77163d921f50aa1d418f4ac709631738046`
-- Python remains pinned at 3.11.9
-- only unavailable GitHub artifact-attestation verification was disabled
+### Failure evidence
 
-## August 3 Runtime Failure and Recovery
+Morning self-check showed an intermittent scanner recursion error at `09:45:34 CDT`:
 
-Morning evidence at `10:29:16 CDT` showed:
-
-- scanner found 25 signals
-- market mode `neutral`
-- no loss, drawdown, halt, self-defense, or open exposure
 - `maximum recursion depth exceeded while calling a Python object`
+- 25 scanner signals
+- zero entries at that snapshot
+- market mode `neutral`
 
-Interpretation:
-
-1. The `09:45` cycle genuinely hit scanner-callable recursion.
-2. A later successful cycle proved the failure was intermittent.
-3. The old self-check treated the stored error text as still active after recovery.
-4. The opening-surge window had ended at `09:15`.
-5. The existing starter accepted `risk_on` and `constructive`, but not strong `neutral` tape.
+A later cycle succeeded, proving the recursion was intermittent. The old self-check also continued to report the prior error as active after later successful cycles.
 
 ### Scanner runtime contract
 
-File and commit:
+File/version/commit:
 
 - `scanner_runtime_contract.py`
-- version `scanner-runtime-contract-2026-08-03-v1`
-- commit `77e0ae2d67bcbe1a3e21fe71d86875e8bae67a00`
-- route `/paper/scanner-runtime-contract-status`
+- `scanner-runtime-contract-2026-08-03-v1`
+- `77e0ae2d67bcbe1a3e21fe71d86875e8bae67a00`
 
 Behavior:
 
-- bounded callable-graph inspection
-- deterministic canonical scanner order
-- repair only when missing, duplicated, cyclic, truncated, or misordered
-- successful cycles clear stale error telemetry while retaining recovered-error history
-- no signal, threshold, sizing, hard-risk, order, live, or ML authority change
+- bounded callable-chain inspection
+- exact scanner layer counts/order
+- deterministic rebuild only when missing, duplicated, cyclic, truncated, or misordered
+- successful cycles clear stale `last_error` while preserving recovered-error telemetry
 
-### Neutral momentum starter v1
+Railway validation:
 
-File and commits:
+- canonical scanner stack healthy
+- no active recursion
+- no rebuild required
 
-- `neutral_momentum_starter_extension.py`
-- v1 `neutral-momentum-starter-extension-2026-08-03-v1`
-- source commit `e9f14fdf3221ad9090c048b198d8f745cc4cd34d`
-- worker activation `1303d2a3a7ab4c1db874a504c6d7364e810395bc`
-- route `/paper/neutral-momentum-starter-status`
+### Self-check freshness correction
 
-Initial bounded context:
-
-- market mode exactly `neutral`
-- 45–180 minutes after open
-- risk score at least `40`
-- scanner cluster at least `15`
-- at least four long signals when available
-- no confirmed bear or defensive rotation
-- no bearish/blocking futures or breadth risk-off confirmation
-- positive tape evidence required
-- existing candidate score/rank, quality, cooldown, cash, position, risk, and execution controls retained
-
-### First post-repair entry evidence
-
-The cycle completed at `10:58:34 CDT`. The diagnostic at `10:59:46 CDT` reported:
-
-- scanner signals `68`
-- long signals `10`
-- short signals `2`
-- `entries_count: 1`
-- verdict `entries_taken_last_cycle`
-- market mode `neutral`
-- risk score `52`
-- longs allowed
-- no loss, drawdown, halt, profit guard, or self-defense block
-
-This established that the repaired execution path was no longer structurally stuck flat.
-
-### Self-check freshness repair
-
-File and commit:
+File/version/commit:
 
 - `fast_self_check_override.py`
-- version `fast-self-check-override-2026-08-03-v4-error-freshness`
-- commit `b6d32ee66aa59e4a9e20b26b8706d597db32a5c6`
+- `fast-self-check-override-2026-08-03-v4-error-freshness`
+- `b6d32ee66aa59e4a9e20b26b8706d597db32a5c6`
 
 Railway validation at `11:08:45 CDT`:
 
@@ -206,153 +150,228 @@ Railway validation at `11:08:45 CDT`:
 - `last_error: null`
 - `last_error_active: false`
 - `recursion_error_active: false`
-- prior recursion preserved under `last_recovered_error`
-- no strategy, threshold, sizing, risk, order, live, or ML authority change
+- prior error retained under `last_recovered_error`
 
-## August 3 Neutral Momentum Starter v2 — Staged Two-Position Policy
+## Neutral Momentum Starter
 
-File and commit:
+### V1 bounded neutral context
+
+The first neutral extension added a reduced-size starter path from 45–180 minutes after open when:
+
+- market mode exactly `neutral`
+- risk score at least 40
+- scanner cluster at least 15
+- at least four long signals when available
+- no confirmed bear or defensive rotation
+- no bearish/blocking futures or breadth risk-off confirmation
+- positive leadership/tape evidence
+
+The first post-repair cycle opened one paper entry. The current position is `DELL`.
+
+### V2 staged two-position policy
+
+File/version/commit:
 
 - `neutral_momentum_starter_extension.py`
-- version `neutral-momentum-starter-extension-2026-08-03-v2-staged-two-position`
-- source commit `ab10a8ef3fadf956a510f1fcfff4dc22c0201379`
-- existing route remains `/paper/neutral-momentum-starter-status`
-- existing Gunicorn import/watchdog remains valid; no startup-file change required
+- `neutral-momentum-starter-extension-2026-08-03-v2-staged-two-position`
+- `ab10a8ef3fadf956a510f1fcfff4dc22c0201379`
 
-Purpose:
+Railway validation at `11:24:26 CDT`:
 
-The v1 one-entry limit was appropriate for initial validation but too restrictive as a permanent neutral-market policy. V2 permits a staged second reduced-size starter without changing the normal portfolio position cap.
+- `overall: pass`
+- `active: true`
+- no re-patching on the status call
+- maximum entries per day: 2
+- maximum entries per cycle: 1
+- maximum neutral starter positions: 2
+- minimum spacing: 900 seconds
+- first-position minimum P&L: `-0.50%`
+- maximum combined neutral exposure: `36%`
+- second candidate must differ by sector or strategy bucket
+- starter allocation factor remains `0.18`
+- normal portfolio position cap unchanged
+- hard-risk ladder unchanged
 
-Base neutral context remains unchanged except that concentrated technology leadership (`tech_concentrated` or `tech_caution`) can count as positive-tape evidence when all other neutral safeguards pass.
+A second neutral starter is considered only when:
 
-### Daily and cycle limits
+1. Exactly one first position remains open.
+2. At least 15 minutes have elapsed since the latest entry.
+3. First-position unrealized P&L is known and at least `-0.50%`.
+4. Candidate differs by sector or bucket.
+5. Projected combined starter exposure is no more than 36%.
+6. Market remains neutral and inside the neutral window.
+7. Existing score, rank, quality, cooldown, cash, position, risk, and execution checks independently pass.
 
-- maximum neutral starter entries per day: `2`
-- maximum starter entries per cycle: `1`
-- maximum starter/open-position stage: `2`
-- existing starter allocation factor remains `0.18`
-- existing raw score floor remains `0.008`
-- existing rank score floor remains `0.012`
-- normal core candidate quality, ranking, cooldown, execution, and risk controls remain downstream
+Unknown entry time, P&L, or diversification metadata blocks stage two rather than guessing.
 
-### Second-entry requirements
+## August 3 Entry-Stack Drift Detected
 
-A second starter is considered only when all of the following are true:
+Railway regression output at `11:25:18 CDT` showed:
 
-1. Market mode remains exactly `neutral`.
-2. Exactly one first position is still open.
-3. At least `900` seconds (15 minutes) have elapsed since the most recent entry.
-4. The first position’s unrealized return is known and is not below `-0.50%`.
-5. The second candidate differs from the first by sector or strategy bucket.
-6. The projected combined neutral-starter exposure does not exceed `36%` of equity.
-7. The daily limit of two and cycle limit of one are not exhausted.
-8. The existing starter valve independently approves score, rank, preferred leadership, quality-block reason, cash, cooldown, risk state, and execution.
+- `overall: warn`
+- `owned: false`
+- `entry_guard_active: false` in the final public snapshot
+- X-Ray wrapper count `0`
+- bear wrapper count varied between `0` and `1` during enforcement
+- deterministic composition remained present
+- scanner remained healthy
+- DELL remained open and account/risk telemetry remained healthy
 
-If position time, P&L, or diversification metadata is unavailable, the second starter is blocked rather than guessed.
+The prior ownership result showed the public stack was normalized from an X-Ray wrapper, but the rebuild finished without restoring X-Ray. This was a real composition race, not a threshold or strategy problem.
 
-### Composition safety
+### Root cause
 
-V2 patches only `core_entry_pipeline._participation_valve_ok`, not the main entry loop. The wrapper carries the existing risk-on-starter ownership marker so the original starter watchdog does not mistake the staged layer for displacement and create recursive composition.
+The v1 X-Ray/bear guard intentionally refused to patch when it saw a bear-owned public callable without an immediate X-Ray, expecting the bear stack contract to repair it.
+
+During contract rebuilding:
+
+1. the contract temporarily normalized the public callable to composition;
+2. the independent bear watchdog could reinstall the bear wrapper before X-Ray was restored;
+3. the v1 X-Ray patcher then saw `bear -> composition` and stood down;
+4. the rebuild could finish without X-Ray.
+
+A second ownership issue was also present: the staged neutral valve did not carry the canonical participation-chain version/role. The composition guard could therefore rebuild the base/extended/risk-on helper chain and temporarily remove the staged neutral wrapper until its watchdog reinstalled it.
+
+## August 3 Atomic Entry-Stack Repair
+
+File/version/final source commit:
+
+- `entry_pipeline_xray_bear_ownership_guard.py`
+- `entry-pipeline-xray-bear-ownership-2026-08-03-v2-atomic`
+- `1786a15e4d0c7fb96adb6e78c057bcde5bac1b62`
+
+Intermediate source commit superseded by the final version:
+
+- `9ae4ee0119f18dbbc9260e8a102273f78c25dfd7`
+
+Behavior:
+
+- serializes contract and direct ownership enforcement with the bear installer lock
+- rebuilds the entry stack atomically as:
+  - deterministic composition
+  - one X-Ray wrapper
+  - one bear recovery wrapper
+- when X-Ray sees a bear-owned stack missing X-Ray, it performs an atomic repair instead of standing down
+- upgrades the already-installed v1 X-Ray ownership guard by exact version comparison
+- allows contract enforcement with or without an explicit core argument
+- preserves the existing ownership markers expected by the bear stack contract
+- patches every neutral extension install so the staged neutral wrapper carries:
+  - canonical participation-valve chain version
+  - canonical `risk_on_outer` role
+  - explicit neutral staged ownership metadata
+- prevents the composition guard from removing the staged neutral valve on later integrity passes
 
 Authority boundary:
 
 - paper only
-- no direct order placement by the extension
-- no main-entry-loop wrapper
+- composition and ownership only
+- no signal generation change
+- no score or threshold change
+- no sizing change
 - no hard-risk change
+- no direct order placement
 - no live or ML authority
-- no change to the normal portfolio position cap
-- no starter sizing increase
-- only the neutral starter daily allowance changes from one to two, with stricter second-stage checks
+
+No Gunicorn change was required because the existing worker already imports and starts `entry_pipeline_xray_bear_ownership_guard`.
 
 ## Post-Deploy Validation
 
-### Neutral starter status
+Run in this order after Railway activates commit `1786a15e...` or the later handoff commit:
 
-Run:
+### 1. Atomic X-Ray/bear ownership
 
-- `/paper/neutral-momentum-starter-status`
+`/paper/entry-pipeline-xray-bear-ownership-status`
 
 Expected:
 
-- version `neutral-momentum-starter-extension-2026-08-03-v2-staged-two-position`
+- version `entry-pipeline-xray-bear-ownership-2026-08-03-v2-atomic`
+- `overall: pass`
+- `owned: true`
+- `valid_xray_below_bear: true`
+- `last_install.xray_patch_guard_version` equals the v2 atomic version
+- wrapper counts:
+  - bear `1`
+  - X-Ray `1`
+- no duplicate wrapper
+
+The first call may report an atomic repair. Later calls should remain passing without rebuilding.
+
+### 2. Bear stack contract
+
+`/paper/bear-recovery-stack-status`
+
+Expected:
+
+- `overall: pass`
+- `owned: true`
+- `entry_guard_active: true`
+- bear wrapper count `1`
+- X-Ray wrapper count `1`
+- composition callable remains direct-core based
+
+### 3. Neutral starter ownership
+
+`/paper/neutral-momentum-starter-status`
+
+Expected:
+
+- v2 staged-two-position version
 - `overall: pass`
 - `active: true`
-- `settings.max_entries_per_day: 2`
-- `settings.max_entries_per_cycle: 1`
-- `settings.max_open_positions: 2`
-- `settings.minimum_seconds_between_entries: 900`
-- `settings.first_position_minimum_pnl_pct: -0.5`
-- `settings.maximum_combined_exposure_pct: 36.0`
-- `settings.requires_different_sector_or_bucket_for_second: true`
-- `settings.starter_alloc_factor: 0.18`
+- `participation_valve_chain_ownership.active: true` when included by the atomic ownership wrapper
+- two-per-day, one-per-cycle, 900-second spacing, `-0.50%` first-position floor, 36% combined cap
 
-The first call after deployment may report that the context and staged valve were patched. Later watchdog/status calls should remain active without adding another layer.
+### 4. Composition status
 
-### Regression checks
+`/paper/entry-pipeline-composition-status`
 
-Run:
+Expected:
+
+- `overall: pass`
+- `stack_stable: true`
+- `recursion_safe: true`
+- `participation_valve_chain_cycle_free: true`
+- outer participation valve remains the neutral staged wrapper while carrying canonical chain metadata
+
+### 5. Scanner and compact health
 
 - `/paper/scanner-runtime-contract-status`
-- `/paper/breakout-scanner-ownership-status`
-- `/paper/bear-recovery-stack-status`
 - `/paper/self-check`
 
 Expected:
 
-- scanner order still canonical
-- one opening-surge, breakout, and market-participation layer
-- one bear wrapper and one X-Ray wrapper
-- no callable cycle or recursion
-- `overall: pass`
-- `last_error_active: false`
+- scanner canonical and cycle-free
+- compact self-check `overall: pass`
+- no active or stale error
+- no active recursion
+- DELL position preserved unless normally exited by strategy management
 
-### Entry diagnostics
-
-Run:
+### 6. Entry decision visibility
 
 - `/paper/no-entry-diagnostic?force=1`
-- `/paper/risk-on-starter-participation-status`
 - `/paper/status`
 
-Use `last_evaluation.staged_gate` to identify whether a second entry was:
+Use these to confirm:
 
-- waiting for 15-minute spacing
-- blocked by first-position loss
-- blocked for sector/bucket concentration
-- blocked by projected combined exposure
-- allowed by the staged gate but rejected by the existing starter/core quality controls
-- accepted into the normal paper execution path
+- current DELL entry price, quantity, entry context, allocation, and unrealized P&L
+- whether stage two is outside the neutral window, waiting on spacing/health/diversification, rejected by existing quality controls, or accepted
 
-## Definition of Done
+## Current Definition of Done
 
 Completed and Railway-validated:
 
-- scanner recursion diagnosis and canonical recovery
-- healthy scanner ordering
-- initial bounded neutral starter installation
-- one post-repair neutral cycle reached the entry path
-- self-check error freshness and recursion recovery telemetry
+- scanner recursion recovery
+- canonical scanner ownership
+- stale-error telemetry correction
+- neutral starter v2 deployment
+- first neutral paper entry opened
+- DELL position visible with positive unrealized P&L
+- no hard-risk or authority regression
 
-Completed in source, pending Railway validation:
+Completed in source; Railway validation pending:
 
-- two-entry staged neutral starter policy
-- 15-minute separation
-- second-position diversification
-- first-position health gate
-- 36% projected combined-exposure cap
-- wrapper ownership compatibility with the existing starter watchdog
+- atomic entry-stack ownership v2
+- exact one-bear/one-X-Ray restoration
+- neutral staged wrapper canonical chain ownership
 
-Do not widen the window, increase starter size, or permit more than two neutral starters until Railway telemetry and actual trade outcomes support another change.
-
-## Exact Next Action
-
-After Railway deploys commit `ab10a8ef3fadf956a510f1fcfff4dc22c0201379`, run in this order:
-
-1. `/paper/neutral-momentum-starter-status`
-2. `/paper/scanner-runtime-contract-status`
-3. `/paper/bear-recovery-stack-status`
-4. `/paper/self-check`
-5. `/paper/no-entry-diagnostic?force=1`
-
-Confirm the V2 policy fields, stable ownership, no recursion, and the staged-gate reason before making another strategy or sizing change.
+Do not make another score, threshold, or sizing change until the atomic ownership endpoints pass and the DELL trade/entry context is captured.
