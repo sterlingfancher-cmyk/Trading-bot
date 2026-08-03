@@ -14,19 +14,22 @@
   - 2.50% hard intraday-drawdown halt
   - 3.00% absolute daily-loss ceiling
 
-## Latest Account Snapshot
+## Latest Account Baseline
 
-Railway snapshot at `2026-08-03 12:12:53 CDT`:
+Supplied all-in-one snapshot at `2026-08-03 12:12:53 CDT`:
 
 - equity: `$10,738.02`
 - cash: `$10,240.9964`
-- open paper position: `DELL`
+- one open paper position: `DELL`
 - unrealized P&L: `+$3.22`
 - realized today: `$0.00`
 - realized lifetime: `+$734.82`
 - completed exits: 52
 - wins/losses: 35/17
-- prior lifetime profit factor: approximately `3.18`
+- scanner signals: 41
+- market/risk snapshot: neutral, no loss, no drawdown, no halt, no self-defense
+
+The account remained materially underdeployed with only one small position despite healthy risk and scanner state.
 
 ## Canonical Scanner Stack
 
@@ -37,15 +40,11 @@ Required order:
 3. one `market_participation_accelerator`
 4. core scanner
 
-Current Railway validation:
+Validated:
 
-- component `scanner_stack`: pass
-- opening-surge count 1
-- breakout count 1
-- market-participation count 1
-- `ordered: true`
-- `cycle_detected: false`
-- `truncated: false`
+- one of each approved scanner layer
+- correct order
+- no cycle or truncation
 - no rebuild required
 
 Source:
@@ -69,65 +68,16 @@ Atomic ownership source:
 - version `entry-pipeline-xray-bear-ownership-2026-08-03-v2-atomic`
 - commit `1786a15e4d0c7fb96adb6e78c057bcde5bac1b62`
 
-Current Railway validation:
+Validated:
 
-- component `entry_stack_ownership`: pass
 - `owned: true`
-- `valid_xray_below_bear: true`
-- `entry_guard_active: true`
-- bear wrapper count 1
-- X-Ray wrapper count 1
-- atomic repair reason `already_owned`
+- one bear wrapper
+- one X-Ray wrapper
+- valid X-Ray below bear
+- direct-core composition
+- no drift or recursion
 
-Composition validation:
-
-- component `entry_composition`: pass
-- `stack_stable: true`
-- `recursion_safe: true`
-- `direct_core_base: true`
-- participation chain cycle-free
-- active participation valve is `neutral_momentum_starter_extension.staged_valve`
-
-Bear contract validation:
-
-- component `bear_recovery_stack`: pass
-- `owned: true`
-- `entry_guard_active: true`
-- bear wrapper count 1
-- X-Ray wrapper count 1
-
-The ownership/composition modules do not change signals, thresholds, sizing, hard-risk limits, live authority, ML authority, or place orders directly.
-
-## Recursion and Error Freshness
-
-Earlier August 3 failure:
-
-- scanner recursion at `09:45:34 CDT`
-- `maximum recursion depth exceeded while calling a Python object`
-
-Current status:
-
-- successful cycles superseded the failure
-- latest successful cycle: `12:07:39 CDT`
-- `last_error: null`
-- no active or historical recursion flag in the current self-check
-- prior failure retained under recovered-error telemetry
-
-## Neutral Momentum Starter
-
-### Staged policy
-
-- maximum entries per day: 2
-- maximum entries per cycle: 1
-- maximum staged starter positions: 2
-- minimum spacing: 900 seconds
-- first-position minimum unrealized return: `-0.50%`
-- maximum combined exposure: `36%`
-- second candidate must differ by sector or strategy bucket
-- allocation factor remains `0.18`
-- normal portfolio cap and hard-risk ladder unchanged
-
-### Neutral-only staging v3
+## Neutral Starter Core Policy
 
 Source:
 
@@ -135,27 +85,80 @@ Source:
 - version `neutral-momentum-starter-extension-2026-08-03-v3-neutral-only-staging`
 - commit `9be472986c6624139833d48bf4e52201f7416205`
 
+Validated settings:
+
+- maximum starter entries per day: 2
+- maximum entries per cycle: 1
+- maximum staged starter positions: 2
+- minimum spacing: 900 seconds
+- first-position minimum P&L in the base window: `-0.50%`
+- maximum combined exposure: 36%
+- second candidate must differ by sector or strategy bucket
+- allocation factor remains `0.18`
+- normal portfolio cap remains 6
+- constructive/risk-on candidates pass through unchanged
+
+## Underdeployment Finding at 12:15 CDT
+
+The one-link test showed every runtime component passing, but only DELL was open.
+
+This was not caused by:
+
+- portfolio capacity
+- risk halt
+- self-defense
+- scanner failure
+- entry-stack drift
+- recursion
+- active loss or drawdown
+
+The remaining mechanical constraint was the neutral starter context window. It ended 180 minutes after the regular open, or `11:30 CDT`. By approximately `12:15 CDT`, the account still had one small position and 41 scanner signals, but the neutral exception could no longer admit a second starter.
+
+## Bounded Late Neutral Participation
+
+Source:
+
+- `neutral_late_session_participation.py`
+- version `neutral-late-session-participation-2026-08-03-v1`
+- source commit `cff93fc2631a45b793cd4ed2aa372166ffbe9e81`
+- worker activation commit `f23a511fa48955951ce7d01eb59d1820eb1c6db2`
+
 Behavior:
 
-- neutral staging checks apply only when market mode is exactly `neutral`
-- `constructive`, `risk_on`, and other non-neutral contexts pass through to the original starter
-- old neutral wrappers are replaced rather than stacked
-- downstream score, rank, quality, cooldown, cash, risk, position, and execution checks remain unchanged
+- extends the neutral context window from 180 to 300 minutes after open
+- new final neutral cutoff: `13:30 CDT`
+- retains two entries per day, one per cycle, two staged starter positions, 18% allocation factor, and 36% combined exposure cap
+- does not change the normal portfolio cap
 
-Railway validation at `12:12:53 CDT`:
+The late segment from 180–300 minutes requires:
 
-- component `neutral_starter`: pass
-- `active: true`
-- `neutral_only_staging: true`
-- maximum entries per day 2
-- maximum entries per cycle 1
-- maximum open positions 2
-- minimum spacing 900 seconds
-- combined exposure cap 36%
-- last gate reason `non_neutral_passthrough`
-- last gate status `non_neutral_passthrough_allowed`
+- market mode exactly neutral
+- risk score at least 50
+- at least 30 scanner signals
+- candidate score at least `0.025`
+- no risk halt or self-defense
+- no realized daily loss
+- intraday drawdown no greater than 0.50%
+- for a second starter, the first position must be non-losing at `0.00%` or better
+- existing spacing, diversification, quality, cooldown, cash, execution, and risk checks still pass
 
-This confirms the v2 defect is repaired: a constructive/risk-on candidate is no longer rejected merely because the neutral stage requires neutral mode.
+Current supplied evidence would satisfy the broad context inputs:
+
+- risk score previously 52
+- scanner signals 41
+- DELL unrealized P&L positive
+- no loss, drawdown, halt, or self-defense
+
+A second position is still not forced. A candidate must independently clear the candidate-score and all original downstream controls.
+
+Authority boundary:
+
+- paper only
+- no direct order placement
+- no hard-risk change
+- no starter-sizing change
+- no normal portfolio-cap change
+- no live or ML authority
 
 ## Single Routine Test
 
@@ -169,41 +172,28 @@ Routine link:
 
 `https://trading-bot-clean.up.railway.app/paper/self-check`
 
-The endpoint validates:
+The late-session module adds a sixth component to this same response:
 
-1. scanner stack
-2. atomic entry-stack ownership
-3. entry composition and recursion safety
-4. bear-recovery stack
-5. neutral starter
-6. account, auto-runner, risk, error freshness, signals, and positions
+- `neutral_late_window`
 
-Railway validation at `12:12:53 CDT`:
+Expected after Railway deploys the activation commit:
 
-- type `all_in_one_self_check`
-- version `fast-self-check-override-2026-08-03-v5-all-in-one`
-- `one_test_complete: true`
+- top-level type `all_in_one_self_check`
 - top-level `overall: pass`
-- components checked 5
-- components passed 5
-- components warned 0
+- `components_checked: 6`
+- `components_passed: 6`
+- `components_warned: 0`
 - `failing_components: []`
 - `base_failures: []`
-- `next_action: none`
-- no active error
-- no halt
-- no self-defense activation
-- auto-runner enabled and thread started
+- `neutral_late_window.overall: pass`
+- `neutral_late_window.active: true`
+- `extended_window_end_minutes: 300`
+- `late_minimum_risk_score: 50`
+- `late_minimum_scanner_signals: 30`
+- `late_minimum_candidate_score: 0.025`
+- `late_minimum_first_position_pnl_pct: 0.0`
 
-## Validation Workflow Going Forward
-
-Routine operation requires only:
-
-`/paper/self-check`
-
-When `overall: pass`, no other endpoint is required.
-
-Open an individual endpoint only when its component name appears in `summary.failing_components`. Use `/paper/full-self-check` only for intentional troubleshooting.
+Run no other endpoint unless its component name appears under `summary.failing_components`.
 
 ## Definition of Done
 
@@ -213,14 +203,19 @@ Completed and Railway-validated:
 - canonical scanner ownership
 - stale-error telemetry correction
 - first neutral paper entry
-- DELL position opened and managed normally
+- neutral-only constructive/risk-on passthrough
 - staged two-position neutral policy
-- neutral-only v3 passthrough
-- atomic public entry-stack ownership
-- exactly one bear and one X-Ray wrapper
+- atomic entry-stack ownership
+- one bear and one X-Ray wrapper
 - all-in-one self-check v5
-- one-link routine validation workflow
+
+Completed in source; Railway validation pending:
+
+- bounded late neutral participation v1
+- six-component all-in-one self-check result
 
 Next evidence requirement:
 
-- observe DELL management/exit and several staged-neutral outcomes before any further score, sizing, risk, or window expansion
+- confirm the one-link test passes with six components
+- observe whether the late neutral window admits a second independent position
+- do not expand score, sizing, exposure, or hard-risk limits until several late-neutral outcomes are recorded
