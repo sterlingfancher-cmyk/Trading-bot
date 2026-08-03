@@ -39,6 +39,7 @@ def post_worker_init(worker):
         import paper_regime_adaptive_policy
         import performance_audit_lab
         import performance_audit_lab_v2
+        import performance_audit_v2_async_route
         import performance_audit_composition_guard
 
         run_report_guard.apply(core)
@@ -83,12 +84,13 @@ def post_worker_init(worker):
 
         performance_audit_lab_v2.apply(core)
         performance_audit_lab_v2.register_routes(core.app, core)
+        performance_audit_v2_async_route.apply(core.app, core)
         performance_audit_composition_guard.start_watchdog(core)
         performance_audit_composition_guard.register_routes(core.app, core)
         diagnostics.register_routes(core.app, core)
         diagnostics.record_module_event(
             "gunicorn.worker",
-            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_score_breakout_scanner_runtime_neutral_starter_late_neutral_underdeployment_adaptive_policy_performance_audit_v2_and_composition_registered",
+            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_score_breakout_scanner_runtime_neutral_starter_late_neutral_underdeployment_adaptive_policy_performance_audit_v2_async_and_composition_registered",
             error=(
                 f"{performance_risk_activation_guard.VERSION};"
                 f"{regime_integrity_underdeployment.VERSION};"
@@ -106,6 +108,7 @@ def post_worker_init(worker):
                 f"{paper_regime_adaptive_policy.VERSION};"
                 f"{performance_audit_lab.VERSION};"
                 f"{performance_audit_lab_v2.VERSION};"
+                f"{performance_audit_v2_async_route.VERSION};"
                 f"{performance_audit_composition_guard.VERSION}"
             ),
         )
