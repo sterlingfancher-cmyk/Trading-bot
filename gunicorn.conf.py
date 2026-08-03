@@ -37,6 +37,7 @@ def post_worker_init(worker):
         import neutral_late_session_participation
         import paper_underdeployment_repair
         import performance_audit_lab
+        import performance_audit_composition_guard
 
         run_report_guard.apply(core)
         run_report_guard.register_routes(core.app, core)
@@ -67,10 +68,12 @@ def post_worker_init(worker):
         paper_underdeployment_repair.register_routes(core.app, core)
         performance_audit_lab.apply(core)
         performance_audit_lab.register_routes(core.app, core)
+        performance_audit_composition_guard.start_watchdog(core)
+        performance_audit_composition_guard.register_routes(core.app, core)
         diagnostics.register_routes(core.app, core)
         diagnostics.record_module_event(
             "gunicorn.worker",
-            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_score_breakout_scanner_runtime_neutral_starter_late_neutral_underdeployment_and_performance_audit_registered",
+            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_score_breakout_scanner_runtime_neutral_starter_late_neutral_underdeployment_performance_audit_and_composition_registered",
             error=(
                 f"{performance_risk_activation_guard.VERSION};"
                 f"{regime_integrity_underdeployment.VERSION};"
@@ -85,7 +88,8 @@ def post_worker_init(worker):
                 f"{neutral_momentum_starter_extension.VERSION};"
                 f"{neutral_late_session_participation.VERSION};"
                 f"{paper_underdeployment_repair.VERSION};"
-                f"{performance_audit_lab.VERSION}"
+                f"{performance_audit_lab.VERSION};"
+                f"{performance_audit_composition_guard.VERSION}"
             ),
         )
     except Exception as exc:
