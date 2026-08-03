@@ -1,384 +1,342 @@
-# Automated Trading Project Handoff — Canonical Status, July 31, 2026
+# Automated Trading Project Handoff — Canonical Status, August 3, 2026
 
-## Engineering Constitution
-
-1. Reliability before performance.
-2. Evidence before modification.
-3. Deterministic runtime ownership before adaptive behavior.
-4. Diagnostics before optimization.
-5. Backtests do not replace live paper validation.
-6. Do not weaken hard risk controls or extension protection merely to force activity.
-7. Machine learning remains advisory until execution history, outcome labels, out-of-sample evidence, and regime stability justify a stronger role.
-8. Every material change must be traceable, reversible, source-tested, and Railway-validated before becoming the baseline.
-9. Competing wrappers, duplicate callables, recursive patch chains, and false ownership warnings are defects.
-10. Every code/configuration change and major Railway validation milestone must update this handoff in the same work session.
-
-## Always Resume Here
+## Operating Boundary
 
 - Repository: `sterlingfancher-cmyk/Trading-bot`
 - Branch: `main`
-- Railway base URL: `https://trading-bot-clean.up.railway.app`
-- Operating mode: paper only.
-- Live-trading authority: none.
-- ML execution authority: none; advisory only.
-- Current account snapshot: approximately `$10,734.80` cash/equity, no open exposure.
-- Lifetime completed exits: 52 — 35 wins, 17 losses.
-- Lifetime win rate: `67.31%`.
-- Lifetime net realized P&L: `+$734.82`.
-- Lifetime profit factor: `3.1781`.
-- Recent 20 exits: 15 wins, 5 losses, `+$681.29`, PF `3.4278`.
-- July 29 risk calibration, regime integrity, bear-short recovery, and entry ownership are Railway-validated.
-- July 30 opening-surge and breakout-scanner ownership are Railway-validated.
-- July 31 two-stage opening-surge score calibration is deployed, installation-validated, and post-deploy regression-validated.
-- No additional threshold, permission, sizing, or risk change is authorized from the July 31 midday sample.
-- Next strategy milestone: capture the first real calibrated opening cycle during the next eligible `08:45–09:15 CDT` window.
+- Railway: `https://trading-bot-clean.up.railway.app`
+- Mode: paper only
+- Live broker authority: none
+- ML execution authority: none; advisory only
+- No repair in this handoff changes the 1.00% soft-pause, 2.50% hard realized-loss halt, 2.50% hard intraday-drawdown halt, or 3.00% absolute daily-loss ceiling.
 
-## Hard Risk Ladder
+## Account Baseline
 
-- Realized-loss soft pause: `1.00%`.
-- Hard realized-loss halt: `2.50%`.
-- Hard intraday-drawdown halt: `2.50%`.
-- Absolute daily-loss ceiling: `3.00%`.
-- Controlled-recovery sizing cap: 50%.
-- No rotations during controlled recovery.
-- Opening-surge temporary loss/drawdown ceiling: `0.50%`.
-- Bear soft-pause short score floor: `0.014`.
-- No confirmed-bear opening long exception.
-- No broad defensive-regime long permission.
-- Opening-surge maximum: one reduced-size paper position, empty book only.
+Latest supplied account snapshot:
 
-## Validated Runtime Architecture
+- cash/equity approximately `$10,734.80`
+- no open positions
+- 52 completed exits
+- 35 wins, 17 losses
+- realized total `+$734.82`
+- lifetime profit factor previously measured at approximately `3.18`
 
-### Entry pipeline
+The strategy has positive historical paper expectancy. The immediate problem is underdeployment and runtime reliability, not proof that the underlying strategy has negative expectancy.
+
+## Engineering Rules
+
+1. Reliability before performance.
+2. Evidence before modification.
+3. Do not lower hard-risk controls to manufacture activity.
+4. Do not add live or ML authority without explicit approval.
+5. Avoid recursive callable wrappers; prefer deterministic ownership contracts or bounded internal extensions.
+6. Every material code/configuration change and Railway validation milestone must update this handoff.
+
+## Validated Architecture Before August 3
+
+### Entry stack
 
 Required order:
 
 1. `bear_soft_pause_short_recovery`
 2. one Entry Pipeline X-Ray
-3. deterministic breakout/composition callable
+3. deterministic composition/breakout callable
 4. direct core entry pipeline
 
-Validated state:
+Prior Railway validation showed:
 
 - `owned: true`
 - `entry_guard_active: true`
 - exactly one bear wrapper
 - exactly one X-Ray wrapper
-- no drift, recursion, or ownership oscillation
+- no drift or recursion in the entry stack
 
-### Scanner pipeline
+### Scanner stack
 
 Required order:
 
 1. `opening_surge_participation`
 2. exactly one `breakout_participation_layer`
 3. `market_participation_accelerator`
-4. remaining scanner chain
+4. deepest core scanner
 
-Validated state:
+Prior Railway validation showed one opening-surge wrapper, one breakout wrapper, opening surge above breakout, and no callable cycle.
 
-- one opening-surge guard
-- one breakout guard
-- opening surge above breakout
-- no callable cycle
-- no truncated ownership search
-- no repair required on the validated calls
+## Prior Reliability and Participation Work
 
-## Performance Record and Risk Calibration
+### July 29
 
-The strategy record showed positive expectancy, so the project preserved the strategy and repaired underdeployment rather than replacing it.
+- staged performance-risk ladder
+- regime-integrity repair
+- side-aware bear soft-pause short recovery
+- deterministic entry-stack ownership
 
-Evidence:
+Key routes:
 
-- gross profit `$1,072.18`
-- gross loss `-$337.36`
-- average win `$30.63`
-- average loss `-$19.84`
-- payoff ratio `1.5437`
-- lifetime expectancy `+$14.13` per completed exit
-- recent-20 expectancy `+$34.06`
+- `/paper/performance-risk-activation-status`
+- `/paper/regime-integrity-status`
+- `/paper/bear-short-recovery-status`
+- `/paper/bear-recovery-stack-status`
+- `/paper/entry-pipeline-xray-bear-ownership-status`
 
-Core commits:
+### July 30
 
-- `performance_risk_calibration.py` — `838ec3b23a6e573177e1fd51dd2917e8adda4c25`
-- `usercustomize.py` registration — `c5a188597074ae8c83e59f78e6e11903b47a3ec4`
-- `fast_self_check_override.py` — `1432b21dbd1d2725c1693da317ca7accd98f7746`
-- `performance_risk_activation_guard.py` — `8dba35127a9656826020a5239bf146778628c5da`
-- worker activation — `85d06eb45e476ba9d50a27ab1479f694984a5c6c`
+A missed bullish opening in a defensive historical regime led to a bounded opening-surge valve:
 
-## Regime Integrity and Bear Recovery
-
-Completed repairs:
-
-- sufficient SPY/QQQ macro history and explicit bar counts
-- rebuilt SPY and QQQ trend states
-- auditable risk-score ledger
-- final mode and permission recomputed after overlays
-- shorts enabled only after all bear-confirmation tests
-- market-data cache preserved
-- no broad risk-off long exception
+- 15–45 minutes after open
+- empty book
+- one reduced-size paper position per day
+- no confirmed-bear long exception
+- strong NQ opening confirmation
+- gap/follow-through/opening-range/near-high/momentum/volume/bucket/cluster tests
 
 Key commits:
 
-- regime repair — `136f74a2078cf1b95b9f2a171a4b07c8e9e8cf56`
-- startup registration — `a06d0020d640686a4de2894ed383ea3fe85051fd`
-- cache preservation — `a713b04d8cf1910ccb71dfe51df396558c20704f`
-- final activation — `0106e574973668a4dff4bed424653898fed33331`
+- opening-surge v2 chain-aware ownership: `2069a448066c3cc8f9fec0f7497ee024ba6ee8c7`
+- breakout scanner ownership source: `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43`
+- breakout scanner worker activation: `115e921ecdfeb50fde4b4b1125787e9bb190352d`
 
-Bear soft-pause recovery remains:
+### July 31
 
-- one reduced-size short only
-- `risk_off`
-- `short_bias`
-- `bear_confirmed`
-- score at least `0.014`
-- regular session open
-- no hard halt, late-day block, or profit guard
-- maximum `0.50` allocation factor
-- longs remain blocked; rotations disabled
+The first real opening test showed the fixed raw score floor `0.045` prevented candidates from reaching structure analysis. A two-stage calibration was added:
 
-Commits:
-
-- policy — `599dcc98355eb9ba4c46920576d1c4eb26f4ecfe`
-- activation — `4e4b27463d28652aae294ebd49c8976bfaa7b93d`
-
-## Entry and Scanner Ownership Repairs
-
-Entry stack:
-
-- initial contract — `61287a0b8dd6f89a073a17e11904a72723901340`
-- registration — `0bc442df367e482fa3526a92d096db04f6be7bbb`
-- duplicate-edge repair — `38a3c935c844716f11f12ab426573e3e83707cf7`
-- v2 contract — `5f3b023dab814cc32b2f6137043d44fc63293dc5`
-- recurring owner order — `fddebd39f4fcf2d57f023ce81d916f0936e3c4a3`
-- X-Ray producer guard — `6589dd791c85575214af103df4414e678441daff`
-- final registration — `8f071f172aec72273288abf92c50fd4697db1856`
-
-Opening surge:
-
-- v1 source — `2351b9b70e22df414aba248abc5e60b03d477431`
-- v1 activation — `3ec95ac24b1eed95367a3fe74813895388cb1a27`
-- v2 chain-aware ownership — `2069a448066c3cc8f9fec0f7497ee024ba6ee8c7`
-
-Breakout scanner:
-
-- ownership guard — `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43`
-- worker activation — `115e921ecdfeb50fde4b4b1125787e9bb190352d`
-- live validation handoff — `3541f8cc2898d1f7364832910a1cbd0338a8afd4`
-
-## Railway Build Recovery
-
-Railway's `mise` release rejected the pinned Python 3.11.9 artifact because no GitHub attestation was available.
-
-Repair:
-
-- root `mise.toml`
-- commit `4114e77163d921f50aa1d418f4ac709631738046`
-
-```toml
-[settings]
-python.github_attestations = false
-```
-
-Python remains pinned to 3.11.9. This changed no dependency, strategy, signal, threshold, sizing, risk, order, live, or ML authority behavior.
-
-## July 30 Missed-Opening Evidence
-
-At `09:08:52 CDT`:
-
-- normal 15-minute warmup had expired
-- no loss, drawdown, hard halt, self-defense, or profit guard
-- 12 signals: six long and six short
-- mode `crash_warning`, regime `bear`, risk score `14`
-- NQ `+1.439%`, trend up
-- both long and short permissions false
-- primary no-entry driver `longs_disabled_by_regime`
-
-High-score names later labeled extended included AMD `0.066916`, ALAB `0.051672`, MU `0.050216`, ACLS `0.048229`, and MRVL `0.039829`.
-
-The opening-surge valve was created to permit one tightly bounded paper long when the opening tape strongly contradicts a defensive historical label.
-
-## July 31 Raw-Score Short-Circuit Evidence
-
-At `08:51:09 CDT`, 21.09 minutes after the open:
-
-- opening-surge permission active
-- `bear_confirmed: false`
-- NQ `+3.898%`, trend up
-- ES `+1.662%`, trend up
-- empty book
-- no loss or drawdown
-- one opening allowance remaining
-- market mode `risk_off`
-
-But:
-
-- `cluster_confirmed: false`
-- zero qualified names
-- zero promoted names
-- every profile stopped at `score_below_opening_surge_floor`
-- top raw scores: BWXT `0.021164`, BE `0.019536`, CVX `0.017632`, HWM `0.017491`, STX `0.016840`, DELL `0.016539`
-- fixed raw floor was `0.045`
-
-Root cause:
-
-The same `0.045` value was used as both a pre-profile screen and the promoted score. Candidates never reached the existing gap, follow-through, opening-range, near-high, momentum, volume, and bucket tests.
-
-## July 31 Two-Stage Opening Score Calibration
-
-File and commits:
-
-- `opening_surge_score_calibration.py`
-- version `opening-surge-score-calibration-2026-07-31-v1`
-- source — `faf6fab8416c14b5e753b0f909edbebe963bdcac`
-- Gunicorn activation — `747a737848de7562035c44507ab81abe694cd11e`
-- initial calibration handoff — `2bee3f71e6d638c0e1dfd2b19077866af350222c`
-- route — `/paper/opening-surge-score-calibration-status`
-
-Behavior:
-
-- raw profile prefilter `0.012`
-- final structure score floor `0.045`
+- raw profiling prefilter `0.012`
+- final structurally confirmed score floor `0.045`
 - final score cap `0.080`
-- structure base credit `0.018`
-- opening window remains 15–45 minutes
-- permission requirements unchanged
-- gap, follow-through, opening-range, near-high, momentum, volume, bucket, and cluster tests unchanged
-- structurally failed candidates are not promoted
-- normal core ranking, quality, cooldown, position, risk, and execution controls remain downstream
-- one reduced-size paper position remains the daily maximum
-- no direct orders, live authority, ML authority, hard-risk change, or confirmed-bear long exception
+- all existing structure and cluster tests retained
 
-Composite ledger:
+Key commits:
 
-- raw scanner score
-- structure confirmation credit
-- excess prior-close move bonus
-- excess post-open follow-through bonus
-- relative-volume bonus
-- calculated score
-- adjusted promoted score
+- score calibration source: `faf6fab8416c14b5e753b0f909edbebe963bdcac`
+- worker activation: `747a737848de7562035c44507ab81abe694cd11e`
 
-This is a profiling calibration, not a blanket entry-threshold reduction.
+Build recovery:
 
-## Railway Calibration Validation — July 31, 10:48:54 CDT
+- `mise.toml` commit `4114e77163d921f50aa1d418f4ac709631738046`
+- Python remains pinned at 3.11.9
+- only GitHub artifact-attestation verification was disabled for the unavailable prebuilt attestation
 
-The calibration endpoint returned:
+## August 3 Failure Evidence
 
-- `overall: pass`
-- `active: true`
-- `patched_this_call: false`
-- profile prefilter `0.012`
-- final floor `0.045`
-- cap `0.080`
-- structure credit `0.018`
-- existing structure tests, cluster requirement, and opening window unchanged
-- paper-only authority preserved
+Fast self-check generated at `2026-08-03 10:29:16 CDT` showed:
 
-`last_profile` was empty because deployment occurred after the opening window. This is expected.
-
-## Post-Calibration Regression Validation — July 31, 10:54–10:55 CDT
-
-### Opening-surge ownership
-
-- `overall: pass`
-- version `opening-surge-participation-2026-07-30-v2-chain-aware`
-- one risk guard at depth zero
-- one scan guard at depth zero
-- both classified `outermost`
-- no patching on the current call
-- no cycle or truncation
-- runtime setting `minimum_score: 0.012`
-- inactive permission was correct because the window had ended and NQ trend was flat
-
-The visible `stored_state` remained the pre-calibration `08:51:09` snapshot with `score_below_opening_surge_floor` reasons. The new worker's in-memory `last_scan` was empty because it deployed after the opening window. The old stored snapshot is historical evidence and does not indicate that the calibrated prefilter failed.
-
-### Breakout scanner ownership
-
-- `overall: pass`
-- one opening-surge guard at depth zero
-- one breakout guard at depth one
-- opening surge above breakout
-- no cycle or truncation
-- no normalization required
-- no patch required; breakout already present and chain-guarded
-
-### Entry-stack ownership
-
-- `overall: pass`
-- `owned: true`
-- `entry_guard_active: true`
-- one bear wrapper
-- one X-Ray wrapper
-- known wrapper depth three
-- no drift, repair, recursion, or logic change
-
-### Compact self-check
-
-- `overall: pass`
 - auto-runner enabled at 300-second cadence
-- last successful automatic cycle `10:55:17 CDT`
-- no auto-runner error
-- scanner found 62 signals
+- `last_attempt: 09:45:34 CDT`
+- `last_error: maximum recursion depth exceeded while calling a Python object`
+- `last_success: 09:54:39 CDT`
+- `recursion_error_active: true`
+- scanner found 25 signals
 - zero entries
-- no entry-pipeline recursion
-- no realized loss or drawdown
-- no risk halt or self-defense activation
-- account remained flat at approximately `$10,734.80`
+- market mode `neutral`
+- no loss, drawdown, halt, self-defense, or open exposure
 
 Interpretation:
 
-The calibration deployment did not destabilize scanner ownership, entry ownership, the auto-runner, or the hard-risk ladder. The 62-signal midday count is not evidence that a trade should have occurred: the system remained in `risk_off`, the bounded opening window was closed, and this release intentionally did not broaden midday permissions.
+1. The `09:45` cycle genuinely hit scanner-callable recursion and could not reliably complete the entry path.
+2. A later cycle succeeded at `09:54`, proving the recursion was intermittent rather than a permanent worker crash.
+3. The compact self-check treated the old error string as still active because successful cycles did not clear `last_error`.
+4. The bounded opening-surge valve had already closed at `09:15`.
+5. The existing risk-on starter accepts only `risk_on` or `constructive`, not `neutral`.
+6. Therefore a strong neutral tape after `09:15` had no bounded starter path even when many valid momentum names existed.
 
-## Validation Endpoints
+User-supplied charts around `10:30 CDT` showed broad strength and orderly intraday advances in:
 
-During the next eligible opening:
+- RGIT approximately `+7.19%`
+- APLD approximately `+7.03%`
+- MP approximately `+5.29%`
+- NBIS approximately `+11.97%`
+- AMZN approximately `+5.23%`
+- META approximately `+6.65%`
+- BTQ approximately `+5.48%`
+- NVTS approximately `+5.02%`
+- KEEL approximately `+4.16%`
+- CIFR approximately `+8.42%`
 
-- `/paper/opening-surge-participation-status`
-- `/paper/opening-surge-score-calibration-status`
-- `/paper/no-entry-diagnostic?force=1`
+This was not a day without opportunity. The runtime and permission architecture failed to convert the available opportunity into a bounded paper entry.
 
-Regression and operations:
+## August 3 Repair 1 — Scanner Runtime Contract
+
+New file:
+
+- `scanner_runtime_contract.py`
+- version `scanner-runtime-contract-2026-08-03-v1`
+- commit `77e0ae2d67bcbe1a3e21fe71d86875e8bae67a00`
+- route `/paper/scanner-runtime-contract-status`
+
+Behavior:
+
+- inspects the callable graph with bounded cycle detection
+- requires exactly one opening-surge wrapper, one breakout wrapper, and one market-participation wrapper
+- requires the order `opening surge -> breakout -> market participation -> core`
+- if the chain is missing, duplicated, cyclic, truncated, or misordered, restores the known core scanner and reapplies only the approved layers
+- preserves the opening-surge score calibration after a rebuild
+- patches `set_auto_success` so a successful cycle clears stale `last_error` and `last_error_trace`
+- preserves the prior error in `last_recovered_error` fields for auditability
+- runs a recurring watchdog
+
+Authority boundary:
+
+- composition and reliability only
+- no signal criteria change
+- no score/threshold change
+- no sizing change
+- no hard-risk change
+- no direct orders
+- no live or ML authority
+
+## August 3 Repair 2 — Bounded Neutral Momentum Starter
+
+New file:
+
+- `neutral_momentum_starter_extension.py`
+- version `neutral-momentum-starter-extension-2026-08-03-v1`
+- commit `e9f14fdf3221ad9090c048b198d8f745cc4cd34d`
+- route `/paper/neutral-momentum-starter-status`
+
+This does not wrap the main entry loop. It extends only the existing risk-on starter's market-context test.
+
+Neutral context may qualify only when:
+
+- paper context
+- regular session open
+- market mode exactly `neutral`
+- 45–180 minutes after open (`09:15–11:30 CDT`)
+- risk score at least `40`
+- no bear confirmation
+- no defensive rotation
+- no bearish/blocking futures context
+- no breadth risk-off confirmation
+- scanner cluster at least 15 signals
+- at least four long signals when a long count is available
+- positive tape evidence from growth leadership, multiple risk-on sectors, supportive/bullish futures, or supportive/narrow leadership breadth
+
+The existing starter still controls final tradability:
+
+- one starter per day and one per cycle
+- existing allocation factor `0.18`
+- existing raw-score and rank-score floors
+- preferred leadership bucket/symbol requirement
+- quality-block allowlist and hard-block tokens
+- clean risk state
+- cash and open-position limits
+- cooldowns and normal core execution controls
+
+Additional universe hints/mappings:
+
+- RGIT, APLD, MP, NBIS, AMZN, META, BTQ, NVTS, KEEL, CIFR
+
+Authority boundary:
+
+- paper only
+- no direct order placement by the extension
+- no main-entry-loop wrapper
+- no hard-risk, live-authority, ML-authority, position-limit, or starter-sizing change
+- only a bounded neutral market-context permission is added
+
+## Worker Activation
+
+`gunicorn.conf.py` activation commit:
+
+- `1303d2a3a7ab4c1db874a504c6d7364e810395bc`
+
+The worker now starts and registers both:
+
+- `scanner_runtime_contract`
+- `neutral_momentum_starter_extension`
+
+## Post-Deploy Validation
+
+### 1. Scanner runtime contract
+
+`/paper/scanner-runtime-contract-status`
+
+Expected:
+
+- version `scanner-runtime-contract-2026-08-03-v1`
+- `overall: pass`
+- `after.ordered: true`
+- `after.opening_surge_count: 1`
+- `after.breakout_count: 1`
+- `after.market_participation_count: 1`
+- `after.cycle_detected: false`
+- `after.truncated: false`
+- the first call may report a canonical rebuild; later calls should be stable
+- stale recursion telemetry may be moved to recovered-error fields after a confirmed successful cycle
+
+### 2. Neutral momentum starter
+
+`/paper/neutral-momentum-starter-status`
+
+Expected:
+
+- version `neutral-momentum-starter-extension-2026-08-03-v1`
+- `overall: pass`
+- `active: true`
+- window start `45`
+- window end `180`
+- minimum risk score `40`
+- minimum scanner signals `15`
+- existing starter allocation factor approximately `0.18`
+- existing maximum one starter per day
+
+The endpoint being active means the extension is installed. `last_evaluation` determines whether the current neutral context actually qualifies.
+
+### 3. Runtime regression
+
+Run:
 
 - `/paper/breakout-scanner-ownership-status`
-- `/paper/entry-pipeline-xray-bear-ownership-status`
+- `/paper/opening-surge-participation-status`
 - `/paper/bear-recovery-stack-status`
 - `/paper/self-check`
-- `/paper/bear-short-recovery-status`
-- `/paper/regime-integrity-status`
-- `/paper/underdeployment-xray?force=1`
-- `/paper/full-self-check` only when compact checks fail or omit required evidence
+
+Expected:
+
+- all ownership checks pass
+- one opening-surge wrapper
+- one breakout wrapper
+- one bear wrapper
+- one X-Ray wrapper
+- no callable cycle or recursion
+- a later successful auto cycle should show `last_error: null`
+
+### 4. Entry explanation
+
+Run:
+
+- `/paper/no-entry-diagnostic?force=1`
+- `/paper/risk-on-starter-participation-status`
+
+Use these to determine whether a neutral starter was accepted or rejected by score, rank, preferred bucket/symbol, quality, cooldown, risk, or execution controls.
 
 ## Definition of Done
 
-Completed:
+Completed in source:
 
-- July 29 risk, regime, bear recovery, and entry ownership repairs
-- July 30 missed-opening diagnosis
-- bounded opening-surge permission
-- chain-aware opening-surge ownership
-- duplicate breakout scanner repair and live validation
-- Railway Python attestation build recovery
-- July 31 raw-score short-circuit diagnosis
-- two-stage score calibration source, startup wiring, deployment, installation validation, and post-deploy regression validation
+- Aug. 3 recursion and stale-error diagnosis
+- canonical scanner runtime contract
+- stale recursion telemetry recovery
+- bounded neutral momentum starter
+- worker startup and route registration
+- handoff update
 
-Pending:
+Pending Railway validation:
 
-- first eligible opening after calibration profiles candidates with raw scores at or above `0.012`
-- at least two names must pass every existing structure test before promotion
-- inspect the composite score ledger for any qualified name
-- determine whether the normal core pipeline accepts or rejects promoted candidates
-- any accepted position remains one reduced-size paper entry
-- collect real outcome evidence before further permission, threshold, or sizing expansion
+- scanner runtime contract passes and remains stable after a watchdog interval
+- later successful cycle clears stale recursion warning
+- neutral starter endpoint passes
+- ownership and compact self-check remain healthy
+- during an eligible neutral momentum window, one qualified candidate reaches the normal core entry pipeline
+- any resulting position remains one reduced-size paper starter
+- collect entry and outcome evidence before widening the window, increasing size, or adding more daily entries
 
 ## Exact Next Action
 
-Do not make another strategy change from the July 31 midday sample.
+After Railway deploys commit `1303d2a3a7ab4c1db874a504c6d7364e810395bc`, run:
 
-During the next `08:45–09:15 CDT` opening window, inspect:
+1. `/paper/scanner-runtime-contract-status`
+2. `/paper/neutral-momentum-starter-status`
+3. `/paper/self-check`
+4. `/paper/no-entry-diagnostic?force=1`
 
-1. `/paper/opening-surge-participation-status`
-2. `/paper/opening-surge-score-calibration-status`
-3. `/paper/no-entry-diagnostic?force=1`
-
-Confirm that candidates with raw scores at or above `0.012` reach full structure profiling. Promotion still requires a two-name structurally confirmed cluster, and any entry must pass the normal core pipeline and remain one reduced-size paper position.
+Do not make another threshold or sizing change until these four responses show whether the runtime recovered and whether the bounded neutral starter reached the existing quality/execution path.
