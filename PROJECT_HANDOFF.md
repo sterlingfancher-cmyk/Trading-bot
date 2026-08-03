@@ -8,31 +8,34 @@
 - Mode: paper only
 - Live broker authority: none
 - ML execution authority: none; advisory only
-- No repair in this handoff changes the 1.00% soft-pause, 2.50% hard realized-loss halt, 2.50% hard intraday-drawdown halt, or 3.00% absolute daily-loss ceiling.
+- Hard-risk ladder remains:
+  - 1.00% realized-loss soft pause
+  - 2.50% realized-loss hard halt
+  - 2.50% intraday-drawdown hard halt
+  - 3.00% absolute daily-equity-loss ceiling
 
 ## Account Baseline
 
-Latest supplied account snapshot before the August 3 entry cycle:
+Latest supplied account snapshot:
 
 - cash/equity approximately `$10,734.80`
-- no open positions before `10:58:34 CDT`
-- 52 completed exits
+- 52 completed exits before the August 3 cycle
 - 35 wins, 17 losses
 - realized total `+$734.82`
-- lifetime profit factor previously measured at approximately `3.18`
+- lifetime paper profit factor previously approximately `3.18`
 
-The strategy has positive historical paper expectancy. The immediate problem was underdeployment and runtime reliability, not proof that the underlying strategy had negative expectancy.
+The project’s current priority is reliable participation without weakening the proven hard-risk controls.
 
 ## Engineering Rules
 
 1. Reliability before performance.
 2. Evidence before modification.
-3. Do not lower hard-risk controls to manufacture activity.
+3. Do not lower hard-risk controls merely to manufacture activity.
 4. Do not add live or ML authority without explicit approval.
-5. Avoid recursive callable wrappers; prefer deterministic ownership contracts or bounded internal extensions.
-6. Every material code/configuration change and Railway validation milestone must update this handoff.
+5. Avoid recursive main-loop wrappers; use bounded ownership contracts or narrow internal valves.
+6. Update this handoff after every material code/configuration change and Railway validation milestone.
 
-## Validated Architecture Before August 3
+## Validated Architecture
 
 ### Entry stack
 
@@ -43,26 +46,36 @@ Required order:
 3. deterministic composition/breakout callable
 4. direct core entry pipeline
 
-Prior Railway validation showed:
+Prior Railway validation:
 
 - `owned: true`
 - `entry_guard_active: true`
 - exactly one bear wrapper
 - exactly one X-Ray wrapper
-- no drift or recursion in the entry stack
+- no entry-stack drift or recursion
 
 ### Scanner stack
 
 Required order:
 
 1. `opening_surge_participation`
-2. exactly one `breakout_participation_layer`
-3. `market_participation_accelerator`
+2. one `breakout_participation_layer`
+3. one `market_participation_accelerator`
 4. deepest core scanner
 
-Prior Railway validation showed one opening-surge wrapper, one breakout wrapper, opening surge above breakout, and no callable cycle.
+Railway validation at `10:57:00 CDT` on August 3:
 
-## Prior Reliability and Participation Work
+- `overall: pass`
+- opening surge depth `0`
+- breakout depth `1`
+- market participation depth `2`
+- `ordered: true`
+- one of each approved layer
+- no cycle
+- no truncation
+- no rebuild required
+
+## Prior Work Summary
 
 ### July 29
 
@@ -71,92 +84,62 @@ Prior Railway validation showed one opening-surge wrapper, one breakout wrapper,
 - side-aware bear soft-pause short recovery
 - deterministic entry-stack ownership
 
-Key routes:
-
-- `/paper/performance-risk-activation-status`
-- `/paper/regime-integrity-status`
-- `/paper/bear-short-recovery-status`
-- `/paper/bear-recovery-stack-status`
-- `/paper/entry-pipeline-xray-bear-ownership-status`
-
 ### July 30
 
-A missed bullish opening in a defensive historical regime led to a bounded opening-surge valve:
+Added the bounded opening-surge sleeve:
 
 - 15–45 minutes after open
-- empty book
-- one reduced-size paper position per day
+- empty-book requirement
+- strong NQ confirmation
 - no confirmed-bear long exception
-- strong NQ opening confirmation
-- gap/follow-through/opening-range/near-high/momentum/volume/bucket/cluster tests
+- gap, follow-through, opening-range, near-high, momentum, volume, bucket, and cluster checks
 
 Key commits:
 
-- opening-surge v2 chain-aware ownership: `2069a448066c3cc8f9fec0f7497ee024ba6ee8c7`
-- breakout scanner ownership source: `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43`
-- breakout scanner worker activation: `115e921ecdfeb50fde4b4b1125787e9bb190352d`
+- opening-surge chain-aware ownership: `2069a448066c3cc8f9fec0f7497ee024ba6ee8c7`
+- breakout scanner ownership: `19d19bfa9df5683c8c89b7c6cd85f4ac13a98b43`
+- breakout worker activation: `115e921ecdfeb50fde4b4b1125787e9bb190352d`
 
 ### July 31
 
-The first real opening test showed the fixed raw score floor `0.045` prevented candidates from reaching structure analysis. A two-stage calibration was added:
+Fixed the raw-score short circuit that prevented candidates from reaching structure analysis:
 
 - raw profiling prefilter `0.012`
-- final structurally confirmed score floor `0.045`
+- final structure-confirmed floor `0.045`
 - final score cap `0.080`
-- all existing structure and cluster tests retained
+- all existing structure and cluster checks retained
 
 Key commits:
 
-- score calibration source: `faf6fab8416c14b5e753b0f909edbebe963bdcac`
+- score calibration: `faf6fab8416c14b5e753b0f909edbebe963bdcac`
 - worker activation: `747a737848de7562035c44507ab81abe694cd11e`
 
-Build recovery:
+Railway Python build repair:
 
 - `mise.toml` commit `4114e77163d921f50aa1d418f4ac709631738046`
 - Python remains pinned at 3.11.9
-- only GitHub artifact-attestation verification was disabled for the unavailable prebuilt attestation
+- only unavailable GitHub artifact-attestation verification was disabled
 
-## August 3 Failure Evidence
+## August 3 Runtime Failure and Recovery
 
-Fast self-check generated at `2026-08-03 10:29:16 CDT` showed:
+Morning evidence at `10:29:16 CDT` showed:
 
-- auto-runner enabled at 300-second cadence
-- `last_attempt: 09:45:34 CDT`
-- `last_error: maximum recursion depth exceeded while calling a Python object`
-- `last_success: 09:54:39 CDT`
-- `recursion_error_active: true`
 - scanner found 25 signals
-- zero entries
 - market mode `neutral`
 - no loss, drawdown, halt, self-defense, or open exposure
+- `maximum recursion depth exceeded while calling a Python object`
 
 Interpretation:
 
-1. The `09:45` cycle genuinely hit scanner-callable recursion and could not reliably complete the entry path.
-2. A later cycle succeeded at `09:54`, proving the recursion was intermittent rather than a permanent worker crash.
-3. The compact self-check treated the old error string as still active because successful cycles did not clear `last_error`.
-4. The bounded opening-surge valve had already closed at `09:15`.
-5. The existing risk-on starter accepted only `risk_on` or `constructive`, not `neutral`.
-6. Therefore a strong neutral tape after `09:15` had no bounded starter path even when many valid momentum names existed.
+1. The `09:45` cycle genuinely hit scanner-callable recursion.
+2. A later successful cycle proved the failure was intermittent.
+3. The old self-check treated the stored error text as still active after recovery.
+4. The opening-surge window had ended at `09:15`.
+5. The existing starter accepted `risk_on` and `constructive`, but not strong `neutral` tape.
 
-User-supplied charts around `10:30 CDT` showed broad strength and orderly intraday advances in:
+### Scanner runtime contract
 
-- RGIT approximately `+7.19%`
-- APLD approximately `+7.03%`
-- MP approximately `+5.29%`
-- NBIS approximately `+11.97%`
-- AMZN approximately `+5.23%`
-- META approximately `+6.65%`
-- BTQ approximately `+5.48%`
-- NVTS approximately `+5.02%`
-- KEEL approximately `+4.16%`
-- CIFR approximately `+8.42%`
-
-This was not a day without opportunity. The runtime and permission architecture failed to convert the available opportunity into a bounded paper entry before the repair.
-
-## August 3 Repair 1 — Scanner Runtime Contract
-
-New file:
+File and commit:
 
 - `scanner_runtime_contract.py`
 - version `scanner-runtime-contract-2026-08-03-v1`
@@ -165,220 +148,211 @@ New file:
 
 Behavior:
 
-- inspects the callable graph with bounded cycle detection
-- requires exactly one opening-surge wrapper, one breakout wrapper, and one market-participation wrapper
-- requires the order `opening surge -> breakout -> market participation -> core`
-- if the chain is missing, duplicated, cyclic, truncated, or misordered, restores the known core scanner and reapplies only the approved layers
-- preserves the opening-surge score calibration after a rebuild
-- patches `set_auto_success` so a successful cycle clears stale `last_error` and `last_error_trace`
-- preserves the prior error in `last_recovered_error` fields for auditability
-- runs a recurring watchdog
+- bounded callable-graph inspection
+- deterministic canonical scanner order
+- repair only when missing, duplicated, cyclic, truncated, or misordered
+- successful cycles clear stale error telemetry while retaining recovered-error history
+- no signal, threshold, sizing, hard-risk, order, live, or ML authority change
 
-Authority boundary:
+### Neutral momentum starter v1
 
-- composition and reliability only
-- no signal criteria change
-- no score/threshold change
-- no sizing change
-- no hard-risk change
-- no direct orders
-- no live or ML authority
-
-## August 3 Repair 2 — Bounded Neutral Momentum Starter
-
-New file:
+File and commits:
 
 - `neutral_momentum_starter_extension.py`
-- version `neutral-momentum-starter-extension-2026-08-03-v1`
-- commit `e9f14fdf3221ad9090c048b198d8f745cc4cd34d`
+- v1 `neutral-momentum-starter-extension-2026-08-03-v1`
+- source commit `e9f14fdf3221ad9090c048b198d8f745cc4cd34d`
+- worker activation `1303d2a3a7ab4c1db874a504c6d7364e810395bc`
 - route `/paper/neutral-momentum-starter-status`
 
-This does not wrap the main entry loop. It extends only the existing risk-on starter's market-context test.
+Initial bounded context:
 
-Neutral context may qualify only when:
-
-- paper context
-- regular session open
 - market mode exactly `neutral`
-- 45–180 minutes after open (`09:15–11:30 CDT`)
+- 45–180 minutes after open
 - risk score at least `40`
-- no bear confirmation
-- no defensive rotation
-- no bearish/blocking futures context
-- no breadth risk-off confirmation
-- scanner cluster at least 15 signals
-- at least four long signals when a long count is available
-- positive tape evidence from growth leadership, multiple risk-on sectors, supportive/bullish futures, or supportive/narrow leadership breadth
+- scanner cluster at least `15`
+- at least four long signals when available
+- no confirmed bear or defensive rotation
+- no bearish/blocking futures or breadth risk-off confirmation
+- positive tape evidence required
+- existing candidate score/rank, quality, cooldown, cash, position, risk, and execution controls retained
 
-The existing starter still controls final tradability:
+### First post-repair entry evidence
 
-- one starter per day and one per cycle
-- existing allocation factor `0.18`
-- existing raw-score and rank-score floors
-- preferred leadership bucket/symbol requirement
-- quality-block allowlist and hard-block tokens
-- clean risk state
-- cash and open-position limits
-- cooldowns and normal core execution controls
+The cycle completed at `10:58:34 CDT`. The diagnostic at `10:59:46 CDT` reported:
 
-Additional universe hints/mappings:
+- scanner signals `68`
+- long signals `10`
+- short signals `2`
+- `entries_count: 1`
+- verdict `entries_taken_last_cycle`
+- market mode `neutral`
+- risk score `52`
+- longs allowed
+- no loss, drawdown, halt, profit guard, or self-defense block
 
-- RGIT, APLD, MP, NBIS, AMZN, META, BTQ, NVTS, KEEL, CIFR
+This established that the repaired execution path was no longer structurally stuck flat.
+
+### Self-check freshness repair
+
+File and commit:
+
+- `fast_self_check_override.py`
+- version `fast-self-check-override-2026-08-03-v4-error-freshness`
+- commit `b6d32ee66aa59e4a9e20b26b8706d597db32a5c6`
+
+Railway validation at `11:08:45 CDT`:
+
+- `overall: pass`
+- `last_error: null`
+- `last_error_active: false`
+- `recursion_error_active: false`
+- prior recursion preserved under `last_recovered_error`
+- no strategy, threshold, sizing, risk, order, live, or ML authority change
+
+## August 3 Neutral Momentum Starter v2 — Staged Two-Position Policy
+
+File and commit:
+
+- `neutral_momentum_starter_extension.py`
+- version `neutral-momentum-starter-extension-2026-08-03-v2-staged-two-position`
+- source commit `ab10a8ef3fadf956a510f1fcfff4dc22c0201379`
+- existing route remains `/paper/neutral-momentum-starter-status`
+- existing Gunicorn import/watchdog remains valid; no startup-file change required
+
+Purpose:
+
+The v1 one-entry limit was appropriate for initial validation but too restrictive as a permanent neutral-market policy. V2 permits a staged second reduced-size starter without changing the normal portfolio position cap.
+
+Base neutral context remains unchanged except that concentrated technology leadership (`tech_concentrated` or `tech_caution`) can count as positive-tape evidence when all other neutral safeguards pass.
+
+### Daily and cycle limits
+
+- maximum neutral starter entries per day: `2`
+- maximum starter entries per cycle: `1`
+- maximum starter/open-position stage: `2`
+- existing starter allocation factor remains `0.18`
+- existing raw score floor remains `0.008`
+- existing rank score floor remains `0.012`
+- normal core candidate quality, ranking, cooldown, execution, and risk controls remain downstream
+
+### Second-entry requirements
+
+A second starter is considered only when all of the following are true:
+
+1. Market mode remains exactly `neutral`.
+2. Exactly one first position is still open.
+3. At least `900` seconds (15 minutes) have elapsed since the most recent entry.
+4. The first position’s unrealized return is known and is not below `-0.50%`.
+5. The second candidate differs from the first by sector or strategy bucket.
+6. The projected combined neutral-starter exposure does not exceed `36%` of equity.
+7. The daily limit of two and cycle limit of one are not exhausted.
+8. The existing starter valve independently approves score, rank, preferred leadership, quality-block reason, cash, cooldown, risk state, and execution.
+
+If position time, P&L, or diversification metadata is unavailable, the second starter is blocked rather than guessed.
+
+### Composition safety
+
+V2 patches only `core_entry_pipeline._participation_valve_ok`, not the main entry loop. The wrapper carries the existing risk-on-starter ownership marker so the original starter watchdog does not mistake the staged layer for displacement and create recursive composition.
 
 Authority boundary:
 
 - paper only
 - no direct order placement by the extension
 - no main-entry-loop wrapper
-- no hard-risk, live-authority, ML-authority, position-limit, or starter-sizing change
-- only a bounded neutral market-context permission is added
+- no hard-risk change
+- no live or ML authority
+- no change to the normal portfolio position cap
+- no starter sizing increase
+- only the neutral starter daily allowance changes from one to two, with stricter second-stage checks
 
-## Worker Activation
+## Post-Deploy Validation
 
-`gunicorn.conf.py` activation commit:
+### Neutral starter status
 
-- `1303d2a3a7ab4c1db874a504c6d7364e810395bc`
+Run:
 
-The worker starts and registers both:
+- `/paper/neutral-momentum-starter-status`
 
-- `scanner_runtime_contract`
-- `neutral_momentum_starter_extension`
+Expected:
 
-## Railway Validation — August 3, 10:57–10:59 CDT
-
-### Scanner runtime contract
-
-At `10:57:00 CDT`:
-
-- version `scanner-runtime-contract-2026-08-03-v1`
-- `overall: pass`
-- canonical stack already healthy; no rebuild required
-- one opening-surge layer at depth `0`
-- one breakout layer at depth `1`
-- one market-participation layer at depth `2`
-- `ordered: true`
-- `cycle_detected: false`
-- `truncated: false`
-- no threshold, sizing, signal, risk, live, or ML authority change
-
-This validates the scanner runtime repair in Railway.
-
-### Neutral momentum starter installation
-
-At `10:57:22 CDT`:
-
-- version `neutral-momentum-starter-extension-2026-08-03-v1`
+- version `neutral-momentum-starter-extension-2026-08-03-v2-staged-two-position`
 - `overall: pass`
 - `active: true`
-- no re-patching on the status call
-- window `45–180` minutes after open
-- minimum risk score `40`
-- minimum scanner cluster `15`
-- existing starter allocation factor `0.18`
-- existing one-entry-per-day limit preserved
-- existing raw score floor `0.008`
-- existing rank score floor `0.012`
+- `settings.max_entries_per_day: 2`
+- `settings.max_entries_per_cycle: 1`
+- `settings.max_open_positions: 2`
+- `settings.minimum_seconds_between_entries: 900`
+- `settings.first_position_minimum_pnl_pct: -0.5`
+- `settings.maximum_combined_exposure_pct: 36.0`
+- `settings.requires_different_sector_or_bucket_for_second: true`
+- `settings.starter_alloc_factor: 0.18`
 
-`last_evaluation` was empty because the status call occurred before the first scanner/entry cycle after installation.
+The first call after deployment may report that the context and staged valve were patched. Later watchdog/status calls should remain active without adding another layer.
 
-### First post-repair entry cycle
+### Regression checks
 
-The cycle completed at `10:58:34 CDT` and the no-entry diagnostic generated at `10:59:46 CDT` reported:
-
-- scanner found `68` signals
-- `10` long signals and `2` short signals
-- `entries_count: 1`
-- `exits_count: 0`
-- verdict `entries_taken_last_cycle`
-- primary driver `entries_taken`
-- market mode `neutral`
-- risk score `52`
-- longs allowed
-- new entries allowed
-- no loss, drawdown, halt, profit guard, or self-defense block
-- the account was no longer stuck flat
-
-The earlier `10:57:41` self-check showing zero positions was generated before this `10:58:34` cycle and was therefore one cycle stale. Do not use that snapshot to conclude the repair failed.
-
-The exact selected symbol was not present in the supplied diagnostic. Confirm it from `/paper/status`, `/paper/self-check`, or the starter telemetry before attributing the entry to a particular ticker.
-
-### Remaining stale-error telemetry defect
-
-The `10:57:41` self-check still displayed the old `09:45` recursion message as active even though successful cycles had occurred at `10:50:14` and `10:58:34`. The scanner contract itself reported no recursion error and a healthy callable chain. Therefore this was a freshness-reporting defect, not an active scanner failure.
-
-Repair:
-
-- file `fast_self_check_override.py`
-- version `fast-self-check-override-2026-08-03-v4-error-freshness`
-- commit `b6d32ee66aa59e4a9e20b26b8706d597db32a5c6`
-
-Behavior:
-
-- compares the last error attempt with later run/success timestamps
-- labels a superseded error `historical_superseded`
-- reports `last_error_active: false` and `last_error_stale: true` when a later successful cycle exists
-- keeps the historical error text for auditability
-- reports recursion as historical rather than active
-- changes telemetry only; no strategy, threshold, sizing, risk, order, live, or ML authority
-
-## Validation Endpoints
-
-Runtime and ownership:
+Run:
 
 - `/paper/scanner-runtime-contract-status`
 - `/paper/breakout-scanner-ownership-status`
-- `/paper/opening-surge-participation-status`
 - `/paper/bear-recovery-stack-status`
-- `/paper/entry-pipeline-xray-bear-ownership-status`
-
-Entry and account state:
-
-- `/paper/status`
 - `/paper/self-check`
+
+Expected:
+
+- scanner order still canonical
+- one opening-surge, breakout, and market-participation layer
+- one bear wrapper and one X-Ray wrapper
+- no callable cycle or recursion
+- `overall: pass`
+- `last_error_active: false`
+
+### Entry diagnostics
+
+Run:
+
 - `/paper/no-entry-diagnostic?force=1`
 - `/paper/risk-on-starter-participation-status`
-- `/paper/neutral-momentum-starter-status`
+- `/paper/status`
+
+Use `last_evaluation.staged_gate` to identify whether a second entry was:
+
+- waiting for 15-minute spacing
+- blocked by first-position loss
+- blocked for sector/bucket concentration
+- blocked by projected combined exposure
+- allowed by the staged gate but rejected by the existing starter/core quality controls
+- accepted into the normal paper execution path
 
 ## Definition of Done
 
 Completed and Railway-validated:
 
-- Aug. 3 recursion diagnosis
-- canonical scanner runtime contract
-- exact scanner ordering with one of each approved layer
-- bounded neutral momentum starter installation
-- first post-repair neutral cycle reached the entry path
-- one paper entry opened at `10:58:34 CDT`
-- no hard-risk or authority regression
+- scanner recursion diagnosis and canonical recovery
+- healthy scanner ordering
+- initial bounded neutral starter installation
+- one post-repair neutral cycle reached the entry path
+- self-check error freshness and recursion recovery telemetry
 
-Completed in source, pending redeploy validation:
+Completed in source, pending Railway validation:
 
-- fast self-check error-freshness correction
-- historical recursion warning should no longer make `/paper/self-check` warn after a later successful cycle
+- two-entry staged neutral starter policy
+- 15-minute separation
+- second-position diversification
+- first-position health gate
+- 36% projected combined-exposure cap
+- wrapper ownership compatibility with the existing starter watchdog
 
-Still required:
-
-- identify the selected symbol and entry context from current account/starter telemetry
-- confirm the position uses the intended reduced-size starter allocation
-- observe management and exit behavior
-- collect outcome evidence before widening the neutral window, increasing size, or allowing more daily entries
+Do not widen the window, increase starter size, or permit more than two neutral starters until Railway telemetry and actual trade outcomes support another change.
 
 ## Exact Next Action
 
-After Railway deploys commit `b6d32ee66aa59e4a9e20b26b8706d597db32a5c6`, run:
+After Railway deploys commit `ab10a8ef3fadf956a510f1fcfff4dc22c0201379`, run in this order:
 
-1. `/paper/self-check`
-2. `/paper/status`
-3. `/paper/risk-on-starter-participation-status`
-4. `/paper/neutral-momentum-starter-status`
+1. `/paper/neutral-momentum-starter-status`
+2. `/paper/scanner-runtime-contract-status`
+3. `/paper/bear-recovery-stack-status`
+4. `/paper/self-check`
+5. `/paper/no-entry-diagnostic?force=1`
 
-Expected self-check telemetry:
-
-- version `fast-self-check-override-2026-08-03-v4-error-freshness`
-- `overall: pass`
-- `last_error_active: false`
-- old recursion message either absent or marked `last_error_stale: true`
-- `recursion_error_active: false`
-- `recursion_error_historical: true` if the old text remains
-
-Use the account and starter outputs to identify the opened symbol, entry context, allocation, entry price, and current unrealized P&L. Do not make another threshold or sizing change until that evidence is captured.
+Confirm the V2 policy fields, stable ownership, no recursion, and the staged-gate reason before making another strategy or sizing change.
