@@ -1,12 +1,13 @@
-"""Bounded neutral-tape extension with a staged second paper starter.
+"""Bounded neutral-tape starter with staged two-position controls.
 
 The existing risk-on starter remains the final candidate-quality and execution
-valve. This module extends its market-context permission to strong neutral tape
-and permits a second starter only after additional spacing, diversification,
+valve. This module adds a neutral context and, only while the market is neutral,
+permits a staged second reduced-size starter after spacing, diversification,
 position-health, and combined-exposure checks.
 
-It does not wrap the main entry loop, place orders directly, change hard-risk
-limits, enable live trading, or grant ML authority.
+Non-neutral markets pass through to the pre-existing starter unchanged. This
+module does not wrap the main entry loop, place orders directly, change hard
+risk limits, enable live trading, or grant ML authority.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import threading
 import time
 from typing import Any, Dict, Iterable, List, Tuple
 
-VERSION = "neutral-momentum-starter-extension-2026-08-03-v2-staged-two-position"
+VERSION = "neutral-momentum-starter-extension-2026-08-03-v3-neutral-only-staging"
 ENABLED = os.environ.get("NEUTRAL_MOMENTUM_STARTER_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 START_MINUTES = int(os.environ.get("NEUTRAL_MOMENTUM_STARTER_START_MINUTES", "45"))
 END_MINUTES = int(os.environ.get("NEUTRAL_MOMENTUM_STARTER_END_MINUTES", "180"))
@@ -30,9 +31,7 @@ MIN_SECONDS_BETWEEN_STARTERS = int(os.environ.get("NEUTRAL_MOMENTUM_STARTER_MIN_
 FIRST_POSITION_MIN_PNL_PCT = float(os.environ.get("NEUTRAL_MOMENTUM_STARTER_FIRST_POSITION_MIN_PNL_PCT", "-0.50"))
 MAX_COMBINED_EXPOSURE_PCT = float(os.environ.get("NEUTRAL_MOMENTUM_STARTER_MAX_COMBINED_EXPOSURE_PCT", "36.0"))
 
-_EXTRA_SYMBOLS = {
-    "RGIT", "APLD", "MP", "NBIS", "AMZN", "META", "BTQ", "NVTS", "KEEL", "CIFR",
-}
+_EXTRA_SYMBOLS = {"RGIT", "APLD", "MP", "NBIS", "AMZN", "META", "BTQ", "NVTS", "KEEL", "CIFR"}
 _EXTRA_BUCKETS = {
     "semi_leaders", "mega_cap_ai", "ai_cloud_breakout", "cloud_cyber_software",
     "data_center_infra", "bitcoin_ai_compute", "space_stocks", "small_cap_momentum",
@@ -200,15 +199,18 @@ def _neutral_context(core: Any, market: Dict[str, Any]) -> Tuple[bool, Dict[str,
     risk_score = _f(market.get("risk_score"))
     futures = _d(market.get("futures_bias"))
     breadth = _d(market.get("breadth"))
-    futures_text = " ".join(str(futures.get(key) or "").lower() for key in ("bias", "action", "reason"))
-    breadth_text = " ".join(str(breadth.get(key) or "").lower() for key in ("state", "action", "reason"))
+    futures_text = " ".join(str(futures.get(k) or "").lower() for k in ("bias", "action", "reason"))
+    breadth_text = " ".join(str(breadth.get(k) or "").lower() for k in ("state", "action", "reason"))
     growth = bool(market.get("growth_leadership") or market.get("tech_leadership") or market.get("risk_on_leadership"))
     sector_count = _i(market.get("risk_on_sector_count"))
     positive_tape = bool(
         growth
         or sector_count >= 2
         or any(token in futures_text for token in ("bullish", "gap_chase_protection", "risk_on"))
-        or any(token in breadth_text for token in ("supportive", "narrow_mega_cap_led", "reduce_aggression", "tech_concentrated", "tech_caution"))
+        or any(token in breadth_text for token in (
+            "supportive", "narrow_mega_cap_led", "reduce_aggression",
+            "tech_concentrated", "tech_caution",
+        ))
     )
 
     reasons: List[str] = []
@@ -313,7 +315,7 @@ def _latest_entry_time(core: Any, positions: Dict[str, Any]) -> dt.datetime | No
 
 def _position_mark(row: Dict[str, Any]) -> float:
     for field in ("current_price", "mark", "last_price", "price", "market_price", "entry_price", "avg_price", "average_price"):
-        value = _f(row.get(field), 0.0)
+        value = _f(row.get(field))
         if value > 0:
             return value
     return 0.0
@@ -321,7 +323,7 @@ def _position_mark(row: Dict[str, Any]) -> float:
 
 def _position_entry(row: Dict[str, Any]) -> float:
     for field in ("entry_price", "avg_price", "average_price", "cost_basis_price", "price"):
-        value = _f(row.get(field), 0.0)
+        value = _f(row.get(field))
         if value > 0:
             return value
     return 0.0
@@ -329,7 +331,7 @@ def _position_entry(row: Dict[str, Any]) -> float:
 
 def _position_qty(row: Dict[str, Any]) -> float:
     for field in ("qty", "quantity", "shares", "units", "position_size"):
-        value = abs(_f(row.get(field), 0.0))
+        value = abs(_f(row.get(field)))
         if value > 0:
             return value
     return 0.0
@@ -337,7 +339,7 @@ def _position_qty(row: Dict[str, Any]) -> float:
 
 def _position_value(row: Dict[str, Any]) -> float:
     for field in ("market_value", "position_value", "value", "notional", "cost_basis"):
-        value = abs(_f(row.get(field), 0.0))
+        value = abs(_f(row.get(field)))
         if value > 0:
             return value
     return _position_qty(row) * _position_mark(row)
@@ -350,12 +352,11 @@ def _position_pnl_pct(row: Dict[str, Any]) -> float | None:
     entry = _position_entry(row)
     mark = _position_mark(row)
     if entry > 0 and mark > 0:
-        side = str(row.get("side") or "long").lower()
         move = ((mark / entry) - 1.0) * 100.0
-        return -move if side == "short" else move
+        return -move if str(row.get("side") or "long").lower() == "short" else move
     unrealized = row.get("unrealized_pnl")
     basis = row.get("cost_basis") or row.get("position_value")
-    if unrealized is not None and _f(basis, 0.0) > 0:
+    if unrealized is not None and _f(basis) > 0:
         return (_f(unrealized) / _f(basis)) * 100.0
     return None
 
@@ -375,7 +376,6 @@ def _stage_gate(core: Any, starter: Any, signal: Dict[str, Any], market: Dict[st
     symbol = _symbol(signal)
     candidate_sector = _sector(core, symbol, signal)
     candidate_bucket = _bucket(core, symbol, signal)
-
     base = {
         "symbol": symbol,
         "candidate_sector": candidate_sector,
@@ -389,12 +389,12 @@ def _stage_gate(core: Any, starter: Any, signal: Dict[str, Any], market: Dict[st
         "max_open_positions": MAX_NEUTRAL_OPEN_POSITIONS,
     }
 
+    if mode != "neutral":
+        return True, {**base, "reason": "non_neutral_passthrough", "neutral_stage_applies": False}
     if stage_count <= 0:
-        return True, {**base, "reason": "first_starter_stage_allowed", "stage": 1}
+        return True, {**base, "reason": "first_neutral_starter_stage_allowed", "stage": 1}
     if stage_count >= MAX_NEUTRAL_STARTERS_PER_DAY or len(positions) >= MAX_NEUTRAL_OPEN_POSITIONS:
         return False, {**base, "reason": "neutral_starter_daily_or_open_position_limit"}
-    if mode != "neutral":
-        return False, {**base, "reason": "second_starter_requires_neutral_mode"}
     if len(positions) != 1:
         return False, {**base, "reason": "second_starter_requires_one_open_first_position"}
 
@@ -454,7 +454,7 @@ def _stage_gate(core: Any, starter: Any, signal: Dict[str, Any], market: Dict[st
         }
 
     state = _portfolio(core)
-    equity = max(_f(state.get("equity"), _f(state.get("cash"), 0.0)), 0.0)
+    equity = max(_f(state.get("equity"), _f(state.get("cash"))), 0.0)
     starter_factor = max(0.0, _f(getattr(starter, "ALLOC_FACTOR", 0.18), 0.18))
     proposed_upper_bound = equity * starter_factor
     combined_pct = ((current_value + proposed_upper_bound) / equity) * 100.0 if equity > 0 else 999.0
@@ -500,7 +500,7 @@ def _linked(fn: Any) -> Iterable[Any]:
     return out
 
 
-def _chain_has_version(fn: Any, limit: int = 32) -> bool:
+def _has_exact_version(fn: Any, limit: int = 32) -> bool:
     queue = [fn]
     seen: set[int] = set()
     while queue and len(seen) < limit:
@@ -514,13 +514,44 @@ def _chain_has_version(fn: Any, limit: int = 32) -> bool:
     return False
 
 
+def _unwrap_old_neutral_stage(fn: Any) -> Any:
+    current = fn
+    seen: set[int] = set()
+    for _ in range(16):
+        if not callable(current) or id(current) in seen:
+            break
+        seen.add(id(current))
+        version = getattr(current, "_neutral_momentum_starter_extension_version", None)
+        prior = getattr(current, "_neutral_momentum_staged_prior", None)
+        if version and callable(prior):
+            current = prior
+            continue
+        break
+    return current
+
+
+def _unwrap_old_neutral_context(fn: Any) -> Any:
+    current = fn
+    seen: set[int] = set()
+    for _ in range(16):
+        if not callable(current) or id(current) in seen:
+            break
+        seen.add(id(current))
+        prior = getattr(current, "_neutral_momentum_starter_extension_prior", None)
+        if callable(prior):
+            current = prior
+            continue
+        break
+    return current
+
+
 def _install_context(core: Any, starter: Any) -> bool:
     current = getattr(starter, "_risk_on_confirmed", None)
     if not callable(current):
         return False
     if getattr(current, "_neutral_momentum_context_version", None) == VERSION:
         return False
-    prior = getattr(current, "_neutral_momentum_starter_extension_prior", current)
+    prior = _unwrap_old_neutral_context(current)
 
     def extended_context(runtime: Any, market: Dict[str, Any], __prior=prior):
         global _LAST
@@ -558,18 +589,47 @@ def _install_staged_valve(core: Any, starter: Any) -> bool:
     current = getattr(cep, "_participation_valve_ok", None)
     if not callable(current):
         return False
-    if _chain_has_version(current):
+    if _has_exact_version(current):
         try:
             current._risk_on_starter_participation_version = starter.VERSION
         except Exception:
             pass
         return False
 
-    prior = current
+    prior = _unwrap_old_neutral_stage(current)
 
-    def staged_valve(runtime: Any, signal: Dict[str, Any], params: Dict[str, Any], market: Dict[str, Any], quality_info: Any, rank_index: int, entries_this_cycle: int, valve_entries_this_cycle: int, __prior=prior):
+    def staged_valve(
+        runtime: Any,
+        signal: Dict[str, Any],
+        params: Dict[str, Any],
+        market: Dict[str, Any],
+        quality_info: Any,
+        rank_index: int,
+        entries_this_cycle: int,
+        valve_entries_this_cycle: int,
+        __prior=prior,
+    ):
         global _LAST
-        gate_ok, gate = _stage_gate(runtime, starter, signal if isinstance(signal, dict) else {}, market if isinstance(market, dict) else {})
+        signal_row = signal if isinstance(signal, dict) else {}
+        market_row = market if isinstance(market, dict) else {}
+        mode = str(market_row.get("market_mode") or market_row.get("regime") or "").lower()
+
+        if mode != "neutral":
+            ok, raw_info = __prior(
+                runtime, signal, params, market, quality_info,
+                rank_index, entries_this_cycle, valve_entries_this_cycle,
+            )
+            info = raw_info if isinstance(raw_info, dict) else {"reason": str(raw_info)}
+            _LAST["staged_gate"] = {
+                "generated_local": _now(runtime),
+                "status": "non_neutral_passthrough_allowed" if ok else "non_neutral_passthrough_blocked",
+                "reason": "non_neutral_passthrough",
+                "market_mode": mode,
+                "prior_result": info,
+            }
+            return ok, info
+
+        gate_ok, gate = _stage_gate(runtime, starter, signal_row, market_row)
         if not gate_ok:
             payload = {
                 "reason": gate.get("reason", "neutral_staged_second_entry_block"),
@@ -580,7 +640,10 @@ def _install_staged_valve(core: Any, starter: Any) -> bool:
             _LAST["staged_gate"] = {"generated_local": _now(runtime), "status": "blocked", **payload}
             return False, payload
 
-        ok, raw_info = __prior(runtime, signal, params, market, quality_info, rank_index, entries_this_cycle, valve_entries_this_cycle)
+        ok, raw_info = __prior(
+            runtime, signal, params, market, quality_info,
+            rank_index, entries_this_cycle, valve_entries_this_cycle,
+        )
         info = raw_info if isinstance(raw_info, dict) else {"reason": str(raw_info)}
         _LAST["staged_gate"] = {
             "generated_local": _now(runtime),
@@ -588,7 +651,7 @@ def _install_staged_valve(core: Any, starter: Any) -> bool:
             "stage_gate": gate,
             "prior_result": info,
         }
-        if ok and isinstance(info, dict):
+        if ok:
             info = dict(info)
             info["neutral_staged_second_entry"] = gate
         return ok, info
@@ -602,7 +665,6 @@ def _install_staged_valve(core: Any, starter: Any) -> bool:
 
 
 def install(core: Any = None) -> Dict[str, Any]:
-    global _LAST
     if core is None:
         try:
             import app as core
@@ -616,7 +678,12 @@ def install(core: Any = None) -> Dict[str, Any]:
             import risk_on_starter_participation_valve as starter
             import core_entry_pipeline as cep
         except Exception as exc:
-            return {"status": "warn", "overall": "warn", "version": VERSION, "reason": f"starter_or_core_import_failed:{type(exc).__name__}:{exc}"}
+            return {
+                "status": "warn",
+                "overall": "warn",
+                "version": VERSION,
+                "reason": f"starter_or_core_import_failed:{type(exc).__name__}:{exc}",
+            }
 
         _extend_universe(core, starter)
         starter.MAX_ENTRIES_PER_DAY = MAX_NEUTRAL_STARTERS_PER_DAY
@@ -625,7 +692,7 @@ def install(core: Any = None) -> Dict[str, Any]:
 
         context_patched = _install_context(core, starter)
         valve_patched = _install_staged_valve(core, starter)
-        active = _chain_has_version(getattr(cep, "_participation_valve_ok", None))
+        active = _has_exact_version(getattr(cep, "_participation_valve_ok", None))
         setattr(core, "NEUTRAL_MOMENTUM_STARTER_EXTENSION_VERSION", VERSION)
         return {
             "status": "ok" if active else "warn",
@@ -651,6 +718,7 @@ def install(core: Any = None) -> Dict[str, Any]:
                 "first_position_minimum_pnl_pct": FIRST_POSITION_MIN_PNL_PCT,
                 "maximum_combined_exposure_pct": MAX_COMBINED_EXPOSURE_PCT,
                 "requires_different_sector_or_bucket_for_second": True,
+                "non_neutral_passthrough_unchanged": True,
                 "existing_starter_min_raw_score": getattr(starter, "MIN_RAW_SCORE", None),
                 "existing_starter_min_rank_score": getattr(starter, "MIN_RANK_SCORE", None),
                 "extra_symbols": sorted(_EXTRA_SYMBOLS),
@@ -667,6 +735,7 @@ def install(core: Any = None) -> Dict[str, Any]:
                 "changes_market_context_permission": True,
                 "changes_neutral_starter_daily_limit": True,
                 "bounded_staged_second_neutral_starter": True,
+                "neutral_stage_applies_only_in_neutral_mode": True,
             },
         }
 
