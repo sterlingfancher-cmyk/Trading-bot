@@ -190,7 +190,7 @@ def _patch_contract_enforce(core: Any) -> Dict[str, Any]:
     original = getattr(current, "_atomic_entry_stack_original", current)
     patched = False
     if callable(original) and not getattr(current, "_atomic_entry_stack_contract_guard", False):
-        def atomic_contract_enforce(supplied_core: Any, __original=original):
+        def atomic_contract_enforce(supplied_core: Any = None, __original=original):
             target = supplied_core or core
             with contract._LOCK:
                 with bear._LOCK:
@@ -261,7 +261,7 @@ def _patch_xray(core: Any) -> Dict[str, Any]:
     current = getattr(xray, "_patch", None)
     original = getattr(current, "_xray_bear_ownership_original", current)
     patched = False
-    if callable(original) and not getattr(current, "_xray_bear_ownership_guard", False):
+    if callable(original) and getattr(current, "_xray_bear_ownership_version", None) != VERSION:
         def bear_aware_patch(supplied_core: Any = None, __original=original) -> bool:
             target = supplied_core or core
             public = getattr(target, "try_entries_and_rotations", None)
@@ -328,6 +328,7 @@ def install(core: Any) -> Dict[str, Any]:
             "wrapper_counts": contract._wrapper_counts(public),
             "public_entry_callable": _meta(public),
             "xray_patch_guard_active": bool(getattr(active_patch, "_xray_bear_ownership_guard", False)),
+            "xray_patch_guard_version": getattr(active_patch, "_xray_bear_ownership_version", None),
             "xray_patch": xray_patch,
             "contract_patch": contract_patch,
             "ownership_patch": ownership_patch,
