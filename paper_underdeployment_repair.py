@@ -27,6 +27,7 @@ TARGETS = {
 }
 MAX_COMBINED = float(os.environ.get("UNDERDEPLOYMENT_MAX_COMBINED_EXPOSURE_PCT", "0.36"))
 MAX_OPEN = int(os.environ.get("UNDERDEPLOYMENT_MAX_OPEN_POSITIONS", "2"))
+MAX_DAILY = int(os.environ.get("UNDERDEPLOYMENT_MAX_STARTER_ENTRIES_PER_DAY", "2"))
 MIN_SPACING = int(os.environ.get("UNDERDEPLOYMENT_MIN_SECONDS_BETWEEN_STARTERS", "900"))
 MIN_FIRST_PNL = float(os.environ.get("UNDERDEPLOYMENT_SECOND_POSITION_MIN_FIRST_PNL_PCT", "-0.005"))
 CASH_RESERVE = float(os.environ.get("UNDERDEPLOYMENT_CASH_RESERVE_PCT", "0.20"))
@@ -262,6 +263,28 @@ def _scanner_count(c: Any) -> int:
                _i(_d(_d(s.get("auto_runner")).get("last_result")).get("scanner_signals_found")))
 
 
+def _today(c: Any) -> str:
+    try:
+        return str(c.today_key())
+    except Exception:
+        return _now_dt(c).strftime("%Y-%m-%d")
+
+
+def _starter_entries_today(c: Any) -> int:
+    try:
+        trades = c.trades_for_date(_today(c)) if callable(getattr(c, "trades_for_date", None)) else _state(c).get("trades") or []
+    except Exception:
+        trades = _state(c).get("trades") or []
+    count = 0
+    for row in trades if isinstance(trades, list) else []:
+        if not isinstance(row, dict) or str(row.get("action") or "").lower() != "entry":
+            continue
+        text = " ".join(str(row.get(k) or "").lower() for k in ("entry_context", "trade_class", "reason"))
+        if any(token in text for token in _STARTER):
+            count += 1
+    return count
+
+
 def _recent_session(c: Any) -> bool:
     a = _d(_state(c).get("auto_runner"))
     x = _parse_time(a.get("last_success") or a.get("last_successful_run_local") or a.get("last_run"))
@@ -317,9 +340,13 @@ def _target_pct(c: Any) -> Tuple[float, Dict[str, Any]]:
 
 def _gate(c: Any, signal: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     positions, r, symbol = _positions(c), _risk(c), _symbol(signal)
-    base = {"symbol": symbol, "open_positions_count": len(positions), "maximum_open_positions": MAX_OPEN}
+    entries_today = _starter_entries_today(c)
+    base = {"symbol": symbol, "open_positions_count": len(positions), "maximum_open_positions": MAX_OPEN,
+            "starter_entries_today": entries_today, "maximum_starter_entries_per_day": MAX_DAILY}
     if r["halted"] or r["profit_guard"] or r["feedback_block"]:
         return False, {**base, "reason": "existing_risk_or_profit_guard_blocks"}
+    if entries_today >= MAX_DAILY:
+        return False, {**base, "reason": "underdeployment_daily_starter_limit"}
     if len(positions) >= MAX_OPEN:
         return False, {**base, "reason": "underdeployment_two_position_limit"}
     latest = _latest_entry(c)
@@ -427,7 +454,7 @@ def _patch_enter(c: Any) -> bool:
         return False
     prior = current
     def enter(signal: Dict[str, Any], params: Dict[str, Any], market_mode: Any = None, __prior=prior):
-        if not ENABLED or not _paper() or not _is_starter(signal):
+        if not ENABLED or not _paper() or not _is_starter(signal) or _d(_risk(c).get("restart")).get("active"):
             return __prior(signal, params, market_mode=market_mode)
         sig, par = dict(signal or {}), dict(params or {})
         ok, gate = _gate(c, sig)
@@ -461,10 +488,12 @@ def _patch_enter(c: Any) -> bool:
 
 def _flatten(row: Any) -> Dict[str, Any]:
     row = row if isinstance(row, dict) else {"reason": str(row)}; q, v, u = _d(row.get("quality_info")), _d(row.get("participation_valve")), _d(row.get("paper_underdeployment_repair"))
-    reason = row.get("reason") or u.get("reason") or q.get("reason") or v.get("reason") or "unknown"
+    outer = str(row.get("reason") or "")
+    nested = u.get("reason") or q.get("reason") or v.get("reason")
+    reason = nested if nested and outer in {"entry_quality_block", "participation_valve_enter_position_returned_empty", "enter_position_returned_empty"} else outer or nested or "unknown"
     return {"symbol": row.get("symbol"), "side": row.get("side"), "score": row.get("score"),
             "rank_score": row.get("rank_score") or row.get("core_entry_rank_score"), "final_reason": reason,
-            "quality_reason": q.get("reason"), "participation_reason": v.get("reason")}
+            "outer_reason": outer or None, "quality_reason": q.get("reason"), "participation_reason": v.get("reason")}
 
 
 def _patch_cycle(c: Any) -> bool:
@@ -498,7 +527,7 @@ def _patch_starter_policy() -> Dict[str, Any]:
     try:
         import risk_on_starter_participation_valve as s
         before = _f(getattr(s, "MIN_CASH_PCT", 85), 85); s.MIN_CASH_PCT = min(before, STARTER_MIN_CASH)
-        s.MAX_ENTRIES_PER_DAY = max(_i(getattr(s, "MAX_ENTRIES_PER_DAY", 1), 1), 2); s.MAX_OPEN_POSITIONS = MAX_OPEN
+        s.MAX_ENTRIES_PER_DAY = max(_i(getattr(s, "MAX_ENTRIES_PER_DAY", 1), 1), MAX_DAILY); s.MAX_OPEN_POSITIONS = MAX_OPEN
         return {"minimum_cash_pct_before": before, "minimum_cash_pct_after": s.MIN_CASH_PCT, "maximum_entries_per_day": s.MAX_ENTRIES_PER_DAY, "maximum_open_positions": s.MAX_OPEN_POSITIONS}
     except Exception as exc: return {"error": f"{type(exc).__name__}: {exc}"}
 
@@ -519,7 +548,12 @@ def _patch_self_check(c: Any) -> Dict[str, bool]:
                 "starter_target_range_pct": [12.0, 18.0], "maximum_combined_exposure_pct": round(MAX_COMBINED * 100, 2),
                 "last_sizing_audit": _d(row.get("telemetry")).get("last_sizing_audit"), "last_candidate_cycle": _d(row.get("telemetry")).get("last_candidate_cycle")}
             return out
-        components._paper_underdeployment_version = VERSION; components.__wrapped__ = prior; sc._component_checks = components; changed["components"] = True
+        components._paper_underdeployment_version = VERSION
+        neutral_version = getattr(prior, "_neutral_late_session_version", None)
+        if neutral_version:
+            components._neutral_late_session_version = neutral_version
+            components._neutral_late_session_prior = getattr(prior, "_neutral_late_session_prior", prior)
+        components.__wrapped__ = prior; sc._component_checks = components; changed["components"] = True
     current = getattr(sc, "build_payload", None)
     if callable(current) and getattr(current, "_paper_underdeployment_version", None) != VERSION:
         prior = current
@@ -572,7 +606,7 @@ def status_payload(c: Any = None, install_first: bool = True) -> Dict[str, Any]:
             "settings": {"risk_on_target_pct": TARGETS["risk_on"] * 100, "constructive_target_pct": TARGETS["constructive"] * 100,
                          "neutral_target_pct": TARGETS["neutral"] * 100, "late_neutral_target_pct": TARGETS["late_neutral"] * 100,
                          "maximum_combined_exposure_pct": MAX_COMBINED * 100, "maximum_open_positions": MAX_OPEN,
-                         "minimum_seconds_between_starters": MIN_SPACING, "maximum_trade_risk_pct": MAX_TRADE_RISK * 100,
+                         "maximum_starter_entries_per_day": MAX_DAILY, "minimum_seconds_between_starters": MIN_SPACING, "maximum_trade_risk_pct": MAX_TRADE_RISK * 100,
                          "starter_minimum_cash_pct": STARTER_MIN_CASH, "cash_reserve_pct": CASH_RESERVE * 100},
             "authority": {"paper_only": True, "changes_paper_sizing": True, "changes_paper_participation_thresholds": True,
                           "changes_global_signal_thresholds": False, "changes_hard_risk_limits": False, "places_orders_directly": False,
