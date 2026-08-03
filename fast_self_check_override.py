@@ -4,7 +4,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict
 
-VERSION = "fast-self-check-override-2026-07-29-v3-risk-ladder"
+VERSION = "fast-self-check-override-2026-08-03-v4-error-freshness"
 _PATCHED_APP_IDS: set[int] = set()
 
 
@@ -34,6 +34,52 @@ def _performance(portfolio: Dict[str, Any]) -> Dict[str, Any]:
     return _dict(portfolio.get("performance"))
 
 
+def _time_key(value: Any) -> float:
+    """Return a comparable timestamp key for canonical local strings or epochs."""
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:
+            return 0.0
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return dt.datetime.strptime(text[:19], "%Y-%m-%d %H:%M:%S").timestamp()
+    except Exception:
+        try:
+            return float(text)
+        except Exception:
+            return 0.0
+
+
+def _error_freshness(last_error: Any, last_attempt: Any, last_run: Any, last_success: Any) -> Dict[str, Any]:
+    error_present = bool(last_error)
+    attempt_key = _time_key(last_attempt)
+    run_key = _time_key(last_run)
+    success_key = _time_key(last_success)
+    recovery_key = max(run_key, success_key)
+    superseded = bool(
+        error_present
+        and attempt_key > 0.0
+        and recovery_key >= attempt_key
+    )
+    active = bool(error_present and not superseded)
+    return {
+        "present": error_present,
+        "active": active,
+        "stale": superseded,
+        "state": (
+            "active"
+            if active
+            else "historical_superseded"
+            if superseded
+            else "none"
+        ),
+        "superseding_run_or_success": bool(superseded),
+    }
+
+
 def build_payload(core: Any = None) -> Dict[str, Any]:
     core = core or _mod()
     portfolio = _dict(getattr(core, "portfolio", {})) if core is not None else {}
@@ -51,10 +97,18 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
     last_run = auto.get("last_run_local") or auto.get("last_run_ts")
     last_success = auto.get("last_successful_run_local") or auto.get("last_successful_run_ts")
     last_skip = auto.get("last_skip_local") or auto.get("last_skip_ts")
+    freshness = _error_freshness(last_error, last_attempt, last_run, last_success)
+    recursion_text = "recursion" in str(last_error or "").lower()
 
     return {
         "status": "ok" if core is not None else "pending",
-        "overall": "pass" if core is not None and not last_error else ("warn" if core is not None else "pending"),
+        "overall": (
+            "pass"
+            if core is not None and not freshness["active"]
+            else "warn"
+            if core is not None
+            else "pending"
+        ),
         "type": "fast_self_check",
         "version": VERSION,
         "generated_local": _now(core),
@@ -88,8 +142,14 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
             "last_skip_reason": auto.get("last_skip_reason"),
             "market_open_now": auto.get("market_open_now"),
             "last_error": last_error,
-            "last_error_present": bool(last_error),
-            "telemetry_source": "portfolio.auto_runner canonical *_local fields",
+            "last_error_present": freshness["present"],
+            "last_error_active": freshness["active"],
+            "last_error_stale": freshness["stale"],
+            "last_error_state": freshness["state"],
+            "last_error_superseded_by_success": freshness["superseding_run_or_success"],
+            "last_recovered_error": auto.get("last_recovered_error"),
+            "last_recovered_error_local": auto.get("last_recovered_error_local"),
+            "telemetry_source": "portfolio.auto_runner canonical *_local fields with freshness comparison",
         },
         "risk": {
             "halted": risk.get("halted"),
@@ -118,7 +178,8 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
         },
         "entry_pipeline": {
             "callable": getattr(getattr(core, "scan_signals", None), "__qualname__", None) if core is not None else None,
-            "recursion_error_active": bool(last_error and "recursion" in str(last_error).lower()),
+            "recursion_error_active": bool(recursion_text and freshness["active"]),
+            "recursion_error_historical": bool(recursion_text and freshness["stale"]),
         },
         "links": {
             "status": "/paper/status",
@@ -134,6 +195,7 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
             "places_orders": False,
             "changes_ml_authority": False,
             "changes_live_authority": False,
+            "telemetry_freshness_only": True,
         },
     }
 
