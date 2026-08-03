@@ -34,6 +34,7 @@ def post_worker_init(worker):
         import breakout_scanner_ownership_guard
         import scanner_runtime_contract
         import neutral_momentum_starter_extension
+        import neutral_late_session_participation
 
         run_report_guard.apply(core)
         run_report_guard.register_routes(core.app, core)
@@ -58,10 +59,12 @@ def post_worker_init(worker):
         scanner_runtime_contract.register_routes(core.app, core)
         neutral_momentum_starter_extension.start_watchdog(core)
         neutral_momentum_starter_extension.register_routes(core.app, core)
+        neutral_late_session_participation.start_watchdog(core)
+        neutral_late_session_participation.register_routes(core.app, core)
         diagnostics.register_routes(core.app, core)
         diagnostics.record_module_event(
             "gunicorn.worker",
-            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_score_breakout_scanner_runtime_and_neutral_starter_registered",
+            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_score_breakout_scanner_runtime_neutral_starter_and_late_neutral_registered",
             error=(
                 f"{performance_risk_activation_guard.VERSION};"
                 f"{regime_integrity_underdeployment.VERSION};"
@@ -73,7 +76,8 @@ def post_worker_init(worker):
                 f"{opening_surge_score_calibration.VERSION};"
                 f"{breakout_scanner_ownership_guard.VERSION};"
                 f"{scanner_runtime_contract.VERSION};"
-                f"{neutral_momentum_starter_extension.VERSION}"
+                f"{neutral_momentum_starter_extension.VERSION};"
+                f"{neutral_late_session_participation.VERSION}"
             ),
         )
     except Exception as exc:
