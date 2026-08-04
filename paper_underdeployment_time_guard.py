@@ -1,24 +1,25 @@
 """Paper participation capacity guard.
 
-This guard repairs three narrow causes of chronic paper-account underdeployment:
+This guard repairs four narrow causes of chronic paper-account underdeployment:
 
 1. Persisted position timestamps are Unix epochs. A naive conversion in the
    Railway container timezone could later be relabeled as Central time, moving
    an old entry into the future and holding the 15-minute starter-spacing gate
    at zero seconds forever.
-2. The risk-on starter valve previously required exactly zero mark-to-market
-   drawdown. A few dollars of normal unrealized noise could therefore disable
-   every additional starter even while all hard risk controls remained clear.
+2. The risk-on starter valves previously required nearly zero mark-to-market
+   drawdown. Normal noise from a small first starter could therefore disable
+   every additional starter while all hard risk controls remained clear.
 3. An older chase-pattern governor could reject an exceptional constructive-
-   market leader even when the account had no realized loss streak and the same
-   signal contained multiple clean retest/continuation patterns. A narrow,
-   paper-only exception now resolves only that contradictory case.
+   market leader despite zero realized losses and multiple clean continuation
+   patterns. A narrow paper-only exception resolves only that contradiction.
+4. The underdeployment gate blocked all diversification once a roughly 10%
+   starter fell more than 0.50%. A controlled constructive-market exception now
+   permits the original gate to re-evaluate down to a 1.25% first-position loss,
+   while preserving spacing, daily caps, diversification, and exposure limits.
 
-The guard patches every loaded copy of the affected modules, including modules
-loaded through an alternate bootstrap path. It does not change the configured
-spacing, general signal thresholds, sizing, hard loss limits, broker authority,
-live-trading authority, or order execution. The controlled pattern exception
-preserves all downstream cooldown, spacing, daily-entry, exposure, and risk caps.
+The guard patches every loaded copy of the affected modules. It does not change
+the configured spacing, general signal thresholds, sizing, hard loss limits,
+broker authority, live-trading authority, or order execution.
 """
 from __future__ import annotations
 
@@ -32,9 +33,9 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
-VERSION = "paper-participation-capacity-guard-2026-08-04-v5-pattern-exception"
+VERSION = "paper-participation-capacity-guard-2026-08-04-v6-second-starter"
 STARTER_MARK_TO_MARKET_TOLERANCE_PCT = float(
-    os.environ.get("RISK_ON_STARTER_MARK_TO_MARKET_TOLERANCE_PCT", "0.10")
+    os.environ.get("RISK_ON_STARTER_MARK_TO_MARKET_TOLERANCE_PCT", "0.15")
 )
 _LOCK = threading.RLock()
 _PATCHED = False
@@ -46,7 +47,11 @@ _STATUS: Dict[str, Any] = {
     "targets": [
         "paper_underdeployment_repair._parse_time",
         "risk_on_starter_participation_valve.MAX_DAILY_LOSS_PCT",
+        "risk_on_starter_participation_valve.MAX_INTRADAY_DRAWDOWN_PCT",
+        "extended_leader_starter_valve.MAX_DAILY_LOSS_PCT",
+        "extended_leader_starter_valve.MAX_INTRADAY_DRAWDOWN_PCT",
         "loss_streak_defensive_governor._govern_signal",
+        "paper_underdeployment_repair._gate",
     ],
 }
 
@@ -132,35 +137,50 @@ def _patch_timestamp_modules() -> list[Dict[str, Any]]:
     return rows
 
 
-def _patch_starter_modules() -> list[Dict[str, Any]]:
+def _patch_one_starter_family(canonical_name: str, filename: str) -> list[Dict[str, Any]]:
     rows: list[Dict[str, Any]] = []
-    for name, module in _matching_modules(
-        "risk_on_starter_participation_valve",
-        "risk_on_starter_participation_valve.py",
-    ):
+    for name, module in _matching_modules(canonical_name, filename):
         if not callable(getattr(module, "_risk_ok", None)):
             rows.append({"module": name, "patched": False, "reason": "import_incomplete"})
             continue
         try:
-            before = float(getattr(module, "MAX_DAILY_LOSS_PCT", 0.0))
+            daily_before = float(getattr(module, "MAX_DAILY_LOSS_PCT", 0.0))
         except Exception:
-            before = 0.0
-        after = max(before, STARTER_MARK_TO_MARKET_TOLERANCE_PCT)
-        setattr(module, "MAX_DAILY_LOSS_PCT", after)
+            daily_before = 0.0
+        try:
+            drawdown_before = float(getattr(module, "MAX_INTRADAY_DRAWDOWN_PCT", 0.0))
+        except Exception:
+            drawdown_before = 0.0
+        daily_after = max(daily_before, STARTER_MARK_TO_MARKET_TOLERANCE_PCT)
+        drawdown_after = max(drawdown_before, STARTER_MARK_TO_MARKET_TOLERANCE_PCT)
+        setattr(module, "MAX_DAILY_LOSS_PCT", daily_after)
+        setattr(module, "MAX_INTRADAY_DRAWDOWN_PCT", drawdown_after)
         setattr(module, "PAPER_PARTICIPATION_CAPACITY_GUARD_VERSION", VERSION)
         rows.append(
             {
                 "module": name,
                 "patched": True,
                 "module_file": str(getattr(module, "__file__", "") or ""),
-                "daily_loss_tolerance_before_pct": before,
-                "daily_loss_tolerance_after_pct": after,
-                "intraday_drawdown_tolerance_pct": getattr(
-                    module, "MAX_INTRADAY_DRAWDOWN_PCT", None
-                ),
+                "daily_loss_tolerance_before_pct": daily_before,
+                "daily_loss_tolerance_after_pct": daily_after,
+                "intraday_drawdown_tolerance_before_pct": drawdown_before,
+                "intraday_drawdown_tolerance_after_pct": drawdown_after,
             }
         )
     return rows
+
+
+def _patch_starter_modules() -> list[Dict[str, Any]]:
+    return (
+        _patch_one_starter_family(
+            "risk_on_starter_participation_valve",
+            "risk_on_starter_participation_valve.py",
+        )
+        + _patch_one_starter_family(
+            "extended_leader_starter_valve",
+            "extended_leader_starter_valve.py",
+        )
+    )
 
 
 def _core_module() -> Any | None:
@@ -180,18 +200,17 @@ def _core_module() -> Any | None:
     return None
 
 
-def _patch_pattern_exception() -> Dict[str, Any]:
+def _install_controlled_exception(module_name: str) -> Dict[str, Any]:
     try:
-        import favorable_regime_pattern_exception as exception
-
+        module = __import__(module_name)
         core = _core_module()
-        result = exception.apply(core)
+        result = module.apply(core)
         flask_app = getattr(core, "app", None) if core is not None else None
-        if flask_app is not None:
-            exception.register_routes(flask_app, core)
+        if flask_app is not None and callable(getattr(module, "register_routes", None)):
+            module.register_routes(flask_app, core)
         return {
             "patched": bool(result.get("patched")),
-            "version": result.get("version") or getattr(exception, "VERSION", None),
+            "version": result.get("version") or getattr(module, "VERSION", None),
             "status": result.get("status"),
             "overall": result.get("overall"),
             "policy": result.get("policy"),
@@ -230,10 +249,16 @@ def apply() -> Dict[str, Any]:
     with _LOCK:
         timestamp_modules = _patch_timestamp_modules()
         starter_modules = _patch_starter_modules()
-        pattern_exception = _patch_pattern_exception()
+        pattern_exception = _install_controlled_exception(
+            "favorable_regime_pattern_exception"
+        )
+        second_starter_tolerance = _install_controlled_exception(
+            "constructive_second_starter_tolerance"
+        )
         timestamp_patched = any(row.get("patched") for row in timestamp_modules)
         starter_patched = any(row.get("patched") for row in starter_modules)
         pattern_exception_patched = bool(pattern_exception.get("patched"))
+        second_starter_patched = bool(second_starter_tolerance.get("patched"))
 
         age_seconds = None
         for _, module in _matching_modules(
@@ -244,7 +269,10 @@ def apply() -> Dict[str, Any]:
                 break
 
         _PATCHED = bool(
-            timestamp_patched and starter_patched and pattern_exception_patched
+            timestamp_patched
+            and starter_patched
+            and pattern_exception_patched
+            and second_starter_patched
         )
         _STATUS = {
             "version": VERSION,
@@ -254,14 +282,17 @@ def apply() -> Dict[str, Any]:
             "timestamp_parser_patched": timestamp_patched,
             "starter_drawdown_tolerance_patched": starter_patched,
             "favorable_pattern_exception_patched": pattern_exception_patched,
+            "constructive_second_starter_tolerance_patched": second_starter_patched,
             "timestamp_modules": timestamp_modules,
             "starter_modules": starter_modules,
             "favorable_pattern_exception": pattern_exception,
+            "constructive_second_starter_tolerance": second_starter_tolerance,
             "latest_entry_age_seconds": age_seconds,
             "starter_mark_to_market_tolerance_pct": STARTER_MARK_TO_MARKET_TOLERANCE_PCT,
             "spacing_threshold_changed": False,
             "general_signal_scores_changed": False,
             "controlled_paper_pattern_exception_added": True,
+            "controlled_second_starter_tolerance_added": True,
             "sizing_changed": False,
             "hard_risk_limits_changed": False,
             "live_authority_changed": False,
@@ -270,9 +301,11 @@ def apply() -> Dict[str, Any]:
         if not timestamp_modules:
             _STATUS["reason"] = "paper_underdeployment_module_not_loaded"
         elif not starter_modules:
-            _STATUS["reason"] = "risk_on_starter_module_not_loaded"
+            _STATUS["reason"] = "starter_modules_not_loaded"
         elif not pattern_exception_patched:
             _STATUS["reason"] = "favorable_pattern_exception_not_installed"
+        elif not second_starter_patched:
+            _STATUS["reason"] = "constructive_second_starter_tolerance_not_installed"
         return dict(_STATUS)
 
 
@@ -286,8 +319,9 @@ def status_payload() -> Dict[str, Any]:
             "timestamp_normalization": True,
             "changes_spacing_seconds": False,
             "changes_global_signal_thresholds": False,
-            "changes_paper_starter_drawdown_tolerance": True,
+            "changes_paper_starter_mark_to_market_tolerance": True,
             "adds_controlled_favorable_pattern_exception": True,
+            "adds_controlled_constructive_second_starter_tolerance": True,
             "preserves_downstream_entry_and_risk_caps": True,
             "changes_hard_risk_limits": False,
             "changes_sizing": False,
