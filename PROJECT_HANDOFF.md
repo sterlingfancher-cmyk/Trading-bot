@@ -42,7 +42,7 @@ Previously validated:
 - bounded late-neutral participation
 - one-link `/paper/self-check`
 
-No trading thresholds, sizing, exits, hard-risk limits, live authority, or ML authority were changed during the architecture-audit work described below.
+No trading thresholds, sizing, exits, hard-risk limits, live authority, or ML authority were changed during the architecture work below.
 
 ## Validation Policy
 
@@ -79,8 +79,9 @@ The workflow runs:
 5. immutable Stage B model tests;
 6. StateStore shadow parity validation;
 7. Stage C tests;
-8. JSON/Markdown artifact publication;
-9. visible `refactor-audit` commit status.
+8. Stage D shadow comparison tests;
+9. JSON/Markdown artifact publication;
+10. visible `refactor-audit` commit status.
 
 The gate blocks:
 
@@ -90,7 +91,7 @@ The gate blocks:
 - new environment-default conflicts;
 - canonical configuration drift;
 - loss of current StateStore safety capabilities;
-- shadow models gaining runtime or order authority.
+- shadow models or comparison code gaining runtime, state, route, broker, or order authority.
 
 ### Weekly
 
@@ -100,41 +101,35 @@ A full deep architecture audit runs Sunday at `12:30 UTC` and retains reports fo
 
 A bounded, concurrent, read-only Railway snapshot runs at `23:15 UTC`, or manually through workflow dispatch.
 
-It checks:
-
-- core web connectivity;
-- `/paper/self-check`;
-- paper status;
-- V1/V2 research status;
-- persisted V2 ablation and regime reports.
-
-It does not start a trading cycle, launch research, mutate state, or place orders.
+It checks core web connectivity, `/paper/self-check`, paper status, V1/V2 research status, persisted V2 ablation, and regime reports. It does not start a trading cycle, launch research, mutate state, or place orders.
 
 Runtime snapshots intentionally do not run after every commit; repeated post-commit probing could create unnecessary load during multi-commit refactors.
 
-## Architecture Audit Baseline
+## Latest Validated Architecture Audit
 
 Canonical document:
 
 - `ARCHITECTURE_AUDIT_BASELINE.md`
 
-Latest validated Stage C audit:
+Latest validated A–D foundation:
 
-- GitHub Actions run: `30875703784`
-- head commit: `eaf02e521b78bf9204426bb8f74331d9f353e9c8`
+- GitHub Actions run: `30876010241`
+- head commit: `de8d095c60e068988397e23dc0dad3f057e7ea36`
 - structural audit: pass
 - ownership contract: pass
 - typed configuration: pass
 - Stage B tests: pass
 - StateStore shadow parity: pass
 - Stage C tests: pass
+- Stage D shadow comparison tests: pass
 - new critical findings: 0
 - new warnings: 0
 
 Current architecture surface:
 
-- Python files: 152
-- source lines: 69,210
+- Python files: 153
+- source lines: 69,297
+- internal import edges: 173
 - import cycles: 0
 - mutation targets: 72
 - overlapping mutation targets: 29
@@ -232,9 +227,38 @@ StateStore shadow result:
 
 This is not a state-authority migration. The shadow validator does not read/write the production state file, replace `save_state`, or change state paths.
 
+## Stage D — Shadow Decision Comparison — Foundation Complete
+
+Sources:
+
+- `shadow_decision_comparison_contract.json`
+- `shadow_decision_comparison.py`
+- `test_shadow_decision_stage_d.py`
+
+Capabilities:
+
+- compares current and candidate decisions from the same immutable cycle input
+- requires matching cycle IDs
+- requires identical input fingerprints
+- compares candidates by symbol and side
+- records candidate presence, allowance, selection, terminal reason, final score, and size-multiplier divergence
+- returns immutable `comparison_only` results
+- rejects mismatched input snapshots
+
+Safety boundary:
+
+- not connected to the production decision path
+- no callable replacement
+- no route registration
+- no state reads or writes
+- no broker or order methods
+- no strategy, threshold, sizing, or risk changes
+- automatic promotion remains false
+- minimum forward evidence remains 30 candidates and 20 one-day outcomes
+
 ## Heavy Research Isolation
 
-The single Gunicorn web worker previously contained several paths capable of automatically starting or resuming multi-year V1/V2 research jobs. That could starve web/status requests.
+The single Gunicorn web worker previously contained paths capable of automatically starting or resuming multi-year V1/V2 research jobs. That could starve web/status requests.
 
 Current web-worker boundary:
 
@@ -252,15 +276,13 @@ Key isolation commit:
 
 This changes research process placement only; it does not change trading behavior.
 
-## Current Runtime Connectivity Note
+## Runtime Connectivity Boundary
 
-Earlier GitHub Actions and an independent external fetch timed out against the Railway endpoints after market close. Railway deployment statuses were successful, but endpoint responsiveness had not yet been confirmed through a completed scheduled/manual snapshot at the time of this handoff update.
-
-Do not interpret that connectivity issue as a failed structural audit. Static architecture, ownership, configuration, shadow-model, and StateStore gates all passed independently.
+Railway deployment statuses for the Stage D gate are successful. A completed scheduled or manually dispatched runtime snapshot is still required before claiming current endpoint responsiveness. Do not infer a runtime failure from a skipped post-commit snapshot; snapshots are intentionally schedule/manual only.
 
 ## Current Freeze
 
-Until forward shadow comparison exists:
+Until runtime shadow capture is validated:
 
 - do not add entry wrappers, watchdogs, starter valves, or threshold exceptions;
 - do not widen hard-risk limits;
@@ -268,20 +290,25 @@ Until forward shadow comparison exists:
 - do not use raw Kelly sizing;
 - do not promote research parameters automatically;
 - do not remove current state or callable owners in bulk;
+- do not connect the comparison engine to order placement;
 - allow urgent operational repairs and controlled refactor stages only.
 
-## Next Engineering Stage — Decision Comparison Recorder
+## Next Engineering Milestone — Runtime Shadow Capture Adapter
 
-Build a read-only Stage D comparison path:
+Build a telemetry-only adapter without adding another public wrapper:
 
-1. capture the same immutable cycle input used by the current engine;
-2. translate scanner candidates, market, risk, and positions into shadow models;
-3. record the existing engine’s decision and reasons;
-4. run a new read-only evaluator against the same snapshot;
-5. compare selected/rejected symbols, terminal reasons, score changes, size multipliers, risk, exposure, and eligibility;
-6. persist comparison telemetry only;
-7. place no orders and change no runtime authority;
-8. collect at least 30 forward candidates and 20 one-day outcomes before considering authority migration.
+1. identify an existing canonical cycle boundary that already owns candidates, market, risk, positions, and final decisions;
+2. add an explicit observer call at that boundary rather than replacing `scan_signals` or `try_entries_and_rotations`;
+3. construct one immutable cycle snapshot;
+4. translate the existing decision into `CycleDecision`;
+5. run a read-only evaluator against the same snapshot;
+6. call `compare_cycles` and retain bounded telemetry;
+7. expose read-only status only through an existing diagnostics registry or a uniquely owned route;
+8. prove the existing trading output is unchanged;
+9. require targeted mocks, startup smoke testing, one successful paper cycle, and `/paper/self-check`;
+10. collect at least 30 forward candidates and 20 one-day outcomes before any authority migration.
+
+The adapter must not create a new watchdog, callable owner, route overlap, state owner, or order path.
 
 ## Recent Milestone Commits
 
@@ -292,5 +319,6 @@ Build a read-only Stage D comparison path:
 - `0866ff5a0a94f37a14d629a7a8e9a95f4507bc4c` — heavy research isolated
 - `499c284134eb2c0b3326d08a78346b2b2966c45c` — StateStore shadow validator
 - `eaf02e521b78bf9204426bb8f74331d9f353e9c8` — Stage C gate enforced
-- `302843b0e7b4d07a24e9e9bb2438bd3c24239126` — runtime snapshots limited to schedule/manual
-- `41953a8fe5cc19a29066f29f55b8be73962ec9b9` — architecture baseline updated
+- `a1bf4711a25158665fb1a62e0e238316b23c7f11` — pure decision comparison engine
+- `de8d095c60e068988397e23dc0dad3f057e7ea36` — Stage D tests enforced
+- `2903c735f0f90f8a4bb69b05b80efd8fc8ec8cb3` — A–D architecture baseline updated
