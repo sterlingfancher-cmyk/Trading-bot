@@ -16,6 +16,7 @@ jobs:
     timeout-minutes: 8
     permissions:
       contents: read
+      statuses: write
     steps:
       - uses: actions/checkout@v4
 
@@ -24,6 +25,7 @@ jobs:
           python-version: "3.11"
 
       - name: Run targeted daily-audit tests
+        id: targeted_tests
         run: python -m unittest -v test_daily_operational_audit.py
 
       - name: Allow Railway deployment to settle
@@ -31,6 +33,7 @@ jobs:
         run: sleep 90
 
       - name: Validate live curated audit contract
+        id: live_validation
         run: |
           curl --silent --show-error --fail \
             --retry 12 \
@@ -70,6 +73,25 @@ jobs:
           }, indent=2, sort_keys=True))
           PY
 
+      - name: Read live audit summary
+        id: live_summary
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          path = Path("daily_operational_audit_live.json")
+          if not path.exists():
+              print("overall=unavailable")
+              print("duration=unknown")
+              print("sections=0")
+          else:
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              print(f"overall={payload.get('overall', 'unknown')}")
+              print(f"duration={payload.get('duration_seconds', 'unknown')}")
+              print(f"sections={len(payload.get('sections', {}))}")
+          PY
+
       - name: Upload live daily-audit evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -78,3 +100,26 @@ jobs:
           path: daily_operational_audit_live.json
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Publish daily audit validation status
+        if: always() && github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const passed =
+              '${{ steps.targeted_tests.outcome }}' === 'success' &&
+              '${{ steps.live_validation.outcome }}' === 'success';
+            const overall = '${{ steps.live_summary.outputs.overall }}';
+            const duration = '${{ steps.live_summary.outputs.duration }}';
+            const sections = '${{ steps.live_summary.outputs.sections }}';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: passed ? 'success' : 'failure',
+              context: 'daily-operational-audit',
+              description: passed
+                ? `Live ${overall}; ${sections} sections; ${duration}s`
+                : 'Daily audit unit or live contract validation failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
