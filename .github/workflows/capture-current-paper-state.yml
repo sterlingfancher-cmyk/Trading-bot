@@ -1,0 +1,95 @@
+name: Capture Current Paper State
+
+on:
+  push:
+    branches: [state-capture-20260804]
+    paths:
+      - ".github/workflows/capture-current-paper-state.yml"
+
+jobs:
+  capture-current-paper-state:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Capture read-only paper state surfaces
+        id: capture
+        run: |
+          base=https://web-production-e1796.up.railway.app
+          python - <<'PY'
+          import json
+          import pathlib
+          import urllib.error
+          import urllib.request
+
+          base = "https://web-production-e1796.up.railway.app"
+          endpoints = {
+              "paper_status_full": "/paper/status?full=1",
+              "paper_status": "/paper/status",
+              "daily_audit": "/paper/daily-audit",
+              "journal_truth": "/paper/journal-truth-status",
+              "state_provenance": "/paper/state-provenance-status",
+              "state_persistence": "/paper/state-persistence-contract-status",
+              "cycle_completion": "/paper/cycle-completion-contract-status",
+              "runtime_shadow": "/paper/runtime-shadow-capture-status",
+          }
+          manifest = {"base_url": base, "read_only": True, "endpoints": {}}
+          for name, path in endpoints.items():
+              target = pathlib.Path(f"capture_{name}.json")
+              request = urllib.request.Request(
+                  base + path,
+                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.0"},
+                  method="GET",
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      raw = response.read()
+                      target.write_bytes(raw)
+                      manifest["endpoints"][name] = {
+                          "status": "ok",
+                          "http_status": getattr(response, "status", 200),
+                          "path": path,
+                          "bytes": len(raw),
+                      }
+              except Exception as exc:
+                  target.write_text(json.dumps({"status": "error", "error": f"{type(exc).__name__}: {exc}", "path": path}, indent=2) + "\n")
+                  manifest["endpoints"][name] = {
+                      "status": "error",
+                      "path": path,
+                      "error": f"{type(exc).__name__}: {exc}",
+                  }
+          pathlib.Path("capture_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+          print(json.dumps(manifest, indent=2, sort_keys=True))
+          if manifest["endpoints"]["paper_status_full"]["status"] != "ok":
+              raise SystemExit("full paper status capture failed")
+          PY
+
+      - name: Upload paper-state capture
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-paper-state-capture
+          path: |
+            capture_manifest.json
+            capture_*.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish capture status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const passed = '${{ steps.capture.outcome }}' === 'success';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: passed ? 'success' : 'failure',
+              context: 'state-capture',
+              description: passed ? 'Current paper state captured read-only' : 'Paper-state capture failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
