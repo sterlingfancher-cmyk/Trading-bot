@@ -1,0 +1,83 @@
+{
+  "version": "state-store-contract-2026-08-03-v1-shadow",
+  "policy": {
+    "read_only": true,
+    "authoritative_runtime_source": false,
+    "replaces_save_state": false,
+    "changes_state_path": false,
+    "changes_locking": false,
+    "changes_backup_policy": false,
+    "changes_runtime_authority": false,
+    "migration_requires_output_parity": true
+  },
+  "target_interface": "trading.state.StateStore",
+  "current_primary_modules": [
+    "app.py",
+    "state_io_hardening.py"
+  ],
+  "path_contract": {
+    "canonical_environment_key": "STATE_FILE",
+    "canonical_owner": "app.py",
+    "canonical_default": "state.json",
+    "directory_precedence": [
+      "STATE_DIR",
+      "PERSISTENT_STATE_DIR",
+      "RAILWAY_VOLUME_MOUNT_PATH",
+      "."
+    ],
+    "filename_precedence": [
+      "STATE_FILENAME",
+      "STATE_FILE",
+      "state.json"
+    ]
+  },
+  "required_symbols": {
+    "state_io_hardening.py": [
+      "STATE_FILE",
+      "STATE_LOCK_FILE",
+      "STATE_BACKUP_LATEST",
+      "STATE_BACKUP_LARGEST",
+      "STATE_BACKUP_PREWRITE",
+      "READ_RETRIES",
+      "READ_RETRY_SLEEP",
+      "safe_load_json_file",
+      "atomic_json_write",
+      "backup_current_state",
+      "install",
+      "status_payload"
+    ]
+  },
+  "required_calls": {
+    "state_io_hardening.py": [
+      "os.replace",
+      "os.fsync",
+      "threading.RLock",
+      "threading.Lock"
+    ]
+  },
+  "required_defaults": {
+    "STATE_IO_READ_RETRIES": "4",
+    "STATE_IO_READ_RETRY_SLEEP": "0.05"
+  },
+  "required_capabilities": {
+    "atomic_write": true,
+    "file_fsync": true,
+    "directory_fsync_attempt": true,
+    "thread_locking": true,
+    "file_locking_when_supported": true,
+    "shared_read_lock": true,
+    "exclusive_write_lock": true,
+    "retrying_reads": true,
+    "backup_fallback_reads": true,
+    "latest_backup": true,
+    "largest_backup": true,
+    "prewrite_backup": true,
+    "non_overlapping_cycle_guard": true
+  },
+  "known_migration_debt": {
+    "save_state_owner_count": 16,
+    "state_file_default_conflict": true,
+    "direct_runtime_replacements_exist": true,
+    "removal_requires_staged_parity": true
+  }
+}
