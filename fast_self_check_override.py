@@ -4,7 +4,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict
 
-VERSION = "fast-self-check-override-2026-08-03-v5-all-in-one"
+VERSION = "fast-self-check-override-2026-08-03-v6-shadow-capture"
 _PATCHED_APP_IDS: set[int] = set()
 
 
@@ -55,9 +55,7 @@ def _time_key(value: Any) -> float:
 def _error_freshness(last_error: Any, last_attempt: Any, last_run: Any, last_success: Any) -> Dict[str, Any]:
     error_present = bool(last_error)
     attempt_key = _time_key(last_attempt)
-    run_key = _time_key(last_run)
-    success_key = _time_key(last_success)
-    recovery_key = max(run_key, success_key)
+    recovery_key = max(_time_key(last_run), _time_key(last_success))
     superseded = bool(error_present and attempt_key > 0.0 and recovery_key >= attempt_key)
     active = bool(error_present and not superseded)
     return {
@@ -209,8 +207,7 @@ def _component_checks(core: Any) -> Dict[str, Dict[str, Any]]:
         row = _dict(neutral_starter.status_payload(core))
         settings = _dict(row.get("settings"))
         authority = _dict(row.get("authority"))
-        last = _dict(row.get("last_evaluation"))
-        staged = _dict(last.get("staged_gate"))
+        staged = _dict(_dict(row.get("last_evaluation")).get("staged_gate"))
         passed = bool(row.get("overall") == "pass" and row.get("active"))
         checks["neutral_starter"] = _check_result(
             "neutral_starter",
@@ -230,6 +227,34 @@ def _component_checks(core: Any) -> Dict[str, Dict[str, Any]]:
         )
     except Exception as exc:
         checks["neutral_starter"] = _component_error("neutral_starter", exc)
+
+    try:
+        import runtime_shadow_capture
+
+        row = _dict(runtime_shadow_capture.status_payload(getattr(core, "portfolio", {})))
+        passed = bool(row.get("overall") == "pass")
+        checks["runtime_shadow_capture"] = _check_result(
+            "runtime_shadow_capture",
+            row,
+            passed,
+            {
+                "capture_state": row.get("capture_state"),
+                "mode": row.get("mode"),
+                "latest_cycle_id": row.get("latest_cycle_id"),
+                "latest_parity": row.get("latest_parity"),
+                "latest_candidate_count": row.get("latest_candidate_count"),
+                "latest_selected_symbols": row.get("latest_selected_symbols"),
+                "total_cycles": row.get("total_cycles"),
+                "total_candidates": row.get("total_candidates"),
+                "independent_policy_active": bool(row.get("independent_policy_active")),
+                "forward_evidence_eligible": bool(
+                    _dict(row.get("forward_evidence")).get("eligible")
+                    or row.get("forward_evidence_eligible")
+                ),
+            },
+        )
+    except Exception as exc:
+        checks["runtime_shadow_capture"] = _component_error("runtime_shadow_capture", exc)
 
     return checks
 
@@ -360,6 +385,7 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
             "changes_ml_authority": False,
             "changes_live_authority": False,
             "may_repair_runtime_composition_or_ownership": True,
+            "runtime_shadow_observer_only": True,
             "trading_authority_unchanged": True,
         },
     }
@@ -394,6 +420,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "patched": getattr(view, "_fast_self_check_override_version", None) == VERSION,
         "routine_test": "/paper/self-check",
         "all_in_one": True,
+        "component_count": 6,
     }
 
 
@@ -401,6 +428,7 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
     if flask_app is None:
         return
     from flask import jsonify
+
     try:
         existing = {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
     except Exception:
