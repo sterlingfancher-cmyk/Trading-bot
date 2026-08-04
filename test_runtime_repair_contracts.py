@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import tempfile
 import threading
-import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +15,13 @@ import state_persistence_contract as persistence
 
 
 class RuntimeRepairContractTests(unittest.TestCase):
+    def _reset_cycle(self, core) -> None:
+        cycle._APPLIED.discard(id(core))
+        cycle._ACTIVE.pop(id(core), None)
+        for key in list(cycle._PHASE_APPLIED):
+            if key[0] == id(core):
+                cycle._PHASE_APPLIED.discard(key)
+
     def test_provider_contract_injects_bounded_timeout(self) -> None:
         import yfinance as yf
 
@@ -62,7 +68,7 @@ class RuntimeRepairContractTests(unittest.TestCase):
             return {"signals_found": 0, "market_open_now": True}
 
         core.run_cycle = run_cycle
-        cycle._APPLIED.discard(id(core))
+        self._reset_cycle(core)
         result = cycle.apply(core)
         self.assertEqual(result["status"], "ok")
         payload = core.run_cycle(source="auto", allow_after_hours=False)
@@ -73,6 +79,71 @@ class RuntimeRepairContractTests(unittest.TestCase):
         self.assertEqual(auto["last_completed_cycle_source"], "auto")
         self.assertIsNotNone(auto["last_completed_cycle_duration_seconds"])
         self.assertGreaterEqual(len(saved), 2)
+
+    def test_cycle_completion_rebinds_after_portfolio_replacement(self) -> None:
+        saved = []
+        core = SimpleNamespace()
+        core.portfolio = {"auto_runner": {}}
+        core.local_ts_text = lambda: "2026-08-04 10:00:00 CDT"
+        core.save_state = lambda state: saved.append(dict(state.get("auto_runner", {})))
+
+        def run_cycle(source="auto", allow_after_hours=False):
+            # Simulate a state transaction or recovery layer replacing the root
+            # portfolio dictionary while the cycle is active.
+            core.portfolio = {
+                "cash": 10_000.0,
+                "equity": 10_000.0,
+                "auto_runner": {
+                    "cycle_in_progress": True,
+                    "cycle_health": "running",
+                },
+            }
+            return {"signals_found": 0}
+
+        core.run_cycle = run_cycle
+        self._reset_cycle(core)
+        cycle.apply(core)
+        core.run_cycle(source="auto")
+        auto = core.portfolio["auto_runner"]
+        self.assertFalse(auto["cycle_in_progress"])
+        self.assertEqual(auto["cycle_health"], "completed")
+        self.assertEqual(auto["last_completed_cycle_status"], "completed")
+        self.assertEqual(cycle.status_payload(core)["active_cycle_count"], 0)
+
+    def test_status_reconciles_detached_completed_cycle(self) -> None:
+        core = SimpleNamespace(
+            portfolio={
+                "auto_runner": {
+                    "cycle_id": "auto-test-cycle",
+                    "cycle_in_progress": True,
+                    "cycle_health": "running",
+                    "cycle_started_ts": 1.0,
+                }
+            },
+            save_state=lambda state: None,
+        )
+        cycle._APPLIED.add(id(core))
+        cycle._ACTIVE[id(core)] = set()
+        original_last = dict(cycle._LAST)
+        try:
+            cycle._LAST = {
+                "status": "ok",
+                "overall": "pass",
+                "cycle_id": "auto-test-cycle",
+                "cycle_status": "completed",
+                "source": "auto",
+                "duration_seconds": 59.3,
+                "completed_ts": 60.3,
+                "completed_local": "2026-08-04 10:01:00 CDT",
+            }
+            row = cycle.status_payload(core)
+            self.assertTrue(row["detached_completion_reconciled"])
+            self.assertFalse(row["cycle_in_progress"])
+            self.assertEqual(row["last_completed_cycle_duration_seconds"], 59.3)
+        finally:
+            cycle._LAST = original_last
+            cycle._APPLIED.discard(id(core))
+            cycle._ACTIVE.pop(id(core), None)
 
     def test_state_contract_migrates_only_richer_legacy_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
