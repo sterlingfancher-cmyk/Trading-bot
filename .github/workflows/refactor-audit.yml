@@ -7,12 +7,18 @@ on:
       - "*.py"
       - "**/*.py"
       - "VALIDATION_POLICY.md"
+      - "REFACTOR_AUDIT_POLICY.md"
+      - "ARCHITECTURE_AUDIT_BASELINE.md"
+      - "architecture_ownership_registry.json"
       - ".github/workflows/refactor-audit.yml"
   pull_request:
     paths:
       - "*.py"
       - "**/*.py"
       - "VALIDATION_POLICY.md"
+      - "REFACTOR_AUDIT_POLICY.md"
+      - "ARCHITECTURE_AUDIT_BASELINE.md"
+      - "architecture_ownership_registry.json"
       - ".github/workflows/refactor-audit.yml"
   schedule:
     # Sunday 12:30 UTC; approximately 7:30 AM Central during daylight time.
@@ -51,6 +57,17 @@ jobs:
               --fail-on-new-critical
           fi
 
+      - name: Validate architecture ownership contract
+        id: contract
+        if: always()
+        run: |
+          test -f refactor_audit_report.json
+          python architecture_contract_validation.py \
+            --audit refactor_audit_report.json \
+            --registry architecture_ownership_registry.json \
+            --json architecture_contract_report.json \
+            --markdown architecture_contract_report.md
+
       - name: Read audit summary
         id: summary
         if: always()
@@ -58,23 +75,32 @@ jobs:
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           from pathlib import Path
-          path = Path("refactor_audit_report.json")
-          if not path.exists():
+
+          audit_path = Path("refactor_audit_report.json")
+          contract_path = Path("architecture_contract_report.json")
+
+          if not audit_path.exists():
               print("critical=unknown")
               print("warnings=unknown")
               print("new_critical=unknown")
               print("new_warnings=unknown")
           else:
-              report = json.loads(path.read_text())
+              report = json.loads(audit_path.read_text())
               summary = report.get("current", {}).get("summary", {})
               comparison = report.get("comparison", {})
               print(f"critical={summary.get('critical_findings', 0)}")
               print(f"warnings={summary.get('warning_findings', 0)}")
               print(f"new_critical={len(comparison.get('new_critical', []))}")
               print(f"new_warnings={len(comparison.get('new_warnings', []))}")
+
+          if not contract_path.exists():
+              print("contract_violations=unknown")
+          else:
+              contract = json.loads(contract_path.read_text())
+              print(f"contract_violations={len(contract.get('violations', []))}")
           PY
 
-      - name: Upload refactor audit
+      - name: Upload refactor and ownership audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -82,6 +108,8 @@ jobs:
           path: |
             refactor_audit_report.json
             refactor_audit_report.md
+            architecture_contract_report.json
+            architecture_contract_report.md
           if-no-files-found: warn
           retention-days: 30
 
@@ -90,9 +118,12 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const passed = '${{ steps.audit.outcome }}' === 'success';
+            const auditPassed = '${{ steps.audit.outcome }}' === 'success';
+            const contractPassed = '${{ steps.contract.outcome }}' === 'success';
+            const passed = auditPassed && contractPassed;
             const newCritical = '${{ steps.summary.outputs.new_critical }}';
             const newWarnings = '${{ steps.summary.outputs.new_warnings }}';
+            const violations = '${{ steps.summary.outputs.contract_violations }}';
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -100,7 +131,7 @@ jobs:
               state: passed ? 'success' : 'failure',
               context: 'refactor-audit',
               description: passed
-                ? `No new critical debt; ${newWarnings} new warnings`
-                : `${newCritical} new critical findings require review`,
+                ? `No new critical debt; ${newWarnings} warnings; ownership intact`
+                : `${newCritical} new critical; ${violations} ownership violations`,
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
