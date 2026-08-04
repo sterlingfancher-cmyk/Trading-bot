@@ -340,6 +340,7 @@ jobs:
         id: snapshot
         run: |
           python runtime_research_snapshot.py \
+            --base-url https://web-production-e1796.up.railway.app \
             --retries 2 \
             --timeout 20 \
             --json runtime_research_snapshot.json \
