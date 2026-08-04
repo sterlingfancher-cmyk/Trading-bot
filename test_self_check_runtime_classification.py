@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import ast
 import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import fast_self_check_override as self_check
 import runtime_worker_registration as registration
+
+ROOT = Path(__file__).resolve().parent
 
 
 class SelfCheckRuntimeClassificationTests(unittest.TestCase):
@@ -174,8 +178,6 @@ class SelfCheckRuntimeClassificationTests(unittest.TestCase):
 
         def ensure_auto_thread() -> None:
             calls.append("ensure_auto_thread")
-            # Mirrors app.ensure_auto_thread(): an already-active global owner
-            # returns without rewriting stale persisted diagnostic state.
             return None
 
         core.ensure_auto_thread = ensure_auto_thread
@@ -209,6 +211,30 @@ class SelfCheckRuntimeClassificationTests(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertFalse(result["started"])
         self.assertEqual(result["reason"], "ensure_auto_thread_missing")
+
+    def test_controlled_redeployment_is_one_shot_not_watchdog_reapplied(self) -> None:
+        path = ROOT / "usercustomize.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        registry: set[str] = set()
+        watchdog: ast.FunctionDef | None = None
+
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "ONE_SHOT_CORE_MUTATION_MODULES":
+                        value = ast.literal_eval(node.value)
+                        registry = {str(item) for item in value}
+            elif isinstance(node, ast.FunctionDef) and node.name == "_watchdog":
+                watchdog = node
+
+        self.assertIn("controlled_redeployment_starter_sleeve", registry)
+        self.assertIsNotNone(watchdog)
+        repeated_names = {
+            str(node.value)
+            for node in ast.walk(watchdog)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        self.assertNotIn("controlled_redeployment_starter_sleeve", repeated_names)
 
 
 if __name__ == "__main__":
