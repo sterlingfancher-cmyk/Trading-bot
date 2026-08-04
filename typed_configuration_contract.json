@@ -1,0 +1,167 @@
+{
+  "version": "typed-configuration-contract-2026-08-03-v1",
+  "policy": {
+    "read_only": true,
+    "authoritative_runtime_source": false,
+    "allow_new_observations": false,
+    "allow_missing_noncanonical_observations": true,
+    "behavior_changes_require_backtest_and_forward_test": true
+  },
+  "environment_contracts": {
+    "MAX_DAILY_LOSS_PCT": {
+      "canonical_owner": "app.py",
+      "canonical_default": "0.03",
+      "unit": "fraction",
+      "meaning": "0.03 equals 3 percent",
+      "behavior_sensitive": true,
+      "allowed_observations": [
+        {"path": "app.py", "default": "0.03"}
+      ]
+    },
+    "MAX_INTRADAY_DRAWDOWN_PCT": {
+      "canonical_owner": "app.py",
+      "canonical_default": "0.025",
+      "unit": "fraction",
+      "meaning": "0.025 equals 2.5 percent",
+      "behavior_sensitive": true,
+      "allowed_observations": [
+        {"path": "app.py", "default": "0.025"}
+      ]
+    },
+    "MIN_ENTRY_SCORE_NEUTRAL": {
+      "canonical_owner": "app.py",
+      "canonical_default": "0.0140",
+      "unit": "raw_score",
+      "behavior_sensitive": true,
+      "known_conflict": true,
+      "allowed_observations": [
+        {"path": "app.py", "default": "0.0140"},
+        {"path": "news_sentiment_engine.py", "default": "0.033"}
+      ]
+    },
+    "STATE_FILE": {
+      "canonical_owner": "app.py",
+      "canonical_default": "state.json",
+      "unit": "path",
+      "behavior_sensitive": true,
+      "known_conflict": true,
+      "allowed_observations": [
+        {"path": "app.py", "default": "state.json"},
+        {"path": "benchmark_participation.py", "default": "state.json"},
+        {"path": "eod_hybrid.py", "default": "state.json"},
+        {"path": "live_volatility.py", "default": "state.json"},
+        {"path": "ml_phase2_shadow.py", "default": "state.json"},
+        {"path": "risk_bootstrap.py", "default": "state.json"},
+        {"path": "risk_improvements.py", "default": "state.json"},
+        {"path": "runtime_controls_repair.py", "default": "state.json"},
+        {"path": "self_check.py", "default": "state.json"},
+        {"path": "state_guard.py", "default": "state.json"},
+        {"path": "state_io_hardening.py", "default": "state.json"},
+        {"path": "state_journal_guard.py", "default": "state.json"},
+        {"path": "state_provenance_monitor.py", "default": null},
+        {"path": "state_size_watchdog.py", "default": ""},
+        {"path": "trade_journal.py", "default": "state.json"}
+      ]
+    },
+    "EOD_ALLOCATION_WINDOW_MINUTES": {
+      "canonical_owner": "eod_hybrid.py",
+      "canonical_default": "45",
+      "unit": "minutes",
+      "behavior_sensitive": true,
+      "known_conflict": true,
+      "allowed_observations": [
+        {"path": "classic_signal_mode.py", "default": "<dynamic>"},
+        {"path": "eod_hybrid.py", "default": "45"},
+        {"path": "intraday_timing.py", "default": "<dynamic>"}
+      ]
+    },
+    "AUTO_RUN_INTERVAL_SECONDS": {
+      "canonical_owner": "app.py",
+      "canonical_default": "300",
+      "unit": "seconds",
+      "behavior_sensitive": true,
+      "allowed_observations": [
+        {"path": "app.py", "default": "300"}
+      ]
+    },
+    "COOLDOWN_SECONDS": {
+      "canonical_owner": "app.py",
+      "canonical_default": "1800",
+      "unit": "seconds",
+      "behavior_sensitive": true,
+      "allowed_observations": [
+        {"path": "app.py", "default": "1800"},
+        {"path": "state_journal_guard.py", "default": "1800"}
+      ]
+    },
+    "PERFORMANCE_AUDIT_V2_WATCHDOG_SECONDS": {
+      "canonical_owner": "performance_audit_lab_v2.py",
+      "canonical_default": "600",
+      "unit": "seconds",
+      "behavior_sensitive": false,
+      "allowed_observations": [
+        {"path": "performance_audit_lab_v2.py", "default": "600"}
+      ]
+    },
+    "PAPER_REGIME_ADAPTIVE_POLICY_WATCHDOG_SECONDS": {
+      "canonical_owner": "paper_regime_adaptive_policy.py",
+      "canonical_default": "30",
+      "unit": "seconds",
+      "behavior_sensitive": false,
+      "allowed_observations": [
+        {"path": "paper_regime_adaptive_policy.py", "default": "30"}
+      ]
+    }
+  },
+  "parameter_unit_contracts": {
+    "MAX_INTRADAY_DRAWDOWN_PCT": {
+      "known_unit_ambiguity": true,
+      "observations": [
+        {
+          "path": "app.py",
+          "value": "<dynamic>",
+          "unit": "fraction",
+          "source": "environment contract"
+        },
+        {
+          "path": "market_surge_queue_executor.py",
+          "value": 1.5,
+          "unit": "percentage_points",
+          "source": "module-local surge limit"
+        }
+      ]
+    },
+    "MAX_DAILY_DRAWDOWN_PCT": {
+      "known_unit_ambiguity": true,
+      "observations": [
+        {
+          "path": "market_surge_queue_executor.py",
+          "value": 1.5,
+          "unit": "percentage_points",
+          "source": "module-local surge limit"
+        },
+        {
+          "path": "post_harvest_entry_fallback.py",
+          "value": "<dynamic>",
+          "unit": "unknown_requires_namespacing"
+        },
+        {
+          "path": "post_harvest_redeployment_controller.py",
+          "value": "<dynamic>",
+          "unit": "unknown_requires_namespacing"
+        }
+      ]
+    },
+    "WATCHDOG_SECONDS": {
+      "known_unit_ambiguity": false,
+      "unit": "seconds",
+      "observations": [
+        {"path": "paper_regime_adaptive_policy.py", "value": "<dynamic>"},
+        {"path": "paper_underdeployment_repair.py", "value": "<dynamic>"},
+        {"path": "performance_audit_lab.py", "value": "<dynamic>"},
+        {"path": "performance_audit_lab_v2.py", "value": "<dynamic>"},
+        {"path": "performance_audit_v2_recovery_guard.py", "value": 10}
+      ]
+    }
+  }
+}
