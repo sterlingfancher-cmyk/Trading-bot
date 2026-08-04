@@ -85,6 +85,7 @@ AUX_MODULES = (
     ("news_sentiment_engine", (("apply", (core,)), ("register_routes", (app, core)))),
     ("sitecustomize", (("_register_routes", (app,)),)),
     ("ml_phase2_shadow", (("apply", (core,)), ("register_routes", (app, core)))),
+    ("ml_recommendation_counterfactual_ledger", (("apply", (core,)), ("register_routes", (app, core)))),
     ("ml_feature_journal_quality", (("apply", (core,)), ("register_routes", (app, core)))),
     ("ml_phase25_readiness", (("apply", (core,)), ("register_routes", (app, core)))),
     ("trade_quality_telemetry", (("apply", (core,)), ("register_routes", (app, core)))),
@@ -152,6 +153,8 @@ try:
         if isinstance(light, list):
             for _path, _category, _required in (
                 ("/paper/ml2-status", "ml", False),
+                ("/paper/ml-counterfactual-ledger-status", "ml", False),
+                ("/paper/ml-counterfactual-training-dataset", "ml", False),
                 ("/paper/ml-readiness-status", "ml", False),
                 ("/paper/ml-phase25-status", "ml", False),
                 ("/paper/ml-feature-journal-status", "ml", False),
