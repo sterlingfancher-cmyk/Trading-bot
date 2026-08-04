@@ -6,6 +6,7 @@ on:
     paths:
       - "runtime_research_snapshot.py"
       - ".github/workflows/runtime-research-snapshot.yml"
+      - "ARCHITECTURE_AUDIT_BASELINE.md"
   schedule:
     # Weekdays at 23:15 UTC; approximately 6:15 PM Central during daylight time.
     - cron: "15 23 * * 1-5"
@@ -14,7 +15,7 @@ on:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
       statuses: write
@@ -29,6 +30,8 @@ jobs:
         id: snapshot
         run: |
           python runtime_research_snapshot.py \
+            --retries 2 \
+            --timeout 20 \
             --json runtime_research_snapshot.json \
             --markdown runtime_research_snapshot.md
 
