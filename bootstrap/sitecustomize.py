@@ -4,11 +4,11 @@ Python imports ``sitecustomize`` before Gunicorn and the WSGI application. This
 shim establishes the advisory-research boundary, selects a real mounted state
 volume when one is available, defers the first automatic market cycle until
 runtime composition is complete, installs the paper-entry epoch timestamp guard,
-and loads the legacy startup helpers without executing their eager pre-app
-registration or busy retry thread.
+starts the rules-gated ML recommendation ledger, and loads the legacy startup
+helpers without executing their eager pre-app registration or busy retry thread.
 
 No trading formulas, thresholds, sizing, risk limits, live authority, or ML
-authority are changed.
+execution authority are changed.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-VERSION = "guarded-sitecustomize-bootstrap-2026-08-04-v4-entry-time-guard"
+VERSION = "guarded-sitecustomize-bootstrap-2026-08-04-v5-ml-counterfactual-ledger"
 _TRUE = {"1", "true", "yes", "on"}
 
 
@@ -137,10 +137,26 @@ def _start_entry_time_guard() -> dict[str, Any]:
         }
 
 
+def _start_ml_counterfactual_ledger() -> dict[str, Any]:
+    try:
+        import ml_recommendation_counterfactual_ledger as ledger
+
+        return ledger.start_bootstrap_watchdog()
+    except Exception as exc:
+        return {
+            "status": "warn",
+            "overall": "warn",
+            "version": "ml-counterfactual-ledger-unavailable",
+            "started": False,
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
+
+
 STATE_BOOTSTRAP = _configure_state_environment()
 AUTO_RUN_BOOTSTRAP = _defer_auto_runner()
 RESEARCH_ISOLATED = _isolate_heavy_research()
 ENTRY_TIME_GUARD = _start_entry_time_guard()
+ML_COUNTERFACTUAL_LEDGER = _start_ml_counterfactual_ledger()
 _ROOT = Path(__file__).resolve().parents[1]
 _LEGACY_PATH = _ROOT / "sitecustomize.py"
 _LEGACY_MODULE_NAME = "_trading_bot_legacy_sitecustomize"
@@ -186,10 +202,12 @@ GUARDED_BOOTSTRAP_STATUS = {
     "state_bootstrap": STATE_BOOTSTRAP,
     "auto_run_bootstrap": AUTO_RUN_BOOTSTRAP,
     "entry_time_guard": ENTRY_TIME_GUARD,
+    "ml_counterfactual_ledger": ML_COUNTERFACTUAL_LEDGER,
     "legacy_loaded": True,
     "legacy_version": getattr(LEGACY_MODULE, "VERSION", None),
     "eager_registration_suppressed": True,
     "legacy_watchdog_suppressed": True,
     "flask_constructor_registration_preserved": True,
     "changes_trading_authority": False,
+    "changes_ml_execution_authority": False,
 }
