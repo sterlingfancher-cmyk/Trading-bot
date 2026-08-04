@@ -15,7 +15,7 @@ def _truthy(value: str | None) -> bool:
 
 def _isolate_heavy_research() -> bool:
     """Keep historical research out of the single production web worker."""
-    if _truthy(os.environ.get("WEB_WORKER_ALLOW_HEAVY_RESEARCH")):
+    if _truthy(os.environ.get("WEB_WORKER_ALLOW_HEAVY_RESEARCH", "false")):
         return False
     os.environ["PERFORMANCE_AUDIT_AUTO_BACKTEST_ENABLED"] = "false"
     os.environ["PERFORMANCE_AUDIT_V2_AUTO_BACKTEST_ENABLED"] = "false"
@@ -24,7 +24,7 @@ def _isolate_heavy_research() -> bool:
 
 
 RESEARCH_ISOLATED = _isolate_heavy_research()
-DEFERRED_BOOTSTRAP = _truthy(os.environ.get("DEFERRED_WSGI_BOOTSTRAP"))
+DEFERRED_BOOTSTRAP = _truthy(os.environ.get("DEFERRED_WSGI_BOOTSTRAP", "false"))
 
 
 def on_starting(server):
