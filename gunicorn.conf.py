@@ -9,6 +9,22 @@ timeout = 120
 workers = 1
 
 
+def _isolate_heavy_research() -> bool:
+    """Keep historical research out of the single production web worker."""
+    allow = os.environ.get("WEB_WORKER_ALLOW_HEAVY_RESEARCH", "false").lower() in {
+        "1", "true", "yes", "on"
+    }
+    if allow:
+        return False
+
+    # Assign rather than setdefault: a stale Railway value must not silently
+    # re-enable multi-year research in the paper-trading web process.
+    os.environ["PERFORMANCE_AUDIT_AUTO_BACKTEST_ENABLED"] = "false"
+    os.environ["PERFORMANCE_AUDIT_V2_AUTO_BACKTEST_ENABLED"] = "false"
+    os.environ["PERFORMANCE_AUDIT_V2_ENABLED"] = "false"
+    return True
+
+
 def on_starting(server):
     diagnostics.record_module_event("gunicorn", "on_starting")
 
@@ -22,14 +38,8 @@ def post_fork(server, worker):
 
 
 def post_worker_init(worker):
+    research_isolated = _isolate_heavy_research()
     try:
-        # Heavy historical research must not auto-start inside the single-worker
-        # paper-trading service. Lightweight forward-shadow capture and all
-        # read-only status routes remain available. Explicit manual research can
-        # still be run, but automatic V1/V2 backtests are disabled by default.
-        os.environ.setdefault("PERFORMANCE_AUDIT_AUTO_BACKTEST_ENABLED", "false")
-        os.environ.setdefault("PERFORMANCE_AUDIT_V2_AUTO_BACKTEST_ENABLED", "false")
-
         import app as core
         import run_report_guard
         import performance_risk_activation_guard
@@ -49,6 +59,13 @@ def post_worker_init(worker):
         import performance_audit_lab
         import performance_audit_lab_v2
         import performance_audit_composition_guard
+
+        # Reinforce the boundary if either research module was imported before
+        # the Gunicorn hook. Forward-shadow capture and status routes remain.
+        if research_isolated:
+            performance_audit_lab.AUTO_BACKTEST = False
+            performance_audit_lab_v2.AUTO_BACKTEST = False
+            performance_audit_lab_v2.ENABLED = False
 
         run_report_guard.apply(core)
         run_report_guard.register_routes(core.app, core)
@@ -83,6 +100,8 @@ def post_worker_init(worker):
         paper_regime_adaptive_policy.start_watchdog(core)
         paper_regime_adaptive_policy.register_routes(core.app, core)
 
+        # V1 remains advisory and forward-shadow capable, but historical runs
+        # cannot auto-start in this web process.
         performance_audit_lab.apply(core)
         performance_audit_lab.register_routes(core.app, core)
         try:
@@ -90,15 +109,20 @@ def post_worker_init(worker):
         except Exception:
             pass
 
+        # V2 exposes status and persisted-result routes. With isolation active,
+        # its heavy run endpoint returns disabled and no async recovery worker is
+        # imported into the web process.
         performance_audit_lab_v2.apply(core)
         performance_audit_lab_v2.register_routes(core.app, core)
+
         performance_audit_composition_guard.start_watchdog(core)
         performance_audit_composition_guard.register_routes(core.app, core)
         diagnostics.register_routes(core.app, core)
         diagnostics.record_module_event(
             "gunicorn.worker",
-            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_score_breakout_scanner_runtime_neutral_starter_late_neutral_underdeployment_adaptive_policy_performance_audit_v2_isolated_and_composition_registered",
+            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_score_breakout_scanner_runtime_neutral_starter_late_neutral_underdeployment_adaptive_policy_research_isolation_and_composition_registered",
             error=(
+                f"research_isolated={research_isolated};"
                 f"{performance_risk_activation_guard.VERSION};"
                 f"{regime_integrity_underdeployment.VERSION};"
                 f"{regime_integrity_cache_guard.VERSION};"
