@@ -15,23 +15,62 @@ from shadow_decision_models import (
     Side,
     SignalSnapshot,
 )
-from typed_configuration_models import ConfigUnit, normalize_value
 
 ROOT = Path(__file__).resolve().parent
 
 
-class TypedConfigurationModelTests(unittest.TestCase):
-    def test_unit_normalization(self) -> None:
-        self.assertEqual(normalize_value("0.025", ConfigUnit.FRACTION), 0.025)
-        self.assertEqual(normalize_value(1.5, ConfigUnit.PERCENT_POINTS), 0.015)
-        self.assertEqual(normalize_value("false", ConfigUnit.BOOLEAN), False)
-        self.assertEqual(normalize_value("300", ConfigUnit.SECONDS), 300.0)
+class CanonicalTypedConfigurationTests(unittest.TestCase):
+    def test_contract_is_read_only_and_non_authoritative(self) -> None:
+        contract = json.loads(
+            (ROOT / "typed_configuration_contract.json").read_text(encoding="utf-8")
+        )
+        policy = contract["policy"]
+        self.assertTrue(policy["read_only"])
+        self.assertFalse(policy["authoritative_runtime_source"])
+        self.assertFalse(policy["allow_new_observations"])
+        self.assertTrue(policy["behavior_changes_require_backtest_and_forward_test"])
 
-    def test_baseline_is_non_authoritative(self) -> None:
-        baseline = json.loads((ROOT / "typed_configuration_baseline.json").read_text())
-        self.assertTrue(baseline["policy"]["read_only"])
-        self.assertFalse(baseline["policy"]["authoritative"])
-        self.assertFalse(baseline["policy"]["effective_value_changes_allowed"])
+    def test_contract_declares_explicit_risk_units(self) -> None:
+        contract = json.loads(
+            (ROOT / "typed_configuration_contract.json").read_text(encoding="utf-8")
+        )
+        environment = contract["environment_contracts"]
+        parameters = contract["parameter_unit_contracts"]
+        self.assertEqual(environment["MAX_DAILY_LOSS_PCT"]["unit"], "fraction")
+        self.assertEqual(
+            environment["MAX_INTRADAY_DRAWDOWN_PCT"]["unit"], "fraction"
+        )
+        surge = parameters["MAX_INTRADAY_DRAWDOWN_PCT"]["observations"]
+        self.assertIn("percentage_points", {row["unit"] for row in surge})
+
+    def test_snapshot_validator_has_no_runtime_or_order_authority(self) -> None:
+        path = ROOT / "typed_configuration_snapshot.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        forbidden_imports = {"app", "alpaca_trade_api", "yfinance"}
+        forbidden_calls = {
+            "submit_order",
+            "place_order",
+            "execute_order",
+            "enter_position",
+            "exit_position",
+            "save_state",
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    self.assertNotIn(alias.name.split(".", 1)[0], forbidden_imports)
+            elif isinstance(node, ast.ImportFrom):
+                self.assertNotIn((node.module or "").split(".", 1)[0], forbidden_imports)
+            elif isinstance(node, ast.Call):
+                func = node.func
+                name = (
+                    func.id
+                    if isinstance(func, ast.Name)
+                    else func.attr
+                    if isinstance(func, ast.Attribute)
+                    else ""
+                )
+                self.assertNotIn(name, forbidden_calls)
 
 
 class ShadowDecisionModelTests(unittest.TestCase):
@@ -64,7 +103,7 @@ class ShadowDecisionModelTests(unittest.TestCase):
 
     def test_shadow_module_has_no_runtime_or_order_authority(self) -> None:
         path = ROOT / "shadow_decision_models.py"
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         forbidden_imports = {"app", "alpaca_trade_api", "yfinance"}
         forbidden_calls = {
             "submit_order",
@@ -72,6 +111,7 @@ class ShadowDecisionModelTests(unittest.TestCase):
             "execute_order",
             "enter_position",
             "exit_position",
+            "save_state",
         }
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
