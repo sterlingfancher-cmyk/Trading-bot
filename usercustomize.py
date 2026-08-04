@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-08-04-v48-one-shot-core-mutations"
+VERSION = "usercustomize-entry-pipeline-composition-2026-08-04-v49-daily-operational-audit"
 _REGISTERED_APP_IDS: set[int] = set()
 _ONE_SHOT_APPLIED: set[tuple[int, str]] = set()
+
+# Keep diagnostic links on the validated Splendid Railway service when neither
+# an explicit public URL nor Railway's injected public domain is available.
+CANONICAL_PUBLIC_BASE_URL = "https://web-production-e1796.up.railway.app"
+if not os.environ.get("PUBLIC_BASE_URL") and not os.environ.get("RAILWAY_PUBLIC_DOMAIN"):
+    os.environ["PUBLIC_BASE_URL"] = CANONICAL_PUBLIC_BASE_URL
 
 # These modules replace a canonical core function pointer while retaining the
 # previous callable. Reapplying them after another module has wrapped that
@@ -161,6 +168,7 @@ MODULES = (
     ("runtime_reliability_overlay", "app_and_module"),
     ("cycle_alignment_overlay", "app_and_module"),
     ("fast_self_check_override", "app_and_module"),
+    ("daily_operational_audit", "app_and_module"),
 )
 
 
@@ -210,7 +218,7 @@ def _watchdog() -> None:
                     "ml_pre3a_shadow_validation", "ml_phase3a_early_paper_gate",
                     "ml_vs_rules_shadow_log", "entry_pipeline_ownership_guard",
                     "daily_self_check_compactor", "missing_reason_trace_overlay", "runtime_reliability_overlay", "cycle_alignment_overlay",
-                    "fast_self_check_override",
+                    "fast_self_check_override", "daily_operational_audit",
                 ):
                     _register_module(flask_app, core, name, route_args="app_and_module")
                 # Reassert final ownership after downstream diagnostic modules.
