@@ -1,4 +1,4 @@
-name: Refactor, Ownership, Configuration, and Research Audit
+name: Refactor, Ownership, Configuration, State, and Research Audit
 
 on:
   push:
@@ -11,6 +11,7 @@ on:
       - "ARCHITECTURE_AUDIT_BASELINE.md"
       - "architecture_ownership_registry.json"
       - "typed_configuration_contract.json"
+      - "state_store_contract.json"
       - ".github/workflows/refactor-audit.yml"
   pull_request:
     paths:
@@ -21,6 +22,7 @@ on:
       - "ARCHITECTURE_AUDIT_BASELINE.md"
       - "architecture_ownership_registry.json"
       - "typed_configuration_contract.json"
+      - "state_store_contract.json"
       - ".github/workflows/refactor-audit.yml"
   schedule:
     - cron: "30 12 * * 0"
@@ -87,6 +89,24 @@ jobs:
         if: always()
         run: python -m unittest -v test_architecture_stage_b.py
 
+      - name: Validate StateStore shadow parity
+        id: state_store
+        if: always()
+        run: |
+          test -f refactor_audit_report.json
+          test -f typed_configuration_report.json
+          python state_store_shadow.py \
+            --contract state_store_contract.json \
+            --audit refactor_audit_report.json \
+            --typed-config typed_configuration_report.json \
+            --json state_store_report.json \
+            --markdown state_store_report.md
+
+      - name: Test Stage C StateStore shadow
+        id: stage_c_tests
+        if: always()
+        run: python -m unittest -v test_state_store_stage_c.py
+
       - name: Read audit summary
         id: summary
         if: always()
@@ -98,20 +118,14 @@ jobs:
           audit_path = Path("refactor_audit_report.json")
           contract_path = Path("architecture_contract_report.json")
           config_path = Path("typed_configuration_report.json")
+          state_path = Path("state_store_report.json")
 
           if not audit_path.exists():
-              print("critical=unknown")
-              print("warnings=unknown")
               print("new_critical=unknown")
-              print("new_warnings=unknown")
           else:
               report = json.loads(audit_path.read_text())
-              summary = report.get("current", {}).get("summary", {})
               comparison = report.get("comparison", {})
-              print(f"critical={summary.get('critical_findings', 0)}")
-              print(f"warnings={summary.get('warning_findings', 0)}")
               print(f"new_critical={len(comparison.get('new_critical', []))}")
-              print(f"new_warnings={len(comparison.get('new_warnings', []))}")
 
           if not contract_path.exists():
               print("contract_violations=unknown")
@@ -124,9 +138,15 @@ jobs:
           else:
               config = json.loads(config_path.read_text())
               print(f"configuration_violations={len(config.get('violations', []))}")
+
+          if not state_path.exists():
+              print("state_store_status=missing")
+          else:
+              state = json.loads(state_path.read_text())
+              print(f"state_store_status={state.get('status', 'unknown')}")
           PY
 
-      - name: Upload refactor, ownership, and configuration audit
+      - name: Upload refactor, ownership, configuration, and state audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -138,6 +158,8 @@ jobs:
             architecture_contract_report.md
             typed_configuration_report.json
             typed_configuration_report.md
+            state_store_report.json
+            state_store_report.md
           if-no-files-found: warn
           retention-days: 30
 
@@ -146,14 +168,17 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const auditPassed = '${{ steps.audit.outcome }}' === 'success';
-            const contractPassed = '${{ steps.contract.outcome }}' === 'success';
-            const configPassed = '${{ steps.configuration.outcome }}' === 'success';
-            const modelsPassed = '${{ steps.stage_b_models.outcome }}' === 'success';
-            const passed = auditPassed && contractPassed && configPassed && modelsPassed;
+            const passed =
+              '${{ steps.audit.outcome }}' === 'success' &&
+              '${{ steps.contract.outcome }}' === 'success' &&
+              '${{ steps.configuration.outcome }}' === 'success' &&
+              '${{ steps.stage_b_models.outcome }}' === 'success' &&
+              '${{ steps.state_store.outcome }}' === 'success' &&
+              '${{ steps.stage_c_tests.outcome }}' === 'success';
             const newCritical = '${{ steps.summary.outputs.new_critical }}';
             const ownership = '${{ steps.summary.outputs.contract_violations }}';
             const configuration = '${{ steps.summary.outputs.configuration_violations }}';
+            const stateStore = '${{ steps.summary.outputs.state_store_status }}';
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -161,8 +186,8 @@ jobs:
               state: passed ? 'success' : 'failure',
               context: 'refactor-audit',
               description: passed
-                ? `Ownership, typed configuration, and shadow models intact`
-                : `${newCritical} critical; ${ownership} owner; ${configuration} config violations`,
+                ? `Ownership, configuration, shadow models, and StateStore parity intact`
+                : `${newCritical} critical; ${ownership} owner; ${configuration} config; state ${stateStore}`,
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 
