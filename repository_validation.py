@@ -58,8 +58,9 @@ FORBIDDEN_ORDER_CALLS = {
     "send_order",
     "create_order",
     "execute_order",
-    "buy",
-    "sell",
+    "submit_market_order",
+    "submit_limit_order",
+    "broker_submit_order",
 }
 
 BEHAVIOR_KEYWORDS = (
