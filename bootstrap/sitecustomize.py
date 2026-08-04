@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-VERSION = "guarded-sitecustomize-bootstrap-2026-08-04-v5-ml-counterfactual-ledger"
+VERSION = "guarded-sitecustomize-bootstrap-2026-08-04-v6-root-loaded-ml-counterfactual-ledger"
 _TRUE = {"1", "true", "yes", "on"}
 
 
@@ -139,8 +139,15 @@ def _start_entry_time_guard() -> dict[str, Any]:
 
 def _start_ml_counterfactual_ledger() -> dict[str, Any]:
     try:
-        import ml_recommendation_counterfactual_ledger as ledger
-
+        path = Path(__file__).resolve().parents[1] / "ml_recommendation_counterfactual_ledger.py"
+        spec = importlib.util.spec_from_file_location(
+            "_trading_bot_ml_counterfactual_ledger", path
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError("unable to create ML counterfactual ledger spec")
+        ledger = importlib.util.module_from_spec(spec)
+        sys.modules["_trading_bot_ml_counterfactual_ledger"] = ledger
+        spec.loader.exec_module(ledger)
         return ledger.start_bootstrap_watchdog()
     except Exception as exc:
         return {
