@@ -1,4 +1,4 @@
-name: Refactor, Ownership, Configuration, State, Decision, Runtime, and Research Audit
+name: Refactor, Ownership, Configuration, State, Decision, Runtime, Startup, and Research Audit
 
 on:
   push:
@@ -6,6 +6,8 @@ on:
     paths:
       - "*.py"
       - "**/*.py"
+      - "Procfile"
+      - "requirements.txt"
       - "VALIDATION_POLICY.md"
       - "REFACTOR_AUDIT_POLICY.md"
       - "ARCHITECTURE_AUDIT_BASELINE.md"
@@ -19,6 +21,8 @@ on:
     paths:
       - "*.py"
       - "**/*.py"
+      - "Procfile"
+      - "requirements.txt"
       - "VALIDATION_POLICY.md"
       - "REFACTOR_AUDIT_POLICY.md"
       - "ARCHITECTURE_AUDIT_BASELINE.md"
@@ -37,6 +41,7 @@ jobs:
   refactor-audit:
     if: github.event_name != 'schedule' || github.event.schedule == '30 12 * * 0'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       statuses: write
@@ -48,6 +53,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
 
       - name: Run structural audit
         id: audit
@@ -121,6 +127,95 @@ jobs:
         if: always()
         run: python -m unittest -v test_runtime_shadow_capture.py
 
+      - name: Install declared runtime dependencies
+        id: runtime_dependencies
+        if: always()
+        run: |
+          python -m pip install --disable-pip-version-check --upgrade pip
+          python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run exact Gunicorn startup smoke
+        id: startup_smoke
+        if: always()
+        env:
+          PORT: "8765"
+          DEFERRED_WSGI_BOOTSTRAP: "true"
+          WEB_WORKER_ALLOW_HEAVY_RESEARCH: "false"
+          PERFORMANCE_AUDIT_AUTO_BACKTEST_ENABLED: "false"
+          PERFORMANCE_AUDIT_V2_AUTO_BACKTEST_ENABLED: "false"
+          PERFORMANCE_AUDIT_V2_ENABLED: "false"
+        run: |
+          rm -f startup_gunicorn.log bootstrap_status.json bootstrap_root.json
+          PYTHONPATH=bootstrap:. gunicorn bootstrap_wsgi:app \
+            --bind 127.0.0.1:$PORT \
+            --workers 1 \
+            --threads 4 \
+            --timeout 180 \
+            >startup_gunicorn.log 2>&1 &
+          GUNICORN_PID=$!
+          cleanup() {
+            kill "$GUNICORN_PID" 2>/dev/null || true
+            wait "$GUNICORN_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 30); do
+            if curl --silent --show-error --fail \
+              "http://127.0.0.1:$PORT/bootstrap-status" \
+              >bootstrap_status.json; then
+              break
+            fi
+            if ! kill -0 "$GUNICORN_PID" 2>/dev/null; then
+              echo "Gunicorn exited before bootstrap status became reachable"
+              cat startup_gunicorn.log
+              exit 1
+            fi
+            sleep 2
+          done
+
+          test -s bootstrap_status.json || {
+            echo "Bootstrap status never became reachable"
+            cat startup_gunicorn.log
+            exit 1
+          }
+
+          ready=false
+          for _ in $(seq 1 45); do
+            state=$(python - <<'PY'
+          import json
+          from pathlib import Path
+          row = json.loads(Path("bootstrap_status.json").read_text())
+          print(row.get("status", "unknown"))
+          PY
+          )
+            if [ "$state" = "ready" ]; then
+              ready=true
+              break
+            fi
+            if [ "$state" = "error" ]; then
+              echo "Deferred application reported a startup error"
+              cat bootstrap_status.json
+              cat startup_gunicorn.log
+              exit 1
+            fi
+            sleep 2
+            curl --silent --show-error --fail \
+              "http://127.0.0.1:$PORT/bootstrap-status" \
+              >bootstrap_status.json
+          done
+
+          if [ "$ready" != "true" ]; then
+            echo "Deferred application did not become ready in the bounded window"
+            cat bootstrap_status.json
+            cat startup_gunicorn.log
+            exit 1
+          fi
+
+          curl --silent --show-error --fail \
+            "http://127.0.0.1:$PORT/" \
+            >bootstrap_root.json
+          cat bootstrap_status.json
+
       - name: Read audit summary
         id: summary
         if: always()
@@ -160,7 +255,7 @@ jobs:
               print(f"state_store_status={state.get('status', 'unknown')}")
           PY
 
-      - name: Upload refactor, ownership, configuration, and state audit
+      - name: Upload refactor and startup audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -174,6 +269,9 @@ jobs:
             typed_configuration_report.md
             state_store_report.json
             state_store_report.md
+            startup_gunicorn.log
+            bootstrap_status.json
+            bootstrap_root.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -190,7 +288,9 @@ jobs:
               '${{ steps.state_store.outcome }}' === 'success' &&
               '${{ steps.stage_c_tests.outcome }}' === 'success' &&
               '${{ steps.stage_d_tests.outcome }}' === 'success' &&
-              '${{ steps.runtime_shadow_tests.outcome }}' === 'success';
+              '${{ steps.runtime_shadow_tests.outcome }}' === 'success' &&
+              '${{ steps.runtime_dependencies.outcome }}' === 'success' &&
+              '${{ steps.startup_smoke.outcome }}' === 'success';
             const newCritical = '${{ steps.summary.outputs.new_critical }}';
             const ownership = '${{ steps.summary.outputs.contract_violations }}';
             const configuration = '${{ steps.summary.outputs.configuration_violations }}';
@@ -202,7 +302,7 @@ jobs:
               state: passed ? 'success' : 'failure',
               context: 'refactor-audit',
               description: passed
-                ? `Ownership, configuration, StateStore, and runtime shadow capture intact`
+                ? `Structure, ownership, parity, shadow, and startup smoke passed`
                 : `${newCritical} critical; ${ownership} owner; ${configuration} config; state ${stateStore}`,
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
