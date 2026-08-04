@@ -1,3 +1,4 @@
+# One-time workflow trigger: bounded Python startup repair.
 name: One-Time Sitecustomize Bootstrap Repair
 
 on:
