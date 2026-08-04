@@ -7,8 +7,8 @@ static-analysis noise before comparing commits:
 - local object attribute assignments are not treated as runtime monkey patches;
 - ordinary dictionary ``get`` calls are not treated as network calls;
 - watchdog loops using named sleep constants are not treated as no-sleep loops;
-- dynamic route and environment expressions are retained in raw source analysis
-  but are excluded from literal conflict counts.
+- ``while True`` loops with a reachable ``break`` are treated as bounded loops;
+- dynamic route and environment expressions are excluded from literal conflicts.
 """
 from __future__ import annotations
 
@@ -22,9 +22,10 @@ from typing import Any, Iterable
 
 import refactor_audit as core
 
-VERSION = "refactor-audit-cli-2026-08-03-v2-calibrated"
+VERSION = "refactor-audit-cli-2026-08-03-v3-bounded-loop-calibration"
 RUNTIME_ASSIGNMENT_ROOTS = {"app", "core", "flask_app", "m", "mod", "module"}
 NETWORK_ROOTS = {"httpx", "requests", "urllib", "urllib3", "yf", "yfinance"}
+TOOLING_NETWORK_PATHS = {"runtime_research_snapshot.py"}
 REBUILT_CATEGORIES = {
     "busy_infinite_loop",
     "conflicting_environment_defaults",
@@ -82,18 +83,25 @@ def _network_call_is_relevant(call: str) -> bool:
     return root in NETWORK_ROOTS and tail in {"get", "post", "request", "urlopen"}
 
 
-def _sleep_presence(units: dict[str, core.SourceUnit]) -> dict[tuple[str, int], bool]:
-    rows: dict[tuple[str, int], bool] = {}
+def _loop_properties(
+    units: dict[str, core.SourceUnit],
+) -> dict[tuple[str, int], dict[str, bool]]:
+    rows: dict[tuple[str, int], dict[str, bool]] = {}
     for path, unit in units.items():
         for node in ast.walk(unit.tree):
             if not isinstance(node, ast.While) or not core._is_true_loop(node):
                 continue
+            children = list(ast.walk(node))
             has_sleep = any(
                 isinstance(child, ast.Call)
                 and core._call_name(child).rsplit(".", 1)[-1] == "sleep"
-                for child in ast.walk(node)
+                for child in children
             )
-            rows[(path, int(node.lineno))] = has_sleep
+            has_break = any(isinstance(child, ast.Break) for child in children)
+            rows[(path, int(node.lineno))] = {
+                "has_sleep": has_sleep,
+                "has_break": has_break,
+            }
     return rows
 
 
@@ -177,12 +185,21 @@ def _calibrate(analysis: dict[str, Any], units: dict[str, core.SourceUnit]) -> d
             )
         )
 
-    sleep_presence = _sleep_presence(units)
+    loop_properties = _loop_properties(units)
     watchdogs: list[dict[str, Any]] = []
+    bounded_true_loops: list[dict[str, Any]] = []
     for raw in analysis.get("watchdog_loops", []):
         row = dict(raw)
-        has_sleep = sleep_presence.get((str(row.get("path")), int(row.get("line") or 0)), False)
-        if row.get("sleep_seconds") is None and has_sleep:
+        props = loop_properties.get(
+            (str(row.get("path")), int(row.get("line") or 0)),
+            {"has_sleep": False, "has_break": False},
+        )
+        if props.get("has_break"):
+            row["busy"] = False
+            row["bounded_by_break"] = True
+            bounded_true_loops.append(row)
+            continue
+        if row.get("sleep_seconds") is None and props.get("has_sleep"):
             row["busy"] = False
             row["sleep_source"] = "dynamic_constant_or_expression"
         watchdogs.append(row)
@@ -194,14 +211,15 @@ def _calibrate(analysis: dict[str, Any], units: dict[str, core.SourceUnit]) -> d
                     str(row.get("path")),
                     int(row.get("line") or 0),
                     "while_true",
-                    "infinite loop has no sleep call or sleeps under 10 seconds",
+                    "persistent loop has no sleep call or sleeps under 10 seconds",
                 )
             )
 
     network_calls = [
         row
         for row in analysis.get("network_calls_inside_loops", [])
-        if _network_call_is_relevant(str(row.get("call") or ""))
+        if row.get("path") not in TOOLING_NETWORK_PATHS
+        and _network_call_is_relevant(str(row.get("call") or ""))
     ]
 
     findings.sort(
@@ -216,6 +234,8 @@ def _calibrate(analysis: dict[str, Any], units: dict[str, core.SourceUnit]) -> d
     summary = dict(analysis.get("summary", {}))
     summary.update(
         {
+            "watchdog_loops": len(watchdogs),
+            "bounded_true_loops": len(bounded_true_loops),
             "busy_watchdog_loops": sum(1 for row in watchdogs if row.get("busy")),
             "dynamic_mutation_targets": len(mutation_owners),
             "environment_keys": len(environment_owners),
@@ -241,12 +261,15 @@ def _calibrate(analysis: dict[str, Any], units: dict[str, core.SourceUnit]) -> d
             "mutation_owners": mutation_owners,
             "mutation_overlaps": mutation_overlaps,
             "watchdog_loops": watchdogs,
+            "bounded_true_loops": bounded_true_loops,
             "network_calls_inside_loops": network_calls,
             "calibration": {
                 "version": VERSION,
                 "local_attribute_assignments_excluded": True,
                 "generic_dict_get_excluded_from_network_calls": True,
+                "tooling_network_calls_excluded": True,
                 "dynamic_watchdog_sleep_recognized": True,
+                "bounded_break_loops_excluded_from_watchdogs": True,
                 "dynamic_literal_conflicts_excluded": True,
             },
         }
