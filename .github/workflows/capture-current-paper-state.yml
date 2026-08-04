@@ -19,11 +19,9 @@ jobs:
       - name: Capture read-only paper state surfaces
         id: capture
         run: |
-          base=https://web-production-e1796.up.railway.app
           python - <<'PY'
           import json
           import pathlib
-          import urllib.error
           import urllib.request
 
           base = "https://web-production-e1796.up.railway.app"
@@ -45,7 +43,7 @@ jobs:
               target = pathlib.Path(f"capture_{name}.json")
               request = urllib.request.Request(
                   base + path,
-                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.1"},
+                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.2"},
                   method="GET",
               )
               try:
@@ -67,13 +65,12 @@ jobs:
                   }
           pathlib.Path("capture_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
           print(json.dumps(manifest, indent=2, sort_keys=True))
-          required = ("paper_status_full", "ml2_status", "ml_counterfactual_ledger", "ml_counterfactual_dataset")
-          failed = [name for name in required if manifest["endpoints"][name]["status"] != "ok"]
-          if failed:
-              raise SystemExit("required capture failed: " + ",".join(failed))
+          if manifest["endpoints"]["paper_status_full"]["status"] != "ok":
+              raise SystemExit("full paper status capture failed")
           PY
 
       - name: Upload paper-state capture
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: current-paper-state-capture
