@@ -1,4 +1,4 @@
-"""Gunicorn configuration and persistent Railway diagnostics hooks."""
+"""Gunicorn configuration and bounded Railway lifecycle diagnostics."""
 from __future__ import annotations
 
 import os
@@ -9,30 +9,33 @@ timeout = 120
 workers = 1
 
 
+def _truthy(value: str | None) -> bool:
+    return str(value or "").lower() in {"1", "true", "yes", "on"}
+
+
 def _isolate_heavy_research() -> bool:
     """Keep historical research out of the single production web worker."""
-    allow = os.environ.get("WEB_WORKER_ALLOW_HEAVY_RESEARCH", "false").lower() in {
-        "1", "true", "yes", "on"
-    }
-    if allow:
+    if _truthy(os.environ.get("WEB_WORKER_ALLOW_HEAVY_RESEARCH")):
         return False
-
-    # Assign rather than setdefault: a stale Railway value must not silently
-    # re-enable multi-year research in the paper-trading web process.
     os.environ["PERFORMANCE_AUDIT_AUTO_BACKTEST_ENABLED"] = "false"
     os.environ["PERFORMANCE_AUDIT_V2_AUTO_BACKTEST_ENABLED"] = "false"
     os.environ["PERFORMANCE_AUDIT_V2_ENABLED"] = "false"
     return True
 
 
-# Gunicorn loads this configuration before importing ``wsgi:app``. Applying the
-# boundary here prevents import-time research watchdogs from starting before
-# ``post_worker_init`` can run.
 RESEARCH_ISOLATED = _isolate_heavy_research()
+DEFERRED_BOOTSTRAP = _truthy(os.environ.get("DEFERRED_WSGI_BOOTSTRAP"))
 
 
 def on_starting(server):
-    diagnostics.record_module_event("gunicorn", "on_starting")
+    diagnostics.record_module_event(
+        "gunicorn",
+        "on_starting",
+        error=(
+            f"deferred_bootstrap={DEFERRED_BOOTSTRAP};"
+            f"research_isolated={RESEARCH_ISOLATED}"
+        ),
+    )
 
 
 def when_ready(server):
@@ -44,113 +47,34 @@ def post_fork(server, worker):
 
 
 def post_worker_init(worker):
-    research_isolated = RESEARCH_ISOLATED
-    try:
-        import app as core
-        import run_report_guard
-        import performance_risk_activation_guard
-        import regime_integrity_underdeployment
-        import regime_integrity_cache_guard
-        import bear_soft_pause_short_recovery
-        import bear_recovery_stack_contract
-        import entry_pipeline_xray_bear_ownership_guard
-        import opening_surge_participation
-        import opening_surge_score_calibration
-        import breakout_scanner_ownership_guard
-        import scanner_runtime_contract
-        import neutral_momentum_starter_extension
-        import neutral_late_session_participation
-        import paper_underdeployment_repair
-        import paper_regime_adaptive_policy
-        import performance_audit_lab
-        import performance_audit_lab_v2
-        import performance_audit_composition_guard
-
-        # Reinforce the boundary if either research module was imported before
-        # the Gunicorn hook. Forward-shadow capture and status routes remain.
-        if research_isolated:
-            performance_audit_lab.AUTO_BACKTEST = False
-            performance_audit_lab_v2.AUTO_BACKTEST = False
-            performance_audit_lab_v2.ENABLED = False
-
-        run_report_guard.apply(core)
-        run_report_guard.register_routes(core.app, core)
-        regime_integrity_underdeployment.start_watchdog(core)
-        regime_integrity_underdeployment.register_routes(core.app, core)
-        regime_integrity_cache_guard.start_watchdog(core)
-        performance_risk_activation_guard.start_watchdog(core)
-        performance_risk_activation_guard.register_routes(core.app, core)
-        bear_soft_pause_short_recovery.start_watchdog(core)
-        bear_soft_pause_short_recovery.register_routes(core.app, core)
-        bear_recovery_stack_contract.start_watchdog(core)
-        bear_recovery_stack_contract.register_routes(core.app, core)
-        entry_pipeline_xray_bear_ownership_guard.start_watchdog(core)
-        entry_pipeline_xray_bear_ownership_guard.register_routes(core.app, core)
-        opening_surge_participation.start_watchdog(core)
-        opening_surge_participation.register_routes(core.app, core)
-        opening_surge_score_calibration.start_watchdog(core)
-        opening_surge_score_calibration.register_routes(core.app, core)
-        breakout_scanner_ownership_guard.start_watchdog(core)
-        breakout_scanner_ownership_guard.register_routes(core.app, core)
-        scanner_runtime_contract.start_watchdog(core)
-        scanner_runtime_contract.register_routes(core.app, core)
-        neutral_momentum_starter_extension.start_watchdog(core)
-        neutral_momentum_starter_extension.register_routes(core.app, core)
-        neutral_late_session_participation.start_watchdog(core)
-        neutral_late_session_participation.register_routes(core.app, core)
-        paper_underdeployment_repair.start_watchdog(core)
-        paper_underdeployment_repair.register_routes(core.app, core)
-
-        # Apply the central configuration owner before refreshing the evidence
-        # stack so the restriction audit reports effective runtime values.
-        paper_regime_adaptive_policy.start_watchdog(core)
-        paper_regime_adaptive_policy.register_routes(core.app, core)
-
-        # V1 remains advisory and forward-shadow capable, but historical runs
-        # cannot auto-start in this web process.
-        performance_audit_lab.apply(core)
-        performance_audit_lab.register_routes(core.app, core)
-        try:
-            performance_audit_lab.restriction_audit(core)
-        except Exception:
-            pass
-
-        # V2 exposes status and persisted-result routes. With isolation active,
-        # its heavy run endpoint returns disabled and no async recovery worker is
-        # imported into the web process.
-        performance_audit_lab_v2.apply(core)
-        performance_audit_lab_v2.register_routes(core.app, core)
-
-        performance_audit_composition_guard.start_watchdog(core)
-        performance_audit_composition_guard.register_routes(core.app, core)
-        diagnostics.register_routes(core.app, core)
+    """Avoid importing the legacy app twice under the deferred dispatcher."""
+    if DEFERRED_BOOTSTRAP:
         diagnostics.record_module_event(
             "gunicorn.worker",
-            "diagnostics_risk_regime_bear_recovery_stack_xray_opening_surge_score_breakout_scanner_runtime_neutral_starter_late_neutral_underdeployment_adaptive_policy_research_isolation_and_composition_registered",
-            error=(
-                f"research_isolated={research_isolated};"
-                f"{performance_risk_activation_guard.VERSION};"
-                f"{regime_integrity_underdeployment.VERSION};"
-                f"{regime_integrity_cache_guard.VERSION};"
-                f"{bear_soft_pause_short_recovery.VERSION};"
-                f"{bear_recovery_stack_contract.VERSION};"
-                f"{entry_pipeline_xray_bear_ownership_guard.VERSION};"
-                f"{opening_surge_participation.VERSION};"
-                f"{opening_surge_score_calibration.VERSION};"
-                f"{breakout_scanner_ownership_guard.VERSION};"
-                f"{scanner_runtime_contract.VERSION};"
-                f"{neutral_momentum_starter_extension.VERSION};"
-                f"{neutral_late_session_participation.VERSION};"
-                f"{paper_underdeployment_repair.VERSION};"
-                f"{paper_regime_adaptive_policy.VERSION};"
-                f"{performance_audit_lab.VERSION};"
-                f"{performance_audit_lab_v2.VERSION};"
-                f"{performance_audit_composition_guard.VERSION};"
-                "auto_historical_research_disabled"
-            ),
+            "deferred_registration_owned_by_bootstrap_wsgi",
+            error=f"research_isolated={RESEARCH_ISOLATED}",
         )
+        return
+
+    try:
+        import app as core
+        import runtime_worker_registration
+
+        result = runtime_worker_registration.register(
+            core,
+            research_isolated=RESEARCH_ISOLATED,
+        )
+        if result.get("status") != "ok":
+            raise RuntimeError(
+                "runtime registration failed: "
+                + str(result.get("error") or result.get("reason"))
+            )
     except Exception as exc:
-        diagnostics.record_exception(exc, source="gunicorn.post_worker_init", module="app")
+        diagnostics.record_exception(
+            exc,
+            source="gunicorn.post_worker_init",
+            module="app",
+        )
 
 
 def worker_abort(worker):
@@ -166,7 +90,10 @@ def worker_exit(server, worker):
     diagnostics.record_module_event(
         "gunicorn.worker",
         "exited",
-        error=f"pid={getattr(worker, 'pid', None)} exitcode={getattr(worker, 'exitcode', None)}",
+        error=(
+            f"pid={getattr(worker, 'pid', None)} "
+            f"exitcode={getattr(worker, 'exitcode', None)}"
+        ),
     )
 
 
