@@ -6,7 +6,9 @@ import os
 import threading
 from typing import Any, Dict, List
 
-VERSION = "run-report-guard-2026-07-24-v2"
+import runtime_shadow_capture
+
+VERSION = "run-report-guard-2026-08-03-v3-shadow-observer"
 _APPLIED: set[int] = set()
 _LOCK = threading.RLock()
 _LAST: Dict[str, Any] = {}
@@ -76,6 +78,66 @@ def _busy_payload(core: Any, timeout_seconds: float) -> Dict[str, Any]:
     }
 
 
+def _capture_shadow(core: Any, result: Any) -> Dict[str, Any]:
+    """Observe a completed market cycle without altering its return value."""
+    if not isinstance(result, dict):
+        return {"status": "not_captured", "reason": "result_not_dict"}
+    if result.get("skipped") or result.get("status") == "cycle_busy":
+        return {
+            "status": "not_captured",
+            "reason": "cycle_not_executed",
+            "generated_local": _now(core),
+        }
+
+    portfolio = getattr(core, "portfolio", {})
+    if not isinstance(portfolio, dict):
+        return {"status": "not_captured", "reason": "portfolio_missing"}
+
+    cycle_id = (
+        getattr(core, "LAST_CYCLE_ID", None)
+        or result.get("cycle_id")
+        or f"observed-{_now(core)}"
+    )
+    generated_local = _now(core)
+    try:
+        report = runtime_shadow_capture.capture_cycle(
+            cycle_id=str(cycle_id),
+            generated_local=generated_local,
+            market=result,
+            risk=result.get("risk_controls") or portfolio.get("risk_controls") or {},
+            positions=portfolio.get("positions") or {},
+            equity=float(portfolio.get("equity") or result.get("equity") or 0.0),
+            long_signals=result.get("long_signals") or [],
+            short_signals=result.get("short_signals") or [],
+            entries=result.get("entries") or [],
+            blocked_entries=result.get("blocked_entries") or [],
+            rejected_signals=result.get("rejected_signals") or [],
+            new_entries_allowed=bool(result.get("new_entries_allowed")),
+            entry_block_reason=result.get("entry_block_reason"),
+            market_open=bool(result.get("market_open_now")),
+        )
+    except Exception as exc:
+        report = runtime_shadow_capture.failure_record(
+            cycle_id=str(cycle_id),
+            generated_local=generated_local,
+            error=exc,
+        )
+
+    portfolio["shadow_decision_comparison"] = runtime_shadow_capture.append_bounded(
+        portfolio.get("shadow_decision_comparison"),
+        report,
+    )
+    return {
+        "status": report.get("status"),
+        "version": report.get("version"),
+        "cycle_id": report.get("cycle_id"),
+        "parity": report.get("parity"),
+        "candidate_count": report.get("candidate_count"),
+        "independent_policy_active": False,
+        "forward_evidence_eligible": False,
+    }
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     if core is None or not hasattr(core, "run_cycle"):
         return {"status": "not_applied", "version": VERSION, "reason": "core_or_run_cycle_missing"}
@@ -90,7 +152,16 @@ def apply(core: Any = None) -> Dict[str, Any]:
     def wrapped_run_cycle(*args, **kwargs):
         global _LAST
         if _inline_enabled():
-            return original(*args, **kwargs)
+            result = original(*args, **kwargs)
+            shadow = _capture_shadow(core, result)
+            _LAST = {
+                "status": "ok",
+                "version": VERSION,
+                "generated_local": _now(core),
+                "inline_report_compilation": True,
+                "shadow_capture": shadow,
+            }
+            return result
 
         timeout_seconds = _lock_timeout_seconds()
         acquired = _LOCK.acquire(timeout=timeout_seconds)
@@ -111,6 +182,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
             if callable(original_store):
                 core.store_compiled_report = store_stub
             result = original(*args, **kwargs)
+            shadow = _capture_shadow(core, result)
             if isinstance(result, dict):
                 result["run_report_guard"] = {
                     "version": VERSION,
@@ -128,6 +200,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
                 "generated_local": _now(core),
                 "deferred_reports_count": len(deferred),
                 "lock_timeout_seconds": timeout_seconds,
+                "shadow_capture": shadow,
             }
             return result
         finally:
@@ -145,10 +218,18 @@ def apply(core: Any = None) -> Dict[str, Any]:
     except Exception:
         pass
     _APPLIED.add(id(core))
-    return {"status": "ok", "version": VERSION, "patched": ["run_cycle"]}
+    return {
+        "status": "ok",
+        "version": VERSION,
+        "patched": ["run_cycle"],
+        "existing_owner_extended": True,
+        "new_callable_owner_added": False,
+        "shadow_observer": runtime_shadow_capture.VERSION,
+    }
 
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
+    portfolio = getattr(core, "portfolio", {}) if core is not None else {}
     return {
         "status": "ok",
         "type": "run_report_guard_status",
@@ -160,6 +241,15 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "normal_test_link": "/paper/self-check",
         "recent_deferred_reports": list(_RECENT),
         "last_status": _LAST,
+        "shadow_capture": runtime_shadow_capture.status_payload(portfolio),
+        "authority": {
+            "existing_run_cycle_owner_only": True,
+            "new_callable_owner_added": False,
+            "changes_strategy": False,
+            "changes_thresholds": False,
+            "changes_risk_or_sizing": False,
+            "places_orders": False,
+        },
     }
 
 
