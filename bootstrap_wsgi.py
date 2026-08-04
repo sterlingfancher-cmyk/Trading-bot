@@ -15,10 +15,11 @@ import time
 import traceback
 from typing import Any, Callable, Iterable
 
-VERSION = "deferred-wsgi-bootstrap-2026-08-03-v1"
+VERSION = "deferred-wsgi-bootstrap-2026-08-03-v2-loader-telemetry"
 _START_MONOTONIC = time.monotonic()
 _LOCK = threading.RLock()
 _DELEGATE: Callable[..., Any] | None = None
+_LOADER_THREAD: threading.Thread | None = None
 _STATE: dict[str, Any] = {
     "status": "loading",
     "phase": "bootstrap_imported",
@@ -43,6 +44,10 @@ def _snapshot() -> dict[str, Any]:
         out = dict(_STATE)
         out["elapsed_seconds"] = round(time.monotonic() - _START_MONOTONIC, 3)
         out["delegate_ready"] = _DELEGATE is not None
+        out["loader_thread_started"] = _LOADER_THREAD is not None
+        out["loader_thread_alive"] = bool(
+            _LOADER_THREAD is not None and _LOADER_THREAD.is_alive()
+        )
         return out
 
 
@@ -86,7 +91,9 @@ def _load_application() -> None:
             status="error",
             phase="startup_failed",
             error=f"{type(exc).__name__}: {exc}",
-            traceback="".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[-6000:],
+            traceback="".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )[-6000:],
         )
 
 
@@ -127,15 +134,19 @@ class DeferredApplication:
             {
                 **state,
                 "requested_path": path,
-                "message": "The paper application is still loading. Use /bootstrap-status for progress.",
+                "message": (
+                    "The paper application is still loading. "
+                    "Use /bootstrap-status for progress."
+                ),
             },
             "503 Service Unavailable",
         )
 
 
 app = DeferredApplication()
-threading.Thread(
+_LOADER_THREAD = threading.Thread(
     target=_load_application,
     name="deferred-paper-application-loader",
     daemon=True,
-).start()
+)
+_LOADER_THREAD.start()
