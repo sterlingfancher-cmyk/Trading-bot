@@ -1,36 +1,53 @@
-name: Performance Audit Validation
+name: Repository Safety and Performance Audit Validation
 
 on:
   push:
     branches: [main]
     paths:
-      - "performance_audit_lab.py"
-      - "performance_audit_lab_v2.py"
-      - "performance_audit_v2_async_route.py"
-      - "performance_audit_v2_recovery_guard.py"
-      - "performance_audit_composition_guard.py"
-      - "paper_underdeployment_repair.py"
-      - "paper_regime_adaptive_policy.py"
-      - "gunicorn.conf.py"
+      - "*.py"
+      - "**/*.py"
+      - "VALIDATION_POLICY.md"
+      - ".github/workflows/performance-audit-validation.yml"
+  pull_request:
+    paths:
+      - "*.py"
+      - "**/*.py"
+      - "VALIDATION_POLICY.md"
       - ".github/workflows/performance-audit-validation.yml"
   workflow_dispatch:
 
 jobs:
-  syntax:
+  repository-validation:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compile performance audit and adaptive policy stack
+
+      - name: Run repository-wide validation
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          python -m py_compile \
-            performance_audit_lab.py \
-            performance_audit_lab_v2.py \
-            performance_audit_v2_async_route.py \
-            performance_audit_v2_recovery_guard.py \
-            performance_audit_composition_guard.py \
-            paper_underdeployment_repair.py \
-            paper_regime_adaptive_policy.py \
-            gunicorn.conf.py
+          if [ -n "$BASE_SHA" ]; then
+            python repository_validation.py \
+              --base "$BASE_SHA" \
+              --report repository_validation_report.json
+          else
+            python repository_validation.py \
+              --report repository_validation_report.json
+          fi
+
+      - name: Upload validation inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-validation-report
+          path: repository_validation_report.json
+          if-no-files-found: warn
+          retention-days: 14
