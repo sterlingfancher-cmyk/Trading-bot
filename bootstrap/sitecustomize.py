@@ -3,8 +3,9 @@
 Python imports ``sitecustomize`` before Gunicorn and the WSGI application. This
 shim establishes the advisory-research boundary, selects a real mounted state
 volume when one is available, defers the first automatic market cycle until
-runtime composition is complete, and loads the legacy startup helpers without
-executing their eager pre-app registration or busy retry thread.
+runtime composition is complete, installs the paper-entry epoch timestamp guard,
+and loads the legacy startup helpers without executing their eager pre-app
+registration or busy retry thread.
 
 No trading formulas, thresholds, sizing, risk limits, live authority, or ML
 authority are changed.
@@ -17,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-VERSION = "guarded-sitecustomize-bootstrap-2026-08-04-v3-state-and-runner-ordering"
+VERSION = "guarded-sitecustomize-bootstrap-2026-08-04-v4-entry-time-guard"
 _TRUE = {"1", "true", "yes", "on"}
 
 
@@ -121,9 +122,25 @@ def _isolate_heavy_research() -> bool:
     return True
 
 
+def _start_entry_time_guard() -> dict[str, Any]:
+    try:
+        import paper_underdeployment_time_guard as guard
+
+        return guard.start_guard()
+    except Exception as exc:
+        return {
+            "status": "warn",
+            "overall": "warn",
+            "version": "paper-underdeployment-time-guard-unavailable",
+            "patched": False,
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
+
+
 STATE_BOOTSTRAP = _configure_state_environment()
 AUTO_RUN_BOOTSTRAP = _defer_auto_runner()
 RESEARCH_ISOLATED = _isolate_heavy_research()
+ENTRY_TIME_GUARD = _start_entry_time_guard()
 _ROOT = Path(__file__).resolve().parents[1]
 _LEGACY_PATH = _ROOT / "sitecustomize.py"
 _LEGACY_MODULE_NAME = "_trading_bot_legacy_sitecustomize"
@@ -168,6 +185,7 @@ GUARDED_BOOTSTRAP_STATUS = {
     "research_isolated": RESEARCH_ISOLATED,
     "state_bootstrap": STATE_BOOTSTRAP,
     "auto_run_bootstrap": AUTO_RUN_BOOTSTRAP,
+    "entry_time_guard": ENTRY_TIME_GUARD,
     "legacy_loaded": True,
     "legacy_version": getattr(LEGACY_MODULE, "VERSION", None),
     "eager_registration_suppressed": True,
