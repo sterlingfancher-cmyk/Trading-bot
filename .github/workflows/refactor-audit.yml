@@ -1,4 +1,4 @@
-name: Refactor, Ownership, and Research Audit
+name: Refactor, Ownership, Configuration, and Research Audit
 
 on:
   push:
@@ -10,6 +10,7 @@ on:
       - "REFACTOR_AUDIT_POLICY.md"
       - "ARCHITECTURE_AUDIT_BASELINE.md"
       - "architecture_ownership_registry.json"
+      - "typed_configuration_contract.json"
       - ".github/workflows/refactor-audit.yml"
   pull_request:
     paths:
@@ -19,11 +20,10 @@ on:
       - "REFACTOR_AUDIT_POLICY.md"
       - "ARCHITECTURE_AUDIT_BASELINE.md"
       - "architecture_ownership_registry.json"
+      - "typed_configuration_contract.json"
       - ".github/workflows/refactor-audit.yml"
   schedule:
-    # Weekly deep architecture audit.
     - cron: "30 12 * * 0"
-    # Weekday after-close read-only Railway research snapshot.
     - cron: "15 23 * * 1-5"
   workflow_dispatch:
 
@@ -71,6 +71,17 @@ jobs:
             --json architecture_contract_report.json \
             --markdown architecture_contract_report.md
 
+      - name: Validate typed configuration parity
+        id: configuration
+        if: always()
+        run: |
+          test -f refactor_audit_report.json
+          python typed_configuration_snapshot.py \
+            --audit refactor_audit_report.json \
+            --contract typed_configuration_contract.json \
+            --json typed_configuration_report.json \
+            --markdown typed_configuration_report.md
+
       - name: Read audit summary
         id: summary
         if: always()
@@ -81,6 +92,7 @@ jobs:
 
           audit_path = Path("refactor_audit_report.json")
           contract_path = Path("architecture_contract_report.json")
+          config_path = Path("typed_configuration_report.json")
 
           if not audit_path.exists():
               print("critical=unknown")
@@ -101,9 +113,15 @@ jobs:
           else:
               contract = json.loads(contract_path.read_text())
               print(f"contract_violations={len(contract.get('violations', []))}")
+
+          if not config_path.exists():
+              print("configuration_violations=unknown")
+          else:
+              config = json.loads(config_path.read_text())
+              print(f"configuration_violations={len(config.get('violations', []))}")
           PY
 
-      - name: Upload refactor and ownership audit
+      - name: Upload refactor, ownership, and configuration audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -113,6 +131,8 @@ jobs:
             refactor_audit_report.md
             architecture_contract_report.json
             architecture_contract_report.md
+            typed_configuration_report.json
+            typed_configuration_report.md
           if-no-files-found: warn
           retention-days: 30
 
@@ -123,10 +143,12 @@ jobs:
           script: |
             const auditPassed = '${{ steps.audit.outcome }}' === 'success';
             const contractPassed = '${{ steps.contract.outcome }}' === 'success';
-            const passed = auditPassed && contractPassed;
+            const configPassed = '${{ steps.configuration.outcome }}' === 'success';
+            const passed = auditPassed && contractPassed && configPassed;
             const newCritical = '${{ steps.summary.outputs.new_critical }}';
             const newWarnings = '${{ steps.summary.outputs.new_warnings }}';
-            const violations = '${{ steps.summary.outputs.contract_violations }}';
+            const ownership = '${{ steps.summary.outputs.contract_violations }}';
+            const configuration = '${{ steps.summary.outputs.configuration_violations }}';
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -134,8 +156,8 @@ jobs:
               state: passed ? 'success' : 'failure',
               context: 'refactor-audit',
               description: passed
-                ? `No new critical debt; ${newWarnings} warnings; ownership intact`
-                : `${newCritical} new critical; ${violations} ownership violations`,
+                ? `No new critical debt; ownership and configuration intact`
+                : `${newCritical} critical; ${ownership} owner; ${configuration} config violations`,
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 
