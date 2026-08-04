@@ -6,12 +6,18 @@ on:
     paths:
       - "*.py"
       - "**/*.py"
+      - "Procfile"
+      - "railway.json"
+      - "railway.toml"
       - "VALIDATION_POLICY.md"
       - ".github/workflows/performance-audit-validation.yml"
   pull_request:
     paths:
       - "*.py"
       - "**/*.py"
+      - "Procfile"
+      - "railway.json"
+      - "railway.toml"
       - "VALIDATION_POLICY.md"
       - ".github/workflows/performance-audit-validation.yml"
   workflow_dispatch:
@@ -45,12 +51,19 @@ jobs:
               --report repository_validation_report.json
           fi
 
+      - name: Validate Railway config ownership
+        id: railway_config
+        if: always()
+        run: python railway_config_validation.py
+
       - name: Upload validation inventory
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: repository-validation-report
-          path: repository_validation_report.json
+          path: |
+            repository_validation_report.json
+            railway_config_validation_report.json
           if-no-files-found: warn
           retention-days: 14
 
@@ -59,7 +72,9 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const passed = '${{ steps.validation.outcome }}' === 'success';
+            const passed =
+              '${{ steps.validation.outcome }}' === 'success' &&
+              '${{ steps.railway_config.outcome }}' === 'success';
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -67,7 +82,7 @@ jobs:
               state: passed ? 'success' : 'failure',
               context: 'repository-validation',
               description: passed
-                ? 'Repository safety validation passed'
-                : 'Repository safety validation failed',
+                ? 'Repository safety and Railway config validation passed'
+                : 'Repository or Railway config validation failed',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
