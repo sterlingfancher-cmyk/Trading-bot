@@ -254,28 +254,33 @@ These findings require semantic review. Exact helper duplication can move into u
 
 ## Migration Sequence
 
-### Stage A — Ownership contracts
+### Stage A — Ownership contracts — Completed
 
-1. Create a machine-readable ownership registry for:
-   - scanner;
-   - decision/entry;
-   - execution;
-   - exit management;
-   - risk policy;
-   - state storage;
-   - market data;
-   - route registration.
-2. Record current owners and target canonical owner.
-3. Make new unauthorized owners fail the structural audit.
-4. Do not change runtime authority in this stage.
+Implemented:
 
-### Stage B — Typed configuration
+- `architecture_ownership_registry.json`
+- `architecture_contract_validation.py`
+- contract validation integrated into `.github/workflows/refactor-audit.yml`
 
-1. Introduce namespaced configuration models.
+Validated result:
+
+- callable targets registered: 10
+- route targets registered: 5
+- environment targets registered: 3
+- ownership violations: 0
+- legacy owner removal is allowed and recorded as progress
+- new owners on registered targets are blocked
+- new route overlaps and environment-default conflicts are blocked
+- no runtime callable, parameter, state, live, ML, or order authority changed
+
+### Stage B — Typed configuration — Next
+
+1. Introduce immutable, namespaced configuration models.
 2. Add explicit fraction-versus-percentage units.
-3. Resolve duplicate environment defaults.
+3. Resolve duplicate environment defaults first in shadow/snapshot form.
 4. Preserve current effective runtime values.
-5. Add snapshot tests proving no policy drift.
+5. Add parity tests proving no policy drift.
+6. Treat any effective-value change as trading behavior requiring backtest and forward evidence.
 
 ### Stage C — State service
 
@@ -325,4 +330,12 @@ The refactor should move toward:
 
 ## Immediate Next Implementation
 
-The next code milestone is a read-only ownership registry and contract validator. It must describe existing and target ownership without replacing current callables. After that, the first shadow decision models and comparison recorder can be introduced without order authority.
+Introduce a read-only typed configuration snapshot and parity validator for:
+
+- risk units;
+- entry-score defaults;
+- state-path resolution;
+- timing windows;
+- watchdog intervals.
+
+The typed configuration layer must not become authoritative until parity is proven. In parallel, define immutable shadow decision data models without connecting them to order placement.
