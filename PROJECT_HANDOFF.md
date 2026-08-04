@@ -1,10 +1,10 @@
-# Automated Trading Project Handoff — Canonical Status, August 3, 2026 Evening
+# Automated Trading Project Handoff — Canonical Status, August 4, 2026
 
 ## Operating Boundary
 
 - Repository: `sterlingfancher-cmyk/Trading-bot`
 - Branch: `main`
-- Railway: `https://trading-bot-clean.up.railway.app`
+- Public URL: `https://trading-bot-clean.up.railway.app`
 - Mode: paper only
 - Live broker authority: none
 - ML execution authority: advisory only
@@ -14,9 +14,11 @@
   - 2.50% hard intraday-drawdown halt
   - 3.00% absolute daily-loss ceiling
 
-## Latest User-Supplied Account Baseline
+No audit, refactor, startup, or research-isolation change in this milestone altered signal formulas, entry floors, position sizing, risk limits, existing paper positions, or order authority.
 
-Historical snapshot from `2026-08-03 12:12:53 CDT`:
+## Latest Account Evidence
+
+The latest user-supplied account snapshot remains the historical `2026-08-03 12:12:53 CDT` observation:
 
 - equity: `$10,738.02`
 - cash: `$10,240.9964`
@@ -27,174 +29,148 @@ Historical snapshot from `2026-08-03 12:12:53 CDT`:
 - scanner signals: 41
 - no halt, self-defense condition, or active recursion
 
-This is a historical baseline, not a claim about the current after-hours account state.
+The public Railway listener is currently unreachable, so no newer production account state is claimed.
 
-## Validated Trading Runtime Foundation
+## Continuous Validation Policy
 
-Previously validated:
+### Trading-behavior changes
 
-- scanner order: opening surge → breakout → market participation → core
-- exactly one bear-recovery wrapper
-- exactly one Entry Pipeline X-Ray
-- direct-core entry composition
-- recursion-safe scanner and entry path
-- neutral-only staged starter behavior
-- bounded late-neutral participation
-- one-link `/paper/self-check`
-
-No trading thresholds, sizing, exits, hard-risk limits, live authority, or ML authority were changed during the architecture work below.
-
-## Validation Policy
-
-`VALIDATION_POLICY.md` is authoritative for engineering completion.
-
-Trading-behavior changes require:
+A change that can affect signals, rankings, scores, entries, exits, sizing, exposure, capacity, or risk is incomplete until it passes:
 
 1. repository/static validation;
 2. targeted unit and invariant tests;
 3. baseline-versus-candidate backtest;
-4. walk-forward or untouched holdout;
+4. walk-forward or untouched holdout testing;
 5. transaction-cost and slippage sensitivity;
 6. regime and calendar segmentation;
 7. ablation when multiple controls change;
 8. forward shadow or bounded paper canary;
 9. post-deploy `/paper/self-check`.
 
-Documentation and genuinely read-only telemetry do not require a backtest when they cannot alter decisions.
+### Non-behavior changes
 
-## Permanent Refactor Audit
+Documentation, audit tooling, read-only telemetry, and runtime reliability changes do not require a strategy backtest when they cannot alter decisions. They still require static validation, targeted tests, startup smoke, and runtime verification where applicable.
 
-Canonical workflow:
+Source:
+
+- `VALIDATION_POLICY.md`
+- `REFACTOR_AUDIT_POLICY.md`
+
+## Permanent Per-Update Code Review
+
+Workflow:
 
 - `.github/workflows/refactor-audit.yml`
 
-### Every Python push or pull request
+Every qualifying update now runs:
 
-The workflow runs:
+- repository-wide compile and AST validation;
+- structural/mutation audit;
+- architecture ownership contract validation;
+- typed configuration parity validation;
+- immutable Stage B model tests;
+- StateStore Stage C shadow/parity tests;
+- Stage D decision-comparison tests;
+- Stage D runtime-capture tests;
+- installation of declared runtime dependencies;
+- the exact Gunicorn startup command against localhost;
+- a post-deploy read-only Railway runtime snapshot.
 
-1. full structural audit;
-2. new-critical-debt comparison against the base commit;
-3. architecture ownership-contract validation;
-4. typed configuration parity validation;
-5. immutable Stage B model tests;
-6. StateStore shadow parity validation;
-7. Stage C tests;
-8. Stage D shadow comparison tests;
-9. JSON/Markdown artifact publication;
-10. visible `refactor-audit` commit status.
+The update fails when it introduces new critical structural debt, an unauthorized owner on a registered target, a new route/environment conflict, configuration drift, StateStore parity failure, immutable-model failure, runtime-shadow failure, or startup failure.
 
-The gate blocks:
+Existing debt remains visible and is removed in controlled batches rather than hidden or mass-deleted.
 
-- new critical callable mutation debt;
-- unauthorized owners on protected targets;
-- new route overlaps;
-- new environment-default conflicts;
-- canonical configuration drift;
-- loss of current StateStore safety capabilities;
-- shadow models or comparison code gaining runtime, state, route, broker, or order authority.
+## Scheduled Audits
 
-### Weekly
+The consolidated workflow runs:
 
-A full deep architecture audit runs Sunday at `12:30 UTC` and retains reports for 30 days.
+- weekly deep architecture audit: Sunday `12:30 UTC`;
+- weekday after-close runtime/research snapshot: `23:15 UTC`;
+- post-push runtime snapshot after a deployment-settle delay.
 
-### Weekdays after close
+Artifacts retain phone-readable Markdown and machine-readable JSON for 30 days.
 
-A bounded, concurrent, read-only Railway snapshot runs at `23:15 UTC`, or manually through workflow dispatch.
+## Current Architecture Baseline
 
-It checks core web connectivity, `/paper/self-check`, paper status, V1/V2 research status, persisted V2 ablation, and regime reports. It does not start a trading cycle, launch research, mutate state, or place orders.
+Latest calibrated audit from GitHub Actions run `30877811708`, head `58da8e70559a6dd33fa596d13ecdc157c57d4287`:
 
-Runtime snapshots intentionally do not run after every commit; repeated post-commit probing could create unnecessary load during multi-commit refactors.
-
-## Latest Validated Architecture Audit
-
-Canonical document:
-
-- `ARCHITECTURE_AUDIT_BASELINE.md`
-
-Latest validated A–D foundation:
-
-- GitHub Actions run: `30876010241`
-- head commit: `de8d095c60e068988397e23dc0dad3f057e7ea36`
-- structural audit: pass
-- ownership contract: pass
-- typed configuration: pass
-- Stage B tests: pass
-- StateStore shadow parity: pass
-- Stage C tests: pass
-- Stage D shadow comparison tests: pass
-- new critical findings: 0
-- new warnings: 0
-
-Current architecture surface:
-
-- Python files: 153
-- source lines: 69,297
-- internal import edges: 173
-- import cycles: 0
-- mutation targets: 72
+- Python files: 159
+- Python source lines: 70,671
+- internal import edges: 183
+- static import cycles: 0
+- module-level calls: 2,489
+- import-time thread creations: 2
+- persistent watchdog loops: 7
+- genuinely high-frequency/busy watchdogs: 1
+- dynamic mutation targets: 72
 - overlapping mutation targets: 29
-- environment-default conflicts: 3
+- environment keys observed: 869
+- conflicting environment defaults: 3
+- parameter names observed: 523
 - parameter-owner conflicts: 10
+- route literals: 187
 - route overlaps: 5
-- critical findings: 29
-- warnings: 90
-- broad exception/pass paths: 482
+- duplicate function-body groups: 65
+- broad exception/pass handlers: 482
+- provider-like calls inside loops: 1
+- critical legacy findings: 29
+- warning findings: 90
+- new critical findings in that update: 0
+- new warnings in that update: 0
 
-Highest ownership debt:
+The baseline is recorded in `ARCHITECTURE_AUDIT_BASELINE.md`.
 
-- `scan_signals`: 14 legacy owners
-- `try_entries_and_rotations`: 13 legacy owners
-- `save_state`: 16 legacy owners
-- `entry_quality_check`: 10 legacy owners
-- `enter_position`: 9 legacy owners
-
-## Stage A — Ownership Contracts — Complete
+## Stage A — Architecture Ownership Contract — Complete
 
 Sources:
 
 - `architecture_ownership_registry.json`
 - `architecture_contract_validation.py`
 
+Registered high-risk targets include:
+
+- scanner ownership;
+- entry/rotation ownership;
+- state persistence;
+- entry-quality evaluation;
+- paper execution;
+- exit management;
+- market-data access;
+- cycle orchestration;
+- route overlaps;
+- known environment conflicts.
+
 Validated:
 
-- protected callable targets: 10
-- protected route targets: 5
-- protected environment targets: 3
+- registered callable targets: 10
+- registered route conflicts: 5
+- registered environment conflicts: 3
 - ownership violations: 0
-- removal of legacy owners is allowed and recorded as progress
-- undeclared new owners are blocked
+- legacy-owner removal allowed and recorded as progress
+- new registered owners blocked
+- new route overlaps and environment-default conflicts blocked
 
-Future owner names are descriptive only and have no runtime authority.
+## Stage B — Typed Configuration and Immutable Models — Complete as Shadow Foundation
 
-## Stage B — Typed Configuration and Shadow Models — Complete
-
-Canonical sources:
+Sources:
 
 - `typed_configuration_contract.json`
 - `typed_configuration_snapshot.py`
+- `typed_configuration_models.py`
 - `shadow_decision_models.py`
 - `test_architecture_stage_b.py`
 
 Validated:
 
-- typed configuration status: pass
-- violations: 0
-- known conflicts/ambiguities preserved: 5
-- canonical defaults present
-- immutable signal, market, risk, position, policy, candidate, and cycle models pass tests
-- shadow authority only
-- no runtime imports or order methods
+- canonical risk defaults frozen without changing effective values;
+- explicit units documented for fractions, percentage points, scores, paths, minutes, and seconds;
+- known conflicts preserved for controlled migration;
+- immutable market, risk, position, signal, policy, candidate, and cycle models tested;
+- runtime authority unchanged.
 
-Known preserved conflicts include:
+The typed configuration layer is not yet authoritative.
 
-- neutral entry-score fallback: `0.0140` versus advisory `0.033`
-- `STATE_FILE` diagnostic fallbacks
-- EOD timing dynamic ownership
-- drawdown fraction versus percentage-point naming
-
-A duplicate typed-configuration implementation was removed before promotion, preserving one canonical validation path.
-
-## Stage C — StateStore Shadow Parity — Foundation Complete
+## Stage C — StateStore Shadow/Parity — Complete as Shadow Foundation
 
 Sources:
 
@@ -202,123 +178,223 @@ Sources:
 - `state_store_shadow.py`
 - `test_state_store_stage_c.py`
 
-Validated current capabilities:
+Validated:
 
-- atomic replace
-- file and directory fsync
-- thread locking
-- file locking when supported
-- shared read and exclusive write paths
-- retrying reads
-- latest, largest, and prewrite backups
-- backup fallback reads
-- non-overlapping cycle guard
-- canonical `STATE_FILE=state.json`
+- state-path precedence;
+- existing environment/default conventions;
+- required lock, retry, atomic-write, backup, and provenance capabilities;
+- no state-file read or write by the shadow validator;
+- no replacement of `save_state`;
+- no runtime authority change.
 
-StateStore shadow result:
+The future `StateStore` interface is not yet authoritative.
 
-- status: pass
-- missing symbols: 0
-- missing calls: 0
-- default drift: 0
-- capability drift: 0
-- typed configuration drift: 0
-- observed `save_state` owners: 16
+## Stage D — Shadow Decision Comparison and Runtime Capture — Foundation Complete
 
-This is not a state-authority migration. The shadow validator does not read/write the production state file, replace `save_state`, or change state paths.
-
-## Stage D — Shadow Decision Comparison — Foundation Complete
-
-Sources:
+Sources include:
 
 - `shadow_decision_comparison_contract.json`
 - `shadow_decision_comparison.py`
-- `test_shadow_decision_stage_d.py`
+- `runtime_shadow_capture_contract.json`
+- `runtime_shadow_capture.py`
+- Stage D comparison and runtime-capture tests
 
-Capabilities:
+Runtime adapter version:
 
-- compares current and candidate decisions from the same immutable cycle input
-- requires matching cycle IDs
-- requires identical input fingerprints
-- compares candidates by symbol and side
-- records candidate presence, allowance, selection, terminal reason, final score, and size-multiplier divergence
-- returns immutable `comparison_only` results
-- rejects mismatched input snapshots
+- `runtime-shadow-capture-2026-08-03-v1-parity-baseline`
+- mode `capture_parity_baseline`
 
-Safety boundary:
+The adapter:
 
-- not connected to the production decision path
-- no callable replacement
-- no route registration
-- no state reads or writes
-- no broker or order methods
-- no strategy, threshold, sizing, or risk changes
-- automatic promotion remains false
-- minimum forward evidence remains 30 candidates and 20 one-day outcomes
+- receives already-computed cycle inputs and outputs;
+- creates immutable snapshots;
+- records current-versus-shadow parity evidence;
+- imports no trading runtime;
+- calls no providers;
+- replaces no callable;
+- writes no files or paper state;
+- places no orders.
 
-## Heavy Research Isolation
+The next evidence target remains at least 30 forward candidates and 20 one-day outcomes before any candidate policy can be promoted.
 
-The single Gunicorn web worker previously contained paths capable of automatically starting or resuming multi-year V1/V2 research jobs. That could starve web/status requests.
+## Startup and Research Isolation
 
-Current web-worker boundary:
+### Heavy research isolation
 
-- V1 automatic historical backtest disabled
-- V2 automatic historical backtest disabled
-- V2 heavy research disabled in the web worker by default
-- stale Railway environment values cannot silently re-enable it
-- async/recovery historical research workers are not imported into the web worker
-- forward-shadow and read-only status capability remain
-- manual/dedicated research must be separated from production execution
+Historical V1/V2 research is disabled inside the single production web worker unless explicitly opted in with:
 
-Key isolation commit:
+`WEB_WORKER_ALLOW_HEAVY_RESEARCH=true`
 
-- `0866ff5a0a94f37a14d629a7a8e9a95f4507bc4c`
+Forward-shadow capture and read-only status are preserved. Heavy historical research should eventually run in a separate worker/service.
 
-This changes research process placement only; it does not change trading behavior.
+### Guarded Python startup
 
-## Runtime Connectivity Boundary
+Sources:
 
-Railway deployment statuses for the Stage D gate are successful. A completed scheduled or manually dispatched runtime snapshot is still required before claiming current endpoint responsiveness. Do not infer a runtime failure from a skipped post-commit snapshot; snapshots are intentionally schedule/manual only.
+- `bootstrap/sitecustomize.py`
+- `gunicorn.conf.py`
+- `runtime_worker_registration.py`
+- `bootstrap_wsgi.py`
+- `Procfile`
+
+Changes:
+
+- research isolation is applied before application imports;
+- the legacy eager pre-app `_register_all()` call is suppressed;
+- the legacy 0.1-second, 1,800-iteration startup watchdog is suppressed;
+- Flask constructor registration remains available;
+- runtime registration has one explicit idempotent owner;
+- a deferred WSGI dispatcher exposes `/bootstrap-status` while the legacy app loads;
+- all normal routes delegate to the unchanged Flask app after registration.
+
+### Exact startup smoke — Pass
+
+GitHub Actions run `30877811708` used the declared runtime dependencies and exact production command.
+
+Result:
+
+- Gunicorn bound successfully;
+- `/bootstrap-status` responded;
+- deferred loader reached `ready`;
+- `delegate_ready: true`;
+- runtime registration `overall: pass`;
+- research isolation active;
+- full root route responded;
+- startup reached ready in approximately 14 seconds in the latest smoke artifact.
+
+This proves the repository start command and application code are functional in a clean Linux environment.
+
+## Railway Config as Code
+
+Source:
+
+- `railway.json`
+- commit `b81a7dfe60b0069446b54e48524441f4708b1659`
+
+Pinned start command:
+
+`DEFERRED_WSGI_BOOTSTRAP=true PYTHONPATH=bootstrap:. gunicorn bootstrap_wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 180`
+
+Pinned health check:
+
+- path: `/bootstrap-status`
+- timeout: 120 seconds
+- restart policy: on failure, maximum five retries
+
+Both connected Railway deployment status contexts report success on current commits.
+
+## Unresolved Railway Public Listener Boundary
+
+Despite successful repository validation, exact-command startup smoke, and successful Railway deployment statuses, the public URL remains unreachable.
+
+Latest bootstrap-aware post-deploy snapshot from run `30877811708` tested eight endpoints:
+
+- `/bootstrap-status`
+- `/`
+- `/paper/status`
+- `/paper/self-check`
+- `/paper/performance-audit-status`
+- `/paper/performance-audit-v2-status`
+- `/paper/performance-ablation-v2`
+- `/paper/performance-regime-report-v2`
+
+Result:
+
+- reachable endpoints: 0 of 8
+- every request timed out
+- listener reachable: false
+- no bootstrap phase or application traceback was obtainable because the public listener itself did not answer
+
+Conclusion:
+
+The remaining failure is outside the tested repository startup path. The most likely boundaries are:
+
+1. the public domain is attached to a different/stale Railway service;
+2. the service has an explicit root directory or config-file path that prevents `/railway.json` from applying;
+3. the service is using a dashboard start-command override or another deployment source;
+4. the public domain belongs to one of the two connected Railway projects while validation is being observed on the other.
+
+Do not make another trading, threshold, sizing, risk, wrapper, or startup-code change until the Railway service/domain configuration is verified.
+
+## Required Manual Railway Verification
+
+On the Railway service that owns `trading-bot-clean.up.railway.app`, verify:
+
+1. **Networking**
+   - the domain is attached to the currently deployed service;
+   - it is not attached to an older duplicate project/service.
+
+2. **Deploy / Config as Code**
+   - repository root is `/`;
+   - config file path is blank/default or explicitly `/railway.json`;
+   - the effective start command matches the pinned deferred command above.
+
+3. **Latest deployment**
+   - deployed commit is current `main`;
+   - deployment logs show Gunicorn binding to `0.0.0.0:$PORT`;
+   - `/bootstrap-status` health check is recognized.
+
+4. **Duplicate Railway projects**
+   - identify which of these connected deployment contexts owns the public domain:
+     - `splendid-creativity - web`
+     - `dazzling-dedication - Trading-bot`
+   - detach or archive the stale duplicate only after the domain owner is confirmed.
+
+After that verification, rerun:
+
+`https://trading-bot-clean.up.railway.app/bootstrap-status`
+
+Then:
+
+`https://trading-bot-clean.up.railway.app/paper/self-check`
 
 ## Current Freeze
 
-Until runtime shadow capture is validated:
+Until the public Railway listener is restored:
 
-- do not add entry wrappers, watchdogs, starter valves, or threshold exceptions;
-- do not widen hard-risk limits;
-- do not force additional positions;
-- do not use raw Kelly sizing;
-- do not promote research parameters automatically;
-- do not remove current state or callable owners in bulk;
-- do not connect the comparison engine to order placement;
-- allow urgent operational repairs and controlled refactor stages only.
+- no new wrappers;
+- no new watchdogs;
+- no score, sizing, exposure, or risk changes;
+- no forced positions;
+- no automatic V2 policy promotion;
+- no live or ML authority change;
+- no removal of legacy owners without parity evidence.
 
-## Next Engineering Milestone — Runtime Shadow Capture Adapter
+## Next Engineering Sequence After Railway Recovery
 
-Build a telemetry-only adapter without adding another public wrapper:
+1. Validate `/bootstrap-status` and `/paper/self-check` on the public service.
+2. Confirm Stage D runtime-shadow telemetry appears in the one-link self-check.
+3. Begin collecting forward candidate/outcome evidence.
+4. Introduce the first authoritative typed configuration adapter only after parity snapshots show no behavior drift.
+5. Migrate scanner ownership from 14 owners toward one explicit `SignalEngine` in small shadow-tested batches.
+6. Migrate entry ownership from 13 owners toward one explicit `DecisionEngine` in small shadow-tested batches.
+7. Migrate state persistence toward one `StateStore` only after state parity tests pass on production snapshots.
+8. Remove route overlaps, duplicate parameter ownership, and unnecessary watchdogs incrementally.
 
-1. identify an existing canonical cycle boundary that already owns candidates, market, risk, positions, and final decisions;
-2. add an explicit observer call at that boundary rather than replacing `scan_signals` or `try_entries_and_rotations`;
-3. construct one immutable cycle snapshot;
-4. translate the existing decision into `CycleDecision`;
-5. run a read-only evaluator against the same snapshot;
-6. call `compare_cycles` and retain bounded telemetry;
-7. expose read-only status only through an existing diagnostics registry or a uniquely owned route;
-8. prove the existing trading output is unchanged;
-9. require targeted mocks, startup smoke testing, one successful paper cycle, and `/paper/self-check`;
-10. collect at least 30 forward candidates and 20 one-day outcomes before any authority migration.
+## Current Definition of Done
 
-The adapter must not create a new watchdog, callable owner, route overlap, state owner, or order path.
+Completed:
 
-## Recent Milestone Commits
+- continuous per-update structural review;
+- weekly architecture audit;
+- weekday/post-push runtime snapshot;
+- repository-wide compile and safety gate;
+- ownership contract;
+- typed configuration parity foundation;
+- immutable Stage B models;
+- StateStore Stage C shadow foundation;
+- Stage D decision comparison and runtime capture foundation;
+- exact Gunicorn startup smoke gate;
+- guarded startup and deferred WSGI dispatcher;
+- Railway config-as-code start command and health check;
+- all source, ownership, parity, shadow, and local startup gates passing.
 
-- `6e8a29ae7186538cbe9f243a839b1fd7c1811b97` — ownership stage recorded
-- `43ac279b3afb72fc41ab1463898bdedf34d79084` — typed configuration parity enforced
-- `4dc2194270ee2816a4eb2332fb3dafd68c136e9e` — immutable shadow decision models
-- `b274a5a0e637179d7aa20d384368d9d4f0e59e49` — canonical Stage B tests enforced
-- `0866ff5a0a94f37a14d629a7a8e9a95f4507bc4c` — heavy research isolated
-- `499c284134eb2c0b3326d08a78346b2b2966c45c` — StateStore shadow validator
-- `eaf02e521b78bf9204426bb8f74331d9f353e9c8` — Stage C gate enforced
-- `a1bf4711a25158665fb1a62e0e238316b23c7f11` — pure decision comparison engine
-- `de8d095c60e068988397e23dc0dad3f057e7ea36` — Stage D tests enforced
-- `2903c735f0f90f8a4bb69b05b80efd8fc8ec8cb3` — A–D architecture baseline updated
+Pending external action:
+
+- verify Railway service/domain/config ownership and restore the public listener.
+
+Pending after Railway recovery:
+
+- production self-check validation;
+- forward-shadow evidence collection;
+- staged authoritative migration and legacy-owner reduction.
