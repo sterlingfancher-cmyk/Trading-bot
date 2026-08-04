@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Any, Dict
 
-VERSION = "paper-underdeployment-time-guard-2026-08-04-v1-epoch-aware"
+VERSION = "paper-underdeployment-time-guard-2026-08-04-v2-import-complete"
 _LOCK = threading.RLock()
 _PATCHED = False
 _STARTED = False
@@ -62,7 +62,7 @@ def parse_time(value: Any) -> dt.datetime | None:
     normalized = text.replace("T", " ")
     if normalized.endswith("Z"):
         normalized = normalized[:-1] + "+00:00"
-    # Existing local telemetry commonly includes a Central abbreviation.  Keep
+    # Existing local telemetry commonly includes a Central abbreviation. Keep
     # those values naive so the caller can attach the runtime's local timezone.
     normalized = normalized.split(" CDT")[0].split(" CST")[0]
     for candidate in (normalized, normalized[:19]):
@@ -87,7 +87,21 @@ def apply() -> Dict[str, Any]:
             }
             return dict(_STATUS)
 
+        # Python places a module in sys.modules before executing its body. Wait
+        # until the target module has defined its parser and final install hook;
+        # otherwise its later function definition would overwrite this patch.
         current = getattr(module, "_parse_time", None)
+        import_complete = callable(current) and callable(getattr(module, "install", None))
+        if not import_complete:
+            _STATUS = {
+                "version": VERSION,
+                "status": "pending",
+                "patched": False,
+                "reason": "target_module_import_incomplete",
+                "target": "paper_underdeployment_repair._parse_time",
+            }
+            return dict(_STATUS)
+
         if getattr(current, "_paper_underdeployment_time_guard_version", None) != VERSION:
             parse_time._paper_underdeployment_time_guard_version = VERSION  # type: ignore[attr-defined]
             parse_time._paper_underdeployment_time_guard_original = current  # type: ignore[attr-defined]
@@ -99,6 +113,7 @@ def apply() -> Dict[str, Any]:
             "overall": "pass",
             "patched": True,
             "target": "paper_underdeployment_repair._parse_time",
+            "target_import_complete": True,
             "unix_epochs_are_utc_aware": True,
             "spacing_threshold_changed": False,
             "risk_or_sizing_changed": False,
@@ -125,7 +140,7 @@ def status_payload() -> Dict[str, Any]:
 
 
 def start_guard(timeout_seconds: float = 180.0) -> Dict[str, Any]:
-    """Patch immediately or wait briefly for the target module to be imported."""
+    """Patch immediately or wait briefly for the target module import to finish."""
     global _STARTED
     first = apply()
     if first.get("patched"):
@@ -142,7 +157,7 @@ def start_guard(timeout_seconds: float = 180.0) -> Dict[str, Any]:
                 return
             time.sleep(0.05)
         with _LOCK:
-            _STATUS.update({"status": "warn", "reason": "target_module_not_loaded_before_timeout"})
+            _STATUS.update({"status": "warn", "reason": "target_module_not_ready_before_timeout"})
 
     threading.Thread(
         target=worker,
