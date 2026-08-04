@@ -1,12 +1,12 @@
 """Guarded Python startup loader for the Railway web process.
 
 Python imports ``sitecustomize`` before Gunicorn and the WSGI application. This
-shim establishes the advisory-research boundary and loads the legacy startup
-helpers without executing their eager pre-app registration or 0.1-second retry
-thread. The legacy Flask constructor hook remains intact, so registration occurs
-once when the application is created.
+shim establishes the advisory-research boundary, selects a real mounted state
+volume when one is available, defers the first automatic market cycle until
+runtime composition is complete, and loads the legacy startup helpers without
+executing their eager pre-app registration or busy retry thread.
 
-No trading logic, thresholds, risk, sizing, state, orders, live authority, or ML
+No trading formulas, thresholds, sizing, risk limits, live authority, or ML
 authority are changed.
 """
 from __future__ import annotations
@@ -17,16 +17,102 @@ import sys
 from pathlib import Path
 from typing import Any
 
-VERSION = "guarded-sitecustomize-bootstrap-2026-08-03-v2-deferred-registration"
+VERSION = "guarded-sitecustomize-bootstrap-2026-08-04-v3-state-and-runner-ordering"
+_TRUE = {"1", "true", "yes", "on"}
+
+
+def _mount_points() -> list[Path]:
+    points: list[Path] = []
+    try:
+        for line in Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines():
+            fields = line.split()
+            if len(fields) < 6:
+                continue
+            value = fields[4].replace("\\040", " ")
+            point = Path(value)
+            if point not in points:
+                points.append(point)
+    except Exception:
+        pass
+    return points
+
+
+def _writable_distinct_mount(path: Path) -> bool:
+    try:
+        path = path.resolve()
+        if not path.is_dir() or not os.access(path, os.W_OK):
+            return False
+        if path != Path("/") and path in _mount_points():
+            return True
+        return path.stat().st_dev != Path("/").stat().st_dev
+    except Exception:
+        return False
+
+
+def _state_mount_candidate() -> Path | None:
+    for name in ("STATE_DIR", "PERSISTENT_STATE_DIR", "RAILWAY_VOLUME_MOUNT_PATH"):
+        value = os.environ.get(name)
+        if value:
+            path = Path(value).expanduser()
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            return path.resolve()
+
+    preferred: list[Path] = []
+    others: list[Path] = []
+    excluded_prefixes = ("/proc", "/sys", "/dev", "/run", "/etc", "/tmp")
+    for point in _mount_points():
+        text = str(point)
+        if point == Path("/") or text.startswith(excluded_prefixes):
+            continue
+        if not _writable_distinct_mount(point):
+            continue
+        lowered = text.lower()
+        if any(token in lowered for token in ("data", "state", "storage", "volume")):
+            preferred.append(point)
+        else:
+            others.append(point)
+    candidates = preferred + others
+    return candidates[0].resolve() if candidates else None
+
+
+def _configure_state_environment() -> dict[str, Any]:
+    candidate = _state_mount_candidate()
+    if candidate is None:
+        os.environ.setdefault("STATE_PERSISTENCE_CONTRACT", "volume_required")
+        return {
+            "configured": False,
+            "state_dir": None,
+            "reason": "no_distinct_writable_mount_detected",
+        }
+    os.environ["STATE_DIR"] = str(candidate)
+    os.environ.setdefault("STATE_FILENAME", "state.json")
+    os.environ["STATE_PERSISTENCE_CONTRACT"] = "mounted_volume_detected"
+    return {
+        "configured": True,
+        "state_dir": str(candidate),
+        "reason": "explicit_or_detected_distinct_mount",
+    }
+
+
+def _defer_auto_runner() -> dict[str, Any]:
+    enabled = os.environ.get("DEFER_AUTO_RUN_UNTIL_RUNTIME_REGISTRATION", "true").lower() in _TRUE
+    requested = os.environ.get("AUTO_RUN_ENABLED", "true")
+    if enabled:
+        os.environ["AUTO_RUN_REQUESTED"] = requested
+        os.environ["AUTO_RUN_ENABLED"] = "false"
+        os.environ["AUTO_RUN_DEFERRED_BOOTSTRAP"] = "true"
+    return {
+        "enabled": enabled,
+        "requested": requested,
+        "app_import_value": os.environ.get("AUTO_RUN_ENABLED"),
+    }
 
 
 def _isolate_heavy_research() -> bool:
-    allow = os.environ.get("WEB_WORKER_ALLOW_HEAVY_RESEARCH", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    allow = os.environ.get("WEB_WORKER_ALLOW_HEAVY_RESEARCH", "false").lower() in _TRUE
     if allow:
         return False
     os.environ["PERFORMANCE_AUDIT_AUTO_BACKTEST_ENABLED"] = "false"
@@ -35,6 +121,8 @@ def _isolate_heavy_research() -> bool:
     return True
 
 
+STATE_BOOTSTRAP = _configure_state_environment()
+AUTO_RUN_BOOTSTRAP = _defer_auto_runner()
 RESEARCH_ISOLATED = _isolate_heavy_research()
 _ROOT = Path(__file__).resolve().parents[1]
 _LEGACY_PATH = _ROOT / "sitecustomize.py"
@@ -78,6 +166,8 @@ for _name, _value in vars(LEGACY_MODULE).items():
 GUARDED_BOOTSTRAP_STATUS = {
     "version": VERSION,
     "research_isolated": RESEARCH_ISOLATED,
+    "state_bootstrap": STATE_BOOTSTRAP,
+    "auto_run_bootstrap": AUTO_RUN_BOOTSTRAP,
     "legacy_loaded": True,
     "legacy_version": getattr(LEGACY_MODULE, "VERSION", None),
     "eager_registration_suppressed": True,
