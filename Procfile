@@ -1,1 +1,1 @@
-web: PYTHONPATH=. gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 180
+web: PYTHONPATH=bootstrap:. gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 180
