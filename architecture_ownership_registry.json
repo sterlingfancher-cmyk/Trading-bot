@@ -1,0 +1,190 @@
+{
+  "version": "architecture-ownership-registry-2026-08-03-v1",
+  "policy": {
+    "allow_removal_of_legacy_owners": true,
+    "allow_new_owners": false,
+    "runtime_authority_change": false,
+    "target_modules_are_future_interfaces": true
+  },
+  "callable_targets": {
+    "scan_signals": {
+      "target_owner": "trading.signals.SignalEngine",
+      "allowed_current_owners": [
+        "breakout_participation_layer.py",
+        "breakout_scanner_ownership_guard.py",
+        "dynamic_universe_builder.py",
+        "fvg_runtime.py",
+        "loss_streak_defensive_governor.py",
+        "market_participation_accelerator.py",
+        "multi_timeframe_swing.py",
+        "opening_surge_participation.py",
+        "pattern_recognition_layer.py",
+        "relative_strength_leader_exception.py",
+        "scanner_runtime_contract.py",
+        "scanner_stack_emergency_reset.py",
+        "scanner_v2_candidate_lifecycle_trace.py",
+        "shared_cycle_identity.py"
+      ]
+    },
+    "try_entries_and_rotations": {
+      "target_owner": "trading.decision.DecisionEngine",
+      "allowed_current_owners": [
+        "bear_recovery_stack_contract.py",
+        "bear_soft_pause_short_recovery.py",
+        "core_entry_pipeline.py",
+        "entry_pipeline_composition_guard.py",
+        "entry_pipeline_xray.py",
+        "entry_pipeline_xray_bear_ownership_guard.py",
+        "paper_exposure_rotation.py",
+        "performance_risk_activation_guard.py",
+        "performance_risk_calibration.py",
+        "post_harvest_entry_fallback.py",
+        "post_harvest_redeployment_controller.py",
+        "profit_maturity_rotation_layer.py",
+        "theme_starter_exception.py"
+      ]
+    },
+    "save_state": {
+      "target_owner": "trading.state.StateStore",
+      "allowed_current_owners": [
+        "adaptive_ml_research.py",
+        "adaptive_portfolio_intelligence.py",
+        "intratrade_path_capture.py",
+        "mae_mfe_integration.py",
+        "ml_feature_journal_quality.py",
+        "ml_phase25_readiness.py",
+        "ml_phase2_shadow.py",
+        "ml_vs_rules_shadow_log.py",
+        "state_io_hardening.py",
+        "state_size_watchdog.py",
+        "state_snapshot_archive.py",
+        "strategy_label_propagation.py",
+        "strategy_promotion_readiness.py",
+        "strategy_scorecard.py",
+        "trade_journal.py",
+        "trade_quality_telemetry.py"
+      ]
+    },
+    "entry_quality_check": {
+      "target_owner": "trading.decision.EntryQualityPolicy",
+      "allowed_current_owners": [
+        "benchmark_participation.py",
+        "fvg_runtime.py",
+        "loss_streak_defensive_governor.py",
+        "market_extension_guard.py",
+        "multi_timeframe_swing.py",
+        "pattern_recognition_layer.py",
+        "regime_flip_entry_guard.py",
+        "relative_strength_leader_exception.py",
+        "risk_reward_structure.py",
+        "theme_starter_exception.py"
+      ]
+    },
+    "enter_position": {
+      "target_owner": "trading.execution.PaperExecutionService",
+      "allowed_current_owners": [
+        "fundamental_valuation_risk_layer.py",
+        "loss_streak_defensive_governor.py",
+        "multi_timeframe_swing.py",
+        "paper_controlled_expansion.py",
+        "paper_participation_allocator.py",
+        "pattern_recognition_layer.py",
+        "regime_flip_entry_guard.py",
+        "risk_reward_structure.py",
+        "theme_starter_exception.py"
+      ]
+    },
+    "manage_exits": {
+      "target_owner": "trading.execution.ExitManager",
+      "allowed_current_owners": [
+        "regime_flip_entry_guard.py",
+        "relative_strength_leader_exception.py",
+        "risk_reward_structure.py"
+      ]
+    },
+    "download_prices": {
+      "target_owner": "trading.market_data.MarketDataAdapter",
+      "allowed_current_owners": [
+        "market_data_resilience.py",
+        "regime_integrity_underdeployment.py",
+        "runner_safety.py"
+      ]
+    },
+    "run_cycle": {
+      "target_owner": "trading.runtime.CycleOrchestrator",
+      "allowed_current_owners": [
+        "benchmark_participation.py",
+        "run_report_guard.py",
+        "state_io_hardening.py"
+      ]
+    },
+    "rotation_allowed": {
+      "target_owner": "trading.decision.RotationPolicy",
+      "allowed_current_owners": [
+        "multi_timeframe_swing.py",
+        "paper_exposure_rotation.py",
+        "profit_maturity_rotation_layer.py"
+      ]
+    },
+    "market_status": {
+      "target_owner": "trading.market.MarketRegimeService",
+      "allowed_current_owners": [
+        "market_extension_guard.py",
+        "regime_integrity_cache_guard.py",
+        "regime_integrity_underdeployment.py"
+      ]
+    }
+  },
+  "route_targets": {
+    "/paper/follow-through-review": {
+      "target_owner": "risk_routes.py",
+      "allowed_current_owners": ["risk_bootstrap.py", "risk_improvements.py"]
+    },
+    "/paper/live-volatility-status": {
+      "target_owner": "risk_routes.py",
+      "allowed_current_owners": ["live_volatility.py", "risk_bootstrap.py"]
+    },
+    "/paper/next-session-risk-plan": {
+      "target_owner": "risk_routes.py",
+      "allowed_current_owners": ["risk_bootstrap.py", "risk_improvements.py"]
+    },
+    "/paper/risk-improvement-status": {
+      "target_owner": "risk_routes.py",
+      "allowed_current_owners": ["risk_bootstrap.py", "risk_improvements.py"]
+    },
+    "/paper/volatility-stop-plan": {
+      "target_owner": "risk_routes.py",
+      "allowed_current_owners": ["risk_bootstrap.py", "risk_improvements.py"]
+    }
+  },
+  "environment_targets": {
+    "EOD_ALLOCATION_WINDOW_MINUTES": {
+      "target_owner": "trading.config.TimingConfig",
+      "allowed_current_owners": ["classic_signal_mode.py", "eod_hybrid.py", "intraday_timing.py"]
+    },
+    "MIN_ENTRY_SCORE_NEUTRAL": {
+      "target_owner": "trading.config.EntryScoreConfig",
+      "allowed_current_owners": ["app.py", "news_sentiment_engine.py"]
+    },
+    "STATE_FILE": {
+      "target_owner": "trading.state.StateStoreConfig",
+      "allowed_current_owners": [
+        "app.py",
+        "benchmark_participation.py",
+        "eod_hybrid.py",
+        "live_volatility.py",
+        "ml_phase2_shadow.py",
+        "risk_bootstrap.py",
+        "risk_improvements.py",
+        "runtime_controls_repair.py",
+        "self_check.py",
+        "state_guard.py",
+        "state_io_hardening.py",
+        "state_journal_guard.py",
+        "state_provenance_monitor.py",
+        "state_size_watchdog.py",
+        "trade_journal.py"
+      ]
+    }
+  }
+}
