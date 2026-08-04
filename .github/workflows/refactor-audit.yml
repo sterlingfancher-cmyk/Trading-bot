@@ -40,11 +40,11 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ "${{ github.event_name }}" = "schedule" ] || [ -z "$BASE_SHA" ]; then
-            python refactor_audit.py \
+            python refactor_audit_cli.py \
               --json refactor_audit_report.json \
               --markdown refactor_audit_report.md
           else
-            python refactor_audit.py \
+            python refactor_audit_cli.py \
               --base "$BASE_SHA" \
               --json refactor_audit_report.json \
               --markdown refactor_audit_report.md \
