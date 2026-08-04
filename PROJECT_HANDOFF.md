@@ -206,6 +206,7 @@ Workflow:
 
 - `.github/workflows/performance-audit-validation.yml`
 - repository-wide workflow commit `753db51a157a76eb5c0b527d7fecce03fb8b4599`
+- commit-status publishing commit `b261f2771c68eed46d24f52db35df84972976504`
 
 The gate runs under Python 3.11 and:
 
@@ -224,7 +225,23 @@ The gate runs under Python 3.11 and:
 
 Railway successfully deployed the validation commits. The files are non-runtime and do not alter trading behavior.
 
-The GitHub Actions artifact/result still needs direct review before the repository-wide gate is treated as fully validated.
+First repository-wide validation:
+
+- commit: `b261f2771c68eed46d24f52db35df84972976504`
+- GitHub Actions run: `30872643574`
+- result: pass
+- tracked Python files: 142
+- parsed Python files: 142
+- compile errors: 0
+- static contract errors: 0
+- module-level calls inventoried: 2,432
+- modules containing module-level calls: 137
+- dynamic mutations inventoried: 162
+- modules containing dynamic mutations: 55
+- change classification for that run: documentation/CI only
+- required gates: syntax/schema validation; no backtest required
+
+The large import-time and dynamic-mutation counts provide objective evidence for the planned architecture audit and refactor. They do not prove that every mutation is wrong; they identify the surface that must be classified and consolidated.
 
 ## Required Validation Going Forward
 
@@ -295,7 +312,6 @@ Completed:
 
 Pending:
 
-- direct review of the GitHub Actions validation artifact;
 - direct review of the latest V2 research report;
 - architecture and constraint inventory;
 - shadow forward-testing path;
