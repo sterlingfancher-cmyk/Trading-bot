@@ -15,19 +15,22 @@ import time
 import traceback
 from typing import Any, Callable, Iterable
 
-VERSION = "deferred-wsgi-bootstrap-2026-08-03-v2-loader-telemetry"
+VERSION = "deferred-wsgi-bootstrap-2026-08-03-v3-env-parity"
 _START_MONOTONIC = time.monotonic()
 _LOCK = threading.RLock()
 _DELEGATE: Callable[..., Any] | None = None
 _LOADER_THREAD: threading.Thread | None = None
+_V2_ENABLED_VALUE = (
+    os.environ["PERFORMANCE_AUDIT_V2_ENABLED"]
+    if "PERFORMANCE_AUDIT_V2_ENABLED" in os.environ
+    else "false"
+)
 _STATE: dict[str, Any] = {
     "status": "loading",
     "phase": "bootstrap_imported",
     "version": VERSION,
     "started_local": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    "research_isolated": os.environ.get(
-        "PERFORMANCE_AUDIT_V2_ENABLED", "false"
-    ).lower()
+    "research_isolated": _V2_ENABLED_VALUE.lower()
     in {"0", "false", "no", "off"},
 }
 
