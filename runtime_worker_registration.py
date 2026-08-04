@@ -8,29 +8,97 @@ placement, live authority, or ML authority.
 from __future__ import annotations
 
 import datetime as dt
+import os
 import threading
 from typing import Any, Dict
 
 import runtime_diagnostics as diagnostics
 
-VERSION = "runtime-worker-registration-2026-08-04-v4-final-cycle-observer"
+VERSION = "runtime-worker-registration-2026-08-04-v5-state-provider-cycle-ordering"
 _LOCK = threading.RLock()
 _REGISTERED_CORE_IDS: set[int] = set()
+_KICKOFF_STARTED: set[int] = set()
 _LAST: Dict[str, Any] = {}
+_TRUE = {"1", "true", "yes", "on"}
 
 
 def _now() -> str:
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _restore_deferred_auto_configuration(core: Any) -> Dict[str, Any]:
+    deferred = os.environ.get("AUTO_RUN_DEFERRED_BOOTSTRAP", "false").lower() in _TRUE
+    requested_text = os.environ.get("AUTO_RUN_REQUESTED", os.environ.get("AUTO_RUN_ENABLED", "true"))
+    requested = requested_text.lower() not in {"0", "false", "no", "off"}
+    if deferred:
+        try:
+            core.AUTO_RUN_ENABLED = requested
+        except Exception:
+            pass
+        portfolio = getattr(core, "portfolio", {})
+        if isinstance(portfolio, dict):
+            auto = portfolio.setdefault("auto_runner", {})
+            if isinstance(auto, dict):
+                auto["enabled"] = requested
+                auto["deferred_bootstrap"] = True
+                auto["deferred_bootstrap_restored_local"] = _now()
+        os.environ["AUTO_RUN_ENABLED"] = "true" if requested else "false"
+    return {
+        "deferred": deferred,
+        "requested_enabled": requested,
+        "restored": deferred,
+    }
+
+
+def _start_immediate_kickoff(core: Any, enabled: bool) -> Dict[str, Any]:
+    if not enabled:
+        return {"started": False, "reason": "auto_runner_disabled"}
+    if id(core) in _KICKOFF_STARTED:
+        return {"started": False, "reason": "already_started"}
+    run_cycle = getattr(core, "run_cycle", None)
+    if not callable(run_cycle):
+        return {"started": False, "reason": "run_cycle_missing"}
+
+    def kickoff() -> None:
+        try:
+            run_cycle(source="auto", allow_after_hours=False)
+        except Exception as exc:
+            diagnostics.record_exception(
+                exc,
+                source="runtime_worker_registration.immediate_kickoff",
+                module="app",
+            )
+
+    thread = threading.Thread(
+        target=kickoff,
+        daemon=True,
+        name="paper-auto-post-composition-kickoff",
+    )
+    _KICKOFF_STARTED.add(id(core))
+    thread.start()
+    portfolio = getattr(core, "portfolio", {})
+    if isinstance(portfolio, dict):
+        auto = portfolio.setdefault("auto_runner", {})
+        if isinstance(auto, dict):
+            auto["post_composition_kickoff_started"] = True
+            auto["post_composition_kickoff_local"] = _now()
+    return {
+        "started": True,
+        "reason": "post_composition_immediate_cycle",
+        "thread_name": thread.name,
+    }
+
+
 def _start_auto_runner(core: Any) -> Dict[str, Any]:
-    """Start the existing app-owned loop and synchronize its diagnostic state."""
+    """Start the existing app-owned loop after restoring deferred configuration."""
+    restored = _restore_deferred_auto_configuration(core)
     ensure = getattr(core, "ensure_auto_thread", None)
     if not callable(ensure):
         return {
             "status": "error",
             "started": False,
             "reason": "ensure_auto_thread_missing",
+            "deferred_configuration": restored,
         }
     ensure()
     portfolio = getattr(core, "portfolio", {})
@@ -40,8 +108,7 @@ def _start_auto_runner(core: Any) -> Dict[str, Any]:
 
     # Older persisted state can retain thread_started=false even when the app's
     # authoritative process-global owner is already active. Synchronize only
-    # this diagnostic field; no thread, strategy, risk, or execution behavior
-    # is changed here.
+    # this diagnostic field; no strategy, risk, or execution behavior changes.
     diagnostic_state_synchronized = False
     if global_started and isinstance(auto, dict) and not reported_before_sync:
         auto["thread_started"] = True
@@ -50,7 +117,9 @@ def _start_auto_runner(core: Any) -> Dict[str, Any]:
         diagnostic_state_synchronized = True
 
     reported = bool(auto.get("thread_started")) if isinstance(auto, dict) else False
+    enabled = bool(auto.get("enabled")) if isinstance(auto, dict) else bool(restored.get("requested_enabled"))
     started = bool(reported or global_started)
+    kickoff = _start_immediate_kickoff(core, enabled) if restored.get("deferred") else {"started": False, "reason": "not_deferred"}
     return {
         "status": "ok" if started else "error",
         "started": started,
@@ -58,10 +127,12 @@ def _start_auto_runner(core: Any) -> Dict[str, Any]:
         "reported_before_sync": reported_before_sync,
         "global_thread_started": global_started,
         "diagnostic_state_synchronized": diagnostic_state_synchronized,
-        "enabled": auto.get("enabled") if isinstance(auto, dict) else None,
+        "enabled": enabled,
         "interval_seconds": auto.get("interval_seconds") if isinstance(auto, dict) else None,
         "owner": "app.ensure_auto_thread",
         "ordering": "after_runtime_composition",
+        "deferred_configuration": restored,
+        "immediate_kickoff": kickoff,
     }
 
 
@@ -87,6 +158,10 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             }
 
         try:
+            import provider_timeout_contract
+            import state_persistence_contract
+            import cycle_completion_contract
+            import daily_audit_repair_overlay
             import run_report_guard
             import performance_risk_activation_guard
             import regime_integrity_underdeployment
@@ -110,6 +185,18 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 performance_audit_lab.AUTO_BACKTEST = False
                 performance_audit_lab_v2.AUTO_BACKTEST = False
                 performance_audit_lab_v2.ENABLED = False
+
+            # Operational contracts must be in place before the first real auto
+            # cycle: mounted state first, provider timeout second, lifecycle
+            # telemetry third. They do not change trading decisions.
+            state_result = state_persistence_contract.apply(core)
+            state_persistence_contract.register_routes(core.app, core)
+            provider_result = provider_timeout_contract.apply(core)
+            provider_timeout_contract.register_routes(core.app, core)
+            cycle_result = cycle_completion_contract.apply(core)
+            cycle_completion_contract.register_routes(core.app, core)
+            daily_overlay_result = daily_audit_repair_overlay.apply(core)
+            daily_audit_repair_overlay.register_routes(core.app, core)
 
             regime_integrity_underdeployment.start_watchdog(core)
             regime_integrity_underdeployment.register_routes(core.app, core)
@@ -155,8 +242,8 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             diagnostics.register_routes(core.app, core)
 
             # Final run_cycle owner: attach the observer only after every startup
-            # component has completed its callable composition. This preserves one
-            # explicit observer and ensures the auto runner executes through it.
+            # component has completed its callable composition. The completion
+            # contract remains immediately below this final observer.
             run_report_guard_apply = run_report_guard.apply(core)
             run_report_guard.register_routes(core.app, core)
             if run_report_guard_apply.get("status") != "ok":
@@ -173,6 +260,10 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 )
 
             versions = [
+                state_persistence_contract.VERSION,
+                provider_timeout_contract.VERSION,
+                cycle_completion_contract.VERSION,
+                daily_audit_repair_overlay.VERSION,
                 performance_risk_activation_guard.VERSION,
                 regime_integrity_underdeployment.VERSION,
                 regime_integrity_cache_guard.VERSION,
@@ -200,6 +291,10 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 "registered_local": _now(),
                 "research_isolated": research_isolated,
                 "component_versions": versions,
+                "state_persistence_contract": state_result,
+                "provider_timeout_contract": provider_result,
+                "cycle_completion_contract": cycle_result,
+                "daily_audit_repair_overlay": daily_overlay_result,
                 "run_cycle_observer": run_report_guard_apply,
                 "auto_runner": auto_runner,
             }
@@ -209,10 +304,9 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 error=(
                     f"research_isolated={research_isolated};"
                     + ";".join(versions)
-                    + ";auto_historical_research_disabled"
+                    + ";state_provider_cycle_contracts_before_runner"
                     + ";final_run_cycle_observer_installed"
                     + ";auto_runner_started_after_composition"
-                    + ";auto_runner_diagnostic_state_synchronized"
                 ),
             )
             return dict(_LAST)
@@ -250,6 +344,8 @@ def status() -> Dict[str, Any]:
             "starts_existing_auto_runner": True,
             "adds_new_runner_type": False,
             "synchronizes_diagnostic_state_only": True,
+            "defers_first_cycle_until_composition": True,
             "final_run_cycle_observer_owner": "run_report_guard",
+            "cycle_completion_owner_below_observer": "cycle_completion_contract",
         },
     }
