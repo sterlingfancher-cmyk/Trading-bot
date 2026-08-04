@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import fast_self_check_override as self_check
+import runtime_worker_registration as registration
 
 
 class SelfCheckRuntimeClassificationTests(unittest.TestCase):
@@ -125,6 +126,52 @@ class SelfCheckRuntimeClassificationTests(unittest.TestCase):
             payload["auto_runner"]["thread_liveness_state"],
             "inferred_from_recent_auto_attempt",
         )
+
+    def test_runtime_registration_starts_existing_app_runner(self) -> None:
+        portfolio = {
+            "auto_runner": {
+                "enabled": True,
+                "thread_started": False,
+                "interval_seconds": 300,
+            }
+        }
+        core = SimpleNamespace(
+            portfolio=portfolio,
+            AUTO_THREAD_STARTED=False,
+        )
+        calls: list[str] = []
+
+        def ensure_auto_thread() -> None:
+            calls.append("ensure_auto_thread")
+            core.AUTO_THREAD_STARTED = True
+            portfolio["auto_runner"]["thread_started"] = True
+
+        core.ensure_auto_thread = ensure_auto_thread
+        result = registration._start_auto_runner(core)
+
+        self.assertEqual(calls, ["ensure_auto_thread"])
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["started"])
+        self.assertTrue(result["reported_thread_started"])
+        self.assertTrue(result["global_thread_started"])
+        self.assertEqual(result["owner"], "app.ensure_auto_thread")
+        self.assertEqual(result["ordering"], "after_runtime_composition")
+
+    def test_runtime_registration_fails_when_runner_owner_missing(self) -> None:
+        result = registration._start_auto_runner(
+            SimpleNamespace(
+                portfolio={
+                    "auto_runner": {
+                        "enabled": True,
+                        "thread_started": False,
+                        "interval_seconds": 300,
+                    }
+                }
+            )
+        )
+        self.assertEqual(result["status"], "error")
+        self.assertFalse(result["started"])
+        self.assertEqual(result["reason"], "ensure_auto_thread_missing")
 
 
 if __name__ == "__main__":
