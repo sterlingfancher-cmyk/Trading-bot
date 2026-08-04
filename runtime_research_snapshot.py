@@ -1,29 +1,31 @@
 #!/usr/bin/env python3
-"""Capture a read-only Railway research and paper-runtime snapshot.
+"""Capture a bounded, read-only Railway runtime and research snapshot.
 
-The collector performs GET requests only. It does not call authenticated run
-routes, initiate a backtest, alter strategy parameters, mutate paper state, or
-place orders. The output is intended for scheduled engineering review.
+The collector performs concurrent GET requests only. It never calls authenticated
+cycle routes, initiates research, changes policy, mutates paper state, or places
+orders.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import time
-import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 DEFAULT_BASE_URL = "https://trading-bot-clean.up.railway.app"
-VERSION = "runtime-research-snapshot-2026-08-03-v1"
+VERSION = "runtime-research-snapshot-2026-08-03-v2-concurrent"
 
 ENDPOINTS = {
+    "root": "/",
+    "paper_status": "/paper/status",
     "self_check": "/paper/self-check",
+    "v1_status": "/paper/performance-audit-status",
     "v2_status": "/paper/performance-audit-v2-status",
     "v2_ablation": "/paper/performance-ablation-v2",
     "v2_regime": "/paper/performance-regime-report-v2",
-    "v2_recovery": "/paper/performance-v2-recovery-status",
 }
 
 
@@ -44,25 +46,23 @@ def _fetch_json(url: str, retries: int, timeout: float) -> dict[str, Any]:
                 url,
                 headers={
                     "Accept": "application/json",
-                    "User-Agent": "Trading-bot-read-only-research-snapshot/1.0",
+                    "User-Agent": "Trading-bot-read-only-research-snapshot/2.0",
                 },
                 method="GET",
             )
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read().decode("utf-8", errors="replace")
-                elapsed = round(time.monotonic() - started, 3)
-                payload = json.loads(raw)
                 return {
                     "status": "ok",
                     "http_status": int(getattr(response, "status", 200)),
-                    "elapsed_seconds": elapsed,
+                    "elapsed_seconds": round(time.monotonic() - started, 3),
                     "attempt": attempt,
-                    "payload": payload,
+                    "payload": json.loads(raw),
                 }
         except Exception as exc:
             last_error = f"{type(exc).__name__}: {exc}"
             if attempt < retries:
-                time.sleep(min(8.0, 1.5 * attempt))
+                time.sleep(min(4.0, 1.0 * attempt))
     return {
         "status": "error",
         "error": last_error or "unknown_fetch_error",
@@ -91,9 +91,8 @@ def _metric_subset(value: Any) -> dict[str, Any]:
 
 
 def _profile_summary(payload: dict[str, Any]) -> dict[str, Any]:
-    profiles = _dict(payload.get("profiles"))
     output: dict[str, Any] = {}
-    for name, raw in profiles.items():
+    for name, raw in _dict(payload.get("profiles")).items():
         row = _dict(raw)
         output[str(name)] = {
             "full_sample": _metric_subset(row.get("full_sample")),
@@ -105,43 +104,51 @@ def _profile_summary(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    root_payload = _dict(_dict(raw.get("root")).get("payload"))
+    paper_payload = _dict(_dict(raw.get("paper_status")).get("payload"))
     self_payload = _dict(_dict(raw.get("self_check")).get("payload"))
-    status_payload = _dict(_dict(raw.get("v2_status")).get("payload"))
-    latest = _dict(status_payload.get("latest"))
-    runner = _dict(status_payload.get("resilient_runner"))
+    v1_payload = _dict(_dict(raw.get("v1_status")).get("payload"))
+    v2_payload = _dict(_dict(raw.get("v2_status")).get("payload"))
+    latest = _dict(v2_payload.get("latest"))
+    runner = _dict(v2_payload.get("resilient_runner"))
     ablation_payload = _dict(_dict(raw.get("v2_ablation")).get("payload"))
     ablation = _dict(ablation_payload.get("ablation"))
     regime_payload = _dict(_dict(raw.get("v2_regime")).get("payload"))
-    recovery_payload = _dict(_dict(raw.get("v2_recovery")).get("payload"))
-    recovery_guard = _dict(recovery_payload.get("guard"))
 
     ranking = _list(ablation.get("ranking"))
     best_variant = _dict(ablation.get("best_variant"))
     if not best_variant and ranking:
         best_variant = _dict(ranking[0])
 
-    profiles = _profile_summary(latest)
-    if not profiles:
-        profiles = _profile_summary(regime_payload)
+    profiles = _profile_summary(latest) or _profile_summary(regime_payload)
+    reachable = sorted(name for name, row in raw.items() if row.get("status") == "ok")
+    failures = sorted(set(raw) - set(reachable))
+    core_reachable = any(name in reachable for name in ("root", "paper_status", "self_check"))
+    self_overall = self_payload.get("overall")
+    v2_run_status = v2_payload.get("run_status") or latest.get("status") or "unknown"
 
-    fetch_failures = sorted(
-        name for name, row in raw.items() if _dict(row).get("status") != "ok"
-    )
-    v2_run_status = status_payload.get("run_status") or latest.get("status") or "unknown"
-    if fetch_failures:
+    if not core_reachable:
+        overall = "error"
+    elif self_overall not in {None, "pass"}:
         overall = "warn"
-    elif self_payload.get("overall") not in {None, "pass"}:
-        overall = "warn"
-    elif str(v2_run_status).lower() == "error":
+    elif str(v2_run_status).lower() == "error" or failures:
         overall = "warn"
     else:
         overall = "pass"
 
     return {
         "overall": overall,
-        "fetch_failures": fetch_failures,
+        "connectivity": {
+            "reachable_count": len(reachable),
+            "total_count": len(raw),
+            "reachable_endpoints": reachable,
+            "failed_endpoints": failures,
+            "core_web_reachable": core_reachable,
+            "root_status": root_payload.get("status"),
+            "paper_status": paper_payload.get("status"),
+        },
         "self_check": {
-            "overall": self_payload.get("overall"),
+            "overall": self_overall,
             "version": self_payload.get("version"),
             "generated_local": self_payload.get("generated_local"),
             "failing_components": _dict(self_payload.get("summary")).get("failing_components"),
@@ -151,15 +158,21 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "cash": _dict(self_payload.get("account")).get("cash"),
             "last_success": _dict(self_payload.get("auto_runner")).get("last_success"),
         },
+        "v1": {
+            "version": v1_payload.get("version"),
+            "enabled": v1_payload.get("enabled"),
+            "auto_backtest_enabled": _dict(v1_payload.get("settings")).get("auto_backtest_enabled"),
+            "backtest_status": _dict(v1_payload.get("backtest")).get("status"),
+            "forward_rows": _dict(v1_payload.get("forward_test")).get("rows_total"),
+        },
         "v2": {
-            "version": status_payload.get("version"),
+            "version": v2_payload.get("version"),
+            "enabled": v2_payload.get("enabled"),
             "run_status": v2_run_status,
-            "latest_key": status_payload.get("latest_key"),
+            "latest_key": v2_payload.get("latest_key"),
             "latest_generated_local": latest.get("generated_local"),
-            "latest_generated_epoch": latest.get("generated_epoch"),
             "runner_state": runner.get("state"),
             "runner_phase": runner.get("phase"),
-            "runner_detail": runner.get("detail"),
             "progress_current": runner.get("progress_current"),
             "progress_total": runner.get("progress_total"),
             "thread_alive": runner.get("thread_alive"),
@@ -179,48 +192,48 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "profile_names": sorted(_dict(regime_payload.get("profiles")).keys()),
             "generated_local": regime_payload.get("generated_local"),
         },
-        "recovery": {
-            "version": recovery_payload.get("version"),
-            "watchdog_started": recovery_payload.get("watchdog_started"),
-            "guard_status": recovery_guard.get("status"),
-            "observed_state": recovery_guard.get("observed_state"),
-            "thread_alive": recovery_guard.get("thread_alive"),
-            "engine_locked": recovery_guard.get("engine_locked"),
-            "recovery_attempt_count": recovery_guard.get("recovery_attempt_count"),
-            "last_result": recovery_guard.get("last_result"),
-        },
     }
 
 
 def _markdown(report: dict[str, Any]) -> str:
     summary = _dict(report.get("summary"))
+    connectivity = _dict(summary.get("connectivity"))
     self_check = _dict(summary.get("self_check"))
+    v1 = _dict(summary.get("v1"))
     v2 = _dict(summary.get("v2"))
     ablation = _dict(summary.get("ablation"))
-    recovery = _dict(summary.get("recovery"))
     lines = [
         "# Runtime Research Snapshot",
         "",
         f"- Snapshot status: **{str(report.get('status', 'unknown')).upper()}**",
         f"- Base URL: `{report.get('base_url')}`",
-        f"- Fetch failures: `{', '.join(summary.get('fetch_failures', [])) or 'none'}`",
+        f"- Reachable: `{connectivity.get('reachable_count')}/{connectivity.get('total_count')}`",
+        f"- Failed endpoints: `{connectivity.get('failed_endpoints')}`",
+        f"- Core web reachable: `{connectivity.get('core_web_reachable')}`",
         "",
         "## Paper Runtime",
         "",
         f"- Self-check: `{self_check.get('overall')}`",
-        f"- Self-check version: `{self_check.get('version')}`",
+        f"- Version: `{self_check.get('version')}`",
         f"- Generated: `{self_check.get('generated_local')}`",
         f"- Positions: `{self_check.get('positions')}`",
         f"- Equity: `{self_check.get('equity')}`",
-        f"- Cash: `{self_check.get('cash')}`",
         f"- Failing components: `{self_check.get('failing_components')}`",
         "",
-        "## Performance Research V2",
+        "## Research V1",
+        "",
+        f"- Version: `{v1.get('version')}`",
+        f"- Enabled: `{v1.get('enabled')}`",
+        f"- Auto backtest: `{v1.get('auto_backtest_enabled')}`",
+        f"- Backtest status: `{v1.get('backtest_status')}`",
+        f"- Forward rows: `{v1.get('forward_rows')}`",
+        "",
+        "## Research V2",
         "",
         f"- Version: `{v2.get('version')}`",
+        f"- Enabled: `{v2.get('enabled')}`",
         f"- Run status: `{v2.get('run_status')}`",
         f"- Latest key: `{v2.get('latest_key')}`",
-        f"- Latest generated: `{v2.get('latest_generated_local')}`",
         f"- Runner: `{v2.get('runner_state')}` / `{v2.get('runner_phase')}`",
         f"- Progress: `{v2.get('progress_current')}` / `{v2.get('progress_total')}`",
         f"- Core checkpoint: `{v2.get('core_checkpoint_available')}`",
@@ -233,12 +246,15 @@ def _markdown(report: dict[str, Any]) -> str:
         lines.append("No completed profile metrics were available.")
     else:
         for name, row in profiles.items():
-            lines.append(f"### {name}")
-            lines.append("")
-            lines.append(f"- Full sample: `{_dict(row).get('full_sample')}`")
-            lines.append(f"- Walk-forward: `{_dict(row).get('walk_forward')}`")
-            lines.append("")
-
+            lines.extend(
+                [
+                    f"### {name}",
+                    "",
+                    f"- Full sample: `{_dict(row).get('full_sample')}`",
+                    f"- Walk-forward: `{_dict(row).get('walk_forward')}`",
+                    "",
+                ]
+            )
     lines.extend(
         [
             "## Ablation",
@@ -247,15 +263,7 @@ def _markdown(report: dict[str, Any]) -> str:
             f"- Variants: `{ablation.get('variant_count')}`",
             f"- Best variant: `{ablation.get('best_variant')}`",
             "",
-            "## Recovery",
-            "",
-            f"- Watchdog started: `{recovery.get('watchdog_started')}`",
-            f"- Observed state: `{recovery.get('observed_state')}`",
-            f"- Thread alive: `{recovery.get('thread_alive')}`",
-            f"- Engine locked: `{recovery.get('engine_locked')}`",
-            f"- Recovery attempts: `{recovery.get('recovery_attempt_count')}`",
-            "",
-            "This report is read-only. It does not promote research settings or place orders.",
+            "This report is read-only and does not initiate research or place orders.",
             "",
         ]
     )
@@ -265,23 +273,34 @@ def _markdown(report: dict[str, Any]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--retries", type=int, default=4)
-    parser.add_argument("--timeout", type=float, default=45.0)
+    parser.add_argument("--retries", type=int, default=2)
+    parser.add_argument("--timeout", type=float, default=20.0)
+    parser.add_argument("--workers", type=int, default=7)
     parser.add_argument("--json", default="runtime_research_snapshot.json")
     parser.add_argument("--markdown", default="runtime_research_snapshot.md")
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
-    raw = {
-        name: _fetch_json(base_url + path, max(1, args.retries), max(5.0, args.timeout))
-        for name, path in ENDPOINTS.items()
-    }
-    summary = _summarize(raw)
-    reachable = sum(1 for row in raw.values() if row.get("status") == "ok")
-    status = "pass" if reachable == len(raw) and summary.get("overall") == "pass" else "warn"
-    if reachable == 0:
-        status = "error"
+    raw: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=max(1, min(args.workers, len(ENDPOINTS)))) as executor:
+        futures = {
+            executor.submit(
+                _fetch_json,
+                base_url + path,
+                max(1, args.retries),
+                max(5.0, args.timeout),
+            ): name
+            for name, path in ENDPOINTS.items()
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                raw[name] = future.result()
+            except Exception as exc:
+                raw[name] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
 
+    summary = _summarize(raw)
+    status = str(summary.get("overall") or "error")
     report = {
         "status": status,
         "type": "runtime_research_snapshot",
@@ -305,12 +324,7 @@ def main() -> int:
 
     Path(args.json).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     Path(args.markdown).write_text(_markdown(report) + "\n", encoding="utf-8")
-    print(json.dumps({
-        "status": status,
-        "reachable_endpoints": reachable,
-        "total_endpoints": len(raw),
-        "summary": summary,
-    }, indent=2, sort_keys=True))
+    print(json.dumps({"status": status, "summary": summary}, indent=2, sort_keys=True))
     return 1 if status == "error" else 0
 
 
