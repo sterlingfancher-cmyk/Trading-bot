@@ -36,13 +36,16 @@ jobs:
               "state_persistence": "/paper/state-persistence-contract-status",
               "cycle_completion": "/paper/cycle-completion-contract-status",
               "runtime_shadow": "/paper/runtime-shadow-capture-status",
+              "ml2_status": "/paper/ml2-status",
+              "ml_counterfactual_ledger": "/paper/ml-counterfactual-ledger-status",
+              "ml_counterfactual_dataset": "/paper/ml-counterfactual-training-dataset?limit=50",
           }
           manifest = {"base_url": base, "read_only": True, "endpoints": {}}
           for name, path in endpoints.items():
               target = pathlib.Path(f"capture_{name}.json")
               request = urllib.request.Request(
                   base + path,
-                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.0"},
+                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.1"},
                   method="GET",
               )
               try:
@@ -64,8 +67,10 @@ jobs:
                   }
           pathlib.Path("capture_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
           print(json.dumps(manifest, indent=2, sort_keys=True))
-          if manifest["endpoints"]["paper_status_full"]["status"] != "ok":
-              raise SystemExit("full paper status capture failed")
+          required = ("paper_status_full", "ml2_status", "ml_counterfactual_ledger", "ml_counterfactual_dataset")
+          failed = [name for name in required if manifest["endpoints"][name]["status"] != "ok"]
+          if failed:
+              raise SystemExit("required capture failed: " + ",".join(failed))
           PY
 
       - name: Upload paper-state capture
