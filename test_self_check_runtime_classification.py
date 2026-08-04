@@ -236,6 +236,16 @@ class SelfCheckRuntimeClassificationTests(unittest.TestCase):
         }
         self.assertNotIn("controlled_redeployment_starter_sleeve", repeated_names)
 
+    def test_final_cycle_observer_precedes_auto_runner(self) -> None:
+        source = (ROOT / "runtime_worker_registration.py").read_text(encoding="utf-8")
+        observer_call = "run_report_guard_apply = run_report_guard.apply(core)"
+        self.assertEqual(source.count(observer_call), 1)
+        diagnostics_index = source.index("diagnostics.register_routes(core.app, core)")
+        observer_index = source.index(observer_call)
+        runner_index = source.index("auto_runner = _start_auto_runner(core)", observer_index)
+        self.assertLess(diagnostics_index, observer_index)
+        self.assertLess(observer_index, runner_index)
+
 
 if __name__ == "__main__":
     unittest.main()
