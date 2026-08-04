@@ -1,0 +1,80 @@
+name: Daily Operational Audit Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "daily_operational_audit.py"
+      - "test_daily_operational_audit.py"
+      - "usercustomize.py"
+      - ".github/workflows/daily-operational-audit.yml"
+  workflow_dispatch:
+
+jobs:
+  validate-daily-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run targeted daily-audit tests
+        run: python -m unittest -v test_daily_operational_audit.py
+
+      - name: Allow Railway deployment to settle
+        if: github.event_name == 'push'
+        run: sleep 90
+
+      - name: Validate live curated audit contract
+        run: |
+          curl --silent --show-error --fail \
+            --retry 12 \
+            --retry-delay 8 \
+            --retry-all-errors \
+            --max-time 15 \
+            https://web-production-e1796.up.railway.app/paper/daily-audit \
+            > daily_operational_audit_live.json
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("daily_operational_audit_live.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          sections = payload.get("sections")
+          contract = payload.get("performance_contract", {})
+          authority = payload.get("authority", {})
+
+          assert payload.get("status") == "ok", payload
+          assert payload.get("type") == "daily_operational_audit", payload
+          assert isinstance(sections, dict) and len(sections) == 12, sections
+          assert contract.get("route_fanout_count") == 0, contract
+          assert contract.get("external_provider_calls") == 0, contract
+          assert contract.get("trading_actions") == 0, contract
+          assert contract.get("repair_actions") == 0, contract
+          assert contract.get("bounded_output") is True, contract
+          assert authority.get("reporting_only") is True, authority
+          assert float(payload.get("duration_seconds", 999.0)) <= 5.0, payload.get("duration_seconds")
+          assert sections.get("11_conclusion", {}).get("status") in {"pass", "warn", "fail"}, sections.get("11_conclusion")
+          assert sections.get("12_next_action", {}).get("status") in {"none", "required"}, sections.get("12_next_action")
+          print(json.dumps({
+              "overall": payload.get("overall"),
+              "duration_seconds": payload.get("duration_seconds"),
+              "section_count": len(sections),
+              "next_action": sections.get("12_next_action"),
+          }, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload live daily-audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-operational-audit-live
+          path: daily_operational_audit_live.json
+          if-no-files-found: warn
+          retention-days: 30
