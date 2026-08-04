@@ -13,7 +13,7 @@ from typing import Any, Dict
 
 import runtime_diagnostics as diagnostics
 
-VERSION = "runtime-worker-registration-2026-08-03-v1"
+VERSION = "runtime-worker-registration-2026-08-04-v2-auto-runner-owner"
 _LOCK = threading.RLock()
 _REGISTERED_CORE_IDS: set[int] = set()
 _LAST: Dict[str, Any] = {}
@@ -21,6 +21,33 @@ _LAST: Dict[str, Any] = {}
 
 def _now() -> str:
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _start_auto_runner(core: Any) -> Dict[str, Any]:
+    """Start the existing app-owned loop after runtime composition is complete."""
+    ensure = getattr(core, "ensure_auto_thread", None)
+    if not callable(ensure):
+        return {
+            "status": "error",
+            "started": False,
+            "reason": "ensure_auto_thread_missing",
+        }
+    ensure()
+    portfolio = getattr(core, "portfolio", {})
+    auto = portfolio.get("auto_runner", {}) if isinstance(portfolio, dict) else {}
+    reported = bool(auto.get("thread_started")) if isinstance(auto, dict) else False
+    global_started = bool(getattr(core, "AUTO_THREAD_STARTED", False))
+    started = bool(reported or global_started)
+    return {
+        "status": "ok" if started else "error",
+        "started": started,
+        "reported_thread_started": reported,
+        "global_thread_started": global_started,
+        "enabled": auto.get("enabled") if isinstance(auto, dict) else None,
+        "interval_seconds": auto.get("interval_seconds") if isinstance(auto, dict) else None,
+        "owner": "app.ensure_auto_thread",
+        "ordering": "after_runtime_composition",
+    }
 
 
 def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
@@ -34,12 +61,14 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
 
     with _LOCK:
         if id(core) in _REGISTERED_CORE_IDS:
+            auto_runner = _start_auto_runner(core)
             return {
-                "status": "ok",
-                "overall": "pass",
+                "status": "ok" if auto_runner.get("status") == "ok" else "error",
+                "overall": "pass" if auto_runner.get("status") == "ok" else "warn",
                 "version": VERSION,
                 "already_registered": True,
                 "research_isolated": research_isolated,
+                "auto_runner": auto_runner,
             }
 
         try:
@@ -112,6 +141,13 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             performance_audit_composition_guard.register_routes(core.app, core)
             diagnostics.register_routes(core.app, core)
 
+            auto_runner = _start_auto_runner(core)
+            if auto_runner.get("status") != "ok":
+                raise RuntimeError(
+                    "auto runner failed to start after runtime composition: "
+                    + str(auto_runner.get("reason") or auto_runner)
+                )
+
             versions = [
                 performance_risk_activation_guard.VERSION,
                 regime_integrity_underdeployment.VERSION,
@@ -139,6 +175,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 "registered_local": _now(),
                 "research_isolated": research_isolated,
                 "component_versions": versions,
+                "auto_runner": auto_runner,
             }
             diagnostics.record_module_event(
                 "runtime_worker_registration",
@@ -147,6 +184,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                     f"research_isolated={research_isolated};"
                     + ";".join(versions)
                     + ";auto_historical_research_disabled"
+                    + ";auto_runner_started_after_composition"
                 ),
             )
             return dict(_LAST)
@@ -181,5 +219,7 @@ def status() -> Dict[str, Any]:
             "places_orders": False,
             "changes_live_authority": False,
             "changes_ml_authority": False,
+            "starts_existing_auto_runner": True,
+            "adds_new_runner_type": False,
         },
     }
