@@ -5,8 +5,17 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-07-29-v47-bear-recovery-stack"
+VERSION = "usercustomize-entry-pipeline-composition-2026-08-04-v48-one-shot-core-mutations"
 _REGISTERED_APP_IDS: set[int] = set()
+_ONE_SHOT_APPLIED: set[tuple[int, str]] = set()
+
+# These modules replace a canonical core function pointer while retaining the
+# previous callable. Reapplying them after another module has wrapped that
+# callable can create A -> B -> A cycles. They are installed once per core;
+# composition owners may still repair the explicitly registered stack.
+ONE_SHOT_CORE_MUTATION_MODULES = {
+    "controlled_redeployment_starter_sleeve",
+}
 
 
 def _mod() -> Any | None:
@@ -77,14 +86,22 @@ def _register_module(flask_app: Any, module_hint: Any | None, module_name: str, 
     try:
         module = __import__(module_name)
         core = _mod() or module_hint
-        for fn_name in ("install", "apply_runtime_overrides", "apply"):
-            fn = getattr(module, fn_name, None)
-            if callable(fn):
-                try:
-                    fn(core)
-                except TypeError:
-                    fn()
-                break
+        one_shot_key = (id(core), module_name)
+        apply_allowed = (
+            module_name not in ONE_SHOT_CORE_MUTATION_MODULES
+            or one_shot_key not in _ONE_SHOT_APPLIED
+        )
+        if apply_allowed:
+            for fn_name in ("install", "apply_runtime_overrides", "apply"):
+                fn = getattr(module, fn_name, None)
+                if callable(fn):
+                    try:
+                        fn(core)
+                    except TypeError:
+                        fn()
+                    if module_name in ONE_SHOT_CORE_MUTATION_MODULES:
+                        _ONE_SHOT_APPLIED.add(one_shot_key)
+                    break
         if flask_app is not None and hasattr(module, "register_routes"):
             try:
                 if route_args == "app_only":
@@ -186,8 +203,10 @@ def _watchdog() -> None:
                 ):
                     _register_module(flask_app, core, name, route_args="app_and_module")
                 _repair_entry_stack(flask_app, core)
+                # controlled_redeployment_starter_sleeve is intentionally absent:
+                # it replaces the canonical core pointer and must remain one-shot.
                 for name in (
-                    "controlled_redeployment_starter_sleeve", "quality_blocker_diagnostics",
+                    "quality_blocker_diagnostics",
                     "ml_pre3a_shadow_validation", "ml_phase3a_early_paper_gate",
                     "ml_vs_rules_shadow_log", "entry_pipeline_ownership_guard",
                     "daily_self_check_compactor", "missing_reason_trace_overlay", "runtime_reliability_overlay", "cycle_alignment_overlay",
