@@ -1,0 +1,249 @@
+{
+  "version": "typed-configuration-baseline-2026-08-03-v1",
+  "policy": {
+    "read_only": true,
+    "authoritative": false,
+    "runtime_imports": false,
+    "environment_reads": false,
+    "effective_value_changes_allowed": false,
+    "behavior_change_requires_backtest_and_forward_test": true
+  },
+  "contracts": [
+    {
+      "config_id": "risk.account.max_daily_loss",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "MAX_DAILY_LOSS_PCT"},
+      "unit": "fraction",
+      "expected_raw": "0.03",
+      "expected_normalized": 0.03,
+      "scope": "account_hard_risk"
+    },
+    {
+      "config_id": "risk.account.max_intraday_drawdown",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "MAX_INTRADAY_DRAWDOWN_PCT"},
+      "unit": "fraction",
+      "expected_raw": "0.025",
+      "expected_normalized": 0.025,
+      "scope": "account_hard_risk"
+    },
+    {
+      "config_id": "risk.surge.max_daily_drawdown",
+      "source": {"kind": "source_constant", "path": "market_surge_queue_executor.py", "name": "MAX_DAILY_DRAWDOWN_PCT"},
+      "unit": "percent_points",
+      "expected_raw": 1.5,
+      "expected_normalized": 0.015,
+      "scope": "surge_executor_gate",
+      "note": "Percent-point naming is retained only as a parity snapshot."
+    },
+    {
+      "config_id": "risk.surge.max_intraday_drawdown",
+      "source": {"kind": "source_constant", "path": "market_surge_queue_executor.py", "name": "MAX_INTRADAY_DRAWDOWN_PCT"},
+      "unit": "percent_points",
+      "expected_raw": 1.5,
+      "expected_normalized": 0.015,
+      "scope": "surge_executor_gate"
+    },
+    {
+      "config_id": "risk.surge.default_stop_loss",
+      "source": {"kind": "source_constant", "path": "market_surge_queue_executor.py", "name": "DEFAULT_STOP_LOSS_PCT"},
+      "unit": "percent_points",
+      "expected_raw": 3.5,
+      "expected_normalized": 0.035,
+      "scope": "surge_executor_position"
+    },
+    {
+      "config_id": "risk.surge.default_take_profit",
+      "source": {"kind": "source_constant", "path": "market_surge_queue_executor.py", "name": "DEFAULT_TAKE_PROFIT_PCT"},
+      "unit": "percent_points",
+      "expected_raw": 8.0,
+      "expected_normalized": 0.08,
+      "scope": "surge_executor_position"
+    },
+    {
+      "config_id": "entry.score.risk_on",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "MIN_ENTRY_SCORE_RISK_ON"},
+      "unit": "fraction",
+      "expected_raw": "0.0120",
+      "expected_normalized": 0.012,
+      "scope": "primary_entry_floor"
+    },
+    {
+      "config_id": "entry.score.constructive",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "MIN_ENTRY_SCORE_CONSTRUCTIVE"},
+      "unit": "fraction",
+      "expected_raw": "0.0120",
+      "expected_normalized": 0.012,
+      "scope": "primary_entry_floor"
+    },
+    {
+      "config_id": "entry.score.neutral",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "MIN_ENTRY_SCORE_NEUTRAL"},
+      "unit": "fraction",
+      "expected_raw": "0.0140",
+      "expected_normalized": 0.014,
+      "scope": "primary_entry_floor"
+    },
+    {
+      "config_id": "entry.score.defensive",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "MIN_ENTRY_SCORE_DEFENSIVE"},
+      "unit": "fraction",
+      "expected_raw": "0.0160",
+      "expected_normalized": 0.016,
+      "scope": "primary_entry_floor"
+    },
+    {
+      "config_id": "entry.score.short",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "MIN_SHORT_ENTRY_SCORE"},
+      "unit": "fraction",
+      "expected_raw": "0.0120",
+      "expected_normalized": 0.012,
+      "scope": "primary_short_floor"
+    },
+    {
+      "config_id": "entry.score.news_advisory_neutral_fallback",
+      "source": {"kind": "audit_environment", "path": "news_sentiment_engine.py", "name": "MIN_ENTRY_SCORE_NEUTRAL"},
+      "unit": "fraction",
+      "expected_raw": "0.033",
+      "expected_normalized": 0.033,
+      "scope": "advisory_fallback",
+      "note": "Known shared-key conflict; not authoritative."
+    },
+    {
+      "config_id": "timing.auto_run_interval",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "AUTO_RUN_INTERVAL_SECONDS"},
+      "unit": "seconds",
+      "expected_raw": "300",
+      "expected_normalized": 300.0,
+      "scope": "cycle_orchestrator"
+    },
+    {
+      "config_id": "timing.cooldown",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "COOLDOWN_SECONDS"},
+      "unit": "seconds",
+      "expected_raw": "1800",
+      "expected_normalized": 1800.0,
+      "scope": "entry_cooldown"
+    },
+    {
+      "config_id": "timing.opening_warmup",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "OPENING_WARMUP_MINUTES"},
+      "unit": "minutes",
+      "expected_raw": "15",
+      "expected_normalized": 15.0,
+      "scope": "entry_window"
+    },
+    {
+      "config_id": "timing.eod_allocation_window",
+      "source": {"kind": "audit_environment", "path": "eod_hybrid.py", "name": "EOD_ALLOCATION_WINDOW_MINUTES"},
+      "unit": "minutes",
+      "expected_raw": "45",
+      "expected_normalized": 45.0,
+      "scope": "eod_strategy"
+    },
+    {
+      "config_id": "watchdog.performance_audit_v1",
+      "source": {"kind": "audit_environment", "path": "performance_audit_lab.py", "name": "PERFORMANCE_AUDIT_WATCHDOG_SECONDS"},
+      "unit": "seconds",
+      "expected_raw": "300",
+      "expected_normalized": 300.0,
+      "scope": "advisory_research"
+    },
+    {
+      "config_id": "watchdog.performance_audit_v2",
+      "source": {"kind": "audit_environment", "path": "performance_audit_lab_v2.py", "name": "PERFORMANCE_AUDIT_V2_WATCHDOG_SECONDS"},
+      "unit": "seconds",
+      "expected_raw": "600",
+      "expected_normalized": 600.0,
+      "scope": "advisory_research"
+    },
+    {
+      "config_id": "watchdog.performance_composition",
+      "source": {"kind": "source_constant", "path": "performance_audit_composition_guard.py", "name": "WATCHDOG_SLEEP_SECONDS"},
+      "unit": "seconds",
+      "expected_raw": 5.0,
+      "expected_normalized": 5.0,
+      "scope": "advisory_composition",
+      "note": "Synthetic selector resolved from time.sleep literal in validator."
+    },
+    {
+      "config_id": "research.v1.module_auto_default",
+      "source": {"kind": "audit_environment", "path": "performance_audit_lab.py", "name": "PERFORMANCE_AUDIT_AUTO_BACKTEST_ENABLED"},
+      "unit": "boolean",
+      "expected_raw": "true",
+      "expected_normalized": true,
+      "scope": "module_default"
+    },
+    {
+      "config_id": "research.v2.module_auto_default",
+      "source": {"kind": "audit_environment", "path": "performance_audit_lab_v2.py", "name": "PERFORMANCE_AUDIT_V2_AUTO_BACKTEST_ENABLED"},
+      "unit": "boolean",
+      "expected_raw": "true",
+      "expected_normalized": true,
+      "scope": "module_default"
+    },
+    {
+      "config_id": "research.v1.production_override",
+      "source": {"kind": "source_env_setdefault", "path": "gunicorn.conf.py", "name": "PERFORMANCE_AUDIT_AUTO_BACKTEST_ENABLED"},
+      "unit": "boolean",
+      "expected_raw": "false",
+      "expected_normalized": false,
+      "scope": "production_bootstrap"
+    },
+    {
+      "config_id": "research.v2.production_override",
+      "source": {"kind": "source_env_setdefault", "path": "gunicorn.conf.py", "name": "PERFORMANCE_AUDIT_V2_AUTO_BACKTEST_ENABLED"},
+      "unit": "boolean",
+      "expected_raw": "false",
+      "expected_normalized": false,
+      "scope": "production_bootstrap"
+    },
+    {
+      "config_id": "state.primary_path",
+      "source": {"kind": "audit_environment", "path": "app.py", "name": "STATE_FILE"},
+      "unit": "path",
+      "expected_raw": "state.json",
+      "expected_normalized": "state.json",
+      "scope": "primary_state"
+    },
+    {
+      "config_id": "state.provenance_path_fallback",
+      "source": {"kind": "audit_environment", "path": "state_provenance_monitor.py", "name": "STATE_FILE"},
+      "unit": "path",
+      "expected_raw": null,
+      "expected_normalized": null,
+      "scope": "diagnostic_state"
+    },
+    {
+      "config_id": "state.size_watchdog_path_fallback",
+      "source": {"kind": "audit_environment", "path": "state_size_watchdog.py", "name": "STATE_FILE"},
+      "unit": "path",
+      "expected_raw": "",
+      "expected_normalized": "",
+      "scope": "diagnostic_state"
+    }
+  ],
+  "known_conflicts": {
+    "MIN_ENTRY_SCORE_NEUTRAL": {
+      "status": "known_conflict",
+      "expected_owner_defaults": {
+        "app.py": "0.0140",
+        "news_sentiment_engine.py": "0.033"
+      }
+    },
+    "STATE_FILE": {
+      "status": "known_conflict",
+      "expected_owner_defaults": {
+        "app.py": "state.json",
+        "state_provenance_monitor.py": null,
+        "state_size_watchdog.py": ""
+      }
+    },
+    "EOD_ALLOCATION_WINDOW_MINUTES": {
+      "status": "known_conflict",
+      "expected_owner_defaults": {
+        "classic_signal_mode.py": "<dynamic>",
+        "eod_hybrid.py": "45",
+        "intraday_timing.py": "<dynamic>"
+      }
+    }
+  }
+}
