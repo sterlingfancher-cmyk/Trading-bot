@@ -20,7 +20,7 @@ on:
 jobs:
   validate-daily-audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     permissions:
       contents: read
       statuses: write
@@ -41,23 +41,53 @@ jobs:
             test_daily_operational_audit.py \
             test_runtime_repair_contracts.py
 
-      - name: Allow Railway deployment to settle
-        if: github.event_name == 'push'
-        run: sleep 120
+      - name: Wait for the repaired Railway runtime
+        id: deployment_ready
+        run: |
+          base=https://web-production-e1796.up.railway.app
+          expected=cycle-completion-contract-2026-08-04-v2-rebind-safe
+          ready=false
+          for attempt in $(seq 1 60); do
+            if curl --silent --show-error --fail --max-time 20 \
+              "$base/paper/cycle-completion-contract-status" \
+              > cycle_completion_contract_live.json; then
+              version=$(python - <<'PY'
+          import json
+          from pathlib import Path
+          try:
+              row = json.loads(Path("cycle_completion_contract_live.json").read_text())
+              print(row.get("version", ""))
+          except Exception:
+              print("")
+          PY
+              )
+              if [ "$version" = "$expected" ]; then
+                ready=true
+                break
+              fi
+            fi
+            sleep 10
+          done
+          if [ "$ready" != "true" ]; then
+            echo "Repaired Railway runtime did not become reachable with $expected"
+            cat cycle_completion_contract_live.json 2>/dev/null || true
+            exit 1
+          fi
 
       - name: Capture live repair contracts
         id: live_validation
         run: |
           base=https://web-production-e1796.up.railway.app
           for spec in \
-            "daily_operational_audit_live.json:/paper/daily-audit" \
+            "bootstrap_status_live.json:/bootstrap-status" \
             "cycle_completion_contract_live.json:/paper/cycle-completion-contract-status" \
             "state_persistence_contract_live.json:/paper/state-persistence-contract-status" \
-            "provider_timeout_contract_live.json:/paper/provider-timeout-contract-status"; do
+            "provider_timeout_contract_live.json:/paper/provider-timeout-contract-status" \
+            "daily_operational_audit_live.json:/paper/daily-audit"; do
             file=${spec%%:*}
             path=${spec#*:}
             curl --silent --show-error --fail \
-              --retry 15 \
+              --retry 12 \
               --retry-delay 8 \
               --retry-all-errors \
               --max-time 20 \
@@ -69,6 +99,7 @@ jobs:
           import json
           from pathlib import Path
 
+          bootstrap = json.loads(Path("bootstrap_status_live.json").read_text(encoding="utf-8"))
           daily = json.loads(Path("daily_operational_audit_live.json").read_text(encoding="utf-8"))
           cycle = json.loads(Path("cycle_completion_contract_live.json").read_text(encoding="utf-8"))
           state = json.loads(Path("state_persistence_contract_live.json").read_text(encoding="utf-8"))
@@ -77,6 +108,8 @@ jobs:
           contract = daily.get("performance_contract", {})
           authority = daily.get("authority", {})
 
+          assert bootstrap.get("status") == "ready", bootstrap
+          assert bootstrap.get("delegate_ready") is True, bootstrap
           assert daily.get("status") == "ok", daily
           assert daily.get("type") == "daily_operational_audit", daily
           assert isinstance(sections, dict) and len(sections) == 12, sections
@@ -92,6 +125,8 @@ jobs:
           assert sections.get("12_next_action", {}).get("status") in {"none", "required"}
 
           assert cycle.get("status") == "ok" and cycle.get("installed") is True, cycle
+          assert cycle.get("version") == "cycle-completion-contract-2026-08-04-v2-rebind-safe", cycle
+          assert cycle.get("cycle_stale") is False, cycle
           assert provider.get("status") == "ok" and provider.get("installed") is True, provider
           assert state.get("status") == "ok", state
           assert state.get("persistent_mount_detected") in {True, False}, state
@@ -103,8 +138,12 @@ jobs:
               "cycle_health": cycle.get("cycle_health"),
               "cycle_phase": cycle.get("cycle_phase"),
               "cycle_in_progress": cycle.get("cycle_in_progress"),
+              "active_cycle_count": cycle.get("active_cycle_count"),
+              "detached_completion_reconciled": cycle.get("detached_completion_reconciled"),
               "last_completed_cycle_local": cycle.get("last_completed_cycle_local"),
+              "last_completed_cycle_duration_seconds": cycle.get("last_completed_cycle_duration_seconds"),
               "provider_calls": provider.get("health", {}).get("calls"),
+              "provider_failures": provider.get("health", {}).get("failed"),
               "persistent_mount_detected": state.get("persistent_mount_detected"),
               "state_file": state.get("state_file"),
               "next_action": sections.get("12_next_action"),
@@ -144,6 +183,7 @@ jobs:
         with:
           name: daily-operational-audit-live
           path: |
+            bootstrap_status_live.json
             daily_operational_audit_live.json
             cycle_completion_contract_live.json
             state_persistence_contract_live.json
@@ -158,6 +198,7 @@ jobs:
           script: |
             const passed =
               '${{ steps.targeted_tests.outcome }}' === 'success' &&
+              '${{ steps.deployment_ready.outcome }}' === 'success' &&
               '${{ steps.live_validation.outcome }}' === 'success';
             const overall = '${{ steps.live_summary.outputs.overall }}';
             const duration = '${{ steps.live_summary.outputs.duration }}';
