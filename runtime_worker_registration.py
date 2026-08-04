@@ -13,7 +13,7 @@ from typing import Any, Dict
 
 import runtime_diagnostics as diagnostics
 
-VERSION = "runtime-worker-registration-2026-08-04-v2-auto-runner-owner"
+VERSION = "runtime-worker-registration-2026-08-04-v3-auto-runner-state-sync"
 _LOCK = threading.RLock()
 _REGISTERED_CORE_IDS: set[int] = set()
 _LAST: Dict[str, Any] = {}
@@ -24,7 +24,7 @@ def _now() -> str:
 
 
 def _start_auto_runner(core: Any) -> Dict[str, Any]:
-    """Start the existing app-owned loop after runtime composition is complete."""
+    """Start the existing app-owned loop and synchronize its diagnostic state."""
     ensure = getattr(core, "ensure_auto_thread", None)
     if not callable(ensure):
         return {
@@ -35,14 +35,29 @@ def _start_auto_runner(core: Any) -> Dict[str, Any]:
     ensure()
     portfolio = getattr(core, "portfolio", {})
     auto = portfolio.get("auto_runner", {}) if isinstance(portfolio, dict) else {}
-    reported = bool(auto.get("thread_started")) if isinstance(auto, dict) else False
     global_started = bool(getattr(core, "AUTO_THREAD_STARTED", False))
+    reported_before_sync = bool(auto.get("thread_started")) if isinstance(auto, dict) else False
+
+    # Older persisted state can retain thread_started=false even when the app's
+    # authoritative process-global owner is already active. Synchronize only
+    # this diagnostic field; no thread, strategy, risk, or execution behavior
+    # is changed here.
+    diagnostic_state_synchronized = False
+    if global_started and isinstance(auto, dict) and not reported_before_sync:
+        auto["thread_started"] = True
+        auto["thread_start_owner"] = "runtime_worker_registration"
+        auto["thread_state_synchronized_local"] = _now()
+        diagnostic_state_synchronized = True
+
+    reported = bool(auto.get("thread_started")) if isinstance(auto, dict) else False
     started = bool(reported or global_started)
     return {
         "status": "ok" if started else "error",
         "started": started,
         "reported_thread_started": reported,
+        "reported_before_sync": reported_before_sync,
         "global_thread_started": global_started,
+        "diagnostic_state_synchronized": diagnostic_state_synchronized,
         "enabled": auto.get("enabled") if isinstance(auto, dict) else None,
         "interval_seconds": auto.get("interval_seconds") if isinstance(auto, dict) else None,
         "owner": "app.ensure_auto_thread",
@@ -185,6 +200,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                     + ";".join(versions)
                     + ";auto_historical_research_disabled"
                     + ";auto_runner_started_after_composition"
+                    + ";auto_runner_diagnostic_state_synchronized"
                 ),
             )
             return dict(_LAST)
@@ -221,5 +237,6 @@ def status() -> Dict[str, Any]:
             "changes_ml_authority": False,
             "starts_existing_auto_runner": True,
             "adds_new_runner_type": False,
+            "synchronizes_diagnostic_state_only": True,
         },
     }
