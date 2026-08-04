@@ -2,59 +2,65 @@
 
 ## Scope
 
-This is the canonical static-refactor baseline for `sterlingfancher-cmyk/Trading-bot`. It inventories architectural debt and protects staged migration contracts. It does not assert that every static finding is an active runtime defect.
+This is the canonical refactor baseline for `sterlingfancher-cmyk/Trading-bot`. It inventories architectural debt and protects staged migration contracts. It does not assert that every static finding is an active runtime defect.
 
-Current validated audit:
+Latest fully validated repository/startup run:
 
-- GitHub Actions run: `30876010241`
-- head commit: `de8d095c60e068988397e23dc0dad3f057e7ea36`
+- GitHub Actions run: `30877811708`
+- head commit: `58da8e70559a6dd33fa596d13ecdc157c57d4287`
+- repository validation: pass
 - structural audit: pass
 - architecture ownership contract: pass
 - typed configuration parity: pass
 - Stage B immutable model tests: pass
 - StateStore shadow parity: pass
 - Stage C StateStore tests: pass
-- Stage D shadow comparison tests: pass
+- Stage D decision-comparison tests: pass
+- Stage D runtime-capture tests: pass
+- declared dependency installation: pass
+- exact Gunicorn startup smoke: pass
 - new critical findings: 0
 - new warnings: 0
 
+The startup smoke used the repository’s real Gunicorn target. `/bootstrap-status` became reachable, the complete application reached `ready` in approximately 14 seconds, runtime worker registration passed, and `/` rendered successfully.
+
 ## Current Repository Surface
 
-- Python files: 153
-- Python source lines: 69,297
-- internal import edges: 173
+- Python files: 159
+- Python source lines: 70,671
+- internal import edges: 183
 - import cycles: 0
-- module-level calls: 2,460
+- module-level calls: 2,489
 - import-time thread creations: 2
 - persistent watchdog loops: 7
 - genuinely high-frequency or potentially busy watchdogs: 1
 - dynamic mutation targets: 72
 - targets with overlapping mutation owners: 29
-- environment keys observed: 867
+- environment keys observed: 869
 - conflicting environment defaults: 3
 - parameter names observed: 523
 - conflicting parameter owners: 10
 - route literals: 187
 - route overlaps: 5
 - exact duplicate function-body groups: 65
-- parallel version families: 1
+- parallel version families: 2
 - broad exception handlers that only pass: 482
 - provider-like calls inside loops: 1
 - critical findings: 29
 - warning findings: 90
-- informational findings: 114
+- informational findings: 116
 
-The absence of import cycles and the passing compile/static gates are positive. The dominant debt remains runtime ownership ambiguity, import-time activation, overlapping callable replacement, duplicated configuration interpretation, and broad exception suppression.
+The absence of import cycles and the passing compile, ownership, configuration, state, shadow, and startup gates are positive. The dominant debt remains runtime ownership ambiguity, import-time activation, overlapping callable replacement, duplicated configuration interpretation, and broad exception suppression.
 
 ## Highest-Priority Ownership Debt
 
 ### Scanner authority
 
-`scan_signals` currently has 14 allowed legacy owners. The target is one canonical `trading.signals.SignalEngine` with explicit, ordered signal layers rather than replacement of the public callable.
+`scan_signals` has 14 allowed legacy owners. The target is one canonical `trading.signals.SignalEngine` with explicit ordered layers rather than public-callable replacement.
 
 ### Entry and decision authority
 
-`try_entries_and_rotations` currently has 13 allowed legacy owners. The target is one canonical `trading.decision.DecisionEngine` that emits typed policy effects:
+`try_entries_and_rotations` has 13 allowed legacy owners. The target is one canonical `trading.decision.DecisionEngine` that emits typed policy effects:
 
 - `HARD_BLOCK`
 - `SIZE_REDUCTION`
@@ -64,7 +70,7 @@ The absence of import cycles and the passing compile/static gates are positive. 
 
 ### State authority
 
-`save_state` currently has 16 allowed legacy owners. The target is one canonical `trading.state.StateStore`. No current owner has been removed or replaced yet.
+`save_state` has 16 allowed legacy owners. The target is one canonical `trading.state.StateStore`. No current owner has been removed or replaced yet.
 
 Other high-overlap targets include:
 
@@ -79,7 +85,7 @@ Other high-overlap targets include:
 
 ## Known Configuration Debt
 
-The typed configuration contract preserves five known conflicts or ambiguities without resolving them:
+The typed configuration contract preserves known conflicts or ambiguities without resolving them:
 
 1. `MIN_ENTRY_SCORE_NEUTRAL`
    - `app.py`: `0.0140`
@@ -100,7 +106,7 @@ The typed snapshot is non-authoritative. Any effective value change remains a tr
 
 ## Known Route Debt
 
-Five exact route overlaps remain registered in the ownership contract:
+Five exact route overlaps remain registered:
 
 - `/paper/follow-through-review`
 - `/paper/live-volatility-status`
@@ -116,7 +122,8 @@ New route overlaps are blocked. Existing overlaps must be removed through contro
 - One provider-like `download_prices` call remains inside a loop in `app.py` and requires profiling/caching review.
 - 482 broad `except Exception: pass` paths remain and must be narrowed incrementally.
 - `app.py` remains approximately 5,037 lines.
-- Heavy V1/V2 historical research has been isolated from the single production web worker. Forward-shadow and read-only status capability remain; historical research must run through an explicit or dedicated research process.
+- Heavy V1/V2 historical research is isolated from the production web worker.
+- The public Railway domain currently times out even though the same repository command passes exact local Gunicorn startup and Railway deployment health checks. This is classified as a Railway domain/service-routing incident until the domain attachment is verified.
 
 ## Completed Migration Foundations
 
@@ -130,15 +137,14 @@ Implemented:
 
 Validated:
 
-- callable targets registered: 10
-- route targets registered: 5
-- environment targets registered: 3
+- protected callable targets: 10
+- protected route targets: 5
+- protected environment targets: 3
 - ownership violations: 0
-- legacy owner removal is allowed and recorded as progress
-- new undeclared owners on protected targets are blocked
-- new route overlaps and environment-default conflicts are blocked
+- removal of legacy owners is allowed and recorded as progress
+- undeclared new owners, route overlaps, and environment-default conflicts are blocked
 
-### Stage B — Typed configuration and immutable shadow models — Complete
+### Stage B — Typed configuration and immutable models — Complete
 
 Canonical implementation:
 
@@ -151,13 +157,11 @@ Validated:
 
 - typed configuration status: pass
 - violations: 0
-- known conflicts preserved: 5
+- known conflicts preserved
 - canonical defaults present
 - immutable signal, market, risk, position, policy, candidate, and cycle models tested
 - shadow authority only
 - no runtime imports or order methods
-
-A duplicate Stage B parity implementation was removed before promotion, preventing the audit framework itself from creating overlapping ownership.
 
 ### Stage C — StateStore shadow parity — Foundation complete
 
@@ -166,48 +170,92 @@ Implemented:
 - `state_store_contract.json`
 - `state_store_shadow.py`
 - `test_state_store_stage_c.py`
-- StateStore validation in `.github/workflows/refactor-audit.yml`
 
 Validated current capabilities:
 
 - atomic `os.replace` writes
-- file fsync
-- directory fsync attempt
-- thread locking
-- file locking when supported
+- file and directory fsync
+- thread and supported file locking
 - shared read and exclusive write paths
 - retrying reads
 - latest, largest, and prewrite backups
 - backup fallback reads
 - non-overlapping cycle guard
-- canonical `STATE_FILE=state.json` observation
+- canonical `STATE_FILE=state.json`
 
-StateStore shadow result: pass, with zero symbol, call, default, capability, or typed-configuration violations.
+StateStore shadow result is pass with zero symbol, call, default, capability, or typed-configuration violations. It does not open the production state file, replace `save_state`, or change state paths.
 
-This is not an authority migration. The shadow validator does not open the production state file, replace `save_state`, or change state paths.
-
-### Stage D — Shadow decision comparison — Foundation complete
+### Stage D1 — Pure decision comparison — Complete
 
 Implemented:
 
 - `shadow_decision_comparison_contract.json`
 - `shadow_decision_comparison.py`
 - `test_shadow_decision_stage_d.py`
-- Stage D tests in `.github/workflows/refactor-audit.yml`
 
-Validated behavior:
+Validated:
 
-- two decisions must share the same cycle ID
-- both decisions must produce the same immutable input fingerprint
+- matching cycle ID and identical input fingerprint are required
 - candidates are compared by symbol and side
-- divergences cover presence, allowance, selection, terminal reason, final score, and size multiplier
-- comparison results are immutable and marked `comparison_only`
-- mismatched cycle or input snapshots are rejected
-- no runtime, state, route, broker, or order authority exists
+- divergences cover presence, allowance, selection, terminal reason, score, and size multiplier
+- results are immutable and `comparison_only`
+- no runtime, state, route, broker, or order authority
 - automatic promotion remains false
-- forward evidence minimum remains 30 candidates and 20 one-day outcomes
 
-This foundation is not connected to the production decision path. It records no live cycle yet and cannot place orders.
+### Stage D2 — Runtime capture-parity adapter — Implemented and repository-validated
+
+Implemented:
+
+- `runtime_shadow_capture_contract.json`
+- `runtime_shadow_capture.py`
+- `test_runtime_shadow_capture.py`
+- existing `run_report_guard.py` owner extended with one observer call
+- `/paper/self-check` v6 includes `runtime_shadow_capture` as component six
+
+Safety boundary:
+
+- no new `run_cycle`, scanner, or entry callable owner
+- no new wrapper, watchdog, or route
+- observer runs only after the existing cycle returns
+- returned trading result does not contain the shadow payload
+- bounded telemetry is retained under `portfolio["shadow_decision_comparison"]`
+- adapter does not call `save_state`, providers, brokers, or order methods
+- current and shadow decisions are intentionally identical in V1 to prove translation and comparison plumbing
+- independent shadow policy is false
+- capture-parity samples do not count toward forward promotion evidence
+
+Validation:
+
+- parity translation tests: pass
+- bounded history and duplicate-cycle tests: pass
+- skipped-cycle handling: pass
+- production result-preservation test: pass
+- AST authority boundary test: pass
+- exact Gunicorn startup smoke: pass
+
+Runtime capture after a real market cycle remains unverified through the public domain because the domain is not responding.
+
+## Listener-First Startup and Research Isolation
+
+Canonical deployment command is pinned in both `Procfile` and `railway.json`:
+
+`DEFERRED_WSGI_BOOTSTRAP=true PYTHONPATH=bootstrap:. gunicorn bootstrap_wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 180`
+
+Railway health check:
+
+- path: `/bootstrap-status`
+- timeout: 120 seconds
+
+Startup protections:
+
+- V1 and V2 automatic historical research disabled before WSGI import
+- heavy research not resumed inside the web worker
+- lightweight bootstrap WSGI callable constructed before the legacy loader starts
+- legacy loading starts through a bounded delayed timer, default 1 second
+- root and `/bootstrap-status` can respond while the full application loads
+- exact CI startup reached ready in approximately 14 seconds
+
+These changes affect process placement and availability only; trading decisions are unchanged.
 
 ## Permanent Audit Cadence
 
@@ -216,52 +264,77 @@ This foundation is not connected to the production decision path. It records no 
 The consolidated audit runs:
 
 1. repository compile and static safety checks;
-2. structural mutation/overlap comparison against the base commit;
-3. architecture ownership contract validation;
-4. typed configuration parity validation;
-5. immutable Stage B model tests;
-6. StateStore shadow parity validation;
-7. Stage C tests;
-8. Stage D shadow comparison tests;
-9. artifact publication and commit status.
+2. structural mutation/overlap comparison;
+3. architecture ownership validation;
+4. typed configuration parity;
+5. Stage B immutable-model tests;
+6. StateStore parity and Stage C tests;
+7. Stage D comparison tests;
+8. runtime capture tests;
+9. declared dependency installation;
+10. exact Gunicorn startup smoke;
+11. artifact publication and commit status.
 
-New critical structural debt, unauthorized protected owners, configuration drift, StateStore safety drift, or shadow comparison authority expansion fails the audit.
+New critical debt, unauthorized owners, configuration drift, StateStore safety drift, shadow-authority expansion, or startup failure fails the audit.
 
 ### Weekly
 
-A full deep architecture audit runs Sunday at `12:30 UTC` and retains JSON and Markdown reports for 30 days.
+A full deep architecture audit runs Sunday at `12:30 UTC` and retains reports for 30 days.
 
-### Weekdays after market close
+### Post-push and weekdays after market close
 
-A bounded, concurrent, read-only Railway snapshot runs at `23:15 UTC`, or manually through workflow dispatch. It checks web connectivity, `/paper/self-check`, paper status, V1/V2 research status, persisted ablation, and regime reports. It does not initiate research, execute a trading cycle, mutate state, or place orders.
+A bounded, concurrent, read-only Railway snapshot probes:
 
-## Next Controlled Milestone — Runtime Shadow Capture Adapter
+- `/bootstrap-status`
+- `/`
+- `/paper/status`
+- `/paper/self-check`
+- V1/V2 research status
+- persisted V2 ablation and regime reports
 
-The next Stage D milestone is to connect comparison telemetry without adding another wrapper or changing the entry callable:
+The snapshot distinguishes listener availability from full-application readiness. It does not initiate research, execute a cycle, mutate state, or place orders.
 
-1. identify one existing, canonical cycle boundary that already has candidates, market, risk, positions, and final decisions;
-2. add an explicit observer call at that boundary rather than replacing `scan_signals` or `try_entries_and_rotations`;
-3. construct the immutable input snapshot once;
-4. translate the current decision into `CycleDecision`;
-5. run a read-only candidate evaluator against the same snapshot;
-6. call `compare_cycles` and retain bounded telemetry;
-7. expose only read-only status through an existing diagnostics registry or a uniquely owned route;
-8. preserve trading output byte-for-byte and decision-for-decision;
-9. require targeted mocks, startup smoke testing, one successful paper cycle, and `/paper/self-check`;
-10. collect at least 30 forward candidates and 20 one-day outcomes before any authority migration.
+## Current External Availability Incident
 
-The adapter must not create a new watchdog, public callable owner, route overlap, state owner, or order path.
+Evidence:
+
+- exact repository Gunicorn startup: pass
+- application registration: pass
+- root rendering locally: pass
+- Railway deployment checks: success
+- Railway-configured health check: `/bootstrap-status`
+- public domain post-deploy probes: 0 of 8 endpoints reachable; each timed out waiting for response
+
+Most likely next external check:
+
+- confirm which Railway service owns `trading-bot-clean.up.railway.app`
+- two Railway services currently publish deployment statuses from this repository
+- verify that the domain is attached to the service using `railway.json` and the latest commit
+- remove or detach any stale duplicate domain/service mapping
+
+Do not change strategy or add more runtime wrappers to address this routing incident.
+
+## Next Controlled Milestone
+
+1. Resolve or verify the Railway public-domain attachment.
+2. Run `/paper/self-check` and confirm:
+   - version `fast-self-check-override-2026-08-03-v6-shadow-capture`
+   - six components
+   - runtime capture `awaiting_first_market_cycle` or captured parity
+3. Observe one successful market cycle with unchanged trading output.
+4. Only then add an independent read-only candidate evaluator to the same observer path.
+5. Collect at least 30 independent forward candidates and 20 one-day outcomes before considering authority migration.
 
 ## Acceptance Targets
 
-- `scan_signals`: 14 owners toward 1 canonical owner
-- `try_entries_and_rotations`: 13 owners toward 1 canonical owner
-- `save_state`: 16 owners toward 1 StateStore
+- `scan_signals`: 14 owners toward 1
+- `try_entries_and_rotations`: 13 owners toward 1
+- `save_state`: 16 owners toward 1
 - route overlaps: 5 toward 0
 - environment conflicts: 3 toward 0
-- parameter-owner conflicts: 10 toward explicit namespaced ownership
+- parameter-owner conflicts: 10 toward namespaced ownership
 - critical structural findings: 29 toward 0
-- high-frequency watchdogs: 1 toward 0 unless explicitly justified
+- high-frequency watchdogs: 1 toward 0 unless justified
 - no new import cycles
 - no increase in broad exception suppression
 - no live, ML, state, or order-authority expansion
