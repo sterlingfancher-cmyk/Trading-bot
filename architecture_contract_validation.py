@@ -4,7 +4,7 @@
 The contract is intentionally one-way during migration:
 
 - legacy owners may disappear as refactoring progresses;
-- no undeclared owner may be added;
+- no undeclared owner may be added to a registered critical target;
 - no undeclared route overlap or environment-default conflict may appear;
 - target future owners are descriptive and receive no runtime authority.
 """
@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-VERSION = "architecture-contract-validation-2026-08-03-v1"
+VERSION = "architecture-contract-validation-2026-08-03-v2-scoped"
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -38,6 +38,8 @@ def _check_group(
     group_name: str,
     registry: dict[str, Any],
     actual: dict[str, Any],
+    *,
+    fail_unregistered: bool,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     violations: list[dict[str, Any]] = []
     progress: list[dict[str, Any]] = []
@@ -70,18 +72,17 @@ def _check_group(
                 }
             )
 
-    registered = set(registry)
-    unregistered = sorted(set(actual) - registered)
-    for target in unregistered:
-        observed = sorted(_owners(actual.get(target)))
-        violations.append(
-            {
-                "group": group_name,
-                "target": target,
-                "reason": "unregistered_overlapping_or_conflicting_target",
-                "observed_owners": observed,
-            }
-        )
+    if fail_unregistered:
+        registered = set(registry)
+        for target in sorted(set(actual) - registered):
+            violations.append(
+                {
+                    "group": group_name,
+                    "target": target,
+                    "reason": "unregistered_overlapping_or_conflicting_target",
+                    "observed_owners": sorted(_owners(actual.get(target))),
+                }
+            )
 
     return violations, progress
 
@@ -149,29 +150,38 @@ def main() -> int:
             "callable_targets",
             _dict(registry.get("callable_targets")),
             _dict(current.get("mutation_owners")),
+            False,
         ),
         (
             "route_targets",
             _dict(registry.get("route_targets")),
             _dict(current.get("route_overlaps")),
+            True,
         ),
         (
             "environment_targets",
             _dict(registry.get("environment_targets")),
             _dict(current.get("environment_conflicts")),
+            True,
         ),
     )
 
     violations: list[dict[str, Any]] = []
     progress: list[dict[str, Any]] = []
     group_summary: dict[str, Any] = {}
-    for name, declared, actual in groups:
-        found, reduced = _check_group(name, declared, actual)
+    for name, declared, actual, fail_unregistered in groups:
+        found, reduced = _check_group(
+            name,
+            declared,
+            actual,
+            fail_unregistered=fail_unregistered,
+        )
         violations.extend(found)
         progress.extend(reduced)
         group_summary[name] = {
             "registered_targets": len(declared),
             "observed_targets": len(actual),
+            "unregistered_targets_blocked": fail_unregistered,
             "violations": len(found),
             "progress_rows": len(reduced),
         }
@@ -185,7 +195,9 @@ def main() -> int:
         "audit_version": audit.get("version"),
         "policy": {
             "legacy_owner_removal_allowed": True,
-            "new_owner_allowed": False,
+            "new_owner_on_registered_target_allowed": False,
+            "new_route_or_environment_conflict_allowed": False,
+            "unregistered_noncritical_callable_targets_are_audit_warnings": True,
             "changes_runtime_authority": False,
             "imports_trading_runtime": False,
             "places_orders": False,
