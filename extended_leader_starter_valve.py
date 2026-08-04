@@ -1,9 +1,10 @@
 """Extended leader starter valve for the core entry pipeline.
 
 This is intentionally a helper-function patch, not a try_entries wrapper. It lets
-an underdeployed paper account take one tiny starter in a top-ranked leader that
-is blocked only for an upper-extension/chase reason, while preserving cooldowns,
-self-defense, risk halts, market-regime blocks, and daily-loss controls.
+an underdeployed paper account take one tiny starter per cycle in a top-ranked
+leader that is blocked only for an upper-extension/chase reason, while preserving
+cooldowns, self-defense, risk halts, market-regime blocks, and daily-loss controls.
+The favorable-market daily cap is aligned with the regime-adaptive policy.
 """
 from __future__ import annotations
 
@@ -12,10 +13,10 @@ import os
 import sys
 from typing import Any, Dict, Tuple
 
-VERSION = "extended-leader-starter-valve-2026-06-29-v1"
+VERSION = "extended-leader-starter-valve-2026-08-04-v2-regime-cap-aligned"
 ENABLED = os.environ.get("EXTENDED_LEADER_STARTER_VALVE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 MAX_REVIEWED_RANK = int(os.environ.get("EXTENDED_LEADER_STARTER_MAX_REVIEWED_RANK", "5"))
-MAX_ENTRIES_PER_DAY = int(os.environ.get("EXTENDED_LEADER_STARTER_MAX_ENTRIES_PER_DAY", "1"))
+MAX_ENTRIES_PER_DAY = int(os.environ.get("EXTENDED_LEADER_STARTER_MAX_ENTRIES_PER_DAY", "3"))
 MIN_CASH_PCT = float(os.environ.get("EXTENDED_LEADER_STARTER_MIN_CASH_PCT", "80.0"))
 MIN_RAW_SCORE = float(os.environ.get("EXTENDED_LEADER_STARTER_MIN_RAW_SCORE", "0.0135"))
 MIN_RANK_SCORE = float(os.environ.get("EXTENDED_LEADER_STARTER_MIN_RANK_SCORE", "0.0190"))
@@ -252,6 +253,8 @@ def policy() -> Dict[str, Any]:
         "helper_patch_only": True,
         "does_not_wrap_try_entries": True,
         "max_entries_per_day": MAX_ENTRIES_PER_DAY,
+        "one_entry_per_cycle": True,
+        "daily_cap_aligned_with_favorable_regime": True,
         "max_reviewed_rank": MAX_REVIEWED_RANK,
         "alloc_factor": ALLOC_FACTOR,
         "min_cash_pct": MIN_CASH_PCT,
