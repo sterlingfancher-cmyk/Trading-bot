@@ -1,0 +1,41 @@
+{
+  "version": "shadow-decision-comparison-contract-2026-08-03-v1",
+  "policy": {
+    "read_only": true,
+    "authoritative_runtime_source": false,
+    "connected_to_runtime": false,
+    "registers_routes": false,
+    "replaces_callables": false,
+    "reads_or_writes_state": false,
+    "places_orders": false,
+    "changes_strategy": false,
+    "changes_thresholds": false,
+    "changes_sizing": false,
+    "changes_risk": false
+  },
+  "comparison": {
+    "same_cycle_id_required": true,
+    "identical_input_fingerprint_required": true,
+    "candidate_key": [
+      "symbol",
+      "side"
+    ],
+    "dimensions": [
+      "candidate_presence",
+      "allowance",
+      "selection",
+      "terminal_reason",
+      "final_score",
+      "final_size_multiplier"
+    ],
+    "default_score_tolerance": 1e-12,
+    "default_size_tolerance": 1e-12
+  },
+  "forward_evidence_gate": {
+    "automatic_promotion": false,
+    "minimum_forward_candidates": 30,
+    "minimum_one_day_outcomes": 20,
+    "requires_backtest_for_behavior_change": true,
+    "requires_walk_forward_or_holdout": true
+  }
+}
