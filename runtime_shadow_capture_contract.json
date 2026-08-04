@@ -1,0 +1,51 @@
+{
+  "version": "runtime-shadow-capture-contract-2026-08-03-v1",
+  "policy": {
+    "telemetry_only": true,
+    "capture_parity_baseline_only": true,
+    "independent_policy_active": false,
+    "forward_evidence_eligible": false,
+    "automatic_promotion": false,
+    "changes_strategy": false,
+    "changes_thresholds": false,
+    "changes_sizing": false,
+    "changes_risk": false,
+    "places_orders": false,
+    "registers_routes": false,
+    "adds_watchdog": false,
+    "adds_callable_owner": false,
+    "writes_files": false
+  },
+  "integration": {
+    "existing_owner": "run_report_guard.py",
+    "existing_callable": "run_cycle",
+    "observer_function": "runtime_shadow_capture.capture_cycle",
+    "observer_call_count": 1,
+    "returned_trading_result_contains_shadow_payload": false,
+    "portfolio_key": "shadow_decision_comparison",
+    "portfolio_mutation_owner": "run_report_guard.py",
+    "state_persistence_owner_unchanged": true
+  },
+  "capture": {
+    "same_cycle_id_required": true,
+    "same_input_fingerprint_required": true,
+    "history_limit": 30,
+    "candidate_dimensions": [
+      "symbol",
+      "side",
+      "allowance",
+      "selection",
+      "terminal_reason",
+      "final_score",
+      "final_size_multiplier"
+    ]
+  },
+  "promotion_gate": {
+    "capture_baseline_counts_as_forward_policy_evidence": false,
+    "minimum_forward_candidates_after_independent_policy": 30,
+    "minimum_one_day_outcomes_after_independent_policy": 20,
+    "behavior_change_requires_backtest": true,
+    "behavior_change_requires_walk_forward_or_holdout": true,
+    "behavior_change_requires_paper_canary": true
+  }
+}
