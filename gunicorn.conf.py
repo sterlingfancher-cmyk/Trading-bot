@@ -25,6 +25,12 @@ def _isolate_heavy_research() -> bool:
     return True
 
 
+# Gunicorn loads this configuration before importing ``wsgi:app``. Applying the
+# boundary here prevents import-time research watchdogs from starting before
+# ``post_worker_init`` can run.
+RESEARCH_ISOLATED = _isolate_heavy_research()
+
+
 def on_starting(server):
     diagnostics.record_module_event("gunicorn", "on_starting")
 
@@ -38,7 +44,7 @@ def post_fork(server, worker):
 
 
 def post_worker_init(worker):
-    research_isolated = _isolate_heavy_research()
+    research_isolated = RESEARCH_ISOLATED
     try:
         import app as core
         import run_report_guard
