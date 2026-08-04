@@ -2,188 +2,104 @@
 
 ## Scope
 
-This document records the first calibrated, repository-wide refactor audit. It is a static architecture baseline, not a claim that every finding is an active runtime defect.
+This is the canonical static-refactor baseline for `sterlingfancher-cmyk/Trading-bot`. It inventories architectural debt and protects migration contracts. It does not assert that every static finding is an active runtime defect.
 
-Source run:
+Current validated audit run:
 
-- GitHub Actions run: `30874076617`
-- head commit: `37f1e4a170868720ec723724b1e3a142d9f8bedc`
-- audit version: `refactor-audit-cli-2026-08-03-v3-bounded-loop-calibration`
-- result: pass
-- new critical findings versus base: 0
-- new warnings versus base: 0
+- GitHub Actions run: `30875703784`
+- head commit: `eaf02e521b78bf9204426bb8f74331d9f353e9c8`
+- structural audit: pass
+- architecture ownership contract: pass
+- typed configuration parity: pass
+- Stage B immutable model tests: pass
+- StateStore shadow parity: pass
+- Stage C StateStore tests: pass
+- new critical findings: 0
+- new warnings: 0
 
-The per-update gate passed because the audit changes did not introduce new structural debt. Existing debt is preserved below as the controlled refactor backlog.
+## Current Repository Surface
 
-## Repository Surface
-
-- Python files: 145
-- Python source lines: 67,643
+- Python files: 152
+- Python source lines: 69,210
 - internal import edges: 170
 - import cycles: 0
-- module-level calls: 2,442
+- module-level calls: 2,460
 - import-time thread creations: 2
 - persistent watchdog loops: 7
-- bounded `while True` loops excluded from watchdog debt: 1
 - genuinely high-frequency or potentially busy watchdogs: 1
 - dynamic mutation targets: 72
 - targets with overlapping mutation owners: 29
-- environment keys observed: 866
+- environment keys observed: 867
 - conflicting environment defaults: 3
 - parameter names observed: 523
 - conflicting parameter owners: 10
 - route literals: 187
 - route overlaps: 5
-- exact duplicate function-body groups: 64
+- exact duplicate function-body groups: 65
 - parallel version families: 1
 - broad exception handlers that only pass: 482
 - provider-like calls inside loops: 1
 - critical findings: 29
 - warning findings: 90
-- informational findings: 113
+- informational findings: 114
 
-## Interpretation
+The absence of import cycles and the passing compile/static gates are positive. The dominant debt remains runtime ownership ambiguity, import-time activation, overlapping callable replacement, duplicated configuration interpretation, and broad exception suppression.
 
-The architecture has no detected static import cycle, and all tracked Python files passed the repository compile and safety gate.
-
-The dominant risk is runtime ownership ambiguity:
-
-- multiple modules replace the same public scanner and entry callables;
-- state, entry quality, execution, and route functions have multiple owners;
-- some configuration names carry different defaults or percentage units;
-- many modules activate behavior at import time and suppress exceptions.
-
-The correct response is not mass deletion. The system requires a staged migration to declared interfaces and one authoritative owner per critical responsibility.
-
-## Priority 1 — Critical Callable Ownership
+## Highest-Priority Ownership Debt
 
 ### Scanner authority
 
-`scan_signals` is replaced from 14 modules:
+`scan_signals` currently has 14 allowed legacy owners. The target is one canonical `trading.signals.SignalEngine` with explicit, ordered signal layers rather than replacement of the public callable.
 
-- `breakout_participation_layer.py`
-- `breakout_scanner_ownership_guard.py`
-- `dynamic_universe_builder.py`
-- `fvg_runtime.py`
-- `loss_streak_defensive_governor.py`
-- `market_participation_accelerator.py`
-- `multi_timeframe_swing.py`
-- `opening_surge_participation.py`
-- `pattern_recognition_layer.py`
-- `relative_strength_leader_exception.py`
-- `scanner_runtime_contract.py`
-- `scanner_stack_emergency_reset.py`
-- `scanner_v2_candidate_lifecycle_trace.py`
-- `shared_cycle_identity.py`
+### Entry and decision authority
 
-Target architecture:
+`try_entries_and_rotations` currently has 13 allowed legacy owners. The target is one canonical `trading.decision.DecisionEngine` that emits typed policy effects:
 
-- one canonical `SignalEngine` or scanner service owns the public scanner callable;
-- strategy layers implement explicit, ordered interfaces rather than replacing the public function;
-- ownership, ordering, and telemetry are data contracts rather than watchdog repairs.
+- `HARD_BLOCK`
+- `SIZE_REDUCTION`
+- `SCORE_ADJUSTMENT`
+- `RANKING_PREFERENCE`
+- `TELEMETRY_ONLY`
 
-### Entry authority
+### State authority
 
-`try_entries_and_rotations` is replaced from 13 modules:
+`save_state` currently has 16 allowed legacy owners. The target is one canonical `trading.state.StateStore`. No current owner has been removed or replaced yet.
 
-- `bear_recovery_stack_contract.py`
-- `bear_soft_pause_short_recovery.py`
-- `core_entry_pipeline.py`
-- `entry_pipeline_composition_guard.py`
-- `entry_pipeline_xray.py`
-- `entry_pipeline_xray_bear_ownership_guard.py`
-- `paper_exposure_rotation.py`
-- `performance_risk_activation_guard.py`
-- `performance_risk_calibration.py`
-- `post_harvest_entry_fallback.py`
-- `post_harvest_redeployment_controller.py`
-- `profit_maturity_rotation_layer.py`
-- `theme_starter_exception.py`
+Other high-overlap targets include:
 
-Target architecture:
+- `entry_quality_check`: 10 owners
+- `enter_position`: 9 owners
+- `UNIVERSE`: 6 owners
+- `BUCKET_CONFIG`: 5 owners
+- `apply_aggression_adjustments`: 5 owners
+- `manage_exits`: 3 owners
+- `download_prices`: 3 owners
+- `run_cycle`: 3 owners
 
-- one canonical `DecisionEngine` owns candidate ranking, permission checks, selection, and rotation decisions;
-- risk policies return typed decisions such as `HARD_BLOCK`, `SIZE_REDUCTION`, `SCORE_ADJUSTMENT`, or `RANKING_PREFERENCE`;
-- recovery, X-Ray, and diagnostics observe the decision path without wrapping or replacing it.
+## Known Configuration Debt
 
-### Other high-overlap targets
+The typed configuration contract currently preserves five known conflicts or ambiguities without resolving them:
 
-- `save_state`: 16 modules
-- `entry_quality_check`: 10 modules
-- `enter_position`: 9 modules
-- `UNIVERSE`: 6 modules
-- `BUCKET_CONFIG`: 5 modules
-- `apply_aggression_adjustments`: 5 modules
-- `portfolio`: 4 modules
-- `feedback_loop_status`: 4 modules
-- `download_prices`: 3 modules
-- `manage_exits`: 3 modules
-- `market_status`: 3 modules
-- `rotation_allowed`: 3 modules
-- `run_cycle`: 3 modules
+1. `MIN_ENTRY_SCORE_NEUTRAL`
+   - `app.py`: `0.0140`
+   - `news_sentiment_engine.py`: `0.033`
+2. `STATE_FILE`
+   - canonical: `state.json`
+   - diagnostic fallbacks also include `None` and an empty string
+3. `EOD_ALLOCATION_WINDOW_MINUTES`
+   - canonical literal: `45`
+   - other owners use dynamic values
+4. `MAX_INTRADAY_DRAWDOWN_PCT`
+   - account hard risk uses fraction units
+   - surge-local limits use percentage points
+5. `MAX_DAILY_DRAWDOWN_PCT`
+   - percentage-point and dynamically resolved module-local meanings coexist
 
-These targets require declared owners before code is removed.
+The typed snapshot is non-authoritative. Any effective value change remains a trading-behavior change and requires backtest, walk-forward or untouched holdout, cost/slippage sensitivity, and forward paper evidence.
 
-## Priority 2 — Configuration and Unit Ownership
+## Known Route Debt
 
-### Neutral entry-score conflict
-
-`MIN_ENTRY_SCORE_NEUTRAL` has two different fallbacks:
-
-- `app.py`: `0.0140`
-- `news_sentiment_engine.py`: `0.033`
-
-This is a genuine namespace/default conflict. The news engine should consume the canonical runtime score helper or a separately named advisory fallback. Because changing the fallback can affect candidate interpretation, the eventual repair must be treated as a trading-behavior change and receive backtest and forward validation.
-
-### State-file ownership conflict
-
-`STATE_FILE` is read with multiple fallback conventions:
-
-- most modules use `state.json`;
-- `state_provenance_monitor.py` permits `None`;
-- `state_size_watchdog.py` permits an empty string.
-
-Target architecture:
-
-- one `StateStore` resolves the path and persistence mode;
-- diagnostics consume the resolved store descriptor instead of independently interpreting environment variables.
-
-### Drawdown-unit ambiguity
-
-The codebase uses both decimal fractions and displayed percentage points.
-
-Examples:
-
-- central runtime hard drawdown: `0.025`, meaning 2.5%;
-- surge executor constants: `1.50`, compared with fields named `*_pct`.
-
-The surge values may be internally consistent, but identical suffixes do not guarantee identical units.
-
-Target architecture:
-
-- use explicit names such as `*_FRACTION` and `*_PCT_POINTS`;
-- centralize conversion at the boundary;
-- include units in typed risk snapshots and tests.
-
-### Other parameter-owner conflicts
-
-- `EOD_ALLOCATION_WINDOW_MINUTES`
-- `MAX_DAILY_DRAWDOWN_PCT`
-- `MAX_INTRADAY_DRAWDOWN_PCT`
-- `MAX_ROWS`
-- `MAX_SYMBOLS`
-- `MIN_AVG_VOLUME`
-- `MIN_DOLLAR_VOLUME`
-- `MIN_PRICE`
-- `WATCHDOG_FAST_ITERATIONS`
-- `WATCHDOG_MAX_ITERATIONS`
-- `WATCHDOG_SECONDS`
-
-Not every repeated name is incorrect. The refactor must distinguish global policy, module-local limits, diagnostics, and research settings through namespaces and typed configuration objects.
-
-## Priority 3 — Route and Runtime Ownership
-
-Five exact route overlaps were found:
+Five exact route overlaps remain registered in the ownership contract:
 
 - `/paper/follow-through-review`
 - `/paper/live-volatility-status`
@@ -191,151 +107,139 @@ Five exact route overlaps were found:
 - `/paper/risk-improvement-status`
 - `/paper/volatility-stop-plan`
 
-The overlapping owners are concentrated in:
+New route overlaps are blocked. Existing overlaps must be removed through controlled handler migration.
 
-- `risk_bootstrap.py`
-- `risk_improvements.py`
-- `live_volatility.py`
+## Performance and Reliability Debt
 
-Target architecture:
+- `performance_audit_composition_guard.py` still runs a five-second repair loop.
+- One provider-like `download_prices` call remains inside a loop in `app.py` and requires profiling/caching review.
+- 482 broad `except Exception: pass` paths remain and must be narrowed incrementally.
+- `app.py` remains approximately 5,037 lines.
+- Heavy V1/V2 historical research has been isolated from the single production web worker. Forward-shadow and read-only status capability remain; historical research must move to an explicit or dedicated research process.
 
-- one route registry declares endpoint ownership;
-- modules provide handlers, not opportunistic registration;
-- duplicate routes fail a startup test before Railway deployment.
+## Completed Migration Stages
 
-## Priority 4 — Performance and Reliability Debt
-
-### High-frequency watchdog
-
-`performance_audit_composition_guard.py` calls its installer every five seconds.
-
-The performance audit is advisory research. Its composition check should become event-driven, startup-driven, or substantially lower frequency unless evidence shows a five-second repair loop is necessary.
-
-### Provider work inside a loop
-
-The audit found one provider-like call inside a loop in `app.py`: `download_prices`.
-
-This requires profiling and caching review. It is not automatically a bug, but repeated provider work can increase latency, timeout risk, and data inconsistency within one cycle.
-
-### Broad exception suppression
-
-The repository contains 482 broad exception handlers whose bodies only pass.
-
-This creates blind spots. Refactoring should replace them incrementally with:
-
-- bounded exception classes;
-- structured telemetry;
-- explicit fallback status;
-- tests proving the fallback behavior.
-
-Do not replace all handlers mechanically. Some startup and diagnostic paths intentionally degrade gracefully.
-
-### Module size
-
-Largest modules include:
-
-- `app.py`: 5,037 lines, 158 functions
-- `market_surge_deployment_mode.py`: 1,434 lines
-- `performance_audit_lab.py`: 1,384 lines
-- `performance_audit_lab_v2.py`: 1,297 lines
-- `opening_surge_participation.py`: 924 lines
-- `dynamic_universe_builder.py`: 898 lines
-- `core_entry_pipeline.py`: 789 lines
-- `neutral_momentum_starter_extension.py`: 785 lines
-
-Line count is not the primary target. The target is explicit ownership and deterministic execution.
-
-## Priority 5 — Duplicate and Parallel Implementations
-
-- exact duplicate function-body groups: 64
-- parallel version family: `performance_audit_lab.py` and `performance_audit_lab_v2.py`
-
-These findings require semantic review. Exact helper duplication can move into utilities; versioned research modules can remain separate until V2 is validated and V1 consumers are migrated.
-
-## Migration Sequence
-
-### Stage A — Ownership contracts — Completed
+### Stage A — Ownership contracts — Complete
 
 Implemented:
 
 - `architecture_ownership_registry.json`
 - `architecture_contract_validation.py`
-- contract validation integrated into `.github/workflows/refactor-audit.yml`
+- ownership validation in `.github/workflows/refactor-audit.yml`
 
-Validated result:
+Validated:
 
 - callable targets registered: 10
 - route targets registered: 5
 - environment targets registered: 3
 - ownership violations: 0
 - legacy owner removal is allowed and recorded as progress
-- new owners on registered targets are blocked
+- new undeclared owners on protected targets are blocked
 - new route overlaps and environment-default conflicts are blocked
-- no runtime callable, parameter, state, live, ML, or order authority changed
 
-### Stage B — Typed configuration — Next
+### Stage B — Typed configuration and immutable shadow models — Complete
 
-1. Introduce immutable, namespaced configuration models.
-2. Add explicit fraction-versus-percentage units.
-3. Resolve duplicate environment defaults first in shadow/snapshot form.
-4. Preserve current effective runtime values.
-5. Add parity tests proving no policy drift.
-6. Treat any effective-value change as trading behavior requiring backtest and forward evidence.
+Canonical implementation:
 
-### Stage C — State service
+- `typed_configuration_contract.json`
+- `typed_configuration_snapshot.py`
+- `shadow_decision_models.py`
+- `test_architecture_stage_b.py`
 
-1. Introduce one `StateStore` interface.
-2. Put path, locking, atomic write, backup, and provenance behind that interface.
-3. Route existing callers through an adapter.
-4. Compare state output before and after migration.
-5. Remove direct `save_state` replacements only after parity tests pass.
+Validated:
 
-### Stage D — Shadow decision engine
+- typed configuration status: pass
+- violations: 0
+- known conflicts preserved: 5
+- canonical defaults present
+- immutable signal, market, risk, position, policy, candidate, and cycle models tested
+- shadow authority only
+- no runtime imports or order methods
 
-1. Define immutable signal, market, risk, position, and decision models.
-2. Run the current entry path and new decision engine against the same cycle snapshot.
-3. Record:
+A duplicate Stage B parity implementation was removed before promotion, preventing the audit framework itself from creating overlapping ownership.
+
+### Stage C — StateStore shadow parity — Foundation complete
+
+Implemented:
+
+- `state_store_contract.json`
+- `state_store_shadow.py`
+- `test_state_store_stage_c.py`
+- StateStore validation in `.github/workflows/refactor-audit.yml`
+
+Validated current capabilities:
+
+- atomic `os.replace` writes
+- file fsync
+- directory fsync attempt
+- thread locking
+- file locking when supported
+- shared read and exclusive write paths
+- retrying reads
+- latest, largest, and prewrite backups
+- backup fallback reads
+- non-overlapping cycle guard
+- canonical `STATE_FILE=state.json` observation
+
+StateStore shadow result: pass, with zero symbol, call, default, capability, or typed-configuration violations.
+
+This is not an authority migration. The shadow validator does not open the production state file, replace `save_state`, or change state paths.
+
+## Permanent Audit Cadence
+
+### Every Python update or pull request
+
+The consolidated audit now runs:
+
+1. repository compile and static safety checks;
+2. structural mutation/overlap comparison against the base commit;
+3. architecture ownership contract validation;
+4. typed configuration parity validation;
+5. immutable Stage B model tests;
+6. StateStore shadow parity validation;
+7. Stage C tests;
+8. artifact publication and commit status.
+
+New critical structural debt, unauthorized protected owners, configuration drift, or StateStore safety drift fails the audit.
+
+### Weekly
+
+A full deep architecture audit runs Sunday at `12:30 UTC` and retains JSON and Markdown reports for 30 days.
+
+### Weekdays after market close
+
+A bounded, concurrent, read-only Railway snapshot runs at `23:15 UTC`. It checks web connectivity, `/paper/self-check`, V1/V2 research status, persisted ablation, and regime reports. It does not initiate research, execute a trading cycle, mutate state, or place orders.
+
+## Next Stage — Shadow Decision Comparison
+
+The next controlled milestone is Stage D:
+
+1. capture one immutable cycle input snapshot;
+2. convert current scanner candidates, market mode, risk state, and positions into the shadow models;
+3. record the current engine decision without changing it;
+4. run a new read-only decision evaluator against the same snapshot;
+5. compare:
    - selected symbols;
    - rejected symbols;
    - terminal reasons;
-   - position sizes;
+   - score changes;
+   - size multipliers;
    - risk and exposure;
-   - execution eligibility.
-4. New engine remains read-only and places no orders.
-5. Collect at least 30 forward candidates and 20 one-day outcomes.
-
-### Stage E — Controlled authority migration
-
-1. Migrate scanner ownership first.
-2. Migrate entry/decision ownership second.
-3. Migrate state ownership third.
-4. Remove wrappers and watchdogs in small batches.
-5. Require repository validation, structural audit, unit tests, backtest, walk-forward, and forward paper evidence for every behavior-affecting batch.
+   - execution eligibility;
+6. store comparison telemetry only;
+7. place no orders and change no runtime authority;
+8. collect at least 30 forward candidates and 20 one-day outcomes before any authority migration.
 
 ## Acceptance Targets
 
-The refactor should move toward:
-
-- `scan_signals`: 14 owners to 1 canonical owner with declared composable layers;
-- `try_entries_and_rotations`: 13 owners to 1 canonical decision engine;
-- `save_state`: 16 owners to 1 state service;
-- route overlaps: 5 to 0;
-- environment conflicts: 3 to 0;
-- parameter-owner conflicts: 10 to explicit namespaced ownership;
-- critical structural findings: 29 toward 0;
-- genuinely high-frequency watchdogs: 1 to 0 unless explicitly justified;
-- no increase in broad exception suppression;
-- no new import cycles;
-- no new live or ML authority.
-
-## Immediate Next Implementation
-
-Introduce a read-only typed configuration snapshot and parity validator for:
-
-- risk units;
-- entry-score defaults;
-- state-path resolution;
-- timing windows;
-- watchdog intervals.
-
-The typed configuration layer must not become authoritative until parity is proven. In parallel, define immutable shadow decision data models without connecting them to order placement.
+- `scan_signals`: 14 owners toward 1 canonical owner
+- `try_entries_and_rotations`: 13 owners toward 1 canonical owner
+- `save_state`: 16 owners toward 1 StateStore
+- route overlaps: 5 toward 0
+- environment conflicts: 3 toward 0
+- parameter-owner conflicts: 10 toward explicit namespaced ownership
+- critical structural findings: 29 toward 0
+- high-frequency watchdogs: 1 toward 0 unless explicitly justified
+- no new import cycles
+- no increase in broad exception suppression
+- no live, ML, or order-authority expansion
