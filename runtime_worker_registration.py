@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 import runtime_diagnostics as diagnostics
 
-VERSION = "runtime-worker-registration-2026-08-04-v5-state-provider-cycle-ordering"
+VERSION = "runtime-worker-registration-2026-08-04-v6-entry-time-guard"
 _LOCK = threading.RLock()
 _REGISTERED_CORE_IDS: set[int] = set()
 _KICKOFF_STARTED: set[int] = set()
@@ -176,6 +176,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             import neutral_momentum_starter_extension
             import neutral_late_session_participation
             import paper_underdeployment_repair
+            import paper_underdeployment_time_guard
             import paper_regime_adaptive_policy
             import performance_audit_lab
             import performance_audit_lab_v2
@@ -197,6 +198,17 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             cycle_completion_contract.register_routes(core.app, core)
             daily_overlay_result = daily_audit_repair_overlay.apply(core)
             daily_audit_repair_overlay.register_routes(core.app, core)
+
+            # The target module is fully imported in this web worker now. Apply
+            # the epoch-aware parser synchronously before any entry cycle can
+            # evaluate second-starter spacing. The configured spacing remains
+            # unchanged; only timestamp timezone semantics are corrected.
+            entry_time_guard_result = paper_underdeployment_time_guard.apply()
+            if not entry_time_guard_result.get("patched"):
+                raise RuntimeError(
+                    "paper underdeployment entry-time guard failed to install: "
+                    + str(entry_time_guard_result)
+                )
 
             regime_integrity_underdeployment.start_watchdog(core)
             regime_integrity_underdeployment.register_routes(core.app, core)
@@ -264,6 +276,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 provider_timeout_contract.VERSION,
                 cycle_completion_contract.VERSION,
                 daily_audit_repair_overlay.VERSION,
+                paper_underdeployment_time_guard.VERSION,
                 performance_risk_activation_guard.VERSION,
                 regime_integrity_underdeployment.VERSION,
                 regime_integrity_cache_guard.VERSION,
@@ -295,6 +308,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 "provider_timeout_contract": provider_result,
                 "cycle_completion_contract": cycle_result,
                 "daily_audit_repair_overlay": daily_overlay_result,
+                "paper_underdeployment_time_guard": entry_time_guard_result,
                 "run_cycle_observer": run_report_guard_apply,
                 "auto_runner": auto_runner,
             }
@@ -305,6 +319,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                     f"research_isolated={research_isolated};"
                     + ";".join(versions)
                     + ";state_provider_cycle_contracts_before_runner"
+                    + ";entry_time_guard_before_runner"
                     + ";final_run_cycle_observer_installed"
                     + ";auto_runner_started_after_composition"
                 ),
@@ -347,5 +362,6 @@ def status() -> Dict[str, Any]:
             "defers_first_cycle_until_composition": True,
             "final_run_cycle_observer_owner": "run_report_guard",
             "cycle_completion_owner_below_observer": "cycle_completion_contract",
+            "entry_time_guard_installed_before_runner": True,
         },
     }
