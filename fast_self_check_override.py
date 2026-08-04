@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import sys
+import time
 from typing import Any, Dict
 
-VERSION = "fast-self-check-override-2026-08-03-v6-shadow-capture"
+VERSION = "fast-self-check-override-2026-08-04-v7-runtime-classification"
 _PATCHED_APP_IDS: set[int] = set()
+_TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def _mod() -> Any | None:
@@ -65,6 +68,78 @@ def _error_freshness(last_error: Any, last_attempt: Any, last_run: Any, last_suc
         "state": "active" if active else "historical_superseded" if superseded else "none",
         "superseding_run_or_success": bool(superseded),
     }
+
+
+def _runner_liveness(auto: Dict[str, Any], now_epoch: float | None = None) -> Dict[str, Any]:
+    """Use observed auto attempts when the persisted boolean is stale.
+
+    The app's auto loop attempts immediately and then at its configured interval.
+    A recent epoch-stamped automatic attempt is therefore stronger evidence than
+    a persisted ``thread_started`` field that can be overwritten by older state.
+    """
+    now_epoch = float(now_epoch if now_epoch is not None else time.time())
+    try:
+        interval = max(30.0, float(auto.get("interval_seconds") or 300.0))
+    except Exception:
+        interval = 300.0
+    freshness_window = max(180.0, interval * 2.5)
+    attempt_epoch = _time_key(auto.get("last_attempt_ts"))
+    age = now_epoch - attempt_epoch if attempt_epoch > 0 else None
+    source = str(auto.get("last_attempt_source") or "").strip().lower()
+    recent_auto_attempt = bool(
+        source == "auto"
+        and age is not None
+        and age >= -5.0
+        and age <= freshness_window
+    )
+    reported_started = auto.get("thread_started") is True
+    active = bool(reported_started or recent_auto_attempt)
+    if reported_started:
+        state = "reported_started"
+    elif recent_auto_attempt:
+        state = "inferred_from_recent_auto_attempt"
+    else:
+        state = "not_observed"
+    return {
+        "active": active,
+        "state": state,
+        "reported_started": reported_started,
+        "recent_auto_attempt": recent_auto_attempt,
+        "last_attempt_age_seconds": round(age, 1) if age is not None else None,
+        "freshness_window_seconds": round(freshness_window, 1),
+    }
+
+
+def _heavy_research_isolated() -> bool:
+    return str(os.environ.get("WEB_WORKER_ALLOW_HEAVY_RESEARCH", "false")).lower() not in _TRUE_VALUES
+
+
+def _normalize_advisory_components(
+    components: Dict[str, Dict[str, Any]],
+    *,
+    research_isolated: bool | None = None,
+) -> tuple[Dict[str, Dict[str, Any]], list[str]]:
+    """Keep optional research evidence visible without failing web runtime health."""
+    research_isolated = _heavy_research_isolated() if research_isolated is None else bool(research_isolated)
+    normalized: Dict[str, Dict[str, Any]] = {}
+    deferred: list[str] = []
+    for name, raw in components.items():
+        row = dict(raw) if isinstance(raw, dict) else {"overall": "warn", "value": raw}
+        if name == "performance_evidence":
+            status = str(row.get("backtest_status") or "not_run").strip().lower()
+            explicit_error = bool(row.get("error")) or status == "error"
+            deferred_status = status in {"not_run", "disabled", "pending", "queued", "running"}
+            if research_isolated and deferred_status and not explicit_error:
+                row["overall"] = "pass"
+                row["evidence_state"] = (
+                    "research_in_progress" if status in {"queued", "running"}
+                    else "deferred_to_research_worker"
+                )
+                row["runtime_blocking"] = False
+                row["web_worker_research_isolated"] = True
+                deferred.append(name)
+        normalized[name] = row
+    return normalized, deferred
 
 
 def _check_result(name: str, payload: Dict[str, Any], passed: bool, details: Dict[str, Any]) -> Dict[str, Any]:
@@ -277,9 +352,11 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
     last_success = auto.get("last_successful_run_local") or auto.get("last_successful_run_ts")
     last_skip = auto.get("last_skip_local") or auto.get("last_skip_ts")
     freshness = _error_freshness(last_error, last_attempt, last_run, last_success)
+    runner_liveness = _runner_liveness(auto)
     recursion_text = "recursion" in str(last_error or "").lower()
 
-    components = _component_checks(core) if core is not None else {}
+    raw_components = _component_checks(core) if core is not None else {}
+    components, deferred_components = _normalize_advisory_components(raw_components)
     failing_components = [name for name, row in components.items() if row.get("overall") != "pass"]
     component_pass_count = sum(1 for row in components.values() if row.get("overall") == "pass")
 
@@ -294,8 +371,8 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
         base_failures.append("self_defense_active")
     if auto.get("enabled") is False:
         base_failures.append("auto_runner_disabled")
-    if auto.get("thread_started") is False:
-        base_failures.append("auto_runner_thread_not_started")
+    if auto.get("enabled") is not False and not runner_liveness["active"]:
+        base_failures.append("auto_runner_liveness_not_observed")
 
     all_passed = bool(core is not None and not base_failures and not failing_components)
 
@@ -311,6 +388,8 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
             "components_checked": len(components),
             "components_passed": component_pass_count,
             "components_warned": len(failing_components),
+            "components_deferred": len(deferred_components),
+            "deferred_components": deferred_components,
             "failing_components": failing_components,
             "base_failures": base_failures,
             "next_action": "none" if all_passed else "inspect_only_the_named_warning_component",
@@ -330,6 +409,12 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
         "auto_runner": {
             "enabled": auto.get("enabled"),
             "thread_started": auto.get("thread_started"),
+            "thread_started_reported": runner_liveness["reported_started"],
+            "thread_active_observed": runner_liveness["active"],
+            "thread_liveness_state": runner_liveness["state"],
+            "recent_auto_attempt": runner_liveness["recent_auto_attempt"],
+            "last_attempt_age_seconds": runner_liveness["last_attempt_age_seconds"],
+            "liveness_freshness_window_seconds": runner_liveness["freshness_window_seconds"],
             "interval_seconds": auto.get("interval_seconds"),
             "last_attempt": last_attempt,
             "last_attempt_source": auto.get("last_attempt_source"),
@@ -387,6 +472,7 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
             "may_repair_runtime_composition_or_ownership": True,
             "runtime_shadow_observer_only": True,
             "trading_authority_unchanged": True,
+            "classification_only": True,
         },
     }
 
