@@ -154,8 +154,45 @@ class SelfCheckRuntimeClassificationTests(unittest.TestCase):
         self.assertTrue(result["started"])
         self.assertTrue(result["reported_thread_started"])
         self.assertTrue(result["global_thread_started"])
+        self.assertFalse(result["diagnostic_state_synchronized"])
         self.assertEqual(result["owner"], "app.ensure_auto_thread")
         self.assertEqual(result["ordering"], "after_runtime_composition")
+
+    def test_runtime_registration_synchronizes_stale_reported_flag(self) -> None:
+        portfolio = {
+            "auto_runner": {
+                "enabled": True,
+                "thread_started": False,
+                "interval_seconds": 300,
+            }
+        }
+        calls: list[str] = []
+        core = SimpleNamespace(
+            portfolio=portfolio,
+            AUTO_THREAD_STARTED=True,
+        )
+
+        def ensure_auto_thread() -> None:
+            calls.append("ensure_auto_thread")
+            # Mirrors app.ensure_auto_thread(): an already-active global owner
+            # returns without rewriting stale persisted diagnostic state.
+            return None
+
+        core.ensure_auto_thread = ensure_auto_thread
+        result = registration._start_auto_runner(core)
+
+        self.assertEqual(calls, ["ensure_auto_thread"])
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["started"])
+        self.assertFalse(result["reported_before_sync"])
+        self.assertTrue(result["reported_thread_started"])
+        self.assertTrue(result["global_thread_started"])
+        self.assertTrue(result["diagnostic_state_synchronized"])
+        self.assertTrue(portfolio["auto_runner"]["thread_started"])
+        self.assertEqual(
+            portfolio["auto_runner"]["thread_start_owner"],
+            "runtime_worker_registration",
+        )
 
     def test_runtime_registration_fails_when_runner_owner_missing(self) -> None:
         result = registration._start_auto_runner(
