@@ -1,7 +1,7 @@
 """Deferred WSGI dispatcher with startup visibility.
 
-Gunicorn can serve a lightweight bootstrap status immediately while the legacy
-Flask application and runtime registrations load in a background thread. Once
+Gunicorn serves a lightweight bootstrap status before the legacy Flask
+application and runtime registrations load in a background timer thread. Once
 ready, all non-bootstrap requests delegate to the unchanged Flask app.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import time
 import traceback
 from typing import Any, Callable, Iterable
 
-VERSION = "deferred-wsgi-bootstrap-2026-08-03-v3-env-parity"
+VERSION = "deferred-wsgi-bootstrap-2026-08-03-v4-listener-first"
 _START_MONOTONIC = time.monotonic()
 _LOCK = threading.RLock()
 _DELEGATE: Callable[..., Any] | None = None
@@ -25,13 +25,26 @@ _V2_ENABLED_VALUE = (
     if "PERFORMANCE_AUDIT_V2_ENABLED" in os.environ
     else "false"
 )
+
+
+def _loader_delay_seconds() -> float:
+    raw = os.environ.get("DEFERRED_WSGI_START_DELAY_SECONDS", "1.0")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = 1.0
+    return max(0.1, min(value, 10.0))
+
+
+_LOADER_DELAY_SECONDS = _loader_delay_seconds()
 _STATE: dict[str, Any] = {
     "status": "loading",
-    "phase": "bootstrap_imported",
+    "phase": "bootstrap_scheduled",
     "version": VERSION,
     "started_local": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "research_isolated": _V2_ENABLED_VALUE.lower()
     in {"0", "false", "no", "off"},
+    "loader_start_delay_seconds": _LOADER_DELAY_SECONDS,
 }
 
 
@@ -146,10 +159,14 @@ class DeferredApplication:
         )
 
 
+# The WSGI callable is fully constructed before the heavy loader is scheduled.
+# This avoids starting the legacy import while Gunicorn is still importing this
+# module and guarantees that the bootstrap listener can answer independently.
 app = DeferredApplication()
-_LOADER_THREAD = threading.Thread(
-    target=_load_application,
-    name="deferred-paper-application-loader",
-    daemon=True,
+_LOADER_THREAD = threading.Timer(
+    _LOADER_DELAY_SECONDS,
+    _load_application,
 )
+_LOADER_THREAD.name = "deferred-paper-application-loader"
+_LOADER_THREAD.daemon = True
 _LOADER_THREAD.start()
