@@ -82,6 +82,11 @@ jobs:
             --json typed_configuration_report.json \
             --markdown typed_configuration_report.md
 
+      - name: Test immutable Stage B models
+        id: stage_b_models
+        if: always()
+        run: python -m unittest -v test_architecture_stage_b.py
+
       - name: Read audit summary
         id: summary
         if: always()
@@ -144,9 +149,9 @@ jobs:
             const auditPassed = '${{ steps.audit.outcome }}' === 'success';
             const contractPassed = '${{ steps.contract.outcome }}' === 'success';
             const configPassed = '${{ steps.configuration.outcome }}' === 'success';
-            const passed = auditPassed && contractPassed && configPassed;
+            const modelsPassed = '${{ steps.stage_b_models.outcome }}' === 'success';
+            const passed = auditPassed && contractPassed && configPassed && modelsPassed;
             const newCritical = '${{ steps.summary.outputs.new_critical }}';
-            const newWarnings = '${{ steps.summary.outputs.new_warnings }}';
             const ownership = '${{ steps.summary.outputs.contract_violations }}';
             const configuration = '${{ steps.summary.outputs.configuration_violations }}';
             await github.rest.repos.createCommitStatus({
@@ -156,7 +161,7 @@ jobs:
               state: passed ? 'success' : 'failure',
               context: 'refactor-audit',
               description: passed
-                ? `No new critical debt; ownership and configuration intact`
+                ? `Ownership, typed configuration, and shadow models intact`
                 : `${newCritical} critical; ${ownership} owner; ${configuration} config violations`,
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
