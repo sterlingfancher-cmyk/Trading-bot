@@ -13,7 +13,7 @@ from typing import Any, Dict
 
 import runtime_diagnostics as diagnostics
 
-VERSION = "runtime-worker-registration-2026-08-04-v3-auto-runner-state-sync"
+VERSION = "runtime-worker-registration-2026-08-04-v4-final-cycle-observer"
 _LOCK = threading.RLock()
 _REGISTERED_CORE_IDS: set[int] = set()
 _LAST: Dict[str, Any] = {}
@@ -111,8 +111,6 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 performance_audit_lab_v2.AUTO_BACKTEST = False
                 performance_audit_lab_v2.ENABLED = False
 
-            run_report_guard.apply(core)
-            run_report_guard.register_routes(core.app, core)
             regime_integrity_underdeployment.start_watchdog(core)
             regime_integrity_underdeployment.register_routes(core.app, core)
             regime_integrity_cache_guard.start_watchdog(core)
@@ -156,6 +154,17 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             performance_audit_composition_guard.register_routes(core.app, core)
             diagnostics.register_routes(core.app, core)
 
+            # Final run_cycle owner: attach the observer only after every startup
+            # component has completed its callable composition. This preserves one
+            # explicit observer and ensures the auto runner executes through it.
+            run_report_guard_apply = run_report_guard.apply(core)
+            run_report_guard.register_routes(core.app, core)
+            if run_report_guard_apply.get("status") != "ok":
+                raise RuntimeError(
+                    "final run-cycle observer failed to install: "
+                    + str(run_report_guard_apply)
+                )
+
             auto_runner = _start_auto_runner(core)
             if auto_runner.get("status") != "ok":
                 raise RuntimeError(
@@ -181,6 +190,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 performance_audit_lab.VERSION,
                 performance_audit_lab_v2.VERSION,
                 performance_audit_composition_guard.VERSION,
+                run_report_guard.VERSION,
             ]
             _REGISTERED_CORE_IDS.add(id(core))
             _LAST = {
@@ -190,6 +200,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 "registered_local": _now(),
                 "research_isolated": research_isolated,
                 "component_versions": versions,
+                "run_cycle_observer": run_report_guard_apply,
                 "auto_runner": auto_runner,
             }
             diagnostics.record_module_event(
@@ -199,6 +210,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                     f"research_isolated={research_isolated};"
                     + ";".join(versions)
                     + ";auto_historical_research_disabled"
+                    + ";final_run_cycle_observer_installed"
                     + ";auto_runner_started_after_composition"
                     + ";auto_runner_diagnostic_state_synchronized"
                 ),
@@ -238,5 +250,6 @@ def status() -> Dict[str, Any]:
             "starts_existing_auto_runner": True,
             "adds_new_runner_type": False,
             "synchronizes_diagnostic_state_only": True,
+            "final_run_cycle_observer_owner": "run_report_guard",
         },
     }
