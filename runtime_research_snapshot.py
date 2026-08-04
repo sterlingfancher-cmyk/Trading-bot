@@ -16,9 +16,10 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_BASE_URL = "https://trading-bot-clean.up.railway.app"
-VERSION = "runtime-research-snapshot-2026-08-03-v2-concurrent"
+VERSION = "runtime-research-snapshot-2026-08-03-v3-bootstrap-aware"
 
 ENDPOINTS = {
+    "bootstrap_status": "/bootstrap-status",
     "root": "/",
     "paper_status": "/paper/status",
     "self_check": "/paper/self-check",
@@ -46,7 +47,7 @@ def _fetch_json(url: str, retries: int, timeout: float) -> dict[str, Any]:
                 url,
                 headers={
                     "Accept": "application/json",
-                    "User-Agent": "Trading-bot-read-only-research-snapshot/2.0",
+                    "User-Agent": "Trading-bot-read-only-research-snapshot/3.0",
                 },
                 method="GET",
             )
@@ -104,6 +105,7 @@ def _profile_summary(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    bootstrap_payload = _dict(_dict(raw.get("bootstrap_status")).get("payload"))
     root_payload = _dict(_dict(raw.get("root")).get("payload"))
     paper_payload = _dict(_dict(raw.get("paper_status")).get("payload"))
     self_payload = _dict(_dict(raw.get("self_check")).get("payload"))
@@ -123,12 +125,21 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
     profiles = _profile_summary(latest) or _profile_summary(regime_payload)
     reachable = sorted(name for name, row in raw.items() if row.get("status") == "ok")
     failures = sorted(set(raw) - set(reachable))
-    core_reachable = any(name in reachable for name in ("root", "paper_status", "self_check"))
+    listener_reachable = any(name in reachable for name in ("bootstrap_status", "root"))
+    delegate_ready = bool(
+        bootstrap_payload.get("delegate_ready")
+        or root_payload.get("delegate_ready")
+        or "paper_status" in reachable
+        or "self_check" in reachable
+    )
+    application_ready = bool(delegate_ready and ("paper_status" in reachable or "self_check" in reachable))
     self_overall = self_payload.get("overall")
     v2_run_status = v2_payload.get("run_status") or latest.get("status") or "unknown"
 
-    if not core_reachable:
+    if not listener_reachable:
         overall = "error"
+    elif not application_ready:
+        overall = "warn"
     elif self_overall not in {None, "pass"}:
         overall = "warn"
     elif str(v2_run_status).lower() == "error" or failures:
@@ -143,7 +154,14 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "total_count": len(raw),
             "reachable_endpoints": reachable,
             "failed_endpoints": failures,
-            "core_web_reachable": core_reachable,
+            "listener_reachable": listener_reachable,
+            "application_ready": application_ready,
+            "delegate_ready": delegate_ready,
+            "bootstrap_status": bootstrap_payload.get("status"),
+            "bootstrap_phase": bootstrap_payload.get("phase"),
+            "bootstrap_error": bootstrap_payload.get("error"),
+            "bootstrap_elapsed_seconds": bootstrap_payload.get("elapsed_seconds"),
+            "loader_thread_alive": bootstrap_payload.get("loader_thread_alive"),
             "root_status": root_payload.get("status"),
             "paper_status": paper_payload.get("status"),
         },
@@ -151,12 +169,14 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "overall": self_overall,
             "version": self_payload.get("version"),
             "generated_local": self_payload.get("generated_local"),
+            "components_checked": _dict(self_payload.get("summary")).get("components_checked"),
             "failing_components": _dict(self_payload.get("summary")).get("failing_components"),
             "base_failures": _dict(self_payload.get("summary")).get("base_failures"),
             "positions": _dict(self_payload.get("account")).get("positions"),
             "equity": _dict(self_payload.get("account")).get("equity"),
             "cash": _dict(self_payload.get("account")).get("cash"),
             "last_success": _dict(self_payload.get("auto_runner")).get("last_success"),
+            "runtime_shadow_capture": _dict(_dict(self_payload.get("component_checks")).get("runtime_shadow_capture")),
         },
         "v1": {
             "version": v1_payload.get("version"),
@@ -208,17 +228,22 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- Snapshot status: **{str(report.get('status', 'unknown')).upper()}**",
         f"- Base URL: `{report.get('base_url')}`",
         f"- Reachable: `{connectivity.get('reachable_count')}/{connectivity.get('total_count')}`",
+        f"- Listener reachable: `{connectivity.get('listener_reachable')}`",
+        f"- Application ready: `{connectivity.get('application_ready')}`",
+        f"- Bootstrap phase: `{connectivity.get('bootstrap_phase')}`",
+        f"- Bootstrap error: `{connectivity.get('bootstrap_error')}`",
         f"- Failed endpoints: `{connectivity.get('failed_endpoints')}`",
-        f"- Core web reachable: `{connectivity.get('core_web_reachable')}`",
         "",
         "## Paper Runtime",
         "",
         f"- Self-check: `{self_check.get('overall')}`",
         f"- Version: `{self_check.get('version')}`",
+        f"- Components: `{self_check.get('components_checked')}`",
         f"- Generated: `{self_check.get('generated_local')}`",
         f"- Positions: `{self_check.get('positions')}`",
         f"- Equity: `{self_check.get('equity')}`",
         f"- Failing components: `{self_check.get('failing_components')}`",
+        f"- Runtime shadow capture: `{self_check.get('runtime_shadow_capture')}`",
         "",
         "## Research V1",
         "",
@@ -275,7 +300,7 @@ def main() -> int:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--timeout", type=float, default=20.0)
-    parser.add_argument("--workers", type=int, default=7)
+    parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--json", default="runtime_research_snapshot.json")
     parser.add_argument("--markdown", default="runtime_research_snapshot.md")
     args = parser.parse_args()
