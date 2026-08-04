@@ -1,20 +1,24 @@
 """Paper participation capacity guard.
 
-This guard repairs two narrow causes of chronic paper-account underdeployment:
+This guard repairs three narrow causes of chronic paper-account underdeployment:
 
-1. Persisted position timestamps are Unix epochs.  A naive conversion in the
+1. Persisted position timestamps are Unix epochs. A naive conversion in the
    Railway container timezone could later be relabeled as Central time, moving
    an old entry into the future and holding the 15-minute starter-spacing gate
    at zero seconds forever.
 2. The risk-on starter valve previously required exactly zero mark-to-market
-   drawdown.  A few dollars of normal unrealized noise could therefore disable
+   drawdown. A few dollars of normal unrealized noise could therefore disable
    every additional starter even while all hard risk controls remained clear.
+3. An older chase-pattern governor could reject an exceptional constructive-
+   market leader even when the account had no realized loss streak and the same
+   signal contained multiple clean retest/continuation patterns. A narrow,
+   paper-only exception now resolves only that contradictory case.
 
 The guard patches every loaded copy of the affected modules, including modules
-loaded through an alternate bootstrap path.  It does not change the configured
-spacing, signal scores, sizing, hard loss limits, broker authority, live-trading
-authority, or order execution.  The small drawdown tolerance applies only to the
-existing paper-only risk-on starter valve.
+loaded through an alternate bootstrap path. It does not change the configured
+spacing, general signal thresholds, sizing, hard loss limits, broker authority,
+live-trading authority, or order execution. The controlled pattern exception
+preserves all downstream cooldown, spacing, daily-entry, exposure, and risk caps.
 """
 from __future__ import annotations
 
@@ -28,7 +32,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
-VERSION = "paper-participation-capacity-guard-2026-08-04-v4-all-modules"
+VERSION = "paper-participation-capacity-guard-2026-08-04-v5-pattern-exception"
 STARTER_MARK_TO_MARKET_TOLERANCE_PCT = float(
     os.environ.get("RISK_ON_STARTER_MARK_TO_MARKET_TOLERANCE_PCT", "0.10")
 )
@@ -42,6 +46,7 @@ _STATUS: Dict[str, Any] = {
     "targets": [
         "paper_underdeployment_repair._parse_time",
         "risk_on_starter_participation_valve.MAX_DAILY_LOSS_PCT",
+        "loss_streak_defensive_governor._govern_signal",
     ],
 }
 
@@ -158,6 +163,49 @@ def _patch_starter_modules() -> list[Dict[str, Any]]:
     return rows
 
 
+def _core_module() -> Any | None:
+    for _, module in _matching_modules(
+        "paper_underdeployment_repair", "paper_underdeployment_repair.py"
+    ):
+        try:
+            core = module._mod()
+        except Exception:
+            core = None
+        if core is not None:
+            return core
+    for name in ("app", "__main__"):
+        module = sys.modules.get(name)
+        if module is not None and getattr(module, "app", None) is not None:
+            return module
+    return None
+
+
+def _patch_pattern_exception() -> Dict[str, Any]:
+    try:
+        import favorable_regime_pattern_exception as exception
+
+        core = _core_module()
+        result = exception.apply(core)
+        flask_app = getattr(core, "app", None) if core is not None else None
+        if flask_app is not None:
+            exception.register_routes(flask_app, core)
+        return {
+            "patched": bool(result.get("patched")),
+            "version": result.get("version") or getattr(exception, "VERSION", None),
+            "status": result.get("status"),
+            "overall": result.get("overall"),
+            "policy": result.get("policy"),
+            "route_registered": flask_app is not None,
+        }
+    except Exception as exc:
+        return {
+            "patched": False,
+            "status": "error",
+            "overall": "warn",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
 def _latest_entry_age_seconds(module: Any) -> float | None:
     try:
         core = module._mod()
@@ -182,8 +230,10 @@ def apply() -> Dict[str, Any]:
     with _LOCK:
         timestamp_modules = _patch_timestamp_modules()
         starter_modules = _patch_starter_modules()
+        pattern_exception = _patch_pattern_exception()
         timestamp_patched = any(row.get("patched") for row in timestamp_modules)
         starter_patched = any(row.get("patched") for row in starter_modules)
+        pattern_exception_patched = bool(pattern_exception.get("patched"))
 
         age_seconds = None
         for _, module in _matching_modules(
@@ -193,7 +243,9 @@ def apply() -> Dict[str, Any]:
             if age_seconds is not None:
                 break
 
-        _PATCHED = bool(timestamp_patched and starter_patched)
+        _PATCHED = bool(
+            timestamp_patched and starter_patched and pattern_exception_patched
+        )
         _STATUS = {
             "version": VERSION,
             "status": "ok" if _PATCHED else "pending",
@@ -201,12 +253,15 @@ def apply() -> Dict[str, Any]:
             "patched": _PATCHED,
             "timestamp_parser_patched": timestamp_patched,
             "starter_drawdown_tolerance_patched": starter_patched,
+            "favorable_pattern_exception_patched": pattern_exception_patched,
             "timestamp_modules": timestamp_modules,
             "starter_modules": starter_modules,
+            "favorable_pattern_exception": pattern_exception,
             "latest_entry_age_seconds": age_seconds,
             "starter_mark_to_market_tolerance_pct": STARTER_MARK_TO_MARKET_TOLERANCE_PCT,
             "spacing_threshold_changed": False,
-            "signal_scores_changed": False,
+            "general_signal_scores_changed": False,
+            "controlled_paper_pattern_exception_added": True,
             "sizing_changed": False,
             "hard_risk_limits_changed": False,
             "live_authority_changed": False,
@@ -216,6 +271,8 @@ def apply() -> Dict[str, Any]:
             _STATUS["reason"] = "paper_underdeployment_module_not_loaded"
         elif not starter_modules:
             _STATUS["reason"] = "risk_on_starter_module_not_loaded"
+        elif not pattern_exception_patched:
+            _STATUS["reason"] = "favorable_pattern_exception_not_installed"
         return dict(_STATUS)
 
 
@@ -230,6 +287,8 @@ def status_payload() -> Dict[str, Any]:
             "changes_spacing_seconds": False,
             "changes_global_signal_thresholds": False,
             "changes_paper_starter_drawdown_tolerance": True,
+            "adds_controlled_favorable_pattern_exception": True,
+            "preserves_downstream_entry_and_risk_caps": True,
             "changes_hard_risk_limits": False,
             "changes_sizing": False,
             "changes_live_authority": False,
