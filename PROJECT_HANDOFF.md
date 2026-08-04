@@ -8,311 +8,289 @@
 - Mode: paper only
 - Live broker authority: none
 - ML execution authority: advisory only
-- Hard-risk ladder remains:
+- Hard-risk ladder unchanged:
   - 1.00% soft realized-loss pause
   - 2.50% hard realized-loss halt
   - 2.50% hard intraday-drawdown halt
   - 3.00% absolute daily-loss ceiling
 
-## Latest Supplied Account Baseline
+## Latest User-Supplied Account Baseline
 
-The latest user-supplied all-in-one snapshot remains the `2026-08-03 12:12:53 CDT` observation:
+Historical snapshot from `2026-08-03 12:12:53 CDT`:
 
 - equity: `$10,738.02`
 - cash: `$10,240.9964`
 - open paper position: `DELL`
 - unrealized P&L: `+$3.22`
-- realized today: `$0.00`
 - realized lifetime: `+$734.82`
-- completed exits: 52
 - wins/losses: 35/17
 - scanner signals: 41
-- no halt, self-defense condition, active recursion, or active auto-runner error
+- no halt, self-defense condition, or active recursion
 
-This is a historical baseline, not a claim about the current evening account state.
+This is a historical baseline, not a claim about the current after-hours account state.
 
-## Validated Runtime Foundation
+## Validated Trading Runtime Foundation
 
 Previously validated:
 
-- canonical scanner order:
-  1. opening surge
-  2. one breakout layer
-  3. one market-participation layer
-  4. core scanner
-- one bear-recovery wrapper
-- one Entry Pipeline X-Ray
+- scanner order: opening surge → breakout → market participation → core
+- exactly one bear-recovery wrapper
+- exactly one Entry Pipeline X-Ray
 - direct-core entry composition
-- no scanner or entry recursion
-- all-in-one `/paper/self-check`
-- neutral-only starter staging
+- recursion-safe scanner and entry path
+- neutral-only staged starter behavior
 - bounded late-neutral participation
+- one-link `/paper/self-check`
 
-Routine post-deploy endpoint remains:
+No trading thresholds, sizing, exits, hard-risk limits, live authority, or ML authority were changed during the architecture-audit work described below.
 
-`https://trading-bot-clean.up.railway.app/paper/self-check`
+## Validation Policy
 
-Open individual diagnostics only when `summary.failing_components` identifies them.
+`VALIDATION_POLICY.md` is authoritative for engineering completion.
 
-## Transitional Runtime Architecture
+Trading-behavior changes require:
 
-Gunicorn currently imports and activates multiple reliability, ownership, participation, policy, and research modules during `post_worker_init`.
+1. repository/static validation;
+2. targeted unit and invariant tests;
+3. baseline-versus-candidate backtest;
+4. walk-forward or untouched holdout;
+5. transaction-cost and slippage sensitivity;
+6. regime and calendar segmentation;
+7. ablation when multiple controls change;
+8. forward shadow or bounded paper canary;
+9. post-deploy `/paper/self-check`.
 
-Important architectural consequence:
+Documentation and genuinely read-only telemetry do not require a backtest when they cannot alter decisions.
 
-- the system still relies on import-time activation, watchdog threads, callable replacement, and runtime configuration mutation;
-- the newly added central policy reduces conflicting parameter ownership but does not eliminate the underlying mutation architecture;
-- no additional wrapper, watchdog, starter valve, or one-off threshold exception should be added while the architecture audit and canonical-engine migration are pending.
+## Permanent Refactor Audit
 
-## Central Regime-Adaptive Paper Policy
+Canonical workflow:
 
-Source:
+- `.github/workflows/refactor-audit.yml`
 
-- `paper_regime_adaptive_policy.py`
-- version `paper-regime-adaptive-policy-2026-08-03-v1`
-- source commit `263b947f29d1a90d0a8d7cee0e4a5f40598ccf1a`
-- activation commit `08f73ddb6c36d1c827b115ba0b98a167cdff7d74`
+### Every Python push or pull request
 
-Purpose:
+The workflow runs:
 
-- provide one central owner for a bounded whitelist of capacity, exposure, starter, allocation, cash-reserve, spacing, and participation-valve parameters;
-- select a profile from:
-  - `strong_risk_on`
-  - `risk_on`
-  - `constructive`
-  - `neutral`
-  - `defensive`
-  - `risk_off`;
-- restore more coherent capital deployment without adding another entry wrapper.
+1. full structural audit;
+2. new-critical-debt comparison against the base commit;
+3. architecture ownership-contract validation;
+4. typed configuration parity validation;
+5. immutable Stage B model tests;
+6. StateStore shadow parity validation;
+7. Stage C tests;
+8. JSON/Markdown artifact publication;
+9. visible `refactor-audit` commit status.
 
-Safety boundary:
+The gate blocks:
 
-- paper only;
-- does not lower the primary `app.py` entry-score floors;
-- does not modify the 3% daily-loss ceiling or 2.5% hard drawdown/realized-loss limits;
-- does not replace `scan_signals` or `try_entries_and_rotations`;
-- does not place orders directly;
-- does not grant live or ML authority.
+- new critical callable mutation debt;
+- unauthorized owners on protected targets;
+- new route overlaps;
+- new environment-default conflicts;
+- canonical configuration drift;
+- loss of current StateStore safety capabilities;
+- shadow models gaining runtime or order authority.
 
-This is a transitional configuration owner, not the final refactored architecture.
+### Weekly
 
-## Performance Research Lab V2
+A full deep architecture audit runs Sunday at `12:30 UTC` and retains reports for 30 days.
 
-Source:
+### Weekdays after close
 
-- `performance_audit_lab_v2.py`
-- version `performance-audit-lab-v2-2026-08-03-v1`
-- source commit `3932751504a2ac25ca4b9c90d7da787d4cc45933`
+A bounded, concurrent, read-only Railway snapshot runs at `23:15 UTC`, or manually through workflow dispatch.
 
-Methodology:
+It checks:
 
-- next-session-open execution assumption;
-- five-year default research period;
-- up to 45 symbols by default;
-- 8 basis points transaction-cost assumption;
-- full-history rolling walk-forward;
-- 252-session training windows;
-- 63-session test windows;
-- regime segmentation;
-- calendar-year reporting;
-- static and adaptive comparison profiles;
-- one-variable-at-a-time ablation;
-- explicit survivorship, universe-selection, daily-bar, provider-latency, and inverse-ETF proxy warnings.
-
-Activation gate built into the report:
-
-- automatic strategy promotion: false;
-- forward-shadow confirmation required;
-- minimum forward candidates: 30;
-- minimum one-day outcomes: 20;
-- paper only.
-
-The research lab is advisory only and must not automatically change runtime policy.
-
-## Resumable V2 Research Runner
-
-Source:
-
-- `performance_audit_v2_async_route.py`
-- version `performance-audit-v2-resumable-route-2026-08-03-v2`
-- initial asynchronous route commit `f7c9b946790ec16f249c3e17116d10349bf68321`
-- activation commit `f18a94965513cd68e565e203de2222ab80ce1901`
-- resumable/staged-ablation commit `0cc7e4563e99f81b130a3370029ed5546ba73da7`
-
-Recovery source:
-
-- `performance_audit_v2_recovery_guard.py`
-- version `performance-audit-v2-recovery-guard-2026-08-03-v1`
-- source commit `c6e5269821f9e159934f29f5b5a3314ccc2877d2`
-- activation commit `6ec236af148a73af3992365a32681e007f978735`
-- validation-workflow inclusion commit `0880135ee63f4aa663767325455d551f5253cdca`
-
-Read-only endpoints:
-
-- `/paper/performance-audit-v2-status`
-- `/paper/performance-backtest-v2`
-- `/paper/performance-backtest-v2-start`
-- `/paper/performance-ablation-v2`
-- `/paper/performance-regime-report-v2`
-- `/paper/performance-v2-recovery-status`
-
-The heavy run executes outside the HTTP request, checkpoints the core walk-forward result, stages ablation separately, and can resume an interrupted queued/running request after a Railway worker restart.
-
-Source deployment is confirmed. The actual latest V2 report has not yet been reviewed in this conversation; therefore no performance conclusion or parameter promotion is authorized.
-
-## Change Validation Policy
-
-Source:
-
-- `VALIDATION_POLICY.md`
-- commit `a4928d0422fe47601423e9f56bcd5f74f7db6c52`
-
-Rule:
-
-A backtest and forward test are mandatory for changes that can alter strategy, scanner output, ranking, score, entry, exit, sizing, exposure, capacity, or risk.
-
-They are not mandatory for documentation-only or purely telemetry-only changes that cannot affect decisions.
-
-Validation classes:
-
-1. documentation/CI only
-2. telemetry/diagnostics
-3. runtime reliability/composition
-4. trading behavior
-5. live/broker authority — not authorized
-
-Trading-behavior completion requires:
-
-- static and unit validation;
-- baseline-versus-candidate backtest;
-- walk-forward or untouched holdout;
-- transaction-cost and slippage sensitivity;
-- regime and calendar segmentation;
-- ablation when multiple controls change;
-- forward shadow or bounded paper canary;
-- post-deploy `/paper/self-check`.
-
-"Forward test" means unseen future paper observations after the candidate is frozen. It is not a prediction of future prices.
-
-## Repository-Wide Validation Gate
-
-Source:
-
-- `repository_validation.py`
-- initial commit `1f7ecfe97c6db1b98d50109be284362efce3bc84`
-- advisory-call refinement commit `13a9d5066defe3a51be2b259fbd2d25b94671005`
-
-Workflow:
-
-- `.github/workflows/performance-audit-validation.yml`
-- repository-wide workflow commit `753db51a157a76eb5c0b527d7fecce03fb8b4599`
-- commit-status publishing commit `b261f2771c68eed46d24f52db35df84972976504`
-
-The gate runs under Python 3.11 and:
-
-- compiles and parses every tracked Python file;
-- checks protected `app.py` defaults:
-  - `MAX_DAILY_LOSS_PCT=0.03`
-  - `MAX_INTRADAY_DRAWDOWN_PCT=0.025`
-  - manual after-hours trading defaults off;
-- verifies the central adaptive policy defaults to paper-only;
-- rejects central-policy mutations of hard-risk constants and primary entry-score floors;
-- rejects replacement of `scan_signals` or `try_entries_and_rotations` by the central policy;
-- checks advisory research modules for broker/order-submission calls;
-- inventories module-level side effects and dynamic mutations;
-- classifies changed files and lists the required validation gates;
-- uploads `repository_validation_report.json` as a GitHub Actions artifact.
-
-Railway successfully deployed the validation commits. The files are non-runtime and do not alter trading behavior.
-
-First repository-wide validation:
-
-- commit: `b261f2771c68eed46d24f52db35df84972976504`
-- GitHub Actions run: `30872643574`
-- result: pass
-- tracked Python files: 142
-- parsed Python files: 142
-- compile errors: 0
-- static contract errors: 0
-- module-level calls inventoried: 2,432
-- modules containing module-level calls: 137
-- dynamic mutations inventoried: 162
-- modules containing dynamic mutations: 55
-- change classification for that run: documentation/CI only
-- required gates: syntax/schema validation; no backtest required
-
-The large import-time and dynamic-mutation counts provide objective evidence for the planned architecture audit and refactor. They do not prove that every mutation is wrong; they identify the surface that must be classified and consolidated.
-
-## Required Validation Going Forward
-
-### Every Python change
-
-- repository-wide compile and AST contracts;
-- targeted unit/invariant tests;
-- change classification;
-- review of the generated validation report.
-
-### Runtime reliability or composition change
-
-- mocked or targeted integration test;
-- worker startup smoke test;
-- one successful paper cycle;
+- core web connectivity;
 - `/paper/self-check`;
-- backtest only when decision output can change.
+- paper status;
+- V1/V2 research status;
+- persisted V2 ablation and regime reports.
 
-### Trading-behavior change
+It does not start a trading cycle, launch research, mutate state, or place orders.
 
-- baseline and candidate backtests on identical assumptions;
-- full walk-forward or untouched holdout;
-- realistic costs and slippage;
-- regime-segmented metrics;
-- ablation;
-- forward shadow or bounded paper canary;
-- `/paper/self-check`.
+Runtime snapshots intentionally do not run after every commit; repeated post-commit probing could create unnecessary load during multi-commit refactors.
 
-### Documentation or telemetry-only change
+## Architecture Audit Baseline
 
-- no mandatory backtest when the change cannot alter decisions;
-- still require static validation and post-deploy smoke testing when runtime code is touched.
+Canonical document:
+
+- `ARCHITECTURE_AUDIT_BASELINE.md`
+
+Latest validated Stage C audit:
+
+- GitHub Actions run: `30875703784`
+- head commit: `eaf02e521b78bf9204426bb8f74331d9f353e9c8`
+- structural audit: pass
+- ownership contract: pass
+- typed configuration: pass
+- Stage B tests: pass
+- StateStore shadow parity: pass
+- Stage C tests: pass
+- new critical findings: 0
+- new warnings: 0
+
+Current architecture surface:
+
+- Python files: 152
+- source lines: 69,210
+- import cycles: 0
+- mutation targets: 72
+- overlapping mutation targets: 29
+- environment-default conflicts: 3
+- parameter-owner conflicts: 10
+- route overlaps: 5
+- critical findings: 29
+- warnings: 90
+- broad exception/pass paths: 482
+
+Highest ownership debt:
+
+- `scan_signals`: 14 legacy owners
+- `try_entries_and_rotations`: 13 legacy owners
+- `save_state`: 16 legacy owners
+- `entry_quality_check`: 10 legacy owners
+- `enter_position`: 9 legacy owners
+
+## Stage A — Ownership Contracts — Complete
+
+Sources:
+
+- `architecture_ownership_registry.json`
+- `architecture_contract_validation.py`
+
+Validated:
+
+- protected callable targets: 10
+- protected route targets: 5
+- protected environment targets: 3
+- ownership violations: 0
+- removal of legacy owners is allowed and recorded as progress
+- undeclared new owners are blocked
+
+Future owner names are descriptive only and have no runtime authority.
+
+## Stage B — Typed Configuration and Shadow Models — Complete
+
+Canonical sources:
+
+- `typed_configuration_contract.json`
+- `typed_configuration_snapshot.py`
+- `shadow_decision_models.py`
+- `test_architecture_stage_b.py`
+
+Validated:
+
+- typed configuration status: pass
+- violations: 0
+- known conflicts/ambiguities preserved: 5
+- canonical defaults present
+- immutable signal, market, risk, position, policy, candidate, and cycle models pass tests
+- shadow authority only
+- no runtime imports or order methods
+
+Known preserved conflicts include:
+
+- neutral entry-score fallback: `0.0140` versus advisory `0.033`
+- `STATE_FILE` diagnostic fallbacks
+- EOD timing dynamic ownership
+- drawdown fraction versus percentage-point naming
+
+A duplicate typed-configuration implementation was removed before promotion, preserving one canonical validation path.
+
+## Stage C — StateStore Shadow Parity — Foundation Complete
+
+Sources:
+
+- `state_store_contract.json`
+- `state_store_shadow.py`
+- `test_state_store_stage_c.py`
+
+Validated current capabilities:
+
+- atomic replace
+- file and directory fsync
+- thread locking
+- file locking when supported
+- shared read and exclusive write paths
+- retrying reads
+- latest, largest, and prewrite backups
+- backup fallback reads
+- non-overlapping cycle guard
+- canonical `STATE_FILE=state.json`
+
+StateStore shadow result:
+
+- status: pass
+- missing symbols: 0
+- missing calls: 0
+- default drift: 0
+- capability drift: 0
+- typed configuration drift: 0
+- observed `save_state` owners: 16
+
+This is not a state-authority migration. The shadow validator does not read/write the production state file, replace `save_state`, or change state paths.
+
+## Heavy Research Isolation
+
+The single Gunicorn web worker previously contained several paths capable of automatically starting or resuming multi-year V1/V2 research jobs. That could starve web/status requests.
+
+Current web-worker boundary:
+
+- V1 automatic historical backtest disabled
+- V2 automatic historical backtest disabled
+- V2 heavy research disabled in the web worker by default
+- stale Railway environment values cannot silently re-enable it
+- async/recovery historical research workers are not imported into the web worker
+- forward-shadow and read-only status capability remain
+- manual/dedicated research must be separated from production execution
+
+Key isolation commit:
+
+- `0866ff5a0a94f37a14d629a7a8e9a95f4507bc4c`
+
+This changes research process placement only; it does not change trading behavior.
+
+## Current Runtime Connectivity Note
+
+Earlier GitHub Actions and an independent external fetch timed out against the Railway endpoints after market close. Railway deployment statuses were successful, but endpoint responsiveness had not yet been confirmed through a completed scheduled/manual snapshot at the time of this handoff update.
+
+Do not interpret that connectivity issue as a failed structural audit. Static architecture, ownership, configuration, shadow-model, and StateStore gates all passed independently.
 
 ## Current Freeze
 
-Until the architecture audit and shadow-decision path are complete:
+Until forward shadow comparison exists:
 
-- do not add new entry wrappers, watchdogs, starter valves, or one-off threshold exceptions;
+- do not add entry wrappers, watchdogs, starter valves, or threshold exceptions;
 - do not widen hard-risk limits;
-- do not use raw Kelly sizing;
 - do not force additional positions;
-- do not promote V2 research parameters automatically;
-- allow urgent operational repairs and testing/refactor foundation work only.
+- do not use raw Kelly sizing;
+- do not promote research parameters automatically;
+- do not remove current state or callable owners in bulk;
+- allow urgent operational repairs and controlled refactor stages only.
 
-## Next Engineering Sequence
+## Next Engineering Stage — Decision Comparison Recorder
 
-1. Review the repository-wide validation artifact and correct any failures.
-2. Review the completed V2 backtest, walk-forward, regime, and ablation reports.
-3. Produce the full dependency, import-side-effect, wrapper, watchdog, constraint, and parameter-ownership map.
-4. Create canonical interfaces for data, signals, risk policy, sizing, decision, execution, state, and telemetry.
-5. Build a shadow decision engine that records old-versus-new decisions without placing orders.
-6. Collect at least 30 forward candidates and 20 one-day outcomes before promoting a candidate policy.
-7. Migrate authority only after tests and forward evidence pass.
-8. Remove legacy wrappers and duplicated controls in controlled batches.
+Build a read-only Stage D comparison path:
 
-## Definition of Done for the Current Milestone
+1. capture the same immutable cycle input used by the current engine;
+2. translate scanner candidates, market, risk, and positions into shadow models;
+3. record the existing engine’s decision and reasons;
+4. run a new read-only evaluator against the same snapshot;
+5. compare selected/rejected symbols, terminal reasons, score changes, size multipliers, risk, exposure, and eligibility;
+6. persist comparison telemetry only;
+7. place no orders and change no runtime authority;
+8. collect at least 30 forward candidates and 20 one-day outcomes before considering authority migration.
 
-Completed:
+## Recent Milestone Commits
 
-- central paper regime-adaptive configuration owner;
-- advisory full-history V2 performance lab;
-- resumable asynchronous research runner;
-- persistent research recovery watchdog;
-- formal validation policy;
-- repository-wide static validation script;
-- Python-change GitHub Actions gate;
-- successful Railway deployment of the non-runtime testing foundation.
-
-Pending:
-
-- direct review of the latest V2 research report;
-- architecture and constraint inventory;
-- shadow forward-testing path;
-- forward evidence before any further policy promotion.
+- `6e8a29ae7186538cbe9f243a839b1fd7c1811b97` — ownership stage recorded
+- `43ac279b3afb72fc41ab1463898bdedf34d79084` — typed configuration parity enforced
+- `4dc2194270ee2816a4eb2332fb3dafd68c136e9e` — immutable shadow decision models
+- `b274a5a0e637179d7aa20d384368d9d4f0e59e49` — canonical Stage B tests enforced
+- `0866ff5a0a94f37a14d629a7a8e9a95f4507bc4c` — heavy research isolated
+- `499c284134eb2c0b3326d08a78346b2b2966c45c` — StateStore shadow validator
+- `eaf02e521b78bf9204426bb8f74331d9f353e9c8` — Stage C gate enforced
+- `302843b0e7b4d07a24e9e9bb2438bd3c24239126` — runtime snapshots limited to schedule/manual
+- `41953a8fe5cc19a29066f29f55b8be73962ec9b9` — architecture baseline updated
