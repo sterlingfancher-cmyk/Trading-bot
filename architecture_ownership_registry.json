@@ -1,5 +1,5 @@
 {
-  "version": "architecture-ownership-registry-2026-08-03-v1",
+  "version": "architecture-ownership-registry-2026-08-04-v2-broad-momentum",
   "policy": {
     "allow_removal_of_legacy_owners": true,
     "allow_new_owners": false,
@@ -114,6 +114,7 @@
       "target_owner": "trading.runtime.CycleOrchestrator",
       "allowed_current_owners": [
         "benchmark_participation.py",
+        "broad_momentum_discovery.py",
         "run_report_guard.py",
         "state_io_hardening.py"
       ]
