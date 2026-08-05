@@ -42,6 +42,50 @@ def test_canonical_scanner_owner_applies_broad_boundary_before_delegate(monkeypa
 
     inspection = contract._inspect(core.scan_signals)
     assert inspection["universe_boundary_count"] == 1
+    assert inspection["opening_surge_count"] == 0
+    assert inspection["cycle_detected"] is False
+    assert inspection["current"]["universe_boundary"] is True
+    assert inspection["current"]["opening_surge"] is False
+
+
+def test_boundary_does_not_inherit_opening_surge_markers(monkeypatch):
+    class Core:
+        portfolio = {"positions": {}}
+        UNIVERSE = [f"OLD{i}" for i in range(125)]
+
+        def local_ts_text(self):
+            return "2026-08-05 10:35:00"
+
+    core = Core()
+
+    def base_scan(market=None):
+        return list(core.UNIVERSE)
+
+    def opening_scan(market=None):
+        return base_scan(market)
+
+    opening_scan._opening_surge_scan_guard = True
+    opening_scan._opening_surge_scan_prior = base_scan
+    core.scan_signals = opening_scan
+
+    fake_broad = SimpleNamespace(
+        VERSION="broad-momentum-discovery-2026-08-05-v2.1-ownership-safe",
+        enforce_scanner_boundary=lambda runtime: {
+            "post_boundary_universe_count": len(runtime.UNIVERSE),
+            "within_policy_cap": True,
+        },
+    )
+    monkeypatch.setitem(sys.modules, "broad_momentum_discovery", fake_broad)
+
+    assert contract._patch_universe_boundary(core) is True
+    inspection = contract._inspect(core.scan_signals)
+    assert inspection["universe_boundary_count"] == 1
+    assert inspection["opening_surge_count"] == 1
+    assert inspection["universe_boundary_depth"] == 0
+    assert inspection["opening_surge_depth"] == 1
+    assert inspection["universe_boundary_ordered"] is True
+    assert inspection["cycle_detected"] is False
+    assert inspection["current"]["opening_surge"] is False
 
 
 def test_boundary_fallback_preserves_existing_scanner_when_discovery_errors(monkeypatch):
