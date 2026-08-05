@@ -31,6 +31,8 @@ MIN_DOLLAR_VOLUME = float(os.getenv("BROAD_MOMENTUM_MIN_DOLLAR_VOLUME", "1000000
 MIN_MARKET_CAP = float(os.getenv("BROAD_MOMENTUM_MIN_MARKET_CAP", "100000000"))
 CUSTOM_SCREEN_SIZE = int(os.getenv("BROAD_MOMENTUM_CUSTOM_SCREEN_SIZE", "250"))
 PREDEFINED_SCREEN_COUNT = int(os.getenv("BROAD_MOMENTUM_PREDEFINED_COUNT", "100"))
+# Typed-configuration compatibility only. No broad-discovery watchdog loop is started.
+WATCHDOG_SECONDS = int(os.getenv("BROAD_MOMENTUM_WATCHDOG_SECONDS", "10"))
 SECTOR_ENRICH_PER_REFRESH = int(os.getenv("BROAD_MOMENTUM_SECTOR_ENRICH_PER_REFRESH", "12"))
 SECTOR_CACHE_TTL_SECONDS = int(os.getenv("BROAD_MOMENTUM_SECTOR_CACHE_TTL_SECONDS", str(7 * 86400)))
 
@@ -321,7 +323,8 @@ def _policy() -> Dict[str, Any]:
             "max_base_slots": MAX_BASE_SLOTS, "min_price": MIN_PRICE, "min_day_volume": MIN_DAY_VOLUME,
             "min_dollar_volume": MIN_DOLLAR_VOLUME, "min_market_cap": MIN_MARKET_CAP,
             "benchmark_symbols": list(BENCHMARK_SYMBOLS), "theme_baskets_are_fallback_and_classification": True,
-            "scanner_boundary_enforced": True, "scanner_boundary_owner": "scanner_runtime_contract"}
+            "scanner_boundary_enforced": True, "scanner_boundary_owner": "scanner_runtime_contract",
+            "watchdog_loop_active": False, "watchdog_seconds_compatibility_only": WATCHDOG_SECONDS}
 
 
 def _refresh_worker(core: Any = None) -> None:
