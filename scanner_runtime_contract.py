@@ -1,11 +1,13 @@
-"""Canonical scanner-stack recovery and recursion telemetry repair.
+"""Canonical scanner-stack recovery, recursion telemetry, and universe boundary.
 
 Maintains the validated paper scanner order:
-    opening surge -> breakout participation -> market participation -> core scanner
+    universe boundary -> opening surge -> breakout participation ->
+    market participation -> core scanner
 
 If callable ownership drifts, duplicates, or forms a cycle, the module restores the
-known core scanner and deterministically reapplies the three approved layers. It
-also clears stale recursion telemetry only after a later successful cycle.
+known core scanner and deterministically reapplies the approved layers. The broad
+momentum module supplies the bounded universe data, but this canonical scanner
+owner remains the only module that wraps ``scan_signals`` for that boundary.
 
 Composition/reliability only. No signal criteria, thresholds, sizing, hard-risk,
 order placement, ML authority, or live authority changes.
@@ -13,12 +15,13 @@ order placement, ML authority, or live authority changes.
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import sys
 import threading
 import time
 from typing import Any, Dict, List, Tuple
 
-VERSION = "scanner-runtime-contract-2026-08-03-v1"
+VERSION = "scanner-runtime-contract-2026-08-05-v2-broad-boundary"
 
 _LOCK = threading.RLock()
 _WATCHDOGS: set[int] = set()
@@ -28,6 +31,7 @@ _LAST: Dict[str, Any] = {}
 _LINK_TOKENS = ("original", "prior", "wrapped", "base", "inner")
 _KNOWN_LINK_ATTRS = (
     "_scanner_runtime_contract_prior",
+    "_scanner_universe_boundary_prior",
     "_opening_surge_scan_prior",
     "_opening_surge_prior",
     "_breakout_original",
@@ -66,6 +70,7 @@ def _label(fn: Any) -> Dict[str, Any]:
         "name": getattr(fn, "__name__", None),
         "qualname": getattr(fn, "__qualname__", None),
         "id": id(fn) if callable(fn) else None,
+        "universe_boundary": bool(getattr(fn, "_scanner_universe_boundary", False)) if callable(fn) else False,
         "opening_surge": bool(getattr(fn, "_opening_surge_scan_guard", False)) if callable(fn) else False,
         "breakout": bool(getattr(fn, "_breakout_layer_patched", False)) if callable(fn) else False,
         "market_participation": str(getattr(fn, "__module__", "")) == "market_participation_accelerator" if callable(fn) else False,
@@ -127,9 +132,11 @@ def _inspect(fn: Any, core: Any = None, limit: int = 128) -> Dict[str, Any]:
             if callable(candidate):
                 base_candidates.append(candidate)
 
+    boundary = [row for row in rows if row.get("universe_boundary")]
     opening = [row for row in rows if row.get("opening_surge")]
     breakout = [row for row in rows if row.get("breakout")]
     market = [row for row in rows if row.get("market_participation")]
+    boundary_depth = boundary[0]["depth"] if boundary else None
     opening_depth = opening[0]["depth"] if opening else None
     breakout_depth = breakout[0]["depth"] if breakout else None
     market_depth = market[0]["depth"] if market else None
@@ -142,12 +149,21 @@ def _inspect(fn: Any, core: Any = None, limit: int = 128) -> Dict[str, Any]:
         and market_depth is not None
         and int(opening_depth) < int(breakout_depth) < int(market_depth)
     )
+    boundary_ordered = bool(
+        len(boundary) == 1
+        and boundary_depth is not None
+        and opening_depth is not None
+        and int(boundary_depth) < int(opening_depth)
+    )
     return {
         "current": _label(fn),
         "nodes": rows,
         "chain_preview": rows[:24],
         "cycle_detected": cycle,
         "truncated": bool(queue),
+        "universe_boundary_count": len(boundary),
+        "universe_boundary_depth": boundary_depth,
+        "universe_boundary_ordered": boundary_ordered,
         "opening_surge_count": len(opening),
         "breakout_count": len(breakout),
         "market_participation_count": len(market),
@@ -213,6 +229,57 @@ def _rebuild(core: Any, before: Dict[str, Any]) -> Dict[str, Any]:
         steps.append({"step": "score_calibration", "error": f"{type(exc).__name__}: {exc}"})
 
     return {"changed": True, "reason": "canonical_scanner_stack_rebuilt", "steps": steps}
+
+
+def _chain_has_boundary(fn: Any) -> bool:
+    return bool(_inspect(fn).get("universe_boundary_count"))
+
+
+def _apply_broad_boundary(core: Any) -> Dict[str, Any]:
+    try:
+        import broad_momentum_discovery as broad
+        result = broad.enforce_scanner_boundary(core)
+        setattr(core, "SCANNER_UNIVERSE_BOUNDARY_VERSION", broad.VERSION)
+        return {
+            "status": "ok",
+            "version": broad.VERSION,
+            "final_universe_count": result.get("post_boundary_universe_count"),
+            "within_policy_cap": result.get("within_policy_cap"),
+        }
+    except Exception as exc:
+        return {
+            "status": "warn",
+            "error": f"{type(exc).__name__}: {exc}",
+            "fallback": "existing_scanner_universe_preserved",
+        }
+
+
+def _patch_universe_boundary(core: Any) -> bool:
+    current = getattr(core, "scan_signals", None)
+    if not callable(current) or _chain_has_boundary(current):
+        return False
+
+    @functools.wraps(current)
+    def bounded_scan(*args, __prior=current, **kwargs):
+        boundary = _apply_broad_boundary(core)
+        try:
+            state = getattr(core, "portfolio", {})
+            if isinstance(state, dict):
+                contract = state.setdefault("scanner_runtime_contract", {})
+                if isinstance(contract, dict):
+                    contract["last_universe_boundary"] = boundary
+                    contract["last_universe_boundary_local"] = _now(core)
+        except Exception:
+            pass
+        return __prior(*args, **kwargs)
+
+    bounded_scan._scanner_universe_boundary = True
+    bounded_scan._scanner_runtime_contract_version = VERSION
+    bounded_scan._scanner_universe_boundary_prior = current
+    bounded_scan._scanner_runtime_contract_prior = current
+    bounded_scan.__wrapped__ = current
+    core.scan_signals = bounded_scan
+    return True
 
 
 def _clear_stale_recursion_error(core: Any) -> Dict[str, Any]:
@@ -285,10 +352,17 @@ def install(core: Any = None) -> Dict[str, Any]:
             or before.get("market_participation_count") != 1
         )
         rebuild = _rebuild(core, before) if unhealthy else {"changed": False, "reason": "canonical_stack_already_healthy"}
+        boundary_patched = _patch_universe_boundary(core)
         after = _inspect(getattr(core, "scan_signals", None), core)
         success_patched = _patch_success(core)
         telemetry = _clear_stale_recursion_error(core)
-        healthy = bool(after.get("ordered") and not after.get("cycle_detected") and not after.get("truncated"))
+        healthy = bool(
+            after.get("ordered")
+            and after.get("universe_boundary_ordered")
+            and after.get("universe_boundary_count") == 1
+            and not after.get("cycle_detected")
+            and not after.get("truncated")
+        )
         _LAST = {
             "status": "ok" if healthy else "warn",
             "overall": "pass" if healthy else "warn",
@@ -298,6 +372,9 @@ def install(core: Any = None) -> Dict[str, Any]:
             "recursion_error_seen_before_install": recursion_error,
             "before": {key: value for key, value in before.items() if key != "base_candidates"},
             "rebuild": rebuild,
+            "universe_boundary_patched_this_call": boundary_patched,
+            "universe_boundary_active": after.get("universe_boundary_count") == 1,
+            "universe_boundary_ordered": after.get("universe_boundary_ordered"),
             "after": {key: value for key, value in after.items() if key != "base_candidates"},
             "set_auto_success_patched_this_call": success_patched,
             "telemetry_recovery": telemetry,
@@ -313,6 +390,12 @@ def install(core: Any = None) -> Dict[str, Any]:
                 "changes_live_authority": False,
             },
         }
+        try:
+            state = getattr(core, "portfolio", {})
+            if isinstance(state, dict):
+                state["scanner_runtime_contract"] = dict(_LAST)
+        except Exception:
+            pass
         setattr(core, "SCANNER_RUNTIME_CONTRACT_VERSION", VERSION)
         return dict(_LAST)
 
