@@ -27,6 +27,8 @@ jobs:
 
           base = "https://web-production-e1796.up.railway.app"
           endpoints = {
+              "yfinance_data_hygiene": "/paper/yfinance-data-hygiene-status",
+              "provider_health": "/paper/provider-health-status",
               "broad_momentum_force": "/paper/broad-momentum-discovery-status?force=1",
               "broad_momentum_status": "/paper/broad-momentum-discovery-status",
               "broad_momentum_candidates": "/paper/broad-momentum-candidates?limit=100",
@@ -49,7 +51,7 @@ jobs:
               target = pathlib.Path(f"capture_{name}.json")
               request = urllib.request.Request(
                   base + path,
-                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.4"},
+                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.5"},
                   method="GET",
               )
               try:
@@ -74,6 +76,8 @@ jobs:
           pathlib.Path("capture_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
           print(json.dumps(manifest, indent=2, sort_keys=True))
           required = (
+              "yfinance_data_hygiene",
+              "provider_health",
               "broad_momentum_force",
               "broad_momentum_status",
               "broad_momentum_candidates",
