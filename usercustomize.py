@@ -6,20 +6,14 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-08-04-v49-daily-operational-audit"
+VERSION = "usercustomize-entry-pipeline-composition-2026-08-05-v52-yfinance-hygiene"
 _REGISTERED_APP_IDS: set[int] = set()
 _ONE_SHOT_APPLIED: set[tuple[int, str]] = set()
 
-# Keep diagnostic links on the validated Splendid Railway service when neither
-# an explicit public URL nor Railway's injected public domain is available.
 CANONICAL_PUBLIC_BASE_URL = "https://web-production-e1796.up.railway.app"
 if not os.environ.get("PUBLIC_BASE_URL") and not os.environ.get("RAILWAY_PUBLIC_DOMAIN"):
     os.environ["PUBLIC_BASE_URL"] = CANONICAL_PUBLIC_BASE_URL
 
-# These modules replace a canonical core function pointer while retaining the
-# previous callable. Reapplying them after another module has wrapped that
-# callable can create A -> B -> A cycles. They are installed once per core;
-# composition owners may still repair the explicitly registered stack.
 ONE_SHOT_CORE_MUTATION_MODULES = {
     "controlled_redeployment_starter_sleeve",
 }
@@ -43,6 +37,7 @@ def _patch_self_check_endpoints() -> None:
         if not isinstance(endpoints, list):
             return
         wanted = [
+            {"path": "/paper/yfinance-data-hygiene-status", "category": "market_data", "required": False},
             {"path": "/paper/symbol-hygiene-guard-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-audit-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-selfcheck-overlay-status", "category": "governance", "required": False},
@@ -131,6 +126,7 @@ MODULES = (
     ("state_snapshot_archive", "app_and_module"),
     ("state_provenance_monitor", "app_and_module"),
     ("shared_cycle_identity", "app_and_module"),
+    ("yfinance_data_hygiene", "app_and_module"),
     ("market_data_resilience", "app_and_module"),
     ("breakout_participation_layer", "app_only"),
     ("fmp_limited_access_guard", "app_and_module"),
@@ -187,7 +183,6 @@ def _repair_entry_stack(flask_app: Any, core: Any) -> None:
     _register_module(flask_app, core, "starter_valve_reason_sanitizer", route_args="app_and_module")
     _register_module(flask_app, core, "entry_pipeline_xray", route_args="app_and_module")
     _register_module(flask_app, core, "entry_pipeline_ownership_guard", route_args="app_and_module")
-    # Final owner: normalize to one bear gate -> one X-ray -> composition -> core.
     _register_module(flask_app, core, "bear_recovery_stack_contract", route_args="app_and_module")
 
 
@@ -199,11 +194,9 @@ def _watchdog() -> None:
             flask_app = getattr(core, "app", None) if core is not None else None
             if flask_app is not None:
                 _register_auxiliary_routes(flask_app, core)
-                # Scanner wrappers are installed once through MODULES. Reapplying
-                # dynamic_universe_builder, shared_cycle_identity, or lifecycle tracing
-                # can form a recursive scan_signals chain when another wrapper is outermost.
                 for name in (
-                    "state_transaction_manager", "performance_risk_calibration", "state_snapshot_archive", "state_provenance_monitor", "market_data_resilience", "symbol_hygiene_guard",
+                    "state_transaction_manager", "performance_risk_calibration", "state_snapshot_archive", "state_provenance_monitor",
+                    "yfinance_data_hygiene", "market_data_resilience", "symbol_hygiene_guard",
                     "blocked_entry_source_contract_guard",
                     "scanner_v2_shadow_universe", "missed_opportunity_post_close_audit",
                     "scanner_v2_shadow_quality_trace", "scanner_v2_shadow_composite_score",
@@ -211,8 +204,6 @@ def _watchdog() -> None:
                 ):
                     _register_module(flask_app, core, name, route_args="app_and_module")
                 _repair_entry_stack(flask_app, core)
-                # controlled_redeployment_starter_sleeve is intentionally absent:
-                # it replaces the canonical core pointer and must remain one-shot.
                 for name in (
                     "quality_blocker_diagnostics",
                     "ml_pre3a_shadow_validation", "ml_phase3a_early_paper_gate",
@@ -221,7 +212,6 @@ def _watchdog() -> None:
                     "fast_self_check_override", "daily_operational_audit",
                 ):
                     _register_module(flask_app, core, name, route_args="app_and_module")
-                # Reassert final ownership after downstream diagnostic modules.
                 _register_module(flask_app, core, "bear_recovery_stack_contract", route_args="app_and_module")
         except Exception:
             pass

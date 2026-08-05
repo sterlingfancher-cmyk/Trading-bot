@@ -2,9 +2,12 @@
 
 Wraps the core ``download_prices`` helper with a yfinance request timeout,
 per-symbol timing, bounded telemetry, and a short provider circuit breaker.
-It does not change signal rules, thresholds, sizing, risk controls, order logic,
-or live/ML authority. Failed or empty downloads remain unavailable exactly as
-before; they now fail quickly instead of consuming the Gunicorn worker budget.
+Known invalid or temporarily quarantined symbols are removed before the
+provider call by ``yfinance_data_hygiene``.
+
+This module does not change signal rules, thresholds, sizing, risk controls,
+order logic, or live/ML authority. Failed or empty downloads remain unavailable
+exactly as before; they now fail quickly instead of consuming the worker budget.
 """
 from __future__ import annotations
 
@@ -15,7 +18,7 @@ import threading
 import time
 from typing import Any, Dict, List
 
-VERSION = "market-data-resilience-2026-07-22-v1"
+VERSION = "market-data-resilience-2026-08-05-v2-symbol-hygiene"
 REQUEST_TIMEOUT_SECONDS = max(2.0, float(os.environ.get("MARKET_DATA_REQUEST_TIMEOUT_SECONDS", "8")))
 FAILURE_THRESHOLD = max(1, int(os.environ.get("MARKET_DATA_FAILURE_THRESHOLD", "3")))
 CIRCUIT_OPEN_SECONDS = max(5, int(os.environ.get("MARKET_DATA_CIRCUIT_OPEN_SECONDS", "60")))
@@ -25,7 +28,15 @@ _LOCK = threading.RLock()
 _PATCHED_MODULE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
 _EVENTS: List[Dict[str, Any]] = []
-_TOTALS: Dict[str, int] = {"requests": 0, "successes": 0, "failures": 0, "timeouts": 0, "empty": 0, "circuit_skips": 0}
+_TOTALS: Dict[str, int] = {
+    "requests": 0,
+    "successes": 0,
+    "failures": 0,
+    "timeouts": 0,
+    "empty": 0,
+    "circuit_skips": 0,
+    "hygiene_blocked": 0,
+}
 _CONSECUTIVE_FAILURES = 0
 _CIRCUIT_OPEN_UNTIL = 0.0
 _LAST_ERROR: Dict[str, Any] = {}
@@ -68,6 +79,15 @@ def _is_empty(frame: Any) -> bool:
     return frame is None or bool(getattr(frame, "empty", True))
 
 
+def _sanitize_symbol_request(symbol: Any) -> tuple[Any, list[str], list[dict[str, Any]]]:
+    try:
+        import yfinance_data_hygiene as hygiene
+        return hygiene.sanitize_tickers(symbol)
+    except Exception:
+        text = str(symbol or "").strip()
+        return symbol, ([text] if text else []), []
+
+
 def install(core: Any = None) -> Dict[str, Any]:
     core = core or _mod()
     if core is None:
@@ -80,22 +100,29 @@ def install(core: Any = None) -> Dict[str, Any]:
 
     original = getattr(current, "_market_data_resilience_original", current)
 
-    def guarded_download_prices(symbol: str, period: str = "5d", interval: str = "5m"):
+    def guarded_download_prices(symbol: Any, period: str = "5d", interval: str = "5m"):
         global _CONSECUTIVE_FAILURES, _CIRCUIT_OPEN_UNTIL
         started = time.monotonic()
+        cleaned, allowed, blocked = _sanitize_symbol_request(symbol)
+        if blocked:
+            with _LOCK:
+                _TOTALS["hygiene_blocked"] += len(blocked)
+            blocked_text = ",".join(str(row.get("symbol") or "") for row in blocked)
+            _record(blocked_text or str(symbol), period, interval, started, "hygiene_blocked")
+        if not allowed:
+            return None
+
         now = time.time()
         with _LOCK:
             _TOTALS["requests"] += 1
             if now < _CIRCUIT_OPEN_UNTIL:
                 _TOTALS["circuit_skips"] += 1
-                _record(symbol, period, interval, started, "circuit_open")
+                _record(str(cleaned), period, interval, started, "circuit_open")
                 return None
 
         try:
-            # Call yfinance directly so the timeout is guaranteed even when the
-            # legacy helper does not expose a timeout parameter.
             frame = core.yf.download(
-                symbol,
+                cleaned,
                 period=period,
                 interval=interval,
                 progress=False,
@@ -110,13 +137,13 @@ def install(core: Any = None) -> Dict[str, Any]:
                     _CONSECUTIVE_FAILURES += 1
                     if _CONSECUTIVE_FAILURES >= FAILURE_THRESHOLD:
                         _CIRCUIT_OPEN_UNTIL = time.time() + CIRCUIT_OPEN_SECONDS
-                _record(symbol, period, interval, started, "empty")
+                _record(str(cleaned), period, interval, started, "empty")
                 return None
             with _LOCK:
                 _TOTALS["successes"] += 1
                 _CONSECUTIVE_FAILURES = 0
                 _CIRCUIT_OPEN_UNTIL = 0.0
-            _record(symbol, period, interval, started, "ok")
+            _record(str(cleaned), period, interval, started, "ok")
             return frame
         except Exception as exc:
             text = f"{type(exc).__name__}: {exc}"
@@ -128,7 +155,7 @@ def install(core: Any = None) -> Dict[str, Any]:
                 _CONSECUTIVE_FAILURES += 1
                 if _CONSECUTIVE_FAILURES >= FAILURE_THRESHOLD:
                     _CIRCUIT_OPEN_UNTIL = time.time() + CIRCUIT_OPEN_SECONDS
-            _record(symbol, period, interval, started, "timeout" if timeout_like else "error", text)
+            _record(str(cleaned), period, interval, started, "timeout" if timeout_like else "error", text)
             return None
 
     guarded_download_prices._market_data_resilience_version = VERSION  # type: ignore[attr-defined]
@@ -172,6 +199,8 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "places_orders": False,
         },
         "logic_changed": False,
+        "execution_authority": "existing_rules_only",
+        "ml_authority": "shadow_recommendation_only",
     }
 
 
