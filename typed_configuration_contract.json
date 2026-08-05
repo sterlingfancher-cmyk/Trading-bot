@@ -1,5 +1,5 @@
 {
-  "version": "typed-configuration-contract-2026-08-03-v1",
+  "version": "typed-configuration-contract-2026-08-04-v2-broad-momentum",
   "policy": {
     "read_only": true,
     "authoritative_runtime_source": false,
@@ -156,6 +156,7 @@
       "known_unit_ambiguity": false,
       "unit": "seconds",
       "observations": [
+        {"path": "broad_momentum_discovery.py", "value": "<dynamic>"},
         {"path": "paper_regime_adaptive_policy.py", "value": "<dynamic>"},
         {"path": "paper_underdeployment_repair.py", "value": "<dynamic>"},
         {"path": "performance_audit_lab.py", "value": "<dynamic>"},
