@@ -30,6 +30,8 @@ jobs:
               "broad_momentum_force": "/paper/broad-momentum-discovery-status?force=1",
               "broad_momentum_status": "/paper/broad-momentum-discovery-status",
               "broad_momentum_candidates": "/paper/broad-momentum-candidates?limit=100",
+              "scanner_runtime_contract": "/paper/scanner-runtime-contract-status",
+              "daily_audit_overlay": "/paper/daily-audit-repair-overlay-status",
               "paper_status_full": "/paper/status?full=1",
               "paper_status": "/paper/status",
               "daily_audit": "/paper/daily-audit",
@@ -47,7 +49,7 @@ jobs:
               target = pathlib.Path(f"capture_{name}.json")
               request = urllib.request.Request(
                   base + path,
-                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.3"},
+                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.4"},
                   method="GET",
               )
               try:
@@ -75,6 +77,8 @@ jobs:
               "broad_momentum_force",
               "broad_momentum_status",
               "broad_momentum_candidates",
+              "scanner_runtime_contract",
+              "daily_audit_overlay",
               "paper_status_full",
               "daily_audit",
               "state_persistence",
