@@ -1,18 +1,9 @@
-"""Paper-only broad market momentum discovery for the trading bot.
+"""Paper-only broad-market momentum discovery with bounded scanner ownership.
 
-The scanner previously depended heavily on a hand-maintained ticker universe and
-closed theme baskets.  This module adds a bounded two-stage discovery path:
-
-1. Yahoo/yfinance performs a broad US-market screen for liquid momentum and
-   most-active stocks.
-2. Only the best bounded candidate set is installed into ``core.UNIVERSE``.
-3. The existing scanner, strategy score, entry rules, sizing and hard-risk
-   controls perform the expensive intraday evaluation and decide what may trade.
-
-Current positions and SPY/QQQ/IWM/DIA are always preserved. Existing theme
-baskets remain fallback candidates and classification/risk labels; they are no
-longer the primary discovery boundary. The module does not place orders, lower
-entry thresholds, grant ML authority, or grant live authority.
+This module discovers liquid U.S. momentum leaders from market-wide Yahoo/yfinance
+screens, installs a bounded working universe, and leaves all trade decisions to
+the existing rules engine. Version 2 adds scanner-boundary enforcement, source
+attribution integrity, non-blocking sector enrichment, and ownership telemetry.
 """
 from __future__ import annotations
 
@@ -25,7 +16,7 @@ import threading
 import time
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
-VERSION = "broad-momentum-discovery-2026-08-04-v1"
+VERSION = "broad-momentum-discovery-2026-08-05-v2-integrity"
 ENABLED = os.environ.get("BROAD_MOMENTUM_DISCOVERY_ENABLED", "true").lower() not in {
     "0", "false", "no", "off"
 }
@@ -45,16 +36,25 @@ MIN_MARKET_CAP = float(os.environ.get("BROAD_MOMENTUM_MIN_MARKET_CAP", "10000000
 CUSTOM_SCREEN_SIZE = int(os.environ.get("BROAD_MOMENTUM_CUSTOM_SCREEN_SIZE", "250"))
 PREDEFINED_SCREEN_COUNT = int(os.environ.get("BROAD_MOMENTUM_PREDEFINED_COUNT", "100"))
 WATCHDOG_SECONDS = int(os.environ.get("BROAD_MOMENTUM_WATCHDOG_SECONDS", "10"))
+SECTOR_ENRICH_PER_REFRESH = int(os.environ.get("BROAD_MOMENTUM_SECTOR_ENRICH_PER_REFRESH", "12"))
+SECTOR_CACHE_TTL_SECONDS = int(
+    os.environ.get("BROAD_MOMENTUM_SECTOR_CACHE_TTL_SECONDS", str(7 * 24 * 3600))
+)
 
 BENCHMARK_SYMBOLS = ("SPY", "QQQ", "IWM", "DIA")
 SECTOR_ETF = {
     "basic materials": "XLB",
+    "materials": "XLB",
     "communication services": "XLC",
     "consumer cyclical": "XLY",
+    "consumer discretionary": "XLY",
     "consumer defensive": "XLP",
+    "consumer staples": "XLP",
     "energy": "XLE",
     "financial services": "XLF",
+    "financial": "XLF",
     "healthcare": "XLV",
+    "health care": "XLV",
     "industrials": "XLI",
     "real estate": "XLRE",
     "technology": "XLK",
@@ -66,11 +66,32 @@ DYNAMIC_BUCKET_CONFIG = {"alloc_factor": 0.40, "max_exposure_pct": 0.20, "max_po
 _LOCK = threading.RLock()
 _REFRESH_EVENT = threading.Event()
 _REFRESH_THREAD: threading.Thread | None = None
+_SECTOR_THREAD: threading.Thread | None = None
 _CACHE: Dict[str, Any] = {"ts": 0.0, "payload": None}
+_SECTOR_CACHE: Dict[str, Dict[str, Any]] = {}
 _LAST: Dict[str, Any] = {}
 _BASE_UNIVERSE: Dict[int, List[str]] = {}
 _REGISTERED_APP_IDS: set[int] = set()
 _WATCHDOG_CORE_IDS: set[int] = set()
+
+_OWNER_MODULE_HINTS = (
+    "neutral_momentum_starter_extension",
+    "opening_surge_participation",
+    "dynamic_universe_builder",
+    "scanner_v2_shadow_universe",
+    "space_stock_basket",
+    "spacex_direct_overlay",
+    "breakout_participation_layer",
+)
+_OWNER_ATTR_HINTS = (
+    "_EXTRA_SYMBOLS",
+    "EXTRA",
+    "EXTRA_SYMBOLS",
+    "PREFERRED_SYMBOLS",
+    "UNIVERSE",
+    "THEME_SYMBOLS",
+    "SYMBOLS",
+)
 
 
 def _f(value: Any, default: float = 0.0) -> float:
@@ -99,6 +120,17 @@ def _unique(values: Iterable[Any]) -> List[str]:
         if symbol and symbol not in seen:
             seen.add(symbol)
             output.append(symbol)
+    return output
+
+
+def _unique_labels(values: Iterable[Any]) -> List[str]:
+    output: List[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        label = str(value or "").strip()
+        if label and label not in seen:
+            seen.add(label)
+            output.append(label)
     return output
 
 
@@ -133,6 +165,14 @@ def _quote_value(quote: Dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _normalize_sector(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _sector_proxy(value: Any) -> str | None:
+    return SECTOR_ETF.get(_normalize_sector(value).lower())
+
+
 def _normalize_quote(quote: Dict[str, Any], source: str) -> Dict[str, Any] | None:
     if not isinstance(quote, dict):
         return None
@@ -146,10 +186,12 @@ def _normalize_quote(quote: Dict[str, Any], source: str) -> Dict[str, Any] | Non
     market_cap = _f(_quote_value(quote, "marketCap", "intradaymarketcap"))
     dollar_volume = max(0.0, price * volume)
     relative_volume = volume / avg_volume if avg_volume > 0 else 0.0
-    sector = str(_quote_value(quote, "sector", "sectorName") or "").strip()
+    sector = _normalize_sector(_quote_value(quote, "sector", "sectorName", "sectorDisp"))
+    industry = str(_quote_value(quote, "industry", "industryName", "industryDisp") or "").strip()
     return {
         "symbol": symbol,
         "source": source,
+        "sources": [source],
         "price": round(price, 4),
         "percent_change": round(pct, 4),
         "day_volume": int(volume) if volume > 0 else 0,
@@ -158,7 +200,9 @@ def _normalize_quote(quote: Dict[str, Any], source: str) -> Dict[str, Any] | Non
         "dollar_volume": round(dollar_volume, 2),
         "market_cap": round(market_cap, 2),
         "sector_name": sector,
-        "sector_proxy": SECTOR_ETF.get(sector.lower()),
+        "industry_name": industry,
+        "sector_proxy": _sector_proxy(sector),
+        "classification_source": "screen_payload" if sector else None,
     }
 
 
@@ -220,7 +264,6 @@ def _screen_calls() -> List[Tuple[str, Any]]:
             calls.append((name, _predefined_screen(yf, name)))
         except Exception as exc:
             calls.append((name, {"_error": f"{type(exc).__name__}: {exc}"}))
-
     try:
         EquityQuery = getattr(yf, "EquityQuery")
         query = EquityQuery(
@@ -237,17 +280,46 @@ def _screen_calls() -> List[Tuple[str, Any]]:
         calls.append(
             (
                 "market_wide_momentum",
-                yf.screen(
-                    query,
-                    size=CUSTOM_SCREEN_SIZE,
-                    sortField="percentchange",
-                    sortAsc=False,
-                ),
+                yf.screen(query, size=CUSTOM_SCREEN_SIZE, sortField="percentchange", sortAsc=False),
             )
         )
     except Exception as exc:
         calls.append(("market_wide_momentum", {"_error": f"{type(exc).__name__}: {exc}"}))
     return calls
+
+
+def _cached_classification(symbol: str) -> Dict[str, Any]:
+    with _LOCK:
+        row = dict(_SECTOR_CACHE.get(symbol) or {})
+    age = time.time() - _f(row.get("ts")) if row else float("inf")
+    return row if row and age <= SECTOR_CACHE_TTL_SECONDS else {}
+
+
+def _merge_classification(row: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
+    symbol = _symbol(row.get("symbol"))
+    if row.get("sector_proxy"):
+        return row
+    cached = _cached_classification(symbol)
+    if cached:
+        row["sector_name"] = cached.get("sector_name") or row.get("sector_name") or ""
+        row["industry_name"] = cached.get("industry_name") or row.get("industry_name") or ""
+        row["sector_proxy"] = cached.get("sector_proxy") or _sector_proxy(row.get("sector_name"))
+        row["classification_source"] = cached.get("classification_source") or "yfinance_profile_cache"
+        return row
+    try:
+        existing = (getattr(core, "SYMBOL_SECTOR", {}) or {}).get(symbol)
+    except Exception:
+        existing = None
+    if existing:
+        value = str(existing)
+        if value.upper().startswith("XL"):
+            row["sector_proxy"] = value.upper()
+            row["classification_source"] = "existing_runtime_sector_map"
+        else:
+            row["sector_name"] = value
+            row["sector_proxy"] = _sector_proxy(value)
+            row["classification_source"] = "existing_runtime_sector_map"
+    return row
 
 
 def _build_payload(core: Any = None) -> Dict[str, Any]:
@@ -279,20 +351,24 @@ def _build_payload(core: Any = None) -> Dict[str, Any]:
             symbol = str(row["symbol"])
             existing = rows_by_symbol.get(symbol)
             if existing is None:
-                row["sources"] = [source]
                 rows_by_symbol[symbol] = row
-            else:
-                sources = _unique(list(existing.get("sources") or []) + [source])
-                if _f(row.get("day_volume")) >= _f(existing.get("day_volume")):
-                    row["sources"] = sources
-                    rows_by_symbol[symbol] = row
-                else:
-                    existing["sources"] = sources
+                continue
+            sources = _unique_labels(list(existing.get("sources") or []) + list(row.get("sources") or []) + [source])
+            keep_new = _f(row.get("day_volume")) >= _f(existing.get("day_volume"))
+            winner = row if keep_new else existing
+            loser = existing if keep_new else row
+            winner["sources"] = sources
+            winner["source"] = str(winner.get("source") or source)
+            for key in ("sector_name", "industry_name", "sector_proxy", "classification_source"):
+                if not winner.get(key) and loser.get(key):
+                    winner[key] = loser.get(key)
+            rows_by_symbol[symbol] = winner
 
-    rows = list(rows_by_symbol.values())
+    rows = [_merge_classification(dict(row), core) for row in rows_by_symbol.values()]
     for row in rows:
-        score = _discovery_score(row) + min(0.06, 0.02 * max(0, len(row.get("sources") or []) - 1))
-        row["discovery_score"] = round(float(score), 6)
+        source_confirmation = min(0.06, 0.02 * max(0, len(row.get("sources") or []) - 1))
+        row["source_confirmation_bonus"] = round(source_confirmation, 6)
+        row["discovery_score"] = round(_discovery_score(row) + source_confirmation, 6)
     rows.sort(
         key=lambda row: (
             _f(row.get("discovery_score")),
@@ -303,6 +379,7 @@ def _build_payload(core: Any = None) -> Dict[str, Any]:
         reverse=True,
     )
     selected = rows[:MAX_DISCOVERY_SYMBOLS]
+    classified = sum(1 for row in selected if row.get("sector_proxy"))
     return {
         "status": "ok" if selected else "warn",
         "overall": "pass" if selected else "warn",
@@ -318,6 +395,12 @@ def _build_payload(core: Any = None) -> Dict[str, Any]:
         "selected_symbols": [row["symbol"] for row in selected],
         "candidates": selected,
         "top_candidates": selected[:50],
+        "classification": {
+            "classified_count": classified,
+            "unclassified_count": max(0, len(selected) - classified),
+            "coverage_pct": round(100.0 * classified / len(selected), 2) if selected else 0.0,
+            "enrichment_non_blocking": True,
+        },
         "policy": {
             "cache_ttl_seconds": CACHE_TTL_SECONDS,
             "max_discovery_symbols": MAX_DISCOVERY_SYMBOLS,
@@ -330,17 +413,22 @@ def _build_payload(core: Any = None) -> Dict[str, Any]:
             "min_market_cap": MIN_MARKET_CAP,
             "benchmark_symbols": list(BENCHMARK_SYMBOLS),
             "theme_baskets_are_fallback_and_classification": True,
+            "scanner_boundary_enforced": True,
         },
-        "authority": {
-            "places_orders": False,
-            "changes_entry_rules": False,
-            "changes_hard_risk": False,
-            "changes_sizing": False,
-            "changes_ml_authority": False,
-            "changes_live_authority": False,
-            "execution_authority": "existing_rules_only",
-            "ml_authority": "shadow_recommendation_only",
-        },
+        "authority": _authority(),
+    }
+
+
+def _authority() -> Dict[str, Any]:
+    return {
+        "places_orders": False,
+        "changes_entry_rules": False,
+        "changes_hard_risk": False,
+        "changes_sizing": False,
+        "changes_ml_authority": False,
+        "changes_live_authority": False,
+        "execution_authority": "existing_rules_only",
+        "ml_authority": "shadow_recommendation_only",
     }
 
 
@@ -359,6 +447,7 @@ def _refresh_worker(core: Any = None) -> None:
             "selected_symbols": [],
             "candidates": [],
             "top_candidates": [],
+            "authority": _authority(),
         }
     with _LOCK:
         _CACHE.update({"ts": time.time(), "payload": payload})
@@ -409,11 +498,7 @@ def discover(core: Any = None, force: bool = False, wait: bool = True) -> Dict[s
         "selected_symbols": [],
         "candidates": [],
         "top_candidates": [],
-        "authority": {
-            "places_orders": False,
-            "execution_authority": "existing_rules_only",
-            "ml_authority": "shadow_recommendation_only",
-        },
+        "authority": _authority(),
     }
 
 
@@ -447,12 +532,35 @@ def _compose_universe(
     return _unique(protected + broad_slots + base_slots)[:cap]
 
 
+def _infer_append_owner(symbol: str, base: set[str], broad: set[str], protected: set[str]) -> str:
+    if symbol in protected:
+        return "protected_position_or_benchmark"
+    if symbol in broad:
+        return "broad_momentum_discovery"
+    if symbol in base:
+        return "base_or_legacy_overlay"
+    for module_name in _OWNER_MODULE_HINTS:
+        module = sys.modules.get(module_name)
+        if module is None:
+            continue
+        for attr in _OWNER_ATTR_HINTS:
+            try:
+                values = getattr(module, attr, None)
+                if isinstance(values, dict):
+                    values = values.keys()
+                if symbol in set(_unique(values or [])):
+                    return module_name
+            except Exception:
+                continue
+    return "unknown_runtime_overlay"
+
+
 def _apply_classification(core: Any, candidates: Sequence[Dict[str, Any]], final_universe: Sequence[str]) -> None:
     sector_map = getattr(core, "SYMBOL_SECTOR", None)
     bucket_map = getattr(core, "SYMBOL_BUCKET", None)
     bucket_cfg = getattr(core, "BUCKET_CONFIG", None)
     by_symbol = {
-        _symbol(row.get("symbol")): row
+        _symbol(row.get("symbol")): _merge_classification(dict(row), core)
         for row in candidates or []
         if isinstance(row, dict) and _symbol(row.get("symbol"))
     }
@@ -463,73 +571,223 @@ def _apply_classification(core: Any, candidates: Sequence[Dict[str, Any]], final
         if isinstance(bucket_map, dict):
             bucket_map.setdefault(symbol, DYNAMIC_BUCKET)
         if isinstance(sector_map, dict):
-            sector_map.setdefault(symbol, str(row.get("sector_proxy") or "UNKNOWN"))
+            sector_map[symbol] = str(row.get("sector_proxy") or sector_map.get(symbol) or "UNKNOWN")
 
 
-def apply_universe(core: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
-    base = _base_universe(core)
-    broad = list(payload.get("selected_symbols") or [])
-    final_universe = _compose_universe(_positions(core), base, broad)
-    if not broad:
-        final_universe = _unique(list(BENCHMARK_SYMBOLS) + _positions(core) + base)[:MAX_FINAL_UNIVERSE]
-    _apply_classification(core, list(payload.get("candidates") or []), final_universe)
-    core.UNIVERSE = final_universe
+def _sector_enrichment_worker(core: Any, candidates: Sequence[Dict[str, Any]]) -> None:
+    try:
+        import yfinance as yf  # type: ignore
+    except Exception:
+        return
+    processed = 0
+    for row in candidates:
+        if processed >= max(0, SECTOR_ENRICH_PER_REFRESH):
+            break
+        symbol = _symbol(row.get("symbol")) if isinstance(row, dict) else ""
+        if not symbol or row.get("sector_proxy") or _cached_classification(symbol):
+            continue
+        processed += 1
+        try:
+            info = yf.Ticker(symbol).get_info()
+            if not isinstance(info, dict):
+                continue
+            sector = _normalize_sector(info.get("sector") or info.get("sectorDisp"))
+            industry = str(info.get("industry") or info.get("industryDisp") or "").strip()
+            proxy = _sector_proxy(sector)
+            with _LOCK:
+                _SECTOR_CACHE[symbol] = {
+                    "ts": time.time(),
+                    "sector_name": sector,
+                    "industry_name": industry,
+                    "sector_proxy": proxy,
+                    "classification_source": "yfinance_profile_cache",
+                }
+            if proxy:
+                try:
+                    getattr(core, "SYMBOL_SECTOR", {})[symbol] = proxy
+                except Exception:
+                    pass
+        except Exception:
+            continue
+
+
+def _schedule_sector_enrichment(core: Any, candidates: Sequence[Dict[str, Any]]) -> None:
+    global _SECTOR_THREAD
+    with _LOCK:
+        if _SECTOR_THREAD is not None and _SECTOR_THREAD.is_alive():
+            return
+        missing = [
+            dict(row)
+            for row in candidates
+            if isinstance(row, dict)
+            and _symbol(row.get("symbol"))
+            and not row.get("sector_proxy")
+            and not _cached_classification(_symbol(row.get("symbol")))
+        ]
+        if not missing:
+            return
+        _SECTOR_THREAD = threading.Thread(
+            target=_sector_enrichment_worker,
+            args=(core, missing),
+            name="broad-momentum-sector-enrichment",
+            daemon=True,
+        )
+        _SECTOR_THREAD.start()
+
+
+def _record_boundary(
+    core: Any,
+    payload: Dict[str, Any],
+    *,
+    phase: str,
+    pre_universe: Sequence[str],
+    final_universe: Sequence[str],
+) -> Dict[str, Any]:
+    base = set(_base_universe(core))
+    broad = set(_unique(payload.get("selected_symbols") or []))
+    protected = set(_unique(list(BENCHMARK_SYMBOLS) + _positions(core)))
+    intended = set(final_universe)
+    extras = [symbol for symbol in _unique(pre_universe) if symbol not in intended]
+    appended = [
+        {"symbol": symbol, "owner_hint": _infer_append_owner(symbol, base, broad, protected)}
+        for symbol in extras[:100]
+    ]
     record = {
         "version": VERSION,
         "generated_local": _now(core),
-        "status": payload.get("status"),
-        "source_counts": payload.get("source_counts"),
-        "source_errors": payload.get("source_errors"),
-        "eligible_unique_count": payload.get("eligible_unique_count"),
-        "discovery_selected_count": len(broad),
-        "final_universe_count": len(final_universe),
-        "protected_symbols": _unique(list(BENCHMARK_SYMBOLS) + _positions(core)),
-        "broad_symbols_used": [s for s in broad if s in final_universe],
-        "base_fallback_symbols": [s for s in final_universe if s in set(base) and s not in set(broad)],
-        "final_universe": final_universe,
-        "theme_baskets_are_fallback_and_classification": True,
+        "phase": phase,
+        "discovery_pool_count": len(_unique(payload.get("selected_symbols") or [])),
+        "intended_working_universe_count": len(final_universe),
+        "scanner_input_universe_count": len(final_universe) if phase == "pre_scan" else None,
+        "pre_boundary_universe_count": len(_unique(pre_universe)),
+        "post_boundary_universe_count": len(final_universe),
+        "max_final_universe": MAX_FINAL_UNIVERSE,
+        "within_policy_cap": len(final_universe) <= MAX_FINAL_UNIVERSE,
+        "appended_after_discovery_count": len(extras),
+        "appended_after_discovery": appended,
+        "final_universe": list(final_universe),
         "execution_authority": "existing_rules_only",
         "ml_authority": "shadow_recommendation_only",
-        "changes_entry_rules": False,
-        "changes_hard_risk": False,
-        "changes_sizing": False,
     }
     try:
         portfolio = getattr(core, "portfolio", {})
         if isinstance(portfolio, dict):
-            portfolio["broad_momentum_discovery"] = record
+            state = portfolio.setdefault("broad_momentum_discovery", {})
+            if isinstance(state, dict):
+                state.update(record)
+                history = state.setdefault("boundary_history", [])
+                if isinstance(history, list):
+                    history.append(dict(record))
+                    del history[:-20]
     except Exception:
         pass
     return record
 
 
-def _chain_has_marker(fn: Any, limit: int = 40) -> bool:
+def apply_universe(core: Any, payload: Dict[str, Any], phase: str = "discovery") -> Dict[str, Any]:
+    base = _base_universe(core)
+    broad = list(payload.get("selected_symbols") or [])
+    pre_universe = _unique(getattr(core, "UNIVERSE", []) or [])
+    final_universe = _compose_universe(_positions(core), base, broad)
+    if not broad:
+        final_universe = _unique(list(BENCHMARK_SYMBOLS) + _positions(core) + base)[:MAX_FINAL_UNIVERSE]
+    _apply_classification(core, list(payload.get("candidates") or []), final_universe)
+    core.UNIVERSE = final_universe
+    _schedule_sector_enrichment(core, list(payload.get("candidates") or [])[:MAX_BROAD_SLOTS])
+    record = _record_boundary(
+        core,
+        payload,
+        phase=phase,
+        pre_universe=pre_universe,
+        final_universe=final_universe,
+    )
+    record.update(
+        {
+            "status": payload.get("status"),
+            "source_counts": payload.get("source_counts"),
+            "source_errors": payload.get("source_errors"),
+            "eligible_unique_count": payload.get("eligible_unique_count"),
+            "protected_symbols": _unique(list(BENCHMARK_SYMBOLS) + _positions(core)),
+            "broad_symbols_used": [s for s in broad if s in final_universe],
+            "base_fallback_symbols": [s for s in final_universe if s in set(base) and s not in set(broad)],
+            "theme_baskets_are_fallback_and_classification": True,
+        }
+    )
+    try:
+        state = (getattr(core, "portfolio", {}) or {}).get("broad_momentum_discovery")
+        if isinstance(state, dict):
+            state.update(record)
+    except Exception:
+        pass
+    return record
+
+
+def _linked_callable(current: Any, marker: str) -> bool:
     seen: set[int] = set()
-    current = fn
-    for _ in range(limit):
-        if not callable(current) or id(current) in seen:
-            return False
-        seen.add(id(current))
-        if getattr(current, "_broad_momentum_discovery_version", None) == VERSION:
+    queue: List[Any] = [current]
+    while queue and len(seen) < 80:
+        fn = queue.pop(0)
+        if not callable(fn) or id(fn) in seen:
+            continue
+        seen.add(id(fn))
+        if getattr(fn, marker, None) == VERSION:
             return True
-        current = getattr(current, "__wrapped__", None) or getattr(current, "_broad_momentum_original", None)
+        for attr in (
+            "__wrapped__",
+            "_broad_momentum_original",
+            "_broad_momentum_scan_original",
+            "_dynamic_universe_builder_original",
+            "_shared_cycle_identity_original",
+            "_scanner_v2_lifecycle_trace_original",
+        ):
+            linked = getattr(fn, attr, None)
+            if callable(linked):
+                queue.append(linked)
     return False
+
+
+def _patch_scan_signals(core: Any) -> bool:
+    current = getattr(core, "scan_signals", None)
+    if not callable(current) or _linked_callable(current, "_broad_momentum_scan_version"):
+        return False
+    original = current
+
+    @functools.wraps(original)
+    def wrapped_scan_signals(*args, **kwargs):
+        payload = discover(core, force=False, wait=True)
+        apply_universe(core, payload, phase="pre_scan")
+        result = original(*args, **kwargs)
+        try:
+            state = (getattr(core, "portfolio", {}) or {}).get("broad_momentum_discovery", {})
+            if isinstance(state, dict):
+                state["last_scan_completed_local"] = _now(core)
+                state["last_scan_result_count"] = len(result) if isinstance(result, list) else None
+                state["post_scan_universe_count"] = len(_unique(getattr(core, "UNIVERSE", []) or []))
+        except Exception:
+            pass
+        return result
+
+    wrapped_scan_signals._broad_momentum_scan_version = VERSION  # type: ignore[attr-defined]
+    wrapped_scan_signals._broad_momentum_scan_original = original  # type: ignore[attr-defined]
+    core.scan_signals = wrapped_scan_signals
+    return True
 
 
 def _patch_run_cycle(core: Any) -> bool:
     current = getattr(core, "run_cycle", None)
-    if not callable(current) or _chain_has_marker(current):
+    if not callable(current) or _linked_callable(current, "_broad_momentum_discovery_version"):
         return False
     original = current
 
     @functools.wraps(original)
     def wrapped_run_cycle(*args, **kwargs):
+        payload: Dict[str, Any] | None = None
         try:
             clock = core.market_clock() if callable(getattr(core, "market_clock", None)) else {}
             market_open = bool(clock.get("is_open", False)) if isinstance(clock, dict) else False
             if ENABLED and _paper_context() and market_open:
                 payload = discover(core, force=False, wait=True)
-                apply_universe(core, payload)
+                apply_universe(core, payload, phase="pre_cycle")
         except Exception as exc:
             try:
                 portfolio = getattr(core, "portfolio", {})
@@ -544,7 +802,14 @@ def _patch_run_cycle(core: Any) -> bool:
                     }
             except Exception:
                 pass
-        return original(*args, **kwargs)
+        try:
+            return original(*args, **kwargs)
+        finally:
+            if payload:
+                try:
+                    apply_universe(core, payload, phase="post_cycle")
+                except Exception:
+                    pass
 
     wrapped_run_cycle._broad_momentum_discovery_version = VERSION  # type: ignore[attr-defined]
     wrapped_run_cycle._broad_momentum_original = original  # type: ignore[attr-defined]
@@ -556,6 +821,7 @@ def _watchdog(core: Any) -> None:
     while True:
         try:
             _patch_run_cycle(core)
+            _patch_scan_signals(core)
         except Exception:
             pass
         time.sleep(max(5, WATCHDOG_SECONDS))
@@ -578,7 +844,6 @@ def _start_watchdog(core: Any) -> None:
 
 def status_payload(core: Any = None, force: bool = False) -> Dict[str, Any]:
     core = core or _module()
-    current = getattr(core, "run_cycle", None) if core is not None else None
     payload = discover(core, force=True, wait=True) if force else dict(_LAST or {})
     if not payload:
         payload = {
@@ -593,21 +858,38 @@ def status_payload(core: Any = None, force: bool = False) -> Dict[str, Any]:
             "top_candidates": [],
         }
     payload = dict(payload)
-    payload["enabled"] = bool(ENABLED)
-    payload["paper_context"] = bool(_paper_context())
-    payload["run_cycle_hook_active"] = _chain_has_marker(current) if callable(current) else False
-    payload["current_universe_count"] = len(_unique(getattr(core, "UNIVERSE", []) or [])) if core is not None else 0
-    payload["current_universe"] = _unique(getattr(core, "UNIVERSE", []) or [])[:MAX_FINAL_UNIVERSE] if core is not None else []
-    payload["authority"] = {
-        "places_orders": False,
-        "changes_entry_rules": False,
-        "changes_hard_risk": False,
-        "changes_sizing": False,
-        "changes_ml_authority": False,
-        "changes_live_authority": False,
-        "execution_authority": "existing_rules_only",
-        "ml_authority": "shadow_recommendation_only",
-    }
+    run_current = getattr(core, "run_cycle", None) if core is not None else None
+    scan_current = getattr(core, "scan_signals", None) if core is not None else None
+    current_universe = _unique(getattr(core, "UNIVERSE", []) or []) if core is not None else []
+    boundary = {}
+    if core is not None:
+        try:
+            boundary = dict((getattr(core, "portfolio", {}) or {}).get("broad_momentum_discovery") or {})
+        except Exception:
+            boundary = {}
+    classified = sum(1 for row in payload.get("candidates") or [] if isinstance(row, dict) and row.get("sector_proxy"))
+    selected_count = len(payload.get("selected_symbols") or [])
+    payload.update(
+        {
+            "enabled": bool(ENABLED),
+            "paper_context": bool(_paper_context()),
+            "run_cycle_hook_active": _linked_callable(run_current, "_broad_momentum_discovery_version"),
+            "scan_boundary_hook_active": _linked_callable(scan_current, "_broad_momentum_scan_version"),
+            "current_universe_count": len(current_universe),
+            "current_universe": current_universe[:MAX_FINAL_UNIVERSE],
+            "current_universe_over_policy_cap": max(0, len(current_universe) - MAX_FINAL_UNIVERSE),
+            "last_scanner_boundary": boundary,
+            "classification": {
+                "classified_count": classified,
+                "unclassified_count": max(0, selected_count - classified),
+                "coverage_pct": round(100.0 * classified / selected_count, 2) if selected_count else 0.0,
+                "sector_cache_count": len(_SECTOR_CACHE),
+                "enrichment_in_progress": bool(_SECTOR_THREAD and _SECTOR_THREAD.is_alive()),
+                "enrichment_non_blocking": True,
+            },
+            "authority": _authority(),
+        }
+    )
     return payload
 
 
@@ -616,7 +898,8 @@ def apply(core: Any = None) -> Dict[str, Any]:
     if core is None:
         return {"status": "pending", "overall": "pending", "version": VERSION, "reason": "core_not_ready"}
     _base_universe(core)
-    patched = _patch_run_cycle(core)
+    run_patched = _patch_run_cycle(core)
+    scan_patched = _patch_scan_signals(core)
     _start_watchdog(core)
     return {
         "status": "ok",
@@ -624,8 +907,10 @@ def apply(core: Any = None) -> Dict[str, Any]:
         "version": VERSION,
         "enabled": bool(ENABLED),
         "paper_context": bool(_paper_context()),
-        "run_cycle_hook_active": _chain_has_marker(getattr(core, "run_cycle", None)),
-        "patched_this_call": bool(patched),
+        "run_cycle_hook_active": _linked_callable(getattr(core, "run_cycle", None), "_broad_momentum_discovery_version"),
+        "scan_boundary_hook_active": _linked_callable(getattr(core, "scan_signals", None), "_broad_momentum_scan_version"),
+        "patched_run_cycle_this_call": bool(run_patched),
+        "patched_scan_this_call": bool(scan_patched),
         "watchdog_started": id(core) in _WATCHDOG_CORE_IDS,
         "authority_changed": False,
         "execution_authority": "existing_rules_only",
@@ -669,6 +954,8 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
                 "selected_symbols": list(payload.get("selected_symbols") or [])[:limit],
                 "source_counts": payload.get("source_counts"),
                 "source_errors": payload.get("source_errors"),
+                "classification": payload.get("classification"),
+                "last_scanner_boundary": payload.get("last_scanner_boundary"),
                 "authority": payload.get("authority"),
             }
         )
@@ -679,12 +966,36 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
             "broad_momentum_discovery_status",
             status_route,
         )
+    else:
+        endpoint = next(
+            (
+                getattr(rule, "endpoint", None)
+                for rule in flask_app.url_map.iter_rules()
+                if getattr(rule, "rule", "") == "/paper/broad-momentum-discovery-status"
+            ),
+            None,
+        )
+        if endpoint:
+            flask_app.view_functions[endpoint] = status_route
+
     if "/paper/broad-momentum-candidates" not in existing:
         flask_app.add_url_rule(
             "/paper/broad-momentum-candidates",
             "broad_momentum_candidates",
             candidates_route,
         )
+    else:
+        endpoint = next(
+            (
+                getattr(rule, "endpoint", None)
+                for rule in flask_app.url_map.iter_rules()
+                if getattr(rule, "rule", "") == "/paper/broad-momentum-candidates"
+            ),
+            None,
+        )
+        if endpoint:
+            flask_app.view_functions[endpoint] = candidates_route
+
     _REGISTERED_APP_IDS.add(id(flask_app))
     apply(core or _module())
 
