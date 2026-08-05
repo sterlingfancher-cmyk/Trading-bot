@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 
-import market_data_request_gate as request_gate
+import market_data_resilience as resilience
 import yfinance_data_hygiene as hygiene
 
 
@@ -33,6 +33,14 @@ def test_no_silent_rgit_to_rgti_translation(monkeypatch):
     assert "RGTI" not in allowed
 
 
+def test_canonical_provider_owner_filters_rgit_before_request(monkeypatch):
+    _reset_hygiene(monkeypatch)
+    cleaned, allowed, blocked = resilience._sanitize_symbol_request(["RGIT", "CIFR"])
+    assert cleaned == ["CIFR"]
+    assert allowed == ["CIFR"]
+    assert blocked == [{"symbol": "RGIT", "reason": "known_no_data_symbol"}]
+
+
 def test_broad_discovery_symbol_normalizer_rejects_rgit(monkeypatch):
     _reset_hygiene(monkeypatch)
     fake_broad = SimpleNamespace(
@@ -50,49 +58,20 @@ def test_broad_discovery_symbol_normalizer_rejects_rgit(monkeypatch):
     assert fake_broad._CACHE == {"ts": 0.0, "payload": None}
 
 
-def test_request_gate_skips_blocked_symbol_before_prior_helper(monkeypatch):
+def test_provider_confirmed_no_data_creates_symbol_quarantine(monkeypatch):
     _reset_hygiene(monkeypatch)
-    calls = []
-
-    def prior(symbol, period="5d", interval="5m"):
-        calls.append((symbol, period, interval))
-        return "provider-result"
-
-    core = SimpleNamespace(download_prices=prior, local_ts_text=lambda: "2026-08-05 13:30:00")
-    request_gate.install(core)
-
-    assert core.download_prices("RGIT") is None
-    assert calls == []
-    assert core.download_prices("CIFR") == "provider-result"
-    assert calls == [("CIFR", "5d", "5m")]
+    hygiene._apply_failure("TESTX", "no_data", "possibly delisted; no price data found")
+    assert hygiene.is_blocked_symbol("TESTX") is True
+    assert hygiene.blocked_reason("TESTX") == "provider_confirmed_no_data"
 
 
-def test_request_gate_rebinds_after_underlying_helper_changes(monkeypatch):
+def test_timeout_backoff_is_symbol_specific(monkeypatch):
     _reset_hygiene(monkeypatch)
-    first_calls = []
-    second_calls = []
-
-    def first(symbol, period="5d", interval="5m"):
-        first_calls.append(symbol)
-        return "first"
-
-    def second(symbol, period="5d", interval="5m"):
-        second_calls.append(symbol)
-        return "second"
-
-    core = SimpleNamespace(download_prices=first, local_ts_text=lambda: "2026-08-05 13:30:00")
-    request_gate.install(core)
-    assert getattr(core.download_prices, "_market_data_request_gate_version", None) == request_gate.VERSION
-
-    core.download_prices = second
-    request_gate.install(core)
-
-    assert getattr(core.download_prices, "_market_data_request_gate_version", None) == request_gate.VERSION
-    assert core.download_prices("RGIT") is None
-    assert second_calls == []
-    assert core.download_prices("CIFR") == "second"
-    assert second_calls == ["CIFR"]
-    assert first_calls == []
+    hygiene._apply_failure("CIFR", "timeout", "curl: (28) resolving timed out")
+    assert hygiene.is_blocked_symbol("CIFR") is False
+    hygiene._apply_failure("CIFR", "timeout", "curl: (28) resolving timed out")
+    assert hygiene.is_blocked_symbol("CIFR") is True
+    assert hygiene.is_blocked_symbol("SPY") is False
 
 
 def test_authority_contract_remains_observational(monkeypatch):
