@@ -15,13 +15,12 @@ order placement, ML authority, or live authority changes.
 from __future__ import annotations
 
 import datetime as dt
-import functools
 import sys
 import threading
 import time
 from typing import Any, Dict, List, Tuple
 
-VERSION = "scanner-runtime-contract-2026-08-05-v2-broad-boundary"
+VERSION = "scanner-runtime-contract-2026-08-05-v2.1-boundary-marker-safe"
 
 _LOCK = threading.RLock()
 _WATCHDOGS: set[int] = set()
@@ -259,7 +258,9 @@ def _patch_universe_boundary(core: Any) -> bool:
     if not callable(current) or _chain_has_boundary(current):
         return False
 
-    @functools.wraps(current)
+    # Do not use functools.wraps here. Copying the inner opening-surge wrapper's
+    # __dict__ would falsely mark this outer boundary as a second opening-surge
+    # layer and would duplicate its prior links in callable-chain telemetry.
     def bounded_scan(*args, __prior=current, **kwargs):
         boundary = _apply_broad_boundary(core)
         try:
@@ -273,11 +274,17 @@ def _patch_universe_boundary(core: Any) -> bool:
             pass
         return __prior(*args, **kwargs)
 
+    bounded_scan.__name__ = "bounded_scan"
+    bounded_scan.__qualname__ = "_patch_universe_boundary.<locals>.bounded_scan"
+    bounded_scan.__module__ = __name__
     bounded_scan._scanner_universe_boundary = True
     bounded_scan._scanner_runtime_contract_version = VERSION
     bounded_scan._scanner_universe_boundary_prior = current
-    bounded_scan._scanner_runtime_contract_prior = current
-    bounded_scan.__wrapped__ = current
+    try:
+        import broad_momentum_discovery as broad
+        setattr(core, "SCANNER_UNIVERSE_BOUNDARY_VERSION", broad.VERSION)
+    except Exception:
+        pass
     core.scan_signals = bounded_scan
     return True
 
