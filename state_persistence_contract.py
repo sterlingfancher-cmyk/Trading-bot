@@ -1,9 +1,8 @@
 """Runtime persistence contract for paper state.
 
-The startup bootstrap selects a mounted volume before app.py imports. This module
-then validates the selected path, migrates a richer legacy local state when safe,
-reloads a richer persistent snapshot into the in-memory portfolio, and exposes a
-bounded status endpoint. It does not fabricate or reconstruct missing trades.
+Startup may migrate and reload only an existing richer snapshot. Status reads are
+strictly observational and now refresh in-memory/on-disk richness on every call,
+so the daily audit never reports an hours-old persistence snapshot.
 """
 from __future__ import annotations
 
@@ -15,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
-VERSION = "state-persistence-contract-2026-08-04-v1"
+VERSION = "state-persistence-contract-2026-08-05-v2-live-status"
 _LOCK = threading.RLock()
 _APPLIED: set[int] = set()
 _LAST: Dict[str, Any] = {}
@@ -44,7 +43,9 @@ def _richness(state: Dict[str, Any]) -> tuple[int, int, int, int, float]:
     trades = state.get("trades") if isinstance(state.get("trades"), list) else []
     history = state.get("history") if isinstance(state.get("history"), list) else []
     reports = _dict(state.get("reports"))
-    report_count = len(reports.get("intraday_history") or []) + len(reports.get("daily_history") or [])
+    report_count = len(reports.get("intraday_history") or []) + len(
+        reports.get("daily_history") or []
+    )
     try:
         equity_delta = abs(float(state.get("equity", 10000.0)) - 10000.0)
     except Exception:
@@ -99,6 +100,15 @@ def _configured_dir(core: Any) -> str | None:
     return None
 
 
+def _state_file(core: Any) -> str:
+    configured = _configured_dir(core)
+    raw = str(getattr(core, "STATE_FILE", "state.json"))
+    path = Path(raw)
+    if configured and not path.is_absolute():
+        path = Path(configured) / path.name
+    return str(path.resolve())
+
+
 def _legacy_candidates(state_file: str) -> Iterable[str]:
     seen: set[str] = set()
     for candidate in (
@@ -122,12 +132,53 @@ def _replace_portfolio(core: Any, loaded: Dict[str, Any]) -> bool:
     return True
 
 
+def _live_snapshot(core: Any, base: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    base = dict(base or {})
+    state_file = _state_file(core)
+    configured_dir = _configured_dir(core)
+    persistent_mount = bool(configured_dir and _is_distinct_mount(configured_dir))
+    in_memory = _dict(getattr(core, "portfolio", {}))
+    on_disk = _read_json(state_file)
+    state_path = Path(state_file)
+    backup_path = Path(state_file + ".bak")
+    base.update(
+        {
+            "status": "ok",
+            "overall": "pass" if persistent_mount else "warn",
+            "type": "state_persistence_contract",
+            "version": VERSION,
+            "generated_local": _now(),
+            "state_file": state_file,
+            "configured_dir": configured_dir,
+            "persistent_mount_detected": persistent_mount,
+            "state_file_exists": state_path.is_file(),
+            "backup_exists": backup_path.is_file(),
+            "state_file_size_bytes": state_path.stat().st_size if state_path.is_file() else None,
+            "state_file_modified_age_seconds": (
+                round(dt.datetime.now().timestamp() - state_path.stat().st_mtime, 1)
+                if state_path.is_file()
+                else None
+            ),
+            "in_memory_richness": _richness(in_memory),
+            "on_disk_richness": _richness(on_disk),
+            "richness_match": _richness(in_memory) == _richness(on_disk),
+            "status_refresh_is_read_only": True,
+            "recovery_limitation": (
+                None
+                if persistent_mount
+                else "No distinct mounted volume was detected. Attach a Railway volume before relying on state durability."
+            ),
+        }
+    )
+    return base
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     global _LAST
     if core is None:
         return {"status": "pending", "version": VERSION, "reason": "core_missing"}
     with _LOCK:
-        state_file = str(Path(getattr(core, "STATE_FILE", "state.json")).resolve())
+        state_file = _state_file(core)
         configured_dir = _configured_dir(core)
         persistent_mount = bool(configured_dir and _is_distinct_mount(configured_dir))
         current = _dict(getattr(core, "portfolio", {}))
@@ -143,8 +194,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
                     if candidate and _materially_richer(candidate, current):
                         try:
                             shutil.copy2(candidate_path, state_file)
-                            backup = state_file + ".bak"
-                            shutil.copy2(candidate_path, backup)
+                            shutil.copy2(candidate_path, state_file + ".bak")
                             on_disk = candidate
                             migration = {
                                 "performed": True,
@@ -171,43 +221,54 @@ def apply(core: Any = None) -> Dict[str, Any]:
                 pass
 
         _APPLIED.add(id(core))
-        _LAST = {
-            "status": "ok",
-            "overall": "pass" if persistent_mount else "warn",
-            "version": VERSION,
-            "generated_local": _now(),
-            "state_file": state_file,
-            "configured_dir": configured_dir,
-            "persistent_mount_detected": persistent_mount,
-            "state_file_exists": Path(state_file).is_file(),
-            "backup_exists": Path(state_file + ".bak").is_file(),
-            "in_memory_richness": _richness(_dict(getattr(core, "portfolio", {}))),
-            "on_disk_richness": _richness(_read_json(state_file)),
-            "migration": migration,
-            "reloaded_richer_persistent_state": reloaded,
-            "recovery_limitation": (
-                None if persistent_mount else
-                "No distinct mounted volume was detected. Code cannot make the Railway application filesystem durable; attach a volume and set STATE_DIR to its mount path."
-            ),
-        }
+        _LAST = _live_snapshot(
+            core,
+            {
+                "migration": migration,
+                "reloaded_richer_persistent_state": reloaded,
+            },
+        )
         return dict(_LAST)
 
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
-    if core is not None and id(core) not in _APPLIED:
-        return apply(core)
+    global _LAST
+    if core is None:
+        return {
+            "status": "ok" if _LAST else "pending",
+            "type": "state_persistence_contract",
+            **dict(_LAST),
+            "authority": _authority(),
+        }
+    with _LOCK:
+        if id(core) not in _APPLIED:
+            return apply(core)
+        _LAST = _live_snapshot(
+            core,
+            {
+                "migration": _LAST.get(
+                    "migration", {"performed": False, "source": None, "reason": None}
+                ),
+                "reloaded_richer_persistent_state": _LAST.get(
+                    "reloaded_richer_persistent_state", False
+                ),
+            },
+        )
+        return {
+            **dict(_LAST),
+            "authority": _authority(),
+        }
+
+
+def _authority() -> Dict[str, Any]:
     return {
-        "status": "ok" if _LAST else "pending",
-        "type": "state_persistence_contract",
-        **dict(_LAST),
-        "authority": {
-            "restores_only_existing_state": True,
-            "fabricates_missing_state": False,
-            "changes_strategy": False,
-            "changes_thresholds": False,
-            "changes_risk_or_sizing": False,
-            "places_orders": False,
-        },
+        "restores_only_existing_state": True,
+        "fabricates_missing_state": False,
+        "status_reads_are_observational": True,
+        "changes_strategy": False,
+        "changes_thresholds": False,
+        "changes_risk_or_sizing": False,
+        "places_orders": False,
     }
 
 
@@ -215,13 +276,29 @@ def register_routes(flask_app: Any, core: Any = None) -> None:
     if flask_app is None:
         return
     from flask import jsonify
+
     try:
         existing = {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
     except Exception:
         existing = set()
+
+    def view():
+        return jsonify(status_payload(core))
+
     if "/paper/state-persistence-contract-status" not in existing:
         flask_app.add_url_rule(
             "/paper/state-persistence-contract-status",
             "state_persistence_contract_status",
-            lambda: jsonify(status_payload(core)),
+            view,
         )
+    else:
+        endpoint = next(
+            (
+                getattr(rule, "endpoint", None)
+                for rule in flask_app.url_map.iter_rules()
+                if getattr(rule, "rule", "") == "/paper/state-persistence-contract-status"
+            ),
+            None,
+        )
+        if endpoint:
+            flask_app.view_functions[endpoint] = view
