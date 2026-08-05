@@ -22,10 +22,14 @@ jobs:
           python - <<'PY'
           import json
           import pathlib
+          import time
           import urllib.request
 
           base = "https://web-production-e1796.up.railway.app"
           endpoints = {
+              "broad_momentum_force": "/paper/broad-momentum-discovery-status?force=1",
+              "broad_momentum_status": "/paper/broad-momentum-discovery-status",
+              "broad_momentum_candidates": "/paper/broad-momentum-candidates?limit=100",
               "paper_status_full": "/paper/status?full=1",
               "paper_status": "/paper/status",
               "daily_audit": "/paper/daily-audit",
@@ -43,11 +47,11 @@ jobs:
               target = pathlib.Path(f"capture_{name}.json")
               request = urllib.request.Request(
                   base + path,
-                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.2"},
+                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.3"},
                   method="GET",
               )
               try:
-                  with urllib.request.urlopen(request, timeout=30) as response:
+                  with urllib.request.urlopen(request, timeout=45) as response:
                       raw = response.read()
                       target.write_bytes(raw)
                       manifest["endpoints"][name] = {
@@ -63,10 +67,23 @@ jobs:
                       "path": path,
                       "error": f"{type(exc).__name__}: {exc}",
                   }
+              if name == "broad_momentum_force":
+                  time.sleep(10)
           pathlib.Path("capture_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
           print(json.dumps(manifest, indent=2, sort_keys=True))
-          if manifest["endpoints"]["paper_status_full"]["status"] != "ok":
-              raise SystemExit("full paper status capture failed")
+          required = (
+              "broad_momentum_force",
+              "broad_momentum_status",
+              "broad_momentum_candidates",
+              "paper_status_full",
+              "daily_audit",
+              "state_persistence",
+              "cycle_completion",
+              "ml_counterfactual_ledger",
+          )
+          failed = [name for name in required if manifest["endpoints"][name]["status"] != "ok"]
+          if failed:
+              raise SystemExit("required capture failed: " + ",".join(failed))
           PY
 
       - name: Upload paper-state capture
