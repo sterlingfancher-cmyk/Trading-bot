@@ -1,123 +1,267 @@
-# Project Handoff Addendum — Curated Daily Operational Audit
+# Project Handoff — Current Paper-Trading Runtime
 
-Date: 2026-08-04  
+Last updated: 2026-08-04 20:38 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Branch: `main`  
-Canonical paper service: `https://web-production-e1796.up.railway.app`
+Code head covered by this handoff: `6012f2a9eb4c15a73a9f8991fcb507904aa7df9b`  
+Canonical paper service: `https://web-production-e1796.up.railway.app`  
+Railway project/service: `splendid-creativity / web`
 
-## Purpose
+## Executive Status
 
-The previous broad full diagnostic was not suitable for routine use. It ran for more than 52 seconds, attempted a 151-route diagnostic surface, completed only 25 checks, and skipped 126 after exhausting the timeout budget.
+The paper bot is deployed, persistent state is now working, the entry bottleneck that prevented a second controlled starter was repaired, machine learning remains shadow-only but now records independent counterfactual recommendations, and the scanner now includes a broad market momentum-discovery prefilter instead of relying primarily on a closed hand-selected ticker list.
 
-Routine operational review is now separated into a new read-only route:
+The runtime remains paper-only. The rules engine is the sole execution authority. Machine learning cannot place orders, override a rejection, alter sizing, relax risk controls, or obtain live authority.
 
-- Routine daily audit: `/paper/daily-audit`
+## Canonical Operating Links
+
+- Routine audit: `/paper/daily-audit`
 - Tiny self-check: `/paper/self-check`
-- Targeted full diagnostics only: `/paper/full-self-check`
+- Targeted diagnostics: `/paper/full-self-check`
+- Paper state: `/paper/status?full=1`
+- Persistence: `/paper/state-persistence-contract-status`
+- Cycle completion: `/paper/cycle-completion-contract-status`
+- ML Phase 2: `/paper/ml2-status`
+- ML recommendation ledger: `/paper/ml-counterfactual-ledger-status`
+- ML training dataset: `/paper/ml-counterfactual-training-dataset`
+- Broad momentum status: `/paper/broad-momentum-discovery-status`
+- Broad momentum candidates: `/paper/broad-momentum-candidates`
 
-The daily audit does not call diagnostic routes, market-data providers, backtests, repair actions, entry functions, or order functions. It reads bounded in-process state and a small local status allowlist.
+## Persistent State — Resolved
 
-## Daily Audit Contract
+A Railway volume is mounted at:
 
-The route returns exactly twelve mobile-readable sections:
+```text
+/app/data
+```
 
-1. Account and open-position performance
-2. Auto-runner liveness and latest completed cycle
-3. Active errors and recursion
-4. Risk controls and drawdown
-5. Scanner signals, entries, and rejection counts
-6. Top five blockers with reasons
-7. Entry-pipeline ownership and stability
-8. Trade-journal reconciliation
-9. State persistence, backup, and recovery health
-10. Runtime-shadow cycles and parity
-11. Clear `pass`, `warn`, or `fail` conclusion
-12. One specific next action when attention is required
+The application automatically uses Railway's `RAILWAY_VOLUME_MOUNT_PATH`; no custom `STATE_DIR` variable is required for the current deployment.
 
-The response includes an explicit performance and authority contract:
+Latest validated persistence state:
 
-- Route fan-out: `0`
-- External provider calls: `0`
-- Trading actions: `0`
-- Repair actions: `0`
-- Heavy research: `0`
-- Bounded output: `true`
-- Reporting only: `true`
-- Strategy, thresholds, risk, sizing, live authority, and ML authority unchanged
+- Persistent mount detected: `true`
+- Configured directory: `/app/data`
+- State file: `/app/data/state.json`
+- State file exists: `true`
+- Backup: `/app/data/state.json.bak`
+- Backup exists: `true`
+- In-memory and on-disk richness matched
+- Daily-audit persistence section: `pass`
 
-## Implementation Commits
+Important historical limitation: the earlier TSM/HWM paper state that disappeared before the volume was attached cannot be safely reconstructed from the current repository or runtime evidence. Do not claim that state was restored. The present paper account is the authoritative post-reset baseline.
 
-- `3353a70477b4a201f643894c8306b78fc3a594a3` — Add curated daily operational audit route
-- `498010387998776673f7db927a9d1b2e8f8b40a9` — Register daily audit and correct the central diagnostic base-URL fallback
-- `4b4bc888bc4572773e5f8f543931b74690b12bc2` — Add daily operational audit tests
-- `4ee3561c9ab04abc4a16153bd6634f3132a76054` — Add local and live daily-audit validation workflow
-- `b2b337123d90fca3f16d49c7018acba7ac862a5d` — Publish the live daily-audit commit status
+## Latest Validated Paper Account
 
-## Validation Evidence
+Capture time: 2026-08-04 20:27:59 CDT
 
-GitHub Actions run: `30922074226`  
-Job: `validate-daily-audit`  
-Job conclusion: `success`  
-Live artifact ID: `8897559181`
+- Cash: `$6,425.12`
+- Equity: `$9,988.16`
+- Open positions: `4`
+- Positions: `MARA`, `AI`, `POWL`, `CRWD`
+- Unrealized P&L: `-$11.84`
+- Realized P&L: `$0.00`
+- Execution rows: `4`
+- Risk halted: `false`
+- Self-defense active: `false`
+- Intraday drawdown: `0.123%`
+- Absolute daily-loss ceiling: `3.0%`
+- Hard intraday drawdown halt: `2.5%`
 
-Targeted tests:
+The market was closed during the latest post-deployment capture, so the automatic cycle correctly completed as `skipped` with reason `after_regular_session`. The auto-runner remained enabled and healthy.
 
-- `3` tests passed
-- Test duration: `0.017s`
-- Exact 12-section contract verified
-- Active-recursion failure classification verified
-- Source verified to contain no route fan-out or trading-action calls
+## Current Effective Participation Limits
 
-Live Railway validation:
+Unless a separately validated controlled-expansion state is active, the effective paper controls are:
 
-- Route status: `ok`
-- Type: `daily_operational_audit`
-- Audit conclusion: `warn`
-- Audit construction time: `0.0091s`
-- Sections returned: `12`
-- Both Railway deployment contexts: `success`
-- Commit status `daily-operational-audit`: `success`
+- Maximum standard starter positions: `4`
+- Maximum standard starter entries per day: `3`
+- Risk-on starter entries per cycle: `1`
+- Normal position target: approximately `12%–18%` of equity
+- Current cautious target observed: `11.475%` of equity
+- Maximum account risk per trade at the configured stop: `2%`
+- Starter cash check: at least `35%` cash before another starter
+- Practical post-sizing cash reserve: approximately `30%`
+- Practical standard deployment ceiling: approximately `70%`
 
-The route contract is therefore validated. The `warn` conclusion is an operational finding, not a route or deployment failure.
+A paper controlled-expansion layer exists with higher theoretical ceilings, but it activates only under its own favorable-regime and safety conditions. Do not treat its maximums as the normal operating limits.
 
-## Live Operational Findings at 2026-08-04 10:04:28 CDT
+## Entry-Pipeline Repair Completed
 
-### Passed
+The one-position lock was caused by a combination of timestamp-spacing interpretation, overly sensitive tiny-drawdown gates, and a false chase/pattern veto. The repair preserved the existing daily entry cap, spacing, position cap, sector and bucket diversification, exposure limits, hard risk halts, and sizing controls.
 
-- Account fields were readable
-- No active auto-runner error
-- No active or historical recursion error
-- Risk was not halted
-- Self-defense was inactive
-- Realized loss and intraday drawdown were `0.0%`
-- Entry pipeline was stable, recursion-safe, directly based on core, and owned
-- Bear wrapper count: `1`
-- X-ray wrapper count: `1`
-- No blocker rows were present
+The controlled second-starter tolerance is paper-only and narrowly constrained. It requires a constructive or risk-on market, exactly one existing position, high cash, no realized losses, no active risk halt or self-defense condition, very small account drawdown, and a bounded loss on the first position.
 
-### Warnings
+The live result was successful: the account progressed beyond one position without globally lowering the strategy score floor or disabling risk controls.
 
-- Auto-runner was enabled and its thread was observed active, but no completed cycle had yet been recorded after the deployment
-- Scanner had `0` signals and `0` entries, but the rejection-count field was not yet populated
-- Trade-journal summary was not yet populated; execution rows and open positions were both `0`
-- Runtime shadow was `awaiting_first_market_cycle`
-- State file existed at `/app/state.json`, but the audit could not detect a configured persistent state-path contract or adjacent backup
+Key repair commits include:
 
-### Account-State Change Requiring Attention
+- `6ec6cb13fde457350465f191562ae5881faf088a` — Repair starter spacing and tiny-drawdown participation gate
+- `d152ea0660bf69d2a47bee2b0c3c3626e15dad1b` — Add controlled favorable-regime pattern exception
+- `93eec508b55c55343bb635491d932be5c99fab0b` — Add controlled constructive-market second-starter tolerance
+- `3f798c55e1a938f6b4be692382a49abade3d225a` — Allow controlled second starter through small unrealized drawdown
+- `01dd6812bde1015cd3d8d56df21f355784ec804` — Load second-starter tolerance from the bootstrap path
 
-The prior validated handoff state showed approximately `9878.62` cash, `9999.56` equity, and an open `TSM` paper position. The new deployment reported `10000.00` cash, `10000.00` equity, and no positions.
+## Machine Learning — Current Role
 
-That discontinuity strongly suggests that the newly deployed `web` runtime did not recover the prior paper-state snapshot. Treat this as a persistence-boundary issue until the Railway volume mount and state-path configuration are verified. Do not infer trading performance from the reset balance.
+ML remains in `shadow_recommendation_only` mode.
 
-## Required Next Work
+It now independently evaluates scanner candidates and records:
 
-1. Verify the `splendid-creativity / web` Railway service has a persistent volume mounted for the paper-state file.
-2. Bind the application state path to that mount through the deployment configuration rather than `/app/state.json` on the ephemeral application filesystem.
-3. Decide whether the prior paper snapshot should be restored or whether the reset `10000.00` baseline is intentional.
-4. Allow at least one complete 300-second automatic interval, then rerun `/paper/daily-audit`.
-5. Confirm a completed auto cycle, scanner/rejection telemetry, trade-journal summary, and runtime-shadow parity are populated.
-6. Use `/paper/full-self-check` only if the daily audit still names a specific failing component.
+- ML recommendation: enter, avoid, or neutral
+- Probability, confidence, edge, and rank
+- Rules allow/block decision and exact reason
+- Whether the candidate was actually executed
+- 15-minute, 60-minute, end-of-day, and next-session outcomes when available
+- Maximum favorable and adverse excursion
+- Stop-versus-target path when available
 
-## Operating Freeze
+The ledger distinguishes:
 
-No strategy logic, signal score, entry threshold, position size, risk ladder, live-broker authority, or ML authority was changed in this work. The bot remains paper-only and ML remains advisory-only.
+- Executed outcomes: strongest evidence and full training weight
+- Counterfactual outcomes: useful but discounted evidence
+
+Counterfactual rows do not count toward promotion gates. ML still cannot select or execute a blocked trade, alter a rules score, change sizing, relax risk, or place an order.
+
+Key ML commits:
+
+- `276ee79dc3077b54a956ed103f081a7001c5c165` — Add rules-gated ML counterfactual recommendation ledger
+- `95ebdaa7da23242bd0ad89f5d27c07156def1672` — Test the ledger
+- `e30969bde00f7ccf8598757805a89df0b126a99b` — Start the ledger during guarded bootstrap
+- `231f69e8cefc57cb1fef6a57df21f355784ec804` — Load the ledger from the root bootstrap path
+- `dac39f322164f9b3bc278652ecb3f46db3c6259c` — Register the ledger in the WSGI runtime
+
+ML promotion remains prohibited until the formal evidence gates pass and the user explicitly approves a change in authority.
+
+## Broad Market Momentum Discovery — Deployed
+
+The scanner no longer depends primarily on a manually maintained ticker universe. A bounded, paper-only discovery layer now screens broad U.S. market momentum and passes the strongest liquid candidates into the existing detailed scanner.
+
+Current discovery sources:
+
+- Market-wide momentum screen
+- Day gainers
+- Most-active stocks
+- Existing positions
+- SPY, QQQ, IWM, and DIA
+- Original ticker/theme list as fallback coverage
+
+Current liquidity floors:
+
+- Minimum price: `$3.00`
+- Minimum daily volume: `350,000`
+- Minimum daily dollar volume: `$10,000,000`
+- Minimum market capitalization when available: `$100,000,000`
+
+Current bounded limits:
+
+- Maximum discovery candidates retained: `160`
+- Maximum broad-momentum slots: `80`
+- Maximum original/fallback slots: `25`
+- Maximum final working universe: `110`
+- Refresh cache: `900 seconds`
+
+Latest forced live discovery validation:
+
+- Raw screen results: `450`
+- Unique liquid eligible stocks: `305`
+- Selected momentum candidates: `160`
+- Provider errors: none
+- Discovery duration: approximately `1.57 seconds`
+
+Examples in the validated candidate set included `LIFE`, `PLTR`, `IBTA`, `SOPH`, `DORM`, `W`, `TSAT`, `AMRC`, `PAY`, and `ZBRA`.
+
+The discovery layer only determines which symbols deserve expensive detailed evaluation. The existing scanner, strategy score, entry rules, risk controls, sector limits, sizing, and execution pipeline remain authoritative. Theme baskets are retained primarily as classification and concentration-control containers rather than closed discovery boundaries.
+
+Broad-discovery commits:
+
+- `2270a928f647b91165d02e514637af71321e7dfa` — Add broad market momentum discovery prefilter
+- `aed50ebdab29b3a435740c7e61a62408e184371d` — Test broad market momentum discovery
+- `4ce3ce806e8dc0d27d4f75ed9557f5fc7dde7ac6` — Register broad discovery in WSGI
+- `13be15a36e7d212d682ba4bb8d92120465d093ca` — Register cycle-hook ownership
+- `6012f2a9eb4c15a73a9f8991fcb507904aa7df9b` — Declare discovery watchdog units
+
+PR `#7`, **Add broad market momentum discovery prefilter**, was merged into `main`.
+
+## Validation State
+
+Validated as successful:
+
+- Repository safety and performance validation
+- Python compilation for new modules
+- Focused broad-discovery unit tests
+- Exact Gunicorn startup smoke
+- Both Railway deployment contexts
+- Persistent-state survival through deployment
+- Broad momentum status and candidate routes: HTTP 200
+- ML ledger status and training-dataset routes: HTTP 200
+- Cycle-completion contract: healthy
+- Daily operational audit: responsive and bounded
+
+Latest broad-momentum live artifact: `8914892837`  
+Latest state-capture workflow run: `30966425023`
+
+The separate refactor/governance audit remains red because the repository still contains legacy ownership and typed-configuration findings. That red status is technical-debt evidence, not proof that the current Railway deployment or the new scanner feature failed. Do not ignore it, but do not misclassify it as a live outage.
+
+## Known Warnings and Technical Debt
+
+1. The daily audit still reports `rejection_count_missing` for scanner telemetry even though signals and blocker rows exist.
+2. Trade-journal reconciliation remains incomplete because the summarized journal row counts are not populated alongside the four execution rows and four open positions.
+3. The direct `/paper/runtime-shadow-capture-status` route returned HTTP 404 in the latest capture, while the daily audit's in-state runtime-shadow section reported healthy parity. The route registration should be reconciled without changing runtime authority.
+4. Broad discovery has been validated after hours, but its first market-open replacement of the executable working universe still needs direct evidence.
+5. Legacy architecture ownership and configuration-contract findings remain unresolved.
+
+## Next Priorities
+
+### 1. Validate the first market-open broad-discovery cycle
+
+Confirm:
+
+- The executable working universe contains current momentum leaders rather than only the original base list
+- Current positions and benchmark ETFs remain protected
+- The detailed scanner receives a bounded 75–110 symbol set
+- Cycle duration stays within the provider-timeout and stale-cycle contracts
+- Candidate source, promotion, rejection, and selection telemetry are populated
+- No recursion or wrapper-chain regression appears
+
+### 2. Close observability gaps
+
+Populate and reconcile:
+
+- Scanner rejection totals
+- Trade-journal execution-row count
+- Trade-journal open-position count
+- Runtime-shadow status route registration
+
+### 3. Evaluate discovery quality, not only discovery breadth
+
+After several market-open cycles, compare:
+
+- Momentum candidates promoted versus rejected
+- Rules-approved candidates versus actual outcomes
+- Fixed-list candidates versus market-wide discoveries
+- Candidate diversity by sector and bucket
+- Cycle duration and provider failure rate
+- Whether the broader universe improves opportunity quality or merely increases noisy signals
+
+### 4. Mature the ML evidence set
+
+Continue collecting executed and counterfactual labels. Do not grant ML trade authority. The next permissible ML step, only after sufficient out-of-sample evidence, is paper-only ranking among candidates already approved by the rules engine.
+
+### 5. Proactive performance review doctrine
+
+Future work should identify structural bottlenecks before adjusting thresholds. Priority review areas are opportunity discovery, capital efficiency, rejection-cost analysis, regime adaptation, correlation/concentration, exit quality, provider reliability, and evidence quality. Each behavioral change should be isolated on a branch, tested, reviewed for authority changes, and then deployed with live read-only validation.
+
+## Non-Negotiable Safety Boundaries
+
+- Paper trading only
+- Rules engine remains execution authority
+- ML remains shadow recommendation only
+- No restoration claims for missing historical TSM/HWM state
+- No bypass of hard risk, drawdown, daily-entry, spacing, position, sector, bucket, or sizing controls
+- Never infer a successful deployment solely from a GitHub commit; verify the live Railway service
+- Never infer persistence solely from code; verify `/app/data/state.json` and its backup live
+- Do not weaken thresholds merely to create more trades; diagnose the actual bottleneck first
+
+## Handoff Instruction for the Next Session
+
+Read this document before modifying the project. Start with the current live state and the latest merged `main`, not an older conversation snapshot. Verify persistent storage, cycle completion, the daily audit, ML authority, and broad-momentum discovery before making behavioral changes. Preserve the user's moderate-to-aggressive risk posture while honoring the 3% maximum daily-loss ceiling, 2% per-trade risk ceiling, and rules-gated paper-only architecture.
