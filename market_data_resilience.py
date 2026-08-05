@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Any, Dict, List
 
-VERSION = "market-data-resilience-2026-08-05-v2-symbol-hygiene"
+VERSION = "market-data-resilience-2026-08-05-v2.1-wrapper-aware-status"
 REQUEST_TIMEOUT_SECONDS = max(2.0, float(os.environ.get("MARKET_DATA_REQUEST_TIMEOUT_SECONDS", "8")))
 FAILURE_THRESHOLD = max(1, int(os.environ.get("MARKET_DATA_FAILURE_THRESHOLD", "3")))
 CIRCUIT_OPEN_SECONDS = max(5, int(os.environ.get("MARKET_DATA_CIRCUIT_OPEN_SECONDS", "60")))
@@ -96,6 +96,7 @@ def install(core: Any = None) -> Dict[str, Any]:
     if not callable(current):
         return {"status": "pending", "version": VERSION, "reason": "download_prices_missing"}
     if getattr(current, "_market_data_resilience_version", None) == VERSION:
+        _PATCHED_MODULE_IDS.add(id(core))
         return status_payload(core)
 
     original = getattr(current, "_market_data_resilience_original", current)
@@ -168,6 +169,9 @@ def install(core: Any = None) -> Dict[str, Any]:
 def status_payload(core: Any = None) -> Dict[str, Any]:
     core = core or _mod()
     now = time.time()
+    current = getattr(core, "download_prices", None) if core is not None else None
+    direct_marker = bool(getattr(current, "_market_data_resilience_version", None) == VERSION)
+    installed_in_process = bool(core is not None and id(core) in _PATCHED_MODULE_IDS)
     with _LOCK:
         recent = list(_EVENTS[-50:])
         totals = dict(_TOTALS)
@@ -175,12 +179,16 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         open_until = float(_CIRCUIT_OPEN_UNTIL)
         last_error = dict(_LAST_ERROR)
     durations = [float(row.get("duration_ms") or 0.0) for row in recent if row.get("status") == "ok"]
+    installed = bool(direct_marker or installed_in_process)
     return {
         "status": "ok" if core is not None else "pending",
-        "overall": "pass" if core is not None else "pending",
+        "overall": "pass" if core is not None and installed else "warn" if core is not None else "pending",
         "type": "market_data_resilience_status",
         "version": VERSION,
-        "installed": bool(core is not None and getattr(getattr(core, "download_prices", None), "_market_data_resilience_version", None) == VERSION),
+        "installed": installed,
+        "installed_direct_marker": direct_marker,
+        "installed_in_process_registry": installed_in_process,
+        "outer_wrapper_may_hide_direct_marker": bool(installed_in_process and not direct_marker),
         "request_timeout_seconds": REQUEST_TIMEOUT_SECONDS,
         "failure_threshold": FAILURE_THRESHOLD,
         "circuit_open_seconds": CIRCUIT_OPEN_SECONDS,
