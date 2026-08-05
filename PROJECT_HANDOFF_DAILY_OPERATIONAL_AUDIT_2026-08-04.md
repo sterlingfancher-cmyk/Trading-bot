@@ -99,7 +99,7 @@ Key repair commits include:
 - `d152ea0660bf69d2a47bee2b0c3c3626e15dad1b` — Add controlled favorable-regime pattern exception
 - `93eec508b55c55343bb635491d932be5c99fab0b` — Add controlled constructive-market second-starter tolerance
 - `3f798c55e1a938f6b4be692382a49abade3d225a` — Allow controlled second starter through small unrealized drawdown
-- `01dd6812bde1015cd3d8d56df21f355784ec804` — Load second-starter tolerance from the bootstrap path
+- `01dd6812bde1015cd3d8d56ac34fec0535a4d48c` — Load second-starter tolerance from the bootstrap path
 
 ## Machine Learning — Current Role
 
