@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-08-04-v49-daily-operational-audit"
+VERSION = "usercustomize-entry-pipeline-composition-2026-08-05-v50-yfinance-hygiene"
 _REGISTERED_APP_IDS: set[int] = set()
 _ONE_SHOT_APPLIED: set[tuple[int, str]] = set()
 
@@ -43,6 +43,7 @@ def _patch_self_check_endpoints() -> None:
         if not isinstance(endpoints, list):
             return
         wanted = [
+            {"path": "/paper/yfinance-data-hygiene-status", "category": "market_data", "required": False},
             {"path": "/paper/symbol-hygiene-guard-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-audit-status", "category": "governance", "required": False},
             {"path": "/paper/blocked-entry-reason-selfcheck-overlay-status", "category": "governance", "required": False},
@@ -131,6 +132,7 @@ MODULES = (
     ("state_snapshot_archive", "app_and_module"),
     ("state_provenance_monitor", "app_and_module"),
     ("shared_cycle_identity", "app_and_module"),
+    ("yfinance_data_hygiene", "app_and_module"),
     ("market_data_resilience", "app_and_module"),
     ("breakout_participation_layer", "app_only"),
     ("fmp_limited_access_guard", "app_and_module"),
@@ -203,7 +205,8 @@ def _watchdog() -> None:
                 # dynamic_universe_builder, shared_cycle_identity, or lifecycle tracing
                 # can form a recursive scan_signals chain when another wrapper is outermost.
                 for name in (
-                    "state_transaction_manager", "performance_risk_calibration", "state_snapshot_archive", "state_provenance_monitor", "market_data_resilience", "symbol_hygiene_guard",
+                    "state_transaction_manager", "performance_risk_calibration", "state_snapshot_archive", "state_provenance_monitor",
+                    "yfinance_data_hygiene", "market_data_resilience", "symbol_hygiene_guard",
                     "blocked_entry_source_contract_guard",
                     "scanner_v2_shadow_universe", "missed_opportunity_post_close_audit",
                     "scanner_v2_shadow_quality_trace", "scanner_v2_shadow_composite_score",
