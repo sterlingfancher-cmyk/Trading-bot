@@ -51,7 +51,7 @@ jobs:
               target = pathlib.Path(f"capture_{name}.json")
               request = urllib.request.Request(
                   base + path,
-                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.5"},
+                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.6"},
                   method="GET",
               )
               try:
