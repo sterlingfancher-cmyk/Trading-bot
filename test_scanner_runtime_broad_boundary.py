@@ -49,6 +49,9 @@ def test_canonical_scanner_owner_applies_broad_boundary_before_delegate(monkeypa
 
 
 def test_boundary_does_not_inherit_opening_surge_markers(monkeypatch):
+    def base_scan(market=None):
+        return ["SPY", "QQQ"]
+
     class Core:
         portfolio = {"positions": {}}
         UNIVERSE = [f"OLD{i}" for i in range(125)]
@@ -56,17 +59,12 @@ def test_boundary_does_not_inherit_opening_surge_markers(monkeypatch):
         def local_ts_text(self):
             return "2026-08-05 10:35:00"
 
+        def scan_signals(self, market=None):
+            return base_scan(market)
+
+    Core.scan_signals._opening_surge_scan_guard = True
+    Core.scan_signals._opening_surge_scan_prior = base_scan
     core = Core()
-
-    def base_scan(market=None):
-        return list(core.UNIVERSE)
-
-    def opening_scan(market=None):
-        return base_scan(market)
-
-    opening_scan._opening_surge_scan_guard = True
-    opening_scan._opening_surge_scan_prior = base_scan
-    core.scan_signals = opening_scan
 
     fake_broad = SimpleNamespace(
         VERSION="broad-momentum-discovery-2026-08-05-v2.1-ownership-safe",
