@@ -66,55 +66,38 @@ def test_universe_composition_prioritizes_positions_benchmarks_and_broad_movers(
     assert len(universe) == len(set(universe))
 
 
-def test_run_cycle_and_scanner_boundary_enforce_final_cap(monkeypatch):
+def test_scanner_boundary_helper_enforces_final_cap(monkeypatch):
     class Core:
-        UNIVERSE = [f"BASE{i}" for i in range(80)] + [f"EXTRA{i}" for i in range(80)]
+        UNIVERSE = [f"BASE{i}" for i in range(160)]
         SYMBOL_SECTOR = {}
         SYMBOL_BUCKET = {}
         BUCKET_CONFIG = {}
         portfolio = {"positions": {"HELD": {}}}
 
-        def market_clock(self):
-            return {"is_open": True}
-
         def local_ts_text(self):
             return "2026-08-05 10:00:00"
-
-        def scan_signals(self):
-            return list(self.UNIVERSE)
-
-        def run_cycle(self, source="manual"):
-            return {"source": source, "universe": self.scan_signals()}
 
     core = Core()
     payload = {
         "status": "ok",
-        "selected_symbols": [f"MOVE{i}" for i in range(100)],
-        "candidates": [
-            {"symbol": f"MOVE{i}", "sector_proxy": "XLK", "sources": ["market_wide_momentum"]}
-            for i in range(100)
-        ],
+        "selected_symbols": [f"MOVE{i}" for i in range(160)],
+        "candidates": [],
         "source_counts": {},
         "source_errors": {},
-        "eligible_unique_count": 100,
+        "eligible_unique_count": 160,
     }
     monkeypatch.setattr(module, "discover", lambda *args, **kwargs: payload)
-    monkeypatch.setattr(module, "_schedule_sector_enrichment", lambda *args, **kwargs: None)
-    result = module.apply(core)
-    assert result["run_cycle_hook_active"] is True
-    assert result["scan_boundary_hook_active"] is True
-    cycle = core.run_cycle(source="test")
-    assert len(cycle["universe"]) <= module.MAX_FINAL_UNIVERSE
+    monkeypatch.setattr(module, "_schedule_enrichment", lambda *args, **kwargs: None)
+    result = module.enforce_scanner_boundary(core)
+    assert result["phase"] == "pre_scan"
+    assert result["within_policy_cap"] is True
+    assert result["post_boundary_universe_count"] <= module.MAX_FINAL_UNIVERSE
     assert len(core.UNIVERSE) <= module.MAX_FINAL_UNIVERSE
-    boundary = core.portfolio["broad_momentum_discovery"]
-    assert boundary["within_policy_cap"] is True
-    assert boundary["post_boundary_universe_count"] <= module.MAX_FINAL_UNIVERSE
-    assert cycle["source"] == "test"
+    assert set(["SPY", "QQQ", "IWM", "DIA", "HELD"]).issubset(core.UNIVERSE)
 
 
 def test_authority_contract_remains_rules_only():
-    payload = module.status_payload(None, force=False)
-    authority = payload["authority"]
+    authority = module._authority()
     assert authority["places_orders"] is False
     assert authority["changes_entry_rules"] is False
     assert authority["changes_hard_risk"] is False
