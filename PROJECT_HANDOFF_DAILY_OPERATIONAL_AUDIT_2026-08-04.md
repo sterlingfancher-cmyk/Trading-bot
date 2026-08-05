@@ -1,9 +1,9 @@
 # Project Handoff — Current Paper-Trading Runtime
 
-Last updated: 2026-08-04 20:38 CDT  
+Last updated: 2026-08-04 20:49 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Branch: `main`  
-Code head covered by this handoff: `6012f2a9eb4c15a73a9f8991fcb507904aa7df9b`  
+Runtime code head covered by this handoff: `6012f2a9eb4c15a73a9f8991fcb507904aa7df9b`  
 Canonical paper service: `https://web-production-e1796.up.railway.app`  
 Railway project/service: `splendid-creativity / web`
 
@@ -247,9 +247,26 @@ After several market-open cycles, compare:
 
 Continue collecting executed and counterfactual labels. Do not grant ML trade authority. The next permissible ML step, only after sufficient out-of-sample evidence, is paper-only ranking among candidates already approved by the rules engine.
 
-### 5. Proactive performance review doctrine
+## Proactive Performance-Improvement Directive
 
-Future work should identify structural bottlenecks before adjusting thresholds. Priority review areas are opportunity discovery, capital efficiency, rejection-cost analysis, regime adaptation, correlation/concentration, exit quality, provider reliability, and evidence quality. Each behavioral change should be isolated on a branch, tested, reviewed for authority changes, and then deployed with live read-only validation.
+The assistant or engineer continuing this project must operate proactively rather than waiting for the user to identify each limitation. At the start of substantive work, independently inspect the latest live state, daily audit, scanner coverage, decision telemetry, execution results, and technical-debt signals. Surface material opportunities, bottlenecks, and failure risks before the user has to ask about them.
+
+Proactive review must continuously examine:
+
+- Opportunity discovery and whether the scanner can see current market leadership
+- Idle cash, deployment efficiency, position capacity, and concentration
+- Rules-blocked candidates that subsequently performed well and rules-approved candidates that failed
+- Entry timing, extension, slippage, stop placement, profit capture, and exit leakage
+- Regime changes, sector rotation, volatility, correlation, and crowding
+- Provider latency, stale data, cycle duration, recursion, persistence, and deployment reliability
+- ML evidence quality, selection bias, label coverage, calibration, and readiness gates
+- Redundant, contradictory, misordered, or overly restrictive filters
+
+Do not propose changes merely because they are novel or would create more trades. Rank ideas by expected effect on risk-adjusted expectancy, supporting evidence, downside risk, implementation complexity, and reversibility. Prefer structural improvements—such as widening discovery, improving telemetry, or correcting pipeline ownership—over indiscriminately lowering thresholds.
+
+Maintain a clear distinction between proactive analysis and trading authority. The assistant should identify, explain, prioritize, and, when directed to proceed, implement defensible upgrades. It must not silently change live authority, grant ML execution power, bypass hard controls, or weaken the user's risk boundaries. Behavioral changes should be isolated on a branch when practical, tested, reviewed for authority changes, and verified against the live Railway service with read-only evidence after deployment.
+
+The standard is: diagnose the actual mechanism, anticipate the next bottleneck, present the highest-value improvement, and preserve safety while improving performance.
 
 ## Non-Negotiable Safety Boundaries
 
@@ -264,4 +281,4 @@ Future work should identify structural bottlenecks before adjusting thresholds. 
 
 ## Handoff Instruction for the Next Session
 
-Read this document before modifying the project. Start with the current live state and the latest merged `main`, not an older conversation snapshot. Verify persistent storage, cycle completion, the daily audit, ML authority, and broad-momentum discovery before making behavioral changes. Preserve the user's moderate-to-aggressive risk posture while honoring the 3% maximum daily-loss ceiling, 2% per-trade risk ceiling, and rules-gated paper-only architecture.
+Read this document before modifying the project. Start with the current live state and the latest merged `main`, not an older conversation snapshot. Verify persistent storage, cycle completion, the daily audit, ML authority, and broad-momentum discovery before making behavioral changes. Preserve the user's moderate-to-aggressive risk posture while honoring the 3% maximum daily-loss ceiling, 2% per-trade risk ceiling, and rules-gated paper-only architecture. Follow the proactive performance-improvement directive: do not wait for the user to discover structural limitations that can be identified from the available evidence.
