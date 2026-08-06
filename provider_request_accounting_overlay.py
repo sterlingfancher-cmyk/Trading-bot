@@ -1,16 +1,18 @@
 """Read-only accounting overlay for market-data provider request totals.
 
-The provider-health counters can be sampled while another request is in flight.
-This overlay makes that gap explicit instead of leaving operators to infer it
-from totals. It does not call providers, change retries/backoff, alter strategy,
-change risk or sizing, place orders, or change live/ML authority.
+The provider-health counters distinguish actual provider requests from symbols
+filtered before a request is made. This overlay makes any in-flight snapshot gap
+explicit without double-counting failure subtypes or pre-provider filters.
+
+It does not call providers, change retries/backoff, alter strategy, change risk
+or sizing, place orders, or change live/ML authority.
 """
 from __future__ import annotations
 
 import functools
 from typing import Any, Dict
 
-VERSION = "provider-request-accounting-overlay-2026-08-06-v1"
+VERSION = "provider-request-accounting-overlay-2026-08-06-v2-denominator-safe"
 _APPLIED = False
 
 
@@ -30,29 +32,39 @@ def _i(value: Any) -> int:
 def accounting_payload(totals: Any) -> Dict[str, Any]:
     row = dict(_d(totals))
     requests = _i(row.get("requests"))
-    # `timeouts` is treated as a failure subtype and therefore is not added a
-    # second time. The other counters represent terminal or intentionally
-    # skipped request outcomes.
+
+    # `failures` already includes empty responses and timeouts. Provider-circuit
+    # skips are counted after the request counter is incremented, so they share
+    # the provider-request denominator. Hygiene and symbol-backoff counters are
+    # pre-provider symbol filters and must not be added to provider outcomes.
     classified = sum(
         _i(row.get(key))
         for key in (
             "successes",
             "failures",
-            "empty",
-            "hygiene_blocked",
             "provider_circuit_skips",
-            "symbol_backoff_skips",
         )
     )
     gap = max(0, requests - classified)
+    over = max(0, classified - requests)
+    pre_provider_filtered = _i(row.get("hygiene_blocked")) + _i(
+        row.get("symbol_backoff_skips")
+    )
     return {
         "requests": requests,
         "classified_terminal_outcomes": classified,
         "in_flight_or_unclassified_requests": gap,
-        "accounting_complete_at_snapshot": gap == 0,
+        "provider_outcomes_over_request_count": over,
+        "accounting_complete_at_snapshot": gap == 0 and over == 0,
+        "pre_provider_filtered_symbols": pre_provider_filtered,
+        "hygiene_blocked_symbols": _i(row.get("hygiene_blocked")),
+        "symbol_backoff_filtered_symbols": _i(row.get("symbol_backoff_skips")),
+        "empty_failures_reported_separately": _i(row.get("empty")),
         "timeouts_reported_separately": _i(row.get("timeouts")),
         "interpretation": (
-            "A small positive gap can be a request that was in flight when the read-only status snapshot was taken."
+            "Provider outcomes use requests as their denominator. Hygiene and "
+            "symbol-backoff counters are pre-provider symbol filters; a small "
+            "positive request gap can be a request in flight at snapshot time."
         ),
     }
 
@@ -85,9 +97,21 @@ def apply(core: Any = None) -> Dict[str, Any]:
         totals = dict(_d(section.get("provider_totals")))
         totals.update(
             {
-                "classified_terminal_outcomes": accounting["classified_terminal_outcomes"],
-                "in_flight_or_unclassified_requests": accounting["in_flight_or_unclassified_requests"],
-                "accounting_complete_at_snapshot": accounting["accounting_complete_at_snapshot"],
+                "classified_terminal_outcomes": accounting[
+                    "classified_terminal_outcomes"
+                ],
+                "in_flight_or_unclassified_requests": accounting[
+                    "in_flight_or_unclassified_requests"
+                ],
+                "provider_outcomes_over_request_count": accounting[
+                    "provider_outcomes_over_request_count"
+                ],
+                "accounting_complete_at_snapshot": accounting[
+                    "accounting_complete_at_snapshot"
+                ],
+                "pre_provider_filtered_symbols": accounting[
+                    "pre_provider_filtered_symbols"
+                ],
             }
         )
         section["provider_totals"] = totals
