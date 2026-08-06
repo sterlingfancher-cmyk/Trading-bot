@@ -15,7 +15,7 @@ import time
 import traceback
 from typing import Any, Callable, Iterable
 
-VERSION = "deferred-wsgi-bootstrap-2026-08-03-v4-listener-first"
+VERSION = "deferred-wsgi-bootstrap-2026-08-06-v5-data-integrity-bridge"
 _START_MONOTONIC = time.monotonic()
 _LOCK = threading.RLock()
 _DELEGATE: Callable[..., Any] | None = None
@@ -67,6 +67,18 @@ def _snapshot() -> dict[str, Any]:
         return out
 
 
+def _bridge_has_error(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return True
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        return payload.get("status") == "error"
+    return any(
+        isinstance(row, dict) and row.get("status") == "error"
+        for row in modules.values()
+    )
+
+
 def _load_application() -> None:
     global _DELEGATE
     try:
@@ -80,6 +92,21 @@ def _load_application() -> None:
         core = sys.modules.get("app")
         if core is None:
             raise RuntimeError("app module missing after legacy WSGI import")
+
+        _set_state(status="loading", phase="data_integrity_registration")
+        import data_integrity_startup_bridge
+
+        integrity_apply = data_integrity_startup_bridge.apply(core)
+        integrity_routes = data_integrity_startup_bridge.register_routes(delegate, core)
+        if _bridge_has_error(integrity_apply) or _bridge_has_error(integrity_routes):
+            raise RuntimeError(
+                "data integrity registration failed: "
+                + json.dumps(
+                    {"apply": integrity_apply, "routes": integrity_routes},
+                    sort_keys=True,
+                    default=str,
+                )[:3000]
+            )
 
         _set_state(status="loading", phase="runtime_worker_registration")
         import runtime_worker_registration
@@ -100,6 +127,10 @@ def _load_application() -> None:
             status="ready",
             phase="delegating",
             registration=registration,
+            data_integrity_registration={
+                "apply": integrity_apply,
+                "routes": integrity_routes,
+            },
             app_module=getattr(core, "__name__", "app"),
         )
     except Exception as exc:
