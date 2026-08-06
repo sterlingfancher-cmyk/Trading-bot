@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import daily_audit_response_reconciliation as response_reconciliation
 import daily_data_integrity_audit_overlay as overlay
 import provider_request_accounting_overlay as provider_accounting
 
@@ -171,6 +172,49 @@ class DailyDataIntegrityOverlayV2Tests(unittest.TestCase):
         self.assertEqual(accounting["classified_terminal_outcomes"], 10)
         self.assertEqual(accounting["in_flight_or_unclassified_requests"], 0)
         self.assertEqual(accounting["timeouts_reported_separately"], 1)
+
+    def test_pre_provider_filters_do_not_exceed_request_denominator(self):
+        accounting = provider_accounting.accounting_payload(
+            {
+                "requests": 5081,
+                "successes": 5081,
+                "failures": 0,
+                "hygiene_blocked": 3,
+                "provider_circuit_skips": 0,
+                "symbol_backoff_skips": 0,
+            }
+        )
+        self.assertEqual(accounting["classified_terminal_outcomes"], 5081)
+        self.assertEqual(accounting["pre_provider_filtered_symbols"], 3)
+        self.assertEqual(accounting["provider_outcomes_over_request_count"], 0)
+        self.assertTrue(accounting["accounting_complete_at_snapshot"])
+
+    def test_response_guard_recounts_full_audit_after_outer_overlay(self):
+        payload = _base_payload()
+        payload["type"] = "daily_operational_audit"
+        payload["sections"]["10b_market_data_and_path_integrity"] = _integrity_section()
+        response_reconciliation.reconcile_payload(payload)
+
+        conclusion = payload["sections"]["11_conclusion"]
+        self.assertEqual(conclusion["checked_sections"], 11)
+        self.assertEqual(conclusion["pass_count"], 11)
+        self.assertEqual(payload["overall"], "pass")
+
+    def test_response_guard_recounts_compact_legacy_summary_once(self):
+        payload = {
+            "type": "daily_operational_audit_compact",
+            "overall": "pass",
+            "section_summary": {"checked": 10, "pass": 10, "warn": 0, "fail": 0},
+            "data_integrity": {"status": "pass"},
+        }
+        response_reconciliation.reconcile_payload(payload)
+        self.assertEqual(
+            payload["section_summary"],
+            {"checked": 11, "pass": 11, "warn": 0, "fail": 0},
+        )
+        response_reconciliation.reconcile_payload(payload)
+        self.assertEqual(payload["section_summary"]["checked"], 11)
+        self.assertEqual(payload["section_summary"]["pass"], 11)
 
     def test_bootstrap_source_contains_registration_heartbeat_contract(self):
         source = Path("bootstrap_wsgi.py").read_text(encoding="utf-8")
