@@ -6,6 +6,8 @@ on:
     paths:
       - "daily_operational_audit.py"
       - "daily_audit_repair_overlay.py"
+      - "daily_data_integrity_audit_overlay.py"
+      - "data_integrity_startup_bridge.py"
       - "cycle_completion_contract.py"
       - "provider_timeout_contract.py"
       - "state_persistence_contract.py"
@@ -13,6 +15,7 @@ on:
       - "bootstrap/sitecustomize.py"
       - "test_daily_operational_audit.py"
       - "test_runtime_repair_contracts.py"
+      - "test_daily_data_integrity_overlay_v2.py"
       - "usercustomize.py"
       - ".github/workflows/daily-operational-audit.yml"
   workflow_dispatch:
@@ -39,7 +42,8 @@ jobs:
         run: |
           python -m unittest -v \
             test_daily_operational_audit.py \
-            test_runtime_repair_contracts.py
+            test_runtime_repair_contracts.py \
+            test_daily_data_integrity_overlay_v2.py
 
       - name: Wait for the repaired Railway runtime
         id: deployment_ready
@@ -83,7 +87,7 @@ jobs:
             "cycle_completion_contract_live.json:/paper/cycle-completion-contract-status" \
             "state_persistence_contract_live.json:/paper/state-persistence-contract-status" \
             "provider_timeout_contract_live.json:/paper/provider-timeout-contract-status" \
-            "daily_operational_audit_live.json:/paper/daily-audit"; do
+            "daily_operational_audit_live.json:/paper/daily-audit?full=1"; do
             file=${spec%%:*}
             path=${spec#*:}
             curl --silent --show-error --fail \
@@ -107,13 +111,15 @@ jobs:
           sections = daily.get("sections")
           contract = daily.get("performance_contract", {})
           authority = daily.get("authority", {})
+          conclusion = (sections or {}).get("11_conclusion", {})
 
           assert bootstrap.get("status") == "ready", bootstrap
           assert bootstrap.get("delegate_ready") is True, bootstrap
           assert daily.get("status") == "ok", daily
           assert daily.get("type") == "daily_operational_audit", daily
-          assert isinstance(sections, dict) and len(sections) == 12, sections
+          assert isinstance(sections, dict) and len(sections) == 13, sections
           assert daily.get("repair_overlay_version"), daily
+          assert daily.get("data_integrity_overlay_version"), daily
           assert contract.get("route_fanout_count") == 0, contract
           assert contract.get("external_provider_calls") == 0, contract
           assert contract.get("trading_actions") == 0, contract
@@ -121,7 +127,9 @@ jobs:
           assert contract.get("bounded_output") is True, contract
           assert authority.get("reporting_only") is True, authority
           assert float(daily.get("duration_seconds", 999.0)) <= 5.0, daily.get("duration_seconds")
-          assert sections.get("11_conclusion", {}).get("status") in {"pass", "warn", "fail"}
+          assert conclusion.get("status") in {"pass", "warn", "fail"}, conclusion
+          assert conclusion.get("checked_sections") == 11, conclusion
+          assert sections.get("10b_market_data_and_path_integrity", {}).get("status") in {"pass", "warn", "fail"}
           assert sections.get("12_next_action", {}).get("status") in {"none", "required"}
 
           assert cycle.get("status") == "ok" and cycle.get("installed") is True, cycle
@@ -135,6 +143,7 @@ jobs:
               "overall": daily.get("overall"),
               "duration_seconds": daily.get("duration_seconds"),
               "section_count": len(sections),
+              "checked_sections": conclusion.get("checked_sections"),
               "cycle_health": cycle.get("cycle_health"),
               "cycle_phase": cycle.get("cycle_phase"),
               "cycle_in_progress": cycle.get("cycle_in_progress"),
