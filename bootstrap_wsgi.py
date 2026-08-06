@@ -15,11 +15,13 @@ import time
 import traceback
 from typing import Any, Callable, Iterable
 
-VERSION = "deferred-wsgi-bootstrap-2026-08-06-v5-data-integrity-bridge"
+VERSION = "deferred-wsgi-bootstrap-2026-08-06-v6-registration-heartbeat"
 _START_MONOTONIC = time.monotonic()
 _LOCK = threading.RLock()
 _DELEGATE: Callable[..., Any] | None = None
 _LOADER_THREAD: threading.Thread | None = None
+_REGISTRATION_HEARTBEAT_INTERVAL_SECONDS = 5.0
+_REGISTRATION_SLOW_AFTER_SECONDS = 60.0
 _V2_ENABLED_VALUE = (
     os.environ["PERFORMANCE_AUDIT_V2_ENABLED"]
     if "PERFORMANCE_AUDIT_V2_ENABLED" in os.environ
@@ -79,8 +81,38 @@ def _bridge_has_error(payload: Any) -> bool:
     )
 
 
+def _registration_heartbeat_payload(
+    started_monotonic: float,
+    now_monotonic: float | None = None,
+) -> dict[str, Any]:
+    now_value = time.monotonic() if now_monotonic is None else float(now_monotonic)
+    elapsed = max(0.0, now_value - float(started_monotonic))
+    return {
+        "status": "loading",
+        "phase": "runtime_worker_registration",
+        "registration_elapsed_seconds": round(elapsed, 3),
+        "registration_slow": elapsed >= _REGISTRATION_SLOW_AFTER_SECONDS,
+        "registration_heartbeat_interval_seconds": _REGISTRATION_HEARTBEAT_INTERVAL_SECONDS,
+        "registration_message": (
+            "Runtime registration is still active; startup has not failed."
+            if elapsed < _REGISTRATION_SLOW_AFTER_SECONDS
+            else "Runtime registration is taking longer than 60 seconds but remains active."
+        ),
+    }
+
+
+def _registration_heartbeat_loop(
+    stop_event: threading.Event,
+    started_monotonic: float,
+) -> None:
+    while not stop_event.wait(_REGISTRATION_HEARTBEAT_INTERVAL_SECONDS):
+        _set_state(**_registration_heartbeat_payload(started_monotonic))
+
+
 def _load_application() -> None:
     global _DELEGATE
+    registration_heartbeat_stop: threading.Event | None = None
+    registration_started_monotonic: float | None = None
     try:
         _set_state(status="loading", phase="legacy_wsgi_import")
         import wsgi as legacy_wsgi
@@ -108,12 +140,46 @@ def _load_application() -> None:
                 )[:3000]
             )
 
-        _set_state(status="loading", phase="runtime_worker_registration")
+        registration_started_monotonic = time.monotonic()
+        _set_state(
+            status="loading",
+            phase="runtime_worker_registration",
+            registration_started_local=dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            registration_elapsed_seconds=0.0,
+            registration_slow=False,
+            registration_heartbeat_interval_seconds=_REGISTRATION_HEARTBEAT_INTERVAL_SECONDS,
+            registration_message="Runtime registration started.",
+        )
+        registration_heartbeat_stop = threading.Event()
+        registration_heartbeat_thread = threading.Thread(
+            target=_registration_heartbeat_loop,
+            args=(registration_heartbeat_stop, registration_started_monotonic),
+            daemon=True,
+            name="runtime-registration-bootstrap-heartbeat",
+        )
+        registration_heartbeat_thread.start()
+
         import runtime_worker_registration
 
-        registration = runtime_worker_registration.register(
-            core,
-            research_isolated=bool(_STATE.get("research_isolated", True)),
+        try:
+            registration = runtime_worker_registration.register(
+                core,
+                research_isolated=bool(_STATE.get("research_isolated", True)),
+            )
+        finally:
+            registration_heartbeat_stop.set()
+
+        registration_duration = round(
+            time.monotonic() - registration_started_monotonic,
+            3,
+        )
+        _set_state(
+            status="loading",
+            phase="runtime_worker_registration_complete",
+            registration_elapsed_seconds=registration_duration,
+            registration_duration_seconds=registration_duration,
+            registration_slow=registration_duration >= _REGISTRATION_SLOW_AFTER_SECONDS,
+            registration_message="Runtime registration completed; delegate activation is next.",
         )
         if registration.get("status") != "ok":
             raise RuntimeError(
@@ -127,6 +193,7 @@ def _load_application() -> None:
             status="ready",
             phase="delegating",
             registration=registration,
+            registration_duration_seconds=registration_duration,
             data_integrity_registration={
                 "apply": integrity_apply,
                 "routes": integrity_routes,
@@ -134,6 +201,14 @@ def _load_application() -> None:
             app_module=getattr(core, "__name__", "app"),
         )
     except Exception as exc:
+        if registration_heartbeat_stop is not None:
+            registration_heartbeat_stop.set()
+        failure_values: dict[str, Any] = {}
+        if registration_started_monotonic is not None:
+            failure_values["registration_elapsed_seconds"] = round(
+                time.monotonic() - registration_started_monotonic,
+                3,
+            )
         _set_state(
             status="error",
             phase="startup_failed",
@@ -141,6 +216,7 @@ def _load_application() -> None:
             traceback="".join(
                 traceback.format_exception(type(exc), exc, exc.__traceback__)
             )[-6000:],
+            **failure_values,
         )
 
 

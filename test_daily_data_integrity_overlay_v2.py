@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import daily_data_integrity_audit_overlay as overlay
+import provider_request_accounting_overlay as provider_accounting
 
 
 class _Daily:
@@ -139,6 +141,44 @@ class DailyDataIntegrityOverlayV2Tests(unittest.TestCase):
         self.assertEqual(counts["quarantined_feature_rows"], 4)
         self.assertEqual(counts["recomputed_rows"], 0)
         self.assertTrue(all(isinstance(value, int) for value in counts.values()))
+
+    def test_provider_accounting_exposes_one_in_flight_request(self):
+        accounting = provider_accounting.accounting_payload(
+            {
+                "requests": 228,
+                "successes": 227,
+                "failures": 0,
+                "empty": 0,
+                "hygiene_blocked": 0,
+                "provider_circuit_skips": 0,
+                "symbol_backoff_skips": 0,
+                "timeouts": 0,
+            }
+        )
+        self.assertEqual(accounting["classified_terminal_outcomes"], 227)
+        self.assertEqual(accounting["in_flight_or_unclassified_requests"], 1)
+        self.assertFalse(accounting["accounting_complete_at_snapshot"])
+
+    def test_provider_timeouts_are_not_double_counted(self):
+        accounting = provider_accounting.accounting_payload(
+            {
+                "requests": 10,
+                "successes": 8,
+                "failures": 2,
+                "timeouts": 1,
+            }
+        )
+        self.assertEqual(accounting["classified_terminal_outcomes"], 10)
+        self.assertEqual(accounting["in_flight_or_unclassified_requests"], 0)
+        self.assertEqual(accounting["timeouts_reported_separately"], 1)
+
+    def test_bootstrap_source_contains_registration_heartbeat_contract(self):
+        source = Path("bootstrap_wsgi.py").read_text(encoding="utf-8")
+        self.assertIn("v6-registration-heartbeat", source)
+        self.assertIn("registration_elapsed_seconds", source)
+        self.assertIn("registration_slow", source)
+        self.assertIn("runtime-registration-bootstrap-heartbeat", source)
+        compile(source, "bootstrap_wsgi.py", "exec")
 
 
 if __name__ == "__main__":
