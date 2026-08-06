@@ -1,16 +1,13 @@
-"""Intratrade price-path capture for MAE/MFE learning.
+"""Symbol-specific intratrade path capture for MAE/MFE research.
 
-Shadow/advisory only. This module records high/low/current price behavior for
-open positions so MAE/MFE can become real telemetry instead of placeholder
-fields. It does not place trades, close trades, change position sizing, or
-override risk controls.
+The capture is advisory-only. It records path observations for open positions,
+but rejects prices that are inconsistent with the position's own symbol-specific
+price, entry basis, or lifecycle identity. A new position fingerprint always
+starts a new path. Invalid historical paths are preserved as quarantined evidence
+and are never marked training eligible.
 
-Routes:
-- /paper/intratrade-path-status
-- /paper/position-path-status
-
-State section:
-- state["intratrade_path_capture"]
+No orders, exits, sizing, strategy thresholds, risk controls, live authority, or
+ML authority are changed.
 """
 from __future__ import annotations
 
@@ -20,9 +17,13 @@ import os
 import sys
 from typing import Any, Dict, List, Tuple
 
-VERSION = "intratrade-path-capture-2026-05-19-phase25-persistence"
+VERSION = "intratrade-path-capture-2026-08-06-v2-symbol-isolated"
+CALCULATION_VERSION = "entry-relative-mae-mfe-v2"
 ENABLED = os.environ.get("INTRATRADE_PATH_CAPTURE_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 LIVE_AUTHORITY = False
+MAX_OBSERVATION_MOVE_PCT = max(10.0, float(os.environ.get("INTRATRADE_MAX_OBSERVATION_MOVE_PCT", "50")))
+MAX_SOURCE_DIVERGENCE_PCT = max(2.0, float(os.environ.get("INTRATRADE_MAX_SOURCE_DIVERGENCE_PCT", "15")))
+MIN_VALID_OBSERVATIONS_FOR_TRAINING = max(2, int(os.environ.get("INTRATRADE_MIN_VALID_OBSERVATIONS", "3")))
 REGISTERED_APP_IDS: set[int] = set()
 PATCHED_MODULE_IDS: set[int] = set()
 
@@ -58,7 +59,7 @@ def _module() -> Any | None:
 
 def _now(mod: Any = None) -> str:
     try:
-        return mod.local_ts_text()
+        return str(mod.local_ts_text())
     except Exception:
         return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -82,18 +83,12 @@ def _load_state(mod: Any = None) -> Tuple[Dict[str, Any], Any]:
 def _positions(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     positions = state.get("positions")
     if isinstance(positions, dict):
-        return {str(sym).upper(): pos for sym, pos in positions.items() if isinstance(pos, dict)}
+        return {str(sym).upper(): pos for sym, pos in list(positions.items()) if isinstance(pos, dict)}
     return {}
 
 
 def _entry_price(pos: Dict[str, Any]) -> float:
-    # Core app positions use "entry". The older Phase 2.5 helper only looked
-    # for entry_price/avg_entry_price/price/cost_basis, which left valid open
-    # positions untracked. Keep every legacy alias and add the canonical key.
-    return _f(
-        pos.get("entry"),
-        _f(pos.get("entry_price"), _f(pos.get("avg_entry_price"), _f(pos.get("price"), _f(pos.get("cost_basis"), 0.0))))
-    )
+    return _f(pos.get("entry"), _f(pos.get("entry_price"), _f(pos.get("avg_entry_price"), _f(pos.get("cost_basis"), 0.0))))
 
 
 def _side(pos: Dict[str, Any]) -> str:
@@ -108,25 +103,62 @@ def _entry_time(pos: Dict[str, Any]) -> float | None:
     for key in ("entry_time", "opened_time", "time", "timestamp"):
         value = pos.get(key)
         if value is not None:
-            return _f(value, 0.0)
+            number = _f(value, 0.0)
+            return number if number > 0 else None
     return None
 
 
-def _safe_latest_price(mod: Any, symbol: str, pos: Dict[str, Any]) -> float:
+def _path_id(symbol: str, side: str, entry_time: float | None, entry_price: float) -> str:
+    return f"{symbol}|{side}|{int(entry_time or 0)}|{entry_price:.6f}"
+
+
+def _position_price(pos: Dict[str, Any]) -> Tuple[float, str]:
+    for key in ("last_price", "current_price", "market_price", "mark_price"):
+        price = _f(pos.get(key), 0.0)
+        if price > 0:
+            return price, f"position.{key}"
+    return 0.0, ""
+
+
+def _move_pct(price: float, entry: float) -> float:
+    return abs((price / entry - 1.0) * 100.0) if price > 0 and entry > 0 else float("inf")
+
+
+def _plausible(price: float, entry: float) -> bool:
+    return price > 0 and entry > 0 and _move_pct(price, entry) <= MAX_OBSERVATION_MOVE_PCT
+
+
+def _safe_latest_price(mod: Any, symbol: str, pos: Dict[str, Any], entry: float) -> Tuple[float, str, List[Dict[str, Any]]]:
+    rejected: List[Dict[str, Any]] = []
+    position_price, position_source = _position_price(pos)
+    if position_price > 0 and not _plausible(position_price, entry):
+        rejected.append({
+            "source": position_source,
+            "price": round(position_price, 6),
+            "reason": "position_price_outside_entry_relative_integrity_bound",
+        })
+        position_price = 0.0
+    if position_price > 0:
+        return position_price, position_source, rejected
     for fn_name in ("latest_price", "get_latest_price", "safe_latest_price"):
         try:
             fn = getattr(mod, fn_name, None)
-            if callable(fn):
-                price = _f(fn(symbol), 0.0)
-                if price > 0:
-                    return price
-        except Exception:
-            pass
-    for key in ("last_price", "current_price", "market_price", "price", "entry"):
-        price = _f(pos.get(key), 0.0)
-        if price > 0:
-            return price
-    return _entry_price(pos)
+            if not callable(fn):
+                continue
+            price = _f(fn(symbol), 0.0)
+            if price <= 0:
+                continue
+            if not _plausible(price, entry):
+                rejected.append({
+                    "source": f"core.{fn_name}",
+                    "price": round(price, 6),
+                    "reason": "core_price_outside_entry_relative_integrity_bound",
+                })
+                continue
+            return price, f"core.{fn_name}", rejected
+        except Exception as exc:
+            rejected.append({"source": f"core.{fn_name}", "reason": f"provider_exception:{type(exc).__name__}"})
+    return entry, "entry_price_fallback", rejected
 
 
 def _pct_for_side(current: float, entry: float, side: str) -> float:
@@ -152,151 +184,250 @@ def _strategy_metadata(pos: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _path_bounds_valid(path: Dict[str, Any], entry: float) -> bool:
+    high = _f(path.get("high_since_entry"), entry)
+    low = _f(path.get("low_since_entry"), entry)
+    return high >= low > 0 and _plausible(high, entry) and _plausible(low, entry)
+
+
+def _archive_item(archive: List[Any], item: Dict[str, Any], now_text: str, reason: str) -> None:
+    row = dict(item)
+    row.update({
+        "closed_local": row.get("closed_local") or now_text,
+        "archived_by": VERSION,
+        "archive_reason": reason,
+    })
+    archive.append(row)
+
+
 def update_paths(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
     mod = mod or _module()
     section = state.setdefault("intratrade_path_capture", {})
     section.setdefault("paths", {})
     paths = _dict(section.get("paths"))
     section["paths"] = paths
-
+    archive = _list(section.setdefault("closed_path_archive", []))
     now_epoch = _epoch_now()
     now_text = _now(mod)
     positions = _positions(state)
     active_symbols = set(positions.keys())
     updated = 0
-    skipped = []
-
-    for symbol, pos in positions.items():
+    skipped: List[Dict[str, Any]] = []
+    rejected_observations: List[Dict[str, Any]] = []
+    integrity_resets = 0
+    for symbol, pos in list(positions.items()):
         entry = _entry_price(pos)
         if entry <= 0:
             skipped.append({"symbol": symbol, "reason": "missing_entry_price"})
             continue
         side = _side(pos)
-        price = _safe_latest_price(mod, symbol, pos) if mod is not None else _f(pos.get("price"), entry)
-        if price <= 0:
-            price = entry
+        entry_time = _entry_time(pos)
+        identity = _path_id(symbol, side, entry_time, entry)
+        price, price_source, rejected = _safe_latest_price(mod, symbol, pos, entry) if mod is not None else (entry, "entry_price_fallback", [])
+        for row in rejected:
+            rejected_observations.append({"symbol": symbol, **row, "entry_price": round(entry, 6)})
         path = _dict(paths.get(symbol))
+        old_identity = str(path.get("path_id") or "")
+        if path and old_identity != identity:
+            path["integrity_status"] = "quarantined"
+            path["training_eligible"] = False
+            path["ml_feature_ready"] = False
+            _archive_item(archive, path, now_text, "entry_identity_changed")
+            path = {}
+            integrity_resets += 1
+        elif path and not _path_bounds_valid(path, entry):
+            path["integrity_status"] = "quarantined"
+            path["training_eligible"] = False
+            path["ml_feature_ready"] = False
+            path["integrity_reason"] = "historical_path_bounds_implausible"
+            _archive_item(archive, path, now_text, "historical_path_bounds_implausible")
+            path = {}
+            integrity_resets += 1
         if not path:
             path = {
+                "path_id": identity,
                 "symbol": symbol,
                 "side": side,
-                "entry_price": round(entry, 4),
+                "entry_price": round(entry, 6),
                 "shares": round(_shares(pos), 6),
-                "entry_time": _entry_time(pos),
+                "entry_time": entry_time,
                 "opened_local": pos.get("opened_local") or pos.get("entry_local") or now_text,
-                "high_since_entry": round(max(entry, price), 4),
-                "low_since_entry": round(min(entry, price), 4),
+                "high_since_entry": round(max(entry, price), 6),
+                "low_since_entry": round(min(entry, price), 6),
                 "mfe_pct": 0.0,
                 "mae_pct": 0.0,
                 "time_to_mfe_seconds": 0,
                 "time_to_mae_seconds": 0,
                 "created_local": now_text,
+                "observation_count": 0,
+                "invalid_observation_count": 0,
             }
         prior_high = _f(path.get("high_since_entry"), entry)
         prior_low = _f(path.get("low_since_entry"), entry)
-        new_high = max(prior_high, price)
-        new_low = min(prior_low, price)
-        entry_time = path.get("entry_time")
-        duration = 0
-        if entry_time:
-            duration = max(0, int(now_epoch - _f(entry_time, now_epoch)))
-
-        if side == "short":
-            favorable_price = new_low
-            adverse_price = new_high
+        observation_valid = _plausible(price, entry)
+        if observation_valid:
+            new_high = max(prior_high, price)
+            new_low = min(prior_low, price)
+            path["observation_count"] = int(path.get("observation_count") or 0) + 1
         else:
-            favorable_price = new_high
-            adverse_price = new_low
+            new_high = prior_high
+            new_low = prior_low
+            path["invalid_observation_count"] = int(path.get("invalid_observation_count") or 0) + 1
+            rejected_observations.append({
+                "symbol": symbol,
+                "source": price_source,
+                "price": round(price, 6),
+                "entry_price": round(entry, 6),
+                "reason": "observation_outside_entry_relative_integrity_bound",
+            })
+        duration = max(0, int(now_epoch - _f(entry_time, now_epoch))) if entry_time else 0
+        favorable_price, adverse_price = (new_low, new_high) if side == "short" else (new_high, new_low)
         mfe = _pct_for_side(favorable_price, entry, side)
         mae = _pct_for_side(adverse_price, entry, side)
-
         if new_high != prior_high or new_low != prior_low:
             if abs(mfe) >= abs(_f(path.get("mfe_pct"), 0.0)):
                 path["time_to_mfe_seconds"] = duration
             if abs(mae) >= abs(_f(path.get("mae_pct"), 0.0)):
                 path["time_to_mae_seconds"] = duration
-
-        meta = _strategy_metadata(pos)
-        for key, value in meta.items():
+        for key, value in _strategy_metadata(pos).items():
             if value is not None:
                 path[key] = value
-
+        valid_count = int(path.get("observation_count") or 0)
+        invalid_count = int(path.get("invalid_observation_count") or 0)
+        training_eligible = bool(
+            valid_count >= MIN_VALID_OBSERVATIONS_FOR_TRAINING
+            and invalid_count == 0
+            and _path_bounds_valid({"high_since_entry": new_high, "low_since_entry": new_low}, entry)
+            and price_source.startswith("position.")
+        )
         path.update({
+            "path_id": identity,
             "symbol": symbol,
             "side": side,
-            "entry_price": round(entry, 4),
-            "current_price": round(price, 4),
-            "high_since_entry": round(new_high, 4),
-            "low_since_entry": round(new_low, 4),
+            "entry_price": round(entry, 6),
+            "current_price": round(price, 6),
+            "current_price_source": price_source,
+            "high_since_entry": round(new_high, 6),
+            "low_since_entry": round(new_low, 6),
             "mfe_pct": round(max(0.0, mfe), 4),
             "mae_pct": round(min(0.0, mae), 4),
             "duration_seconds": duration,
             "last_updated_local": now_text,
-            "vwap_drift_pct": path.get("vwap_drift_pct"),
-            "ema_hold_status": path.get("ema_hold_status"),
+            "calculation_version": CALCULATION_VERSION,
+            "integrity_status": "valid" if training_eligible else "collecting" if invalid_count == 0 else "quarantined",
+            "integrity_reason": None if invalid_count == 0 else "invalid_price_observation",
+            "training_eligible": training_eligible,
+            "ml_feature_ready": training_eligible,
             "live_authority": False,
         })
         paths[symbol] = path
         updated += 1
-
-    closed = [sym for sym in list(paths.keys()) if sym not in active_symbols]
-    archive = section.setdefault("closed_path_archive", [])
-    seen_keys = set()
-    compact_archive = []
-    for item in _list(archive):
-        if not isinstance(item, dict):
-            continue
-        key = (item.get("symbol"), item.get("side"), item.get("entry_time"), item.get("entry_price"), item.get("closed_local"))
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        compact_archive.append(item)
-    archive = compact_archive
-    for sym in closed:
+    for sym in [symbol for symbol in list(paths.keys()) if symbol not in active_symbols]:
         item = paths.pop(sym)
         if isinstance(item, dict):
-            item["closed_local"] = now_text
-            item["archived_by"] = VERSION
-            archive.append(item)
-    section["closed_path_archive"] = archive[-500:]
-
+            eligible = bool(item.get("training_eligible")) and item.get("integrity_status") == "valid"
+            item["training_eligible"] = eligible
+            item["ml_feature_ready"] = eligible
+            _archive_item(archive, item, now_text, "position_closed")
+    compact: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in archive:
+        if not isinstance(raw, dict):
+            continue
+        row = dict(raw)
+        identity = str(row.get("path_id") or _path_id(
+            str(row.get("symbol") or "").upper(),
+            str(row.get("side") or "long").lower(),
+            _f(row.get("entry_time"), 0.0) or None,
+            _f(row.get("entry_price"), 0.0),
+        ))
+        row["path_id"] = identity
+        entry = _f(row.get("entry_price"), 0.0)
+        if entry <= 0 or not _path_bounds_valid(row, entry):
+            row.update({
+                "integrity_status": "quarantined",
+                "integrity_reason": row.get("integrity_reason") or "archived_path_bounds_implausible",
+                "training_eligible": False,
+                "ml_feature_ready": False,
+            })
+        if identity in seen:
+            continue
+        seen.add(identity)
+        compact.append(row)
+    section["closed_path_archive"] = compact[-500:]
+    active_values = list(paths.values())
+    archive_values = section["closed_path_archive"]
+    invalid_rows = sum(1 for row in active_values + archive_values if row.get("integrity_status") == "quarantined")
+    eligible_rows = sum(1 for row in active_values + archive_values if row.get("training_eligible") is True)
     section.update({
         "version": VERSION,
+        "calculation_version": CALCULATION_VERSION,
         "enabled": ENABLED,
         "live_authority": False,
         "last_updated_local": now_text,
         "active_positions_tracked": len(paths),
-        "closed_paths_archived": len(section.get("closed_path_archive", [])),
+        "closed_paths_archived": len(archive_values),
         "updated_count": updated,
         "skipped_positions": skipped[-25:],
-        "recommended_actions": [
-            "Use intratrade path data to convert MAE/MFE telemetry from placeholder to real outcome labels.",
-            "Keep this advisory only until enough path observations exist across multiple regimes.",
-            "Next step after enough path data: feed MAE/MFE into trade-quality and ML readiness scoring.",
-        ],
+        "rejected_observations": rejected_observations[-50:],
+        "integrity_resets": integrity_resets,
+        "invalid_or_quarantined_rows": invalid_rows,
+        "training_eligible_rows": eligible_rows,
+        "regression_guards": {
+            "position_owned_price_preferred": True,
+            "entry_identity_resets_path": True,
+            "implausible_historical_bounds_quarantined": True,
+            "symbol_only_feature_matching_prohibited": True,
+        },
     })
     return section
 
 
-def payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
-    section = update_paths(state, mod) if ENABLED else _dict(state.get("intratrade_path_capture"))
-    paths = _dict(section.get("paths"))
-    archive = _list(section.get("closed_path_archive"))
+def status_payload(mod: Any = None, state: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    if state is None:
+        state, mod = _load_state(mod)
+    section = _dict(state.get("intratrade_path_capture"))
+    paths = list(_dict(section.get("paths")).values())
+    archive = [row for row in _list(section.get("closed_path_archive")) if isinstance(row, dict)]
+    invalid = [row for row in paths + archive if row.get("integrity_status") == "quarantined"]
+    eligible = [row for row in paths + archive if row.get("training_eligible") is True]
     return {
         "status": "ok",
-        "type": "intratrade_path_status",
+        "overall": "warn" if invalid else "pass",
+        "type": "intratrade_path_integrity_status",
         "version": VERSION,
+        "calculation_version": CALCULATION_VERSION,
         "generated_local": _now(mod),
         "enabled": ENABLED,
         "live_authority": False,
         "active_positions_tracked": len(paths),
         "closed_paths_archived": len(archive),
+        "invalid_or_quarantined_rows": len(invalid),
+        "training_eligible_rows": len(eligible),
+        "rejected_observations": _list(section.get("rejected_observations"))[-25:],
+        "invalid_rows_tail": invalid[-10:],
+        "regression_guards": section.get("regression_guards") or {},
+        "authority": {
+            "changes_strategy": False,
+            "changes_thresholds": False,
+            "changes_risk_or_sizing": False,
+            "places_orders": False,
+            "changes_live_or_ml_authority": False,
+        },
+    }
+
+
+def payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
+    section = update_paths(state, mod) if ENABLED else _dict(state.get("intratrade_path_capture"))
+    status = status_payload(mod, state)
+    status.update({
+        "type": "intratrade_path_status",
         "updated_count": section.get("updated_count", 0),
         "skipped_positions": section.get("skipped_positions", []),
-        "active_paths": list(paths.values())[-25:],
-        "closed_path_tail": archive[-25:],
-        "recommended_actions": section.get("recommended_actions") or [],
-    }
+        "active_paths": list(_dict(section.get("paths")).values())[-25:],
+        "closed_path_tail": _list(section.get("closed_path_archive"))[-25:],
+    })
+    return status
 
 
 def apply(module: Any = None) -> Dict[str, Any]:
@@ -342,15 +473,17 @@ def register_routes(flask_app: Any, module: Any = None) -> Dict[str, Any]:
         existing = {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
     except Exception:
         existing = set()
-
     def status_route():
         state, mod = _load_state(module)
         return jsonify(payload(state, mod))
-
+    def integrity_route():
+        state, mod = _load_state(module)
+        return jsonify(status_payload(mod, state))
     if "/paper/intratrade-path-status" not in existing:
         flask_app.add_url_rule("/paper/intratrade-path-status", "paper_intratrade_path_status", status_route)
     if "/paper/position-path-status" not in existing:
         flask_app.add_url_rule("/paper/position-path-status", "paper_position_path_status", status_route)
-
+    if "/paper/intratrade-path-integrity-status" not in existing:
+        flask_app.add_url_rule("/paper/intratrade-path-integrity-status", "paper_intratrade_path_integrity_status", integrity_route)
     REGISTERED_APP_IDS.add(id(flask_app))
-    return {"status": "ok", "version": VERSION, "routes": ["/paper/intratrade-path-status", "/paper/position-path-status"], "live_authority": False}
+    return {"status": "ok", "version": VERSION, "live_authority": False}
