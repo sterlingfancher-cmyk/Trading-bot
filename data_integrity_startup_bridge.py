@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-06-v2-provider-accounting"
+VERSION = "data-integrity-startup-bridge-2026-08-06-v3-response-reconciliation"
 MODULES = (
     "intratrade_path_capture",
     "mae_mfe_integration",
     "daily_data_integrity_audit_overlay",
     "provider_request_accounting_overlay",
+    "daily_audit_response_reconciliation",
 )
 
 
