@@ -9,7 +9,7 @@ on:
 jobs:
   capture-current-paper-state:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     permissions:
       contents: read
       statuses: write
@@ -27,35 +27,32 @@ jobs:
 
           base = "https://web-production-e1796.up.railway.app"
           endpoints = {
+              "daily_audit": "/paper/daily-audit",
+              "data_integrity_audit": "/paper/data-integrity-audit-status",
+              "mae_mfe_integrity": "/paper/mae-mfe-integrity-status",
+              "intratrade_path_integrity": "/paper/intratrade-path-integrity-status",
               "yfinance_data_hygiene": "/paper/yfinance-data-hygiene-status",
               "provider_health": "/paper/provider-health-status",
-              "broad_momentum_force": "/paper/broad-momentum-discovery-status?force=1",
-              "broad_momentum_status": "/paper/broad-momentum-discovery-status",
-              "broad_momentum_candidates": "/paper/broad-momentum-candidates?limit=100",
-              "scanner_runtime_contract": "/paper/scanner-runtime-contract-status",
-              "daily_audit_overlay": "/paper/daily-audit-repair-overlay-status",
               "paper_status_full": "/paper/status?full=1",
               "paper_status": "/paper/status",
-              "daily_audit": "/paper/daily-audit",
+              "scanner_runtime_contract": "/paper/scanner-runtime-contract-status",
+              "broad_momentum_status": "/paper/broad-momentum-discovery-status",
+              "broad_momentum_candidates": "/paper/broad-momentum-candidates?limit=100",
               "journal_truth": "/paper/journal-truth-status",
-              "state_provenance": "/paper/state-provenance-status",
               "state_persistence": "/paper/state-persistence-contract-status",
               "cycle_completion": "/paper/cycle-completion-contract-status",
-              "runtime_shadow": "/paper/runtime-shadow-capture-status",
-              "ml2_status": "/paper/ml2-status",
               "ml_counterfactual_ledger": "/paper/ml-counterfactual-ledger-status",
-              "ml_counterfactual_dataset": "/paper/ml-counterfactual-training-dataset?limit=50",
           }
-          manifest = {"base_url": base, "read_only": True, "endpoints": {}}
+          manifest = {"base_url": base, "read_only": True, "capture_type": "afternoon_audit", "endpoints": {}}
           for name, path in endpoints.items():
               target = pathlib.Path(f"capture_{name}.json")
               request = urllib.request.Request(
                   base + path,
-                  headers={"Accept": "application/json", "User-Agent": "paper-state-capture/1.6"},
+                  headers={"Accept": "application/json", "User-Agent": "paper-afternoon-audit/1.0"},
                   method="GET",
               )
               try:
-                  with urllib.request.urlopen(request, timeout=45) as response:
+                  with urllib.request.urlopen(request, timeout=60) as response:
                       raw = response.read()
                       target.write_bytes(raw)
                       manifest["endpoints"][name] = {
@@ -71,23 +68,20 @@ jobs:
                       "path": path,
                       "error": f"{type(exc).__name__}: {exc}",
                   }
-              if name == "broad_momentum_force":
-                  time.sleep(10)
+              time.sleep(1)
           pathlib.Path("capture_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
           print(json.dumps(manifest, indent=2, sort_keys=True))
           required = (
+              "daily_audit",
+              "data_integrity_audit",
+              "mae_mfe_integrity",
+              "intratrade_path_integrity",
               "yfinance_data_hygiene",
               "provider_health",
-              "broad_momentum_force",
-              "broad_momentum_status",
-              "broad_momentum_candidates",
-              "scanner_runtime_contract",
-              "daily_audit_overlay",
               "paper_status_full",
-              "daily_audit",
+              "scanner_runtime_contract",
               "state_persistence",
               "cycle_completion",
-              "ml_counterfactual_ledger",
           )
           failed = [name for name in required if manifest["endpoints"][name]["status"] != "ok"]
           if failed:
@@ -98,7 +92,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: current-paper-state-capture
+          name: afternoon-paper-audit-capture
           path: |
             capture_manifest.json
             capture_*.json
@@ -117,6 +111,6 @@ jobs:
               sha: context.sha,
               state: passed ? 'success' : 'failure',
               context: 'state-capture',
-              description: passed ? 'Current paper state captured read-only' : 'Paper-state capture failed',
+              description: passed ? 'Afternoon paper audit captured read-only' : 'Afternoon paper audit capture failed',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
