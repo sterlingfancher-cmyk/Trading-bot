@@ -4,12 +4,20 @@
 This check is dependency-free and read-only. It prevents a stale railway.toml,
 Procfile, or dashboard-equivalent command from silently diverging from the
 validated railway.json startup contract.
+
+The temporary afternoon-audit branch also captures public read-only status
+surfaces into the validation artifact. That branch-only capture never mutates
+trading state and is not intended for merge.
 """
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
+import urllib.request
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 EXPECTED_START_COMMAND = (
@@ -20,6 +28,61 @@ EXPECTED_START_COMMAND = (
 EXPECTED_HEALTHCHECK_PATH = "/bootstrap-status"
 EXPECTED_HEALTHCHECK_TIMEOUT = 120
 EXPECTED_PROCFILE = f"web: {EXPECTED_START_COMMAND}"
+AFTERNOON_CAPTURE_BRANCH = "afternoon-audit-capture-20260806-1254"
+
+
+def _capture_afternoon_audit() -> dict[str, Any] | None:
+    if os.environ.get("GITHUB_HEAD_REF") != AFTERNOON_CAPTURE_BRANCH:
+        return None
+    base = "https://web-production-e1796.up.railway.app"
+    endpoints = {
+        "daily_audit": "/paper/daily-audit",
+        "data_integrity_audit": "/paper/data-integrity-audit-status",
+        "mae_mfe_integrity": "/paper/mae-mfe-integrity-status",
+        "intratrade_path_integrity": "/paper/intratrade-path-integrity-status",
+        "yfinance_data_hygiene": "/paper/yfinance-data-hygiene-status",
+        "provider_health": "/paper/provider-health-status",
+        "paper_status_full": "/paper/status?full=1",
+        "scanner_runtime_contract": "/paper/scanner-runtime-contract-status",
+        "broad_momentum_status": "/paper/broad-momentum-discovery-status",
+        "broad_momentum_candidates": "/paper/broad-momentum-candidates?limit=100",
+        "state_persistence": "/paper/state-persistence-contract-status",
+        "cycle_completion": "/paper/cycle-completion-contract-status",
+        "journal_truth": "/paper/journal-truth-status",
+    }
+    capture: dict[str, Any] = {
+        "base_url": base,
+        "read_only": True,
+        "capture_type": "afternoon_audit",
+        "endpoints": {},
+    }
+    for name, path in endpoints.items():
+        request = urllib.request.Request(
+            base + path,
+            headers={"Accept": "application/json", "User-Agent": "afternoon-audit-validation/1.1"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                raw = response.read()
+            try:
+                payload: Any = json.loads(raw.decode("utf-8"))
+            except Exception:
+                payload = {"raw_text": raw.decode("utf-8", errors="replace")[:20000]}
+            capture["endpoints"][name] = {
+                "status": "ok",
+                "http_status": getattr(response, "status", 200),
+                "path": path,
+                "payload": payload,
+            }
+        except Exception as exc:
+            capture["endpoints"][name] = {
+                "status": "error",
+                "path": path,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        time.sleep(0.5)
+    return capture
 
 
 def validate() -> tuple[dict, list[str]]:
@@ -78,6 +141,9 @@ def validate() -> tuple[dict, list[str]]:
         "procfile_matches": procfile_text == EXPECTED_PROCFILE,
         "errors": errors,
     }
+    afternoon_capture = _capture_afternoon_audit()
+    if afternoon_capture is not None:
+        report["afternoon_audit_capture"] = afternoon_capture
     return report, errors
 
 
