@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import daily_data_integrity_audit_overlay as overlay
 
@@ -55,110 +57,89 @@ def _base_payload():
     }
 
 
-def test_finalizer_counts_integrity_section_after_outer_wrappers(monkeypatch):
-    monkeypatch.setattr(
-        overlay,
-        "build_integrity_section",
-        lambda core=None: {
-            "status": "pass",
-            "reasons": [],
-            "provider_circuit_open": False,
-            "protected_symbols_blocked": [],
-            "active_contaminated_feature_count": 0,
-            "path_integrity": {
-                "valid_rows": 0,
-                "invalid_or_quarantined_rows": 4,
-                "training_eligible_rows": 0,
-                "recomputed_rows": 0,
-            },
-            "mae_mfe_integrity": {
-                "valid_path_rows": 0,
-                "invalid_or_quarantined_path_rows": 4,
-                "training_eligible_feature_rows": 0,
-                "quarantined_feature_rows": 4,
-                "recomputed_rows": 0,
-            },
-            "forward_validation": {
-                "valid_exact_lifecycle_rows_observed": 0,
-                "complete": False,
-                "historical_backfill_established": False,
-            },
-        },
-    )
-
-    payload = overlay._finalize_payload(_base_payload(), _Daily(), SimpleNamespace())
-    conclusion = payload["sections"]["11_conclusion"]
-
-    assert conclusion == {
+def _integrity_section():
+    return {
         "status": "pass",
-        "pass_count": 11,
-        "warn_count": 0,
-        "fail_count": 0,
-        "checked_sections": 11,
-    }
-    risk = payload["sections"]["04_risk_controls_and_drawdown"]
-    assert risk["net_daily_loss_pct"] == 0.12
-    assert risk["realized_loss_pct_source_key"] == "risk_controls.daily_loss_pct"
-    assert payload["links"]["full_daily_audit"].endswith("/paper/daily-audit?full=1")
-
-
-def test_compact_payload_keeps_operator_fields_without_full_sections(monkeypatch):
-    monkeypatch.setattr(
-        overlay,
-        "build_integrity_section",
-        lambda core=None: {
-            "status": "pass",
-            "reasons": [],
-            "provider_circuit_open": False,
-            "protected_symbols_blocked": [],
-            "active_contaminated_feature_count": 0,
-            "path_integrity": {
-                "valid_rows": 0,
-                "invalid_or_quarantined_rows": 4,
-                "training_eligible_rows": 0,
-                "recomputed_rows": 0,
-            },
-            "mae_mfe_integrity": {
-                "valid_path_rows": 0,
-                "invalid_or_quarantined_path_rows": 4,
-                "training_eligible_feature_rows": 0,
-                "quarantined_feature_rows": 4,
-                "recomputed_rows": 0,
-            },
-            "forward_validation": {
-                "valid_exact_lifecycle_rows_observed": 0,
-                "complete": False,
-                "historical_backfill_established": False,
-            },
+        "reasons": [],
+        "provider_circuit_open": False,
+        "protected_symbols_blocked": [],
+        "active_contaminated_feature_count": 0,
+        "path_integrity": {
+            "valid_rows": 0,
+            "invalid_or_quarantined_rows": 4,
+            "training_eligible_rows": 0,
+            "recomputed_rows": 0,
         },
-    )
-
-    payload = overlay._finalize_payload(_base_payload(), _Daily(), SimpleNamespace())
-    compact = overlay._compact_payload(payload)
-
-    assert compact["type"] == "daily_operational_audit_compact"
-    assert compact["section_summary"]["checked"] == 11
-    assert compact["section_summary"]["pass"] == 11
-    assert compact["risk"]["net_daily_loss_pct"] == 0.12
-    assert compact["data_integrity"]["path_integrity"]["invalid_or_quarantined_rows"] == 4
-    assert "sections" not in compact
-
-
-def test_integrity_counts_are_explicit_integers():
-    counts = overlay._integrity_counts(
-        {"invalid_or_quarantined_rows": 4, "training_eligible_rows": 0},
-        {},
-        {
+        "mae_mfe_integrity": {
             "valid_path_rows": 0,
-            "ml_rows_quarantined": 3,
-            "trade_rows_quarantined": 1,
+            "invalid_or_quarantined_path_rows": 4,
+            "training_eligible_feature_rows": 0,
+            "quarantined_feature_rows": 4,
+            "recomputed_rows": 0,
         },
-        {},
-    )
+        "forward_validation": {
+            "valid_exact_lifecycle_rows_observed": 0,
+            "complete": False,
+            "historical_backfill_established": False,
+        },
+    }
 
-    assert counts["valid_path_rows"] == 0
-    assert counts["invalid_or_quarantined_path_rows"] == 4
-    assert counts["training_eligible_feature_rows"] == 0
-    assert counts["quarantined_feature_rows"] == 4
-    assert counts["recomputed_rows"] == 0
-    assert all(isinstance(value, int) for value in counts.values())
+
+class DailyDataIntegrityOverlayV2Tests(unittest.TestCase):
+    def test_finalizer_counts_integrity_section_after_outer_wrappers(self):
+        with patch.object(overlay, "build_integrity_section", return_value=_integrity_section()):
+            payload = overlay._finalize_payload(_base_payload(), _Daily(), SimpleNamespace())
+
+        conclusion = payload["sections"]["11_conclusion"]
+        self.assertEqual(
+            conclusion,
+            {
+                "status": "pass",
+                "pass_count": 11,
+                "warn_count": 0,
+                "fail_count": 0,
+                "checked_sections": 11,
+            },
+        )
+        risk = payload["sections"]["04_risk_controls_and_drawdown"]
+        self.assertEqual(risk["net_daily_loss_pct"], 0.12)
+        self.assertEqual(risk["realized_loss_pct_source_key"], "risk_controls.daily_loss_pct")
+        self.assertTrue(payload["links"]["full_daily_audit"].endswith("/paper/daily-audit?full=1"))
+
+    def test_compact_payload_keeps_operator_fields_without_full_sections(self):
+        with patch.object(overlay, "build_integrity_section", return_value=_integrity_section()):
+            payload = overlay._finalize_payload(_base_payload(), _Daily(), SimpleNamespace())
+
+        compact = overlay._compact_payload(payload)
+        self.assertEqual(compact["type"], "daily_operational_audit_compact")
+        self.assertEqual(compact["section_summary"]["checked"], 11)
+        self.assertEqual(compact["section_summary"]["pass"], 11)
+        self.assertEqual(compact["risk"]["net_daily_loss_pct"], 0.12)
+        self.assertEqual(
+            compact["data_integrity"]["path_integrity"]["invalid_or_quarantined_rows"],
+            4,
+        )
+        self.assertNotIn("sections", compact)
+
+    def test_integrity_counts_are_explicit_integers(self):
+        counts = overlay._integrity_counts(
+            {"invalid_or_quarantined_rows": 4, "training_eligible_rows": 0},
+            {},
+            {
+                "valid_path_rows": 0,
+                "ml_rows_quarantined": 3,
+                "trade_rows_quarantined": 1,
+            },
+            {},
+        )
+
+        self.assertEqual(counts["valid_path_rows"], 0)
+        self.assertEqual(counts["invalid_or_quarantined_path_rows"], 4)
+        self.assertEqual(counts["training_eligible_feature_rows"], 0)
+        self.assertEqual(counts["quarantined_feature_rows"], 4)
+        self.assertEqual(counts["recomputed_rows"], 0)
+        self.assertTrue(all(isinstance(value, int) for value in counts.values()))
+
+
+if __name__ == "__main__":
+    unittest.main()
