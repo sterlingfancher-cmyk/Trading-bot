@@ -8,6 +8,8 @@ on:
       - "daily_audit_repair_overlay.py"
       - "daily_data_integrity_audit_overlay.py"
       - "data_integrity_startup_bridge.py"
+      - "provider_request_accounting_overlay.py"
+      - "bootstrap_wsgi.py"
       - "cycle_completion_contract.py"
       - "provider_timeout_contract.py"
       - "state_persistence_contract.py"
@@ -112,9 +114,13 @@ jobs:
           contract = daily.get("performance_contract", {})
           authority = daily.get("authority", {})
           conclusion = (sections or {}).get("11_conclusion", {})
+          integrity = (sections or {}).get("10b_market_data_and_path_integrity", {})
+          accounting = integrity.get("provider_request_accounting", {})
 
           assert bootstrap.get("status") == "ready", bootstrap
           assert bootstrap.get("delegate_ready") is True, bootstrap
+          assert bootstrap.get("version") == "deferred-wsgi-bootstrap-2026-08-06-v6-registration-heartbeat", bootstrap
+          assert isinstance(bootstrap.get("registration_duration_seconds"), (int, float)), bootstrap
           assert daily.get("status") == "ok", daily
           assert daily.get("type") == "daily_operational_audit", daily
           assert isinstance(sections, dict) and len(sections) == 13, sections
@@ -129,7 +135,9 @@ jobs:
           assert float(daily.get("duration_seconds", 999.0)) <= 5.0, daily.get("duration_seconds")
           assert conclusion.get("status") in {"pass", "warn", "fail"}, conclusion
           assert conclusion.get("checked_sections") == 11, conclusion
-          assert sections.get("10b_market_data_and_path_integrity", {}).get("status") in {"pass", "warn", "fail"}
+          assert integrity.get("status") in {"pass", "warn", "fail"}, integrity
+          assert isinstance(accounting.get("in_flight_or_unclassified_requests"), int), accounting
+          assert isinstance(accounting.get("accounting_complete_at_snapshot"), bool), accounting
           assert sections.get("12_next_action", {}).get("status") in {"none", "required"}
 
           assert cycle.get("status") == "ok" and cycle.get("installed") is True, cycle
@@ -144,6 +152,8 @@ jobs:
               "duration_seconds": daily.get("duration_seconds"),
               "section_count": len(sections),
               "checked_sections": conclusion.get("checked_sections"),
+              "registration_duration_seconds": bootstrap.get("registration_duration_seconds"),
+              "provider_request_gap": accounting.get("in_flight_or_unclassified_requests"),
               "cycle_health": cycle.get("cycle_health"),
               "cycle_phase": cycle.get("cycle_phase"),
               "cycle_in_progress": cycle.get("cycle_in_progress"),
