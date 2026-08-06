@@ -19,14 +19,21 @@ class _Daily:
 
 def _base_payload():
     sections = {
-        f"{index:02d}_section": {"status": "pass", "reasons": []}
-        for index in range(1, 11)
-    }
-    sections["04_risk_controls_and_drawdown"] = {
-        "status": "pass",
-        "reasons": [],
-        "realized_loss_pct": 0.12,
-        "intraday_drawdown_pct": 0.12,
+        "01_account_and_open_position_performance": {"status": "pass", "reasons": []},
+        "02_auto_runner_liveness": {"status": "pass", "reasons": []},
+        "03_active_errors_and_recursion": {"status": "pass", "reasons": []},
+        "04_risk_controls_and_drawdown": {
+            "status": "pass",
+            "reasons": [],
+            "realized_loss_pct": 0.12,
+            "intraday_drawdown_pct": 0.12,
+        },
+        "05_scanner_signals_entries_rejections": {"status": "pass", "reasons": []},
+        "06_top_five_blockers": {"status": "pass", "reasons": [], "blockers": []},
+        "07_entry_pipeline_ownership_and_stability": {"status": "pass", "reasons": []},
+        "08_trade_journal_reconciliation": {"status": "pass", "reasons": []},
+        "09_state_persistence_backup_recovery": {"status": "pass", "reasons": []},
+        "10_runtime_shadow_cycles_and_parity": {"status": "pass", "reasons": []},
     }
     sections["11_conclusion"] = {
         "status": "pass",
