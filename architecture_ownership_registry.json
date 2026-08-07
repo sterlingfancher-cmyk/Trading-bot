@@ -1,5 +1,5 @@
 {
-  "version": "architecture-ownership-registry-2026-08-04-v2-broad-momentum",
+  "version": "architecture-ownership-registry-2026-08-07-v3-runtime-observer-sync",
   "policy": {
     "allow_removal_of_legacy_owners": true,
     "allow_new_owners": false,
@@ -54,6 +54,7 @@
         "ml_feature_journal_quality.py",
         "ml_phase25_readiness.py",
         "ml_phase2_shadow.py",
+        "ml_recommendation_counterfactual_ledger.py",
         "ml_vs_rules_shadow_log.py",
         "state_io_hardening.py",
         "state_size_watchdog.py",
@@ -115,6 +116,7 @@
       "allowed_current_owners": [
         "benchmark_participation.py",
         "broad_momentum_discovery.py",
+        "cycle_completion_contract.py",
         "run_report_guard.py",
         "state_io_hardening.py"
       ]
@@ -172,6 +174,7 @@
       "allowed_current_owners": [
         "app.py",
         "benchmark_participation.py",
+        "daily_operational_audit.py",
         "eod_hybrid.py",
         "live_volatility.py",
         "ml_phase2_shadow.py",
@@ -185,6 +188,32 @@
         "state_provenance_monitor.py",
         "state_size_watchdog.py",
         "trade_journal.py"
+      ]
+    },
+    "STATE_FILENAME": {
+      "target_owner": "trading.state.StateStoreConfig",
+      "allowed_current_owners": [
+        "app.py",
+        "daily_operational_audit.py",
+        "eod_hybrid.py",
+        "live_volatility.py",
+        "ml_phase2_shadow.py",
+        "risk_bootstrap.py",
+        "risk_improvements.py",
+        "runtime_controls_repair.py",
+        "self_check.py",
+        "state_guard.py",
+        "state_io_hardening.py",
+        "state_journal_guard.py",
+        "trade_journal.py"
+      ]
+    },
+    "AUTO_RUN_ENABLED": {
+      "target_owner": "trading.runtime.AutoRunnerConfig",
+      "allowed_current_owners": [
+        "app.py",
+        "bootstrap/sitecustomize.py",
+        "runtime_worker_registration.py"
       ]
     }
   }

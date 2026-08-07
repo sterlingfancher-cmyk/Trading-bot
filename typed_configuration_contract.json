@@ -1,5 +1,5 @@
 {
-  "version": "typed-configuration-contract-2026-08-04-v2-broad-momentum",
+  "version": "typed-configuration-contract-2026-08-07-v3-observer-sync",
   "policy": {
     "read_only": true,
     "authoritative_runtime_source": false,
@@ -48,6 +48,7 @@
       "allowed_observations": [
         {"path": "app.py", "default": "state.json"},
         {"path": "benchmark_participation.py", "default": "state.json"},
+        {"path": "daily_operational_audit.py", "default": null},
         {"path": "eod_hybrid.py", "default": "state.json"},
         {"path": "live_volatility.py", "default": "state.json"},
         {"path": "ml_phase2_shadow.py", "default": "state.json"},
