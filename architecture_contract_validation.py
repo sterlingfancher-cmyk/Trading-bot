@@ -7,6 +7,10 @@ The contract is intentionally one-way during migration:
 - no undeclared owner may be added to a registered critical target;
 - no undeclared route overlap or environment-default conflict may appear;
 - target future owners are descriptive and receive no runtime authority.
+
+Test fixtures are excluded from runtime ownership evidence. They may reference or
+monkeypatch production callables to exercise contracts, but they are not runtime
+owners and must not force production ownership-registry entries.
 """
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-VERSION = "architecture-contract-validation-2026-08-03-v2-scoped"
+VERSION = "architecture-contract-validation-2026-08-07-v3-runtime-only"
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -26,11 +30,23 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _is_runtime_path(path: Any) -> bool:
+    text = str(path or "").replace("\\", "/")
+    name = text.rsplit("/", 1)[-1]
+    return not (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or "/tests/" in f"/{text}"
+    )
+
+
 def _owners(rows: Any) -> set[str]:
     return {
         str(row.get("path"))
         for row in _list(rows)
-        if isinstance(row, dict) and row.get("path")
+        if isinstance(row, dict)
+        and row.get("path")
+        and _is_runtime_path(row.get("path"))
     }
 
 
@@ -75,12 +91,15 @@ def _check_group(
     if fail_unregistered:
         registered = set(registry)
         for target in sorted(set(actual) - registered):
+            observed = sorted(_owners(actual.get(target)))
+            if not observed:
+                continue
             violations.append(
                 {
                     "group": group_name,
                     "target": target,
                     "reason": "unregistered_overlapping_or_conflicting_target",
-                    "observed_owners": sorted(_owners(actual.get(target))),
+                    "observed_owners": observed,
                 }
             )
 
@@ -126,7 +145,7 @@ def _markdown(report: dict[str, Any]) -> str:
 
     lines.extend(
         [
-            "Future target-owner names are descriptive only. This validation does not import the trading application, replace callables, change parameters, mutate state, or place orders.",
+            "Future target-owner names are descriptive only. Test fixtures are excluded from runtime ownership evidence. This validation does not import the trading application, replace callables, change parameters, mutate state, or place orders.",
             "",
         ]
     )
@@ -198,6 +217,7 @@ def main() -> int:
             "new_owner_on_registered_target_allowed": False,
             "new_route_or_environment_conflict_allowed": False,
             "unregistered_noncritical_callable_targets_are_audit_warnings": True,
+            "test_fixtures_excluded_from_runtime_ownership": True,
             "changes_runtime_authority": False,
             "imports_trading_runtime": False,
             "places_orders": False,
