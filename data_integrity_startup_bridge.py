@@ -1,19 +1,21 @@
 """Deterministic startup bridge for data-integrity runtime modules.
 
-Imported by the WSGI entry point. This module only applies existing
-observability/data-integrity modules and registers their read-only routes.
-It does not alter strategy, thresholds, sizing, risk, order placement,
-live authority, or ML authority.
+Imported by the WSGI entry point. This module applies bounded integrity and
+observability modules and registers their status routes. The paper-accounting
+guard is allowed to reconcile paper state from the execution ledger; no module
+here places orders or changes live/ML authority.
 """
 from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-06-v3-response-reconciliation"
+VERSION = "data-integrity-startup-bridge-2026-08-07-v4-paper-accounting"
 MODULES = (
+    "paper_accounting_integrity_guard",
     "intratrade_path_capture",
     "mae_mfe_integration",
     "daily_data_integrity_audit_overlay",
+    "paper_accounting_audit_bridge",
     "provider_request_accounting_overlay",
     "daily_audit_response_reconciliation",
 )
