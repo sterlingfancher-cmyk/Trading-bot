@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-07-v5-paper-accounting-readonly-status"
+VERSION = "data-integrity-startup-bridge-2026-08-07-v6-multi-asset-shadow"
 MODULES = (
     "paper_accounting_integrity_guard",
     "paper_accounting_readonly_status",
@@ -19,6 +19,7 @@ MODULES = (
     "paper_accounting_audit_bridge",
     "provider_request_accounting_overlay",
     "daily_audit_response_reconciliation",
+    "multi_asset_shadow_ranker",
 )
 
 
