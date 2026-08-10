@@ -1,10 +1,15 @@
-"""Block MAE/MFE promotion until a new clean lifecycle exists after accounting recovery."""
+"""Block MAE/MFE promotion until new clean lifecycle evidence exists.
+
+Supports both the historical accounting-recovery epoch and the deliberate clean
+accounting epoch.  Old contaminated/recovery-era rows can never satisfy a clean
+epoch promotion gate.
+"""
 from __future__ import annotations
 
 import functools
 from typing import Any, Dict
 
-VERSION = "post-recovery-evidence-epoch-guard-2026-08-10-v1"
+VERSION = "post-recovery-evidence-epoch-guard-2026-08-10-v2-clean-epoch"
 _APPLIED = False
 
 
@@ -15,6 +20,26 @@ def _d(value: Any) -> Dict[str, Any]:
 def _state(core: Any) -> Dict[str, Any]:
     pf = getattr(core, "portfolio", None) if core is not None else None
     return pf if isinstance(pf, dict) else {}
+
+
+def _epoch_gate(state: Dict[str, Any]) -> Dict[str, Any]:
+    clean = _d(state.get("paper_accounting_epoch"))
+    if bool(clean.get("clean_start")):
+        return {
+            "source": "clean_accounting_epoch",
+            "epoch_id": clean.get("id"),
+            "baseline": int(clean.get("valid_path_rows_baseline") or 0),
+            "required": bool(clean.get("forward_validation_required", True)),
+            "reason": "clean_accounting_epoch_forward_validation_required",
+        }
+    recovery = _d(state.get("paper_accounting_semantics_recovery"))
+    return {
+        "source": "historical_accounting_recovery",
+        "epoch_id": None,
+        "baseline": int(recovery.get("recovery_epoch_valid_path_rows_baseline") or 0),
+        "required": bool(recovery.get("post_recovery_validation_required", False)),
+        "reason": "post_accounting_recovery_forward_validation_required",
+    }
 
 
 def apply(core: Any = None) -> Dict[str, Any]:
@@ -41,27 +66,29 @@ def apply(core: Any = None) -> Dict[str, Any]:
             return section
 
         state = _state(active)
-        recovery = _d(state.get("paper_accounting_semantics_recovery"))
-        baseline = int(recovery.get("recovery_epoch_valid_path_rows_baseline") or 0)
+        gate = _epoch_gate(state)
+        baseline = int(gate.get("baseline") or 0)
         forward = _d(section.get("forward_validation"))
         current_valid = int(forward.get("valid_exact_lifecycle_rows_observed") or 0)
-        post_recovery_valid = max(0, current_valid - baseline)
-        required = bool(recovery.get("post_recovery_validation_required", False))
-        eligible = (not required) or post_recovery_valid >= 1
+        post_epoch_valid = max(0, current_valid - baseline)
+        required = bool(gate.get("required", False))
+        eligible = (not required) or post_epoch_valid >= 1
 
         epoch = {
             "version": VERSION,
-            "recovery_active": bool(recovery),
+            "source": gate.get("source"),
+            "epoch_id": gate.get("epoch_id"),
             "baseline_valid_exact_lifecycle_rows": baseline,
             "current_valid_exact_lifecycle_rows": current_valid,
-            "post_recovery_valid_exact_lifecycle_rows": post_recovery_valid,
+            "post_recovery_valid_exact_lifecycle_rows": post_epoch_valid,
+            "post_epoch_valid_exact_lifecycle_rows": post_epoch_valid,
             "minimum_post_recovery_rows_required": 1,
             "promotion_evidence_eligible": eligible,
         }
         section["post_recovery_evidence_epoch"] = epoch
 
         if required and not eligible:
-            reason = "post_accounting_recovery_forward_validation_required"
+            reason = str(gate.get("reason") or "post_accounting_recovery_forward_validation_required")
             reasons = list(section.get("reasons") or [])
             if reason not in reasons:
                 reasons.insert(0, reason)
@@ -70,17 +97,20 @@ def apply(core: Any = None) -> Dict[str, Any]:
 
             forward["promotion_evidence_eligible"] = False
             forward["promotion_block_reason"] = reason
-            forward["post_recovery_valid_exact_lifecycle_rows"] = post_recovery_valid
+            forward["post_recovery_valid_exact_lifecycle_rows"] = post_epoch_valid
+            forward["post_epoch_valid_exact_lifecycle_rows"] = post_epoch_valid
             section["forward_validation"] = forward
 
             mae = _d(section.get("mae_mfe_integrity"))
             mae["promotion_evidence_eligible"] = False
             mae["promotion_block_reason"] = reason
-            mae["post_recovery_training_eligible_rows"] = post_recovery_valid
+            mae["post_recovery_training_eligible_rows"] = post_epoch_valid
+            mae["post_epoch_training_eligible_rows"] = post_epoch_valid
             section["mae_mfe_integrity"] = mae
         elif required and eligible:
             forward["promotion_evidence_eligible"] = True
-            forward["post_recovery_valid_exact_lifecycle_rows"] = post_recovery_valid
+            forward["post_recovery_valid_exact_lifecycle_rows"] = post_epoch_valid
+            forward["post_epoch_valid_exact_lifecycle_rows"] = post_epoch_valid
             section["forward_validation"] = forward
 
         return section
@@ -93,15 +123,19 @@ def apply(core: Any = None) -> Dict[str, Any]:
 
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
-    recovery = _d(_state(core).get("paper_accounting_semantics_recovery")) if core is not None else {}
+    state = _state(core) if core is not None else {}
+    gate = _epoch_gate(state)
     return {
         "status": "ok" if _APPLIED else "pending",
         "overall": "pass" if _APPLIED else "warn",
         "type": "post_recovery_evidence_epoch_guard_status",
         "version": VERSION,
         "applied": _APPLIED,
-        "recovery_epoch_valid_path_rows_baseline": int(recovery.get("recovery_epoch_valid_path_rows_baseline") or 0),
-        "post_recovery_validation_required": bool(recovery.get("post_recovery_validation_required", False)),
+        "epoch_source": gate.get("source"),
+        "epoch_id": gate.get("epoch_id"),
+        "recovery_epoch_valid_path_rows_baseline": int(gate.get("baseline") or 0),
+        "post_recovery_validation_required": bool(gate.get("required", False)),
+        "promotion_block_reason": gate.get("reason") if gate.get("required") else None,
         "authority": {
             "reporting_and_promotion_gate_only": True,
             "places_orders": False,
