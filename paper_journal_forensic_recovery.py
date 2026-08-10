@@ -1,15 +1,19 @@
 """Read-only forensic recovery candidate from the append-only trade journal.
 
-Builds a deduplicated execution candidate from /data/trade_journal.json and
-checks whether it can reconstruct a complete, economically plausible paper
-account. It never mutates portfolio state, clears halts, or places orders.
+Before a clean accounting epoch is established, this builds a deduplicated
+execution candidate from /data/trade_journal.json and checks whether it can
+reconstruct a complete, economically plausible paper account.
+
+After the historical decision is resolved in favor of a clean epoch, the old
+journal is treated as archived forensic evidence rather than an active recovery
+warning.  This module never mutates state, clears halts, or places orders.
 """
 from __future__ import annotations
 
 import json
 from typing import Any, Dict, List, Tuple
 
-VERSION = "paper-journal-forensic-recovery-2026-08-10-v1"
+VERSION = "paper-journal-forensic-recovery-2026-08-10-v2-clean-epoch"
 
 
 def _d(value: Any) -> Dict[str, Any]:
@@ -77,9 +81,54 @@ def _candidate_rows(journal: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+def _clean_epoch_disposition(core: Any) -> Dict[str, Any] | None:
+    pf = _portfolio(core)
+    epoch = _d(pf.get("paper_accounting_epoch"))
+    if not bool(epoch.get("clean_start")) or epoch.get("historical_recovery_decision") != "clean_epoch":
+        return None
+    journal, error = _load_journal()
+    return {
+        "status": "archived",
+        "overall": "pass",
+        "type": "paper_journal_forensic_recovery_status",
+        "version": VERSION,
+        "journal_available": not bool(error),
+        "journal_trade_rows": len(_l(journal.get("trades"))),
+        "deduplicated_execution_rows": len(_candidate_rows(journal)),
+        "entry_rows": sum(1 for row in _candidate_rows(journal) if str(row.get("action") or "").lower() == "entry"),
+        "exit_rows": sum(1 for row in _candidate_rows(journal) if str(row.get("action") or "").lower() in {"exit", "partial_exit"}),
+        "coverage_complete": None,
+        "coverage_issue_count": int(epoch.get("journal_coverage_issue_count") or 0),
+        "economic_issue_count": int(epoch.get("journal_economic_issue_count") or 0),
+        "candidate_cash": None,
+        "candidate_equity": None,
+        "candidate_open_positions": [],
+        "trusted_recovery_candidate": False,
+        "decision_complete": True,
+        "historical_recovery_disposition": "archived_after_incomplete_coverage",
+        "clean_epoch_id": epoch.get("id"),
+        "forensic_archive_dir": epoch.get("forensic_archive_dir"),
+        "error": error,
+        "authority": {
+            "reporting_only": True,
+            "repairs_state": False,
+            "clears_hard_halt": False,
+            "places_orders": False,
+            "changes_strategy": False,
+            "changes_thresholds": False,
+            "changes_risk_or_sizing": False,
+            "changes_live_or_ml_authority": False,
+        },
+    }
+
+
 def status_payload(core: Any = None) -> Dict[str, Any]:
     if core is None:
         return {"status": "pending", "overall": "warn", "version": VERSION, "reason": "runtime_missing"}
+
+    disposition = _clean_epoch_disposition(core)
+    if disposition is not None:
+        return disposition
 
     journal, error = _load_journal()
     rows = _candidate_rows(journal)
@@ -121,6 +170,8 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "candidate_equity": rebuilt.get("equity"),
         "candidate_open_positions": sorted(_d(rebuilt.get("open_positions")).keys()),
         "trusted_recovery_candidate": trustworthy,
+        "decision_complete": False,
+        "historical_recovery_disposition": "pending",
         "authority": {
             "reporting_only": True,
             "repairs_state": False,
