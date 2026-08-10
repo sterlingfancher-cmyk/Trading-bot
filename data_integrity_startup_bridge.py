@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-10-v7-economic-ledger"
+VERSION = "data-integrity-startup-bridge-2026-08-10-v8-action-semantics-recovery"
 MODULES = (
     "orla_hygiene_overlay",
+    "paper_trade_action_semantics_recovery",
     "paper_accounting_integrity_guard",
     "paper_accounting_readonly_status",
     "paper_ledger_economic_integrity",
@@ -19,6 +20,7 @@ MODULES = (
     "mae_mfe_integration",
     "daily_data_integrity_audit_overlay",
     "paper_accounting_audit_bridge",
+    "post_recovery_evidence_epoch_guard",
     "provider_request_accounting_overlay",
     "daily_audit_response_reconciliation",
     "multi_asset_shadow_ranker",
