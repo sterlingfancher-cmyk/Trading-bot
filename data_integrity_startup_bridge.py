@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-10-v14-stable-paper-release"
+VERSION = "data-integrity-startup-bridge-2026-08-10-v15-stable-paper-release-timestamp-safe"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
@@ -30,6 +30,9 @@ MODULES = (
     # Stable Paper must support the runtime's actual long/short lifecycle before
     # the administrative clean-epoch hold is eligible for release.
     "paper_bidirectional_accounting_guard",
+    # Canonical record_trade rows use epoch-second timestamps. Normalize them for
+    # session P&L reconstruction and require explicit canonical long/short sides.
+    "paper_execution_timestamp_semantics",
     # A validation hold is an administrative execution block, not a loss event.
     "administrative_halt_classification_guard",
     # Re-verifies the deployed zero-trade baseline and clears only that exact
