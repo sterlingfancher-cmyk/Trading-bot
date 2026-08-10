@@ -1,15 +1,20 @@
 """Block MAE/MFE promotion until new clean lifecycle evidence exists.
 
 Supports both the historical accounting-recovery epoch and the deliberate clean
-accounting epoch.  Old contaminated/recovery-era rows can never satisfy a clean
+accounting epoch. Old contaminated/recovery-era rows can never satisfy a clean
 epoch promotion gate.
+
+A clean zero-trade epoch with no forward lifecycle rows is an expected research
+readiness state, not an operational market-data failure. It therefore remains a
+hard promotion block while surfacing as an operational warning unless another
+integrity defect already makes the section fail.
 """
 from __future__ import annotations
 
 import functools
 from typing import Any, Dict
 
-VERSION = "post-recovery-evidence-epoch-guard-2026-08-10-v2-clean-epoch"
+VERSION = "post-recovery-evidence-epoch-guard-2026-08-10-v3-clean-warning"
 _APPLIED = False
 
 
@@ -93,12 +98,24 @@ def apply(core: Any = None) -> Dict[str, Any]:
             if reason not in reasons:
                 reasons.insert(0, reason)
             section["reasons"] = reasons
-            section["status"] = "fail"
+
+            # Historical recovery uncertainty remains an operational failure.
+            # A deliberately established clean epoch is different: the account is
+            # operationally valid, but research promotion must wait for a forward
+            # exact lifecycle. Preserve any unrelated existing failure.
+            if gate.get("source") == "clean_accounting_epoch":
+                if str(section.get("status") or "pass").lower() != "fail":
+                    section["status"] = "warn"
+                section["promotion_gate_operational_severity"] = "warn"
+            else:
+                section["status"] = "fail"
+                section["promotion_gate_operational_severity"] = "fail"
 
             forward["promotion_evidence_eligible"] = False
             forward["promotion_block_reason"] = reason
             forward["post_recovery_valid_exact_lifecycle_rows"] = post_epoch_valid
             forward["post_epoch_valid_exact_lifecycle_rows"] = post_epoch_valid
+            forward["promotion_gate_blocks_execution"] = False
             section["forward_validation"] = forward
 
             mae = _d(section.get("mae_mfe_integrity"))
@@ -106,11 +123,13 @@ def apply(core: Any = None) -> Dict[str, Any]:
             mae["promotion_block_reason"] = reason
             mae["post_recovery_training_eligible_rows"] = post_epoch_valid
             mae["post_epoch_training_eligible_rows"] = post_epoch_valid
+            mae["promotion_gate_blocks_execution"] = False
             section["mae_mfe_integrity"] = mae
         elif required and eligible:
             forward["promotion_evidence_eligible"] = True
             forward["post_recovery_valid_exact_lifecycle_rows"] = post_epoch_valid
             forward["post_epoch_valid_exact_lifecycle_rows"] = post_epoch_valid
+            forward["promotion_gate_blocks_execution"] = False
             section["forward_validation"] = forward
 
         return section
@@ -136,6 +155,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "recovery_epoch_valid_path_rows_baseline": int(gate.get("baseline") or 0),
         "post_recovery_validation_required": bool(gate.get("required", False)),
         "promotion_block_reason": gate.get("reason") if gate.get("required") else None,
+        "clean_epoch_operational_severity": "warn" if gate.get("source") == "clean_accounting_epoch" and gate.get("required") else None,
         "authority": {
             "reporting_and_promotion_gate_only": True,
             "places_orders": False,

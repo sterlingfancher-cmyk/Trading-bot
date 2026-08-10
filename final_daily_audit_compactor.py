@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "final-daily-audit-compactor-2026-08-10-v3-clean-accounting-epoch"
+VERSION = "final-daily-audit-compactor-2026-08-10-v4-stable-paper-release"
 _REGISTERED = set()
 
 
@@ -18,6 +18,15 @@ def _d(value: Any) -> Dict[str, Any]:
 
 def _l(value: Any) -> list:
     return value if isinstance(value, list) else []
+
+
+def _i(value: Any) -> int:
+    try:
+        if value is None or isinstance(value, bool):
+            return 0
+        return max(0, int(value))
+    except Exception:
+        return 0
 
 
 def _journal_status(core: Any = None) -> Dict[str, Any]:
@@ -44,6 +53,39 @@ def _epoch_status(core: Any = None) -> Dict[str, Any]:
         return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
 
 
+def _release_status(core: Any = None) -> Dict[str, Any]:
+    try:
+        import clean_epoch_validation_release as module
+        return module.status_payload(core)
+    except Exception as exc:
+        return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _bidirectional_status(core: Any = None) -> Dict[str, Any]:
+    try:
+        import paper_bidirectional_accounting_guard as module
+        return module.status_payload(core)
+    except Exception as exc:
+        return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _market_data_status(integrity: Dict[str, Any], provider: Dict[str, Any]) -> str:
+    requests = _i(provider.get("requests"))
+    classified = _i(provider.get("classified_terminal_outcomes"))
+    gap = _i(provider.get("in_flight_or_unclassified_requests"))
+    if not gap and requests > classified:
+        gap = requests - classified
+    over = _i(provider.get("provider_outcomes_over_request_count"))
+    protected_blocked = _l(integrity.get("protected_symbols_blocked"))
+    if bool(integrity.get("provider_circuit_open")) or protected_blocked or over > 0:
+        return "fail"
+    # One open request is an expected concurrent snapshot state because the
+    # request counter increments before its terminal outcome is recorded.
+    if gap > 1:
+        return "warn"
+    return "pass"
+
+
 def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
     sections = _d(payload.get("sections"))
     account = _d(sections.get("01_account_and_open_position_performance"))
@@ -61,11 +103,26 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
     journal = _journal_status(core)
     ledger = _ledger_status(core)
     epoch = _epoch_status(core)
+    release = _release_status(core)
+    bidirectional = _bidirectional_status(core)
 
     reasons = []
     for value in _l(risk.get("reasons")) + _l(integrity.get("reasons")):
         if value and value not in reasons:
             reasons.append(value)
+
+    next_reason = next_action.get("reason")
+    next_action_text = next_action.get("action")
+    next_priority = next_action.get("priority")
+    if next_reason == "clean_accounting_epoch_forward_validation_required":
+        next_action_text = "Continue normal paper operation and collect the first clean exact lifecycle before any ML/MAE-MFE promotion."
+        next_priority = "normal"
+
+    requests = _i(provider.get("requests"))
+    classified = _i(provider.get("classified_terminal_outcomes"))
+    gap = _i(provider.get("in_flight_or_unclassified_requests"))
+    if not gap and requests > classified:
+        gap = requests - classified
 
     return {
         "status": payload.get("status"),
@@ -96,6 +153,9 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "historical_recovery_decision": epoch.get("historical_recovery_decision"),
             "historical_evidence_archived": epoch.get("historical_evidence_archived"),
             "validation_hold": epoch.get("validation_hold"),
+            "validation_release_status": release.get("status"),
+            "validation_released": release.get("released"),
+            "validation_released_local": release.get("released_local"),
         },
         "runner": {
             "status": runner.get("status"),
@@ -108,6 +168,7 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "halted": risk.get("halted"),
             "halt_reason": risk.get("halt_reason"),
             "self_defense_active": risk.get("self_defense_active"),
+            "self_defense_reason": risk.get("self_defense_reason"),
             "net_daily_loss_pct": risk.get("net_daily_loss_pct", risk.get("realized_loss_pct")),
             "intraday_drawdown_pct": risk.get("intraday_drawdown_pct"),
         },
@@ -120,6 +181,8 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "status": accounting.get("status"),
             "coverage_complete": accounting.get("coverage_complete"),
             "baseline_type": rebuilt.get("baseline_type"),
+            "supports_long_short": bidirectional.get("supports_long_short"),
+            "accounting_model": "bidirectional_margin_v1" if bidirectional.get("supports_long_short") else None,
             "ignored_trade_rows": rebuilt.get("ignored_trade_rows"),
             "coverage_issue_count": rebuilt.get("coverage_issue_count"),
             "economic_issue_count": economics.get("economic_issue_count"),
@@ -150,12 +213,15 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "authoritative_for_new_executions": ledger.get("authoritative_for_new_executions"),
         },
         "market_data": {
-            "status": integrity.get("status"),
-            "requests": provider.get("requests"),
-            "classified_terminal_outcomes": provider.get("classified_terminal_outcomes"),
+            "status": _market_data_status(integrity, provider),
+            "requests": requests,
+            "classified_terminal_outcomes": classified,
+            "in_flight_or_unclassified_requests": gap,
+            "accounting_complete_at_snapshot": provider.get("accounting_complete_at_snapshot"),
             "provider_circuit_open": integrity.get("provider_circuit_open"),
         },
         "ml_evidence": {
+            "status": "pass" if forward.get("promotion_evidence_eligible") else "warn",
             "promotion_evidence_eligible": forward.get("promotion_evidence_eligible"),
             "promotion_block_reason": forward.get("promotion_block_reason"),
             "valid_exact_lifecycle_rows": forward.get("valid_exact_lifecycle_rows_observed"),
@@ -164,9 +230,9 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
         },
         "next_action": {
             "status": next_action.get("status"),
-            "priority": next_action.get("priority"),
-            "reason": next_action.get("reason"),
-            "action": next_action.get("action"),
+            "priority": next_priority,
+            "reason": next_reason,
+            "action": next_action_text,
         },
         "full_audit": "https://web-production-e1796.up.railway.app/paper/daily-audit?full=1",
         "compactor_version": VERSION,
