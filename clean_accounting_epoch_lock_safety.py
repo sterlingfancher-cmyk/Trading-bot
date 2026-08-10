@@ -1,18 +1,21 @@
-"""One-time lock-safety shim for the clean accounting epoch cutover.
+"""One-time lock/persistence safety shim for the clean accounting epoch cutover.
 
-The cutover already owns the trade-journal mirror lock and state file lock.  A
-nested call back into ``trade_journal.mirror_state`` is therefore unnecessary and
-could reacquire the state file lock.  This shim replaces only that helper with a
-direct empty-journal rotation before the cutover module is applied.
+The cutover already owns the trade-journal mirror lock and state file lock. A
+nested call back into ``trade_journal.mirror_state`` is unnecessary and could
+reacquire the state file lock. The base migration also fsyncs backup copies via a
+read-only descriptor, which is platform-dependent. This shim replaces only those
+two helpers before the cutover module is applied.
 
 This file is intentionally temporary migration plumbing and can be removed once
 the clean epoch has been established and validated.
 """
 from __future__ import annotations
 
+import os
+import shutil
 from typing import Any, Dict
 
-VERSION = "clean-accounting-epoch-lock-safety-2026-08-10-v1"
+VERSION = "clean-accounting-epoch-lock-safety-2026-08-10-v2"
 _APPLIED = False
 
 
@@ -41,10 +44,24 @@ def _safe_rotate_journal(_state: Dict[str, Any]) -> None:
             clean._atomic_json(path, journal)  # noqa: SLF001 - same atomic writer as cutover
 
 
+def _safe_copy_file_atomic(src: str, dst: str) -> None:
+    folder = os.path.dirname(dst)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    tmp = dst + ".tmp"
+    shutil.copy2(src, tmp)
+    # Open writable for a portable fsync before the atomic replace.
+    with open(tmp, "rb+") as handle:
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, dst)
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     global _APPLIED
     import clean_accounting_epoch as clean
     clean._rotate_journal = _safe_rotate_journal  # type: ignore[attr-defined]  # noqa: SLF001
+    clean._copy_file_atomic = _safe_copy_file_atomic  # type: ignore[attr-defined]  # noqa: SLF001
     _APPLIED = True
     return {
         "status": "ok",
@@ -52,6 +69,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
         "version": VERSION,
         "applied": True,
         "nested_journal_mirror_disabled": True,
+        "portable_backup_fsync": True,
         "authority": {
             "changes_strategy": False,
             "changes_thresholds": False,
@@ -69,6 +87,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "version": VERSION,
         "applied": _APPLIED,
         "nested_journal_mirror_disabled": _APPLIED,
+        "portable_backup_fsync": _APPLIED,
     }
 
 
