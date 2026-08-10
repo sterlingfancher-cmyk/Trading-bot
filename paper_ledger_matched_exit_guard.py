@@ -3,13 +3,16 @@
 Prevents unmatched/duplicate exits from creating synthetic cash during ledger
 reconstruction. This module is paper-only and changes accounting reconstruction
 and reporting only; it does not place orders or change strategy/risk authority.
+
+A deliberately created clean accounting epoch is also a valid zero-trade ledger
+baseline when cash/equity/P&L and the canonical execution ledger all agree.
 """
 from __future__ import annotations
 
 import datetime as dt
 from typing import Any, Dict, List
 
-VERSION = "paper-ledger-matched-exit-guard-2026-08-10-v1"
+VERSION = "paper-ledger-matched-exit-guard-2026-08-10-v2-clean-epoch"
 _APPLIED = False
 _REGISTERED_APP_IDS: set[int] = set()
 
@@ -55,12 +58,80 @@ def _initial_cash(accounting: Any, pf: Dict[str, Any]) -> float:
         return _f(history[0], 10000.0) if history else 10000.0
 
 
+def _clean_epoch_zero_trade_baseline(pf: Dict[str, Any], core: Any, accounting: Any) -> Dict[str, Any] | None:
+    epoch = _d(pf.get("paper_accounting_epoch"))
+    if not bool(epoch.get("clean_start")) or not bool(epoch.get("zero_trade_baseline")):
+        return None
+    if _l(pf.get("trades")) or _d(pf.get("positions")):
+        return None
+
+    initial = _f(epoch.get("starting_cash"), _initial_cash(accounting, pf))
+    cash = _f(pf.get("cash"), initial)
+    equity = _f(pf.get("equity"), cash)
+    realized = _d(pf.get("realized_pnl"))
+    performance = _d(pf.get("performance"))
+    issues: List[Dict[str, Any]] = []
+    money_tol = max(0.01, abs(initial) * 1e-8)
+
+    if initial <= 0:
+        issues.append({"reason": "clean_epoch_starting_cash_invalid", "starting_cash": initial})
+    if abs(cash - initial) > money_tol:
+        issues.append({"reason": "clean_epoch_cash_not_at_baseline", "cash": cash, "starting_cash": initial})
+    if abs(equity - initial) > money_tol:
+        issues.append({"reason": "clean_epoch_equity_not_at_baseline", "equity": equity, "starting_cash": initial})
+    if abs(_f(realized.get("today"), 0.0)) > money_tol or abs(_f(realized.get("total"), 0.0)) > money_tol:
+        issues.append({"reason": "clean_epoch_realized_pnl_not_zero"})
+    if abs(_f(performance.get("unrealized_pnl"), 0.0)) > money_tol:
+        issues.append({"reason": "clean_epoch_unrealized_pnl_not_zero"})
+
+    try:
+        import canonical_execution_ledger as ledger
+        ledger_status = ledger.status_payload(core)
+        if not bool(ledger_status.get("chain_valid")):
+            issues.append({"reason": "canonical_execution_ledger_chain_invalid"})
+        if not bool(ledger_status.get("authoritative_for_new_executions")):
+            issues.append({"reason": "canonical_execution_ledger_not_authoritative"})
+        if int(ledger_status.get("row_count") or 0) != 0:
+            issues.append({"reason": "clean_epoch_canonical_ledger_not_empty", "row_count": ledger_status.get("row_count")})
+        if int(ledger_status.get("current_epoch_rows") or 0) != 0:
+            issues.append({"reason": "clean_epoch_current_epoch_ledger_not_empty", "current_epoch_rows": ledger_status.get("current_epoch_rows")})
+        if str(ledger_status.get("current_epoch_id") or "") != str(epoch.get("id") or pf.get("accounting_epoch_id") or ""):
+            issues.append({"reason": "clean_epoch_ledger_epoch_id_mismatch"})
+    except Exception as exc:
+        issues.append({"reason": "canonical_execution_ledger_status_error", "error": f"{type(exc).__name__}: {exc}"})
+
+    complete = not issues
+    return {
+        "status": "ok" if complete else "partial",
+        "reason": "clean_zero_trade_epoch_baseline" if complete else "clean_zero_trade_epoch_baseline_invalid",
+        "baseline_type": "clean_zero_trade_epoch",
+        "coverage_complete": complete,
+        "parsed_trade_rows": 0,
+        "ignored_trade_rows": 0,
+        "initial_cash": round(initial, 6),
+        "cash": round(cash, 6),
+        "equity": round(equity, 6),
+        "market_value": 0.0,
+        "realized_total": 0.0,
+        "realized_today": 0.0,
+        "unrealized_pnl": 0.0,
+        "open_positions": {},
+        "coverage_issues": issues[:50],
+        "coverage_issue_count": len(issues),
+        "economic_issues": [],
+        "economic_issue_count": 0,
+    }
+
+
 def analyze_ledger(pf: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
     import paper_accounting_integrity_guard as accounting
 
     trades = _l(pf.get("trades"))
     positions = _d(pf.get("positions"))
     if not trades:
+        clean = _clean_epoch_zero_trade_baseline(pf, core, accounting)
+        if clean is not None:
+            return clean
         return {
             "status": "unavailable",
             "reason": "trade_ledger_empty",
@@ -130,8 +201,6 @@ def analyze_ledger(pf: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
                 })
             continue
 
-        # Sell only the quantity proven to exist in the lot book. Never credit
-        # proceeds for unmatched/duplicate exit quantity.
         remaining = qty
         matched_qty = 0.0
         matched_proceeds = 0.0
@@ -274,6 +343,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "version": VERSION,
         "applied": _APPLIED,
         "coverage_complete": bool(rebuilt.get("coverage_complete")),
+        "baseline_type": rebuilt.get("baseline_type"),
         "parsed_trade_rows": int(rebuilt.get("parsed_trade_rows") or 0),
         "ignored_trade_rows": int(rebuilt.get("ignored_trade_rows") or 0),
         "coverage_issue_count": int(rebuilt.get("coverage_issue_count") or 0),
