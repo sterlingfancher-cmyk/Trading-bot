@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-10-v10-one-link-journal-recovery"
+VERSION = "data-integrity-startup-bridge-2026-08-10-v11-canonical-execution-ledger"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
+    # Stable Core execution truth: durable append-only hash-chained events.
+    "canonical_execution_ledger",
     "orla_hygiene_overlay",
     "paper_ledger_matched_exit_guard",
     "paper_trade_action_semantics_recovery",
