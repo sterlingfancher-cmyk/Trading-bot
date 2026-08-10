@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-10-v12-clean-accounting-epoch"
+VERSION = "data-integrity-startup-bridge-2026-08-10-v13-clean-epoch-lock-safe"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
@@ -24,6 +24,8 @@ MODULES = (
     "paper_ledger_economic_integrity",
     # Historical recovery evidence is evaluated before the one-time cutover.
     "paper_journal_forensic_recovery",
+    # Disable the unnecessary nested journal mirror while the cutover owns locks.
+    "clean_accounting_epoch_lock_safety",
     "clean_accounting_epoch",
     # All research/path layers run only after the accounting epoch is established.
     "intratrade_path_capture",
