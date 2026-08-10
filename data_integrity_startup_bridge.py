@@ -2,14 +2,15 @@
 
 Imported by the WSGI entry point. This module applies bounded integrity and
 observability modules and registers their status routes. The paper-accounting
-guard is allowed to reconcile paper state from the execution ledger; no module
-here places orders or changes live/ML authority.
+guard is allowed to reconcile paper state from the execution ledger. The one-time
+clean-accounting-epoch module is the explicitly authorized 2026-08-10 migration
+after historical journal recovery was proven incomplete.
 """
 from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-10-v11-canonical-execution-ledger"
+VERSION = "data-integrity-startup-bridge-2026-08-10-v12-clean-accounting-epoch"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
@@ -21,7 +22,10 @@ MODULES = (
     "paper_accounting_integrity_guard",
     "paper_accounting_readonly_status",
     "paper_ledger_economic_integrity",
+    # Historical recovery evidence is evaluated before the one-time cutover.
     "paper_journal_forensic_recovery",
+    "clean_accounting_epoch",
+    # All research/path layers run only after the accounting epoch is established.
     "intratrade_path_capture",
     "mae_mfe_integration",
     "daily_data_integrity_audit_overlay",
