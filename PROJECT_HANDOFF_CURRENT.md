@@ -1,355 +1,442 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-07 morning CDT  
+Last updated: 2026-08-10 12:51 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Branch: `main`  
-Runtime code head covered: `bbce42192183297b6478d5248c6b21b4b1983b55`  
-Canonical paper service: `https://web-production-e1796.up.railway.app`  
-Railway contexts: `splendid-creativity / web` and `dazzling-dedication / Trading-bot`
+Runtime code head covered: `8fcf06622759cc5775a23361c12de1087f73e4b7`  
+Canonical paper service: `https://web-production-e1796.up.railway.app`
 
-This is the authoritative handoff. Older `PROJECT_HANDOFF_*` files are historical context unless this document explicitly references them.
+This is the authoritative handoff for the next conversation. Older `PROJECT_HANDOFF_*` files are historical context unless this file explicitly references them.
 
 ## Executive Status
 
-The paper bot remains deployed with persistent Railway state, broad-market momentum discovery, a canonical 110-symbol detailed-scanner boundary, reconciled audit/journal reporting, protected-symbol provider hygiene, exact-lifecycle MAE/MFE containment, and a rules-gated ML counterfactual ledger.
-
-The runtime remains paper-only. The existing rules engine is the sole execution authority. ML remains `shadow_recommendation_only` and cannot place orders, select or override entries/exits, alter sizing, relax hard risk, change thresholds, or obtain live authority.
-
-The MAE/MFE incident is safely contained but not fully closed. Legacy or unverifiable rows remain quarantined and training-ineligible. Completion still requires trustworthy forward evidence from at least one newly opened and completed exact-lifecycle trade.
-
-The project has entered a stabilization-and-evidence phase. Do not add features merely because they are available. Prefer proving reliability, execution correctness, strategy expectancy, and live-readiness gates.
-
-## Latest Runtime Change
-
-PR `#17`, **Fix daily audit recount and provider denominator reporting**, was squash-merged as:
-
-- Runtime commit: `bbce42192183297b6478d5248c6b21b4b1983b55`
-- Response reconciliation: `daily-audit-response-reconciliation-2026-08-06-v1`
-- Data-integrity startup bridge: `data-integrity-startup-bridge-2026-08-06-v3-response-reconciliation`
-- Provider accounting overlay: `provider-request-accounting-overlay-2026-08-06-v2-denominator-safe`
+The project is now in a **Stable Core + Performance Lab** phase.
 
-This change is reporting/observability only. It does not change strategy, thresholds, provider request behavior, retries/backoff, sizing, hard-risk controls, order placement, live authority, or ML authority.
+The goal is no longer to keep layering features onto the current runtime. The immediate priority is to produce a stable, operational paper/live-ready core without sacrificing the strategy components that have shown useful performance or the future upside from ML, crypto, MAE/MFE, LONA research, and shadow ranking.
 
-PR #17 corrected two defects exposed by the after-close audit:
+The runtime remains **paper-only**. The rules engine remains the sole execution authority. ML and multi-asset ranking remain shadow/research-only and must not place orders, select or override entries/exits, change sizing, relax hard risk, change thresholds, or obtain live authority without an explicit later promotion decision.
 
-1. A later reporting wrapper could recalculate `11_conclusion` from only the original ten sections and omit section `10b_market_data_and_path_integrity` from the count. A final response-boundary reconciliation now guarantees the 11-operational-check contract for compact and full audits.
-2. Provider accounting incorrectly mixed pre-provider hygiene/backoff filters into the provider-request denominator. Actual provider outcomes are now separated from symbols filtered before a request is made.
+The current paper account is still under a **hard risk halt** due to accounting/state contamination discovered on 2026-08-10. Do not clear the halt manually until the account state is either successfully reconstructed from trustworthy evidence or a clean accounting epoch is intentionally started.
 
-Both Railway deployment contexts reported success for `bbce421`:
+## Operator Workflow — One Routine Test
 
-- `splendid-creativity / web`: success
-- `dazzling-dedication / Trading-bot`: success
+The user has repeatedly requested **one routine test only** unless a deeper diagnostic is specifically necessary.
 
-Prior important runtime change: PR `#16`, **Add bootstrap registration heartbeat and provider accounting**, merged as `f14b25e2b76b21d42007dc60e7ceb232d7e6c126`. It added the registration heartbeat and the first provider-accounting observability layer.
-
-## Latest After-Close Audit Evidence
-
-The full after-close audit captured on 2026-08-06 reported operational health across the trading runtime:
-
-- Cash: `$9,964.09`
-- Equity: `$9,964.09`
-- Open positions: `0`
-- Realized today: `-$35.97`
-- Realized total: `-$35.92`
-- Unrealized P&L: `$0.00`
-- Wins/losses: `1 / 4`
-- Auto-runner enabled: `true`
-- Latest after-hours cycle: correctly skipped with `market closed: after_regular_session`
-- Active runtime error: `false`
-- Recursion error active: `false`
-- Trading halted: `false`
-- Self-defense active: `false`
-- Net daily-loss metric: `0.12%`
-- Intraday drawdown: `0.12%`
-- Scanner entries: `0`
-- Scanner rejected signals observed: `15`
-- Top blocker reason coverage: `100%`
-- Entry pipeline ownership/stability: pass
-- Journal execution rows: `9`
-- Runtime execution rows: `9`
-- Journal/open-position reconciliation: pass
-- Persistent mount detected: `true`
-- State file: `/app/data/state.json`
-- Backup exists: `true`
-- In-memory/on-disk richness: matched
-- Runtime shadow parity: `true`
-- Provider circuit open: `false`
-- Protected symbols blocked: `0`
-- Active contaminated MAE/MFE features: `0`
-
-The audit payload still showed `checked_sections: 10` because the reporting defect described above was present in that deployed version. All eleven operational section objects were actually present and passing. PR #17 corrected the response-count defect.
-
-## Latest Data-Integrity / MAE-MFE Evidence
-
-Most recent captured values:
-
-- Invalid or quarantined path rows: `4`
-- Valid exact-lifecycle path rows: `0`
-- Training-eligible path rows: `0`
-- Recomputed rows: `0`
-- ML rows enriched: `0`
-- ML rows quarantined: `4,710`
-- Trade rows enriched: `0`
-- Trade rows quarantined: `9`
-- Total quarantined feature rows: `4,719`
-- Active contaminated feature count: `0`
-- Forward validation complete: `false`
-- Historical backfill established: `false`
-
-Interpretation:
-
-- Quarantined feature rows are explicitly excluded evidence, not active contamination.
-- `active_contaminated_feature_count: 0` is the decisive safety metric.
-- `valid_path_rows: 0` means MAE/MFE-derived evidence must remain disabled for strategy, risk, stop/target, promotion, and authority decisions.
-- Forward validation should occur naturally on a future exact-lifecycle trade; do not manufacture a trade or weaken thresholds to generate evidence.
-
-## Provider Accounting
-
-The latest after-close snapshot reported:
-
-- Provider requests: `5,081`
-- Successes: `5,081`
-- Failures: `0`
-- Timeouts: `0`
-- Empty responses: `0`
-- Hygiene-blocked symbols: `3`
-- Provider circuit skips: `0`
-- Symbol-backoff skips: `0`
+Routine test:
 
-Correct interpretation after PR #17:
+`https://web-production-e1796.up.railway.app/paper/daily-audit`
 
-- Provider terminal outcomes: `5,081`
-- Pre-provider filtered symbols: `3`
-- In-flight or unclassified provider requests: `0`
-- Provider accounting complete at snapshot: `true`
+The default response must remain compact and copy/paste friendly. Full forensic output is available only when specifically needed:
 
-Hygiene and symbol-backoff filters occur before the provider-request denominator and must not be added to terminal provider outcomes. Empty responses and timeouts are failure subtypes and must not be double-counted.
+`https://web-production-e1796.up.railway.app/paper/daily-audit?full=1`
 
-## Morning Operator Observation — 2026-08-07
+Do not ask the user to run bootstrap + multiple accounting + multiple audit endpoints as a normal workflow. Use the single compact audit whenever possible and add targeted diagnostics only for a demonstrated blocker.
 
-The user reported seeing substantial green across the board and a majority of ticker symbols positive during the morning session.
+PR #23 adds a final Flask response-stage compactor so later overlays cannot re-expand the routine audit.
 
-Treat this as useful market-context/operator observation only. It is not independently verified performance evidence and must not be used by itself to relax thresholds, alter risk, promote ML authority, or accelerate the live-launch gates. Use completed-cycle and completed-trade telemetry for evidence.
+## Current Runtime Head / Latest Change
 
-## Canonical Operating Links
+PR #23 — **Make daily audit one-link compact and add journal recovery candidate** — passed both repository CI workflows and was squash-merged into `main` as:
 
-- Bootstrap status: `/bootstrap-status`
-- Routine compact daily audit: `/paper/daily-audit`
-- Complete daily audit: `/paper/daily-audit?full=1`
-- Data-integrity audit status: `/paper/data-integrity-audit-status`
-- Tiny self-check: `/paper/self-check`
-- Targeted full diagnostics: `/paper/full-self-check`
-- Paper state: `/paper/status?full=1`
-- Cycle completion: `/paper/cycle-completion-contract-status`
-- Persistence: `/paper/state-persistence-contract-status`
-- Scanner composition: `/paper/scanner-runtime-contract-status`
-- Broad discovery status: `/paper/broad-momentum-discovery-status`
-- Broad candidates: `/paper/broad-momentum-candidates`
-- Provider health: `/paper/provider-health-status`
-- yFinance hygiene: `/paper/yfinance-data-hygiene-status`
-- Intratrade path integrity: `/paper/intratrade-path-integrity-status`
-- MAE/MFE integrity: `/paper/mae-mfe-integrity-status`
-- ML Phase 2: `/paper/ml2-status`
-- ML recommendation ledger: `/paper/ml-counterfactual-ledger-status`
-- ML training dataset: `/paper/ml-counterfactual-training-dataset`
+`8fcf06622759cc5775a23361c12de1087f73e4b7`
 
-## Daily Audit Contract
+It adds:
 
-Routine operator use should call `/paper/daily-audit`. Detailed diagnosis and automated validation should call `/paper/daily-audit?full=1`.
+- `final_daily_audit_compactor.py`
+- `paper_journal_forensic_recovery.py`
+- startup bridge version `data-integrity-startup-bridge-2026-08-10-v10-one-link-journal-recovery`
+- regression coverage for compact output and semantic journal deduplication
 
-Required invariants:
+The forensic recovery candidate is **read-only**. It does not repair state, clear the halt, place orders, or change strategy/risk/sizing/live/ML authority.
 
-- Compact response type: `daily_operational_audit_compact`
-- Full response type: `daily_operational_audit`
-- Full section-object count: `13`
-- Operational checked-section count: `11`
-- Integrity section key: `10b_market_data_and_path_integrity`
-- Audit route performs no provider fan-out, trading action, repair action, or heavy research
-- Audit authority remains reporting-only
+## Accounting Incident — Root Cause and Current Understanding
 
-The compact payload includes account/equity, runner health, active errors, risk/halt state, scanner signals and blockers, journal/persistence reconciliation, provider/path integrity, and the required next action.
+On 2026-08-10 the paper account began reporting economically impossible values, including very large negative cash and oversized positions. Initial symptoms included repeated apparent MARA purchases and an impossible QQQ cost basis.
 
-## Risk Boundaries
+The first major root cause was identified in the trade parser:
 
-Current operating boundaries remain:
+- canonical trade rows store `action` separately from `side`
+- examples: `action="exit"`, `side="long"`
+- older accounting reconstruction treated `side="long"` as a buy before consulting `action`
+- legitimate long exits were therefore reconstructed as additional buys
 
-- Soft daily-loss pause: `1.0%`
-- Hard realized-loss halt: `2.5%`
-- Hard intraday drawdown halt: `2.5%`
-- Absolute daily-loss ceiling: `3.0%`
-- Maximum account risk per trade at configured stop: `2.0%`
-- Standard starter positions: maximum `4`
-- Standard starter entries per day: maximum `3`
-- Risk-on starter entries per cycle: `1`
-- Normal position target: approximately `12%–18%` of equity
-- Starter cash check: at least `35%` cash before another starter
-- Practical standard deployment ceiling: approximately `70%`
+That created cascading fake position growth, negative cash, and contaminated P&L/account state.
 
-The audit's displayed `net_daily_loss_pct` comes from the runtime's stored day-start equity baseline. Realized-ledger loss safety is calculated separately. Do not assume those two values must always be numerically identical after restart/redeployment/baseline restoration.
+PR #21 corrected this by making **action authoritative**.
 
-## Scanner and Participation Architecture
+A second defect was then exposed: unmatched or duplicate exits could create synthetic cash during reconstruction. PR #22 corrected this so exit proceeds are credited only for quantity proven to exist in reconstructed lots.
 
-Discovery sources include market-wide momentum, day gainers, most-active stocks, current positions, SPY/QQQ/IWM/DIA, and bounded original-watchlist fallback coverage.
+The remaining issue is now clearer and more fundamental:
 
-Bounds:
+- `state.trades` contains **30 execution rows** in the latest captured audit
+- **19 exit/partial-exit rows have no matching entry lots available in `state.trades`**
+- therefore exact account reconstruction from `state.trades` alone is impossible
+- the matched-exit guard now correctly reports `coverage_complete: false`
+- it no longer fabricates cash from those unmatched exits
 
-- Maximum retained discovery candidates: `160`
-- Maximum broad-momentum slots: `80`
-- Maximum base/fallback slots: `25`
-- Maximum detailed-scanner input: `110`
-- Discovery cache: `900` seconds
+The last single audit before PR #23 showed a bounded reconstructed candidate around:
 
-Canonical scanner chain:
+- reconstructed cash: approximately `$14,386.33`
+- reconstructed equity: approximately `$18,004.11`
+- one reconstructed QQQ lot remained
+- ignored/unmatched execution rows: `19`
+- economic/accounting integrity: fail due incomplete ledger coverage
 
-1. Broad-universe boundary
-2. Opening-surge participation
-3. Breakout participation
-4. Market-participation accelerator
+These values are **not yet trusted account values** because coverage is incomplete.
 
-The authoritative universe metric is the detailed-scanner boundary, not the temporarily expanded shared `UNIVERSE` between cycles.
+## Append-Only Trade Journal Recovery Candidate
 
-## Machine Learning — Current Role
+The bot already maintains a separate persistent append-only trade journal at `/data/trade_journal.json` through `trade_journal.py`.
 
-ML remains shadow recommendation only. Executed outcomes receive stronger evidence weight; counterfactual outcomes remain discounted and do not count toward promotion gates.
+Important properties:
 
-Invalid or unverifiable MAE/MFE features remain quarantined. No ML authority expansion is permitted without formal evidence and explicit user authorization.
+- mirrors trade history from state and backup files
+- does not shrink existing journal history
+- maintains a backup journal
+- seeds from state backups and current state
+- does not write to `state.json`
+- was designed specifically to preserve execution history across state resets/redeployments
 
-LONA may be used for independent strategy development, backtesting, robustness testing, and comparison work. Codex/GitHub tooling may be used for code inspection, regression review, implementation, debugging, and deployment work. Neither changes the execution-authority boundary: the rules engine remains the only execution authority unless the user explicitly approves a later promotion after evidence gates are satisfied.
+PR #23 now builds a **read-only deduplicated execution candidate** from this journal and runs it through the corrected matched-exit accounting guard.
 
-## Live-Readiness Roadmap and Goals
+The compact daily audit will report whether this journal candidate is:
 
-The dates below are targets, not automatic promotion dates. Promotion is evidence-gated. If the evidence is not sufficient, remain at the current stage regardless of calendar date.
+- available
+- complete
+- economically consistent
+- a `trusted_recovery_candidate`
 
-### Goal 1 — Paper Stability
+### Recovery Decision Rule
 
-Target window: **2026-08-07 through approximately 2026-08-21**.
+1. If the journal candidate has complete entry/exit coverage and no economic issues, use it as the evidence base for a controlled state rebuild.
+2. If the journal candidate is still incomplete, **stop spending time reverse-engineering contaminated history**.
+3. Archive the current state/journal/backups as forensic evidence and start a **clean accounting epoch** using the existing proven strategy logic.
+4. Do not carry contaminated historical MAE/MFE promotion evidence into the new epoch.
 
-Desired evidence:
+This decision rule is intended to prevent another prolonged historical repair loop.
 
-- Approximately `7–10` consecutive trading days with clean operational behavior.
-- Daily audit consistently passes with zero unexplained fail states.
-- No persistence or redeployment surprises.
-- No stale, overlapping, or orphaned cycles.
-- Provider health remains stable and denominator accounting reconciles.
-- Journal and execution records reconcile daily.
-- Risk controls and after-hours skip behavior remain correct.
-- Scanner participation is healthy without weakening thresholds merely to create trades.
-- No new architecture/runtime defects requiring trading-logic intervention.
+## PR History — Accounting / Recovery Incident
 
-### Goal 2 — Validate Actual Trade Behavior
+### PR #20 — Harden paper ledger economics and block ORLA
 
-Target window: **weeks 2–4**, approximately mid-to-late August 2026.
+Merged as `73e118a...`.
 
-Collect enough naturally occurring completed trades under the current architecture to validate:
+Added:
 
-- Entry execution and lifecycle identity.
-- Stop behavior.
-- Profit taking and profit protection.
-- Rotation and exit behavior.
-- Position sizing and cash deployment.
-- Daily loss / drawdown controls.
-- Scanner → decision → execution consistency.
-- Exact-lifecycle MAE/MFE capture.
-- Paper slippage assumptions and any fill-model limitations.
+- economic-ledger validator
+- detection of buys exceeding cash
+- negative reconstructed cash detection
+- MAE/MFE promotion block when accounting integrity is not clean
+- ORLA static no-data/delisting hygiene block
 
-MAE/MFE forward validation is an explicit gate. Do not rely on MAE/MFE optimization inputs until at least one valid new exact-lifecycle row exists and the enrichment remains contamination-free.
+This correctly exposed the impossible paper ledger instead of allowing a false green accounting result.
 
-Use LONA during this phase for independent backtesting/robustness challenges rather than relying only on the bot's own historical tests.
+### PR #21 — Recover paper ledger with action-first trade semantics
 
-### Goal 3 — Live-Readiness Simulation
+Merged as:
 
-Target window: **weeks 3–5**, approximately late August to early September 2026.
+`60014694b829c2433e20bca32bd41920e7801095`
 
-Operate the paper account as if it were live:
+Corrected the core semantic bug where exits from long positions were being reconstructed as buys.
 
-- Do not manually rescue trades merely because the outcome is uncomfortable.
-- Do not change thresholds because of one poor or quiet day.
-- Do not force trades to create evidence.
-- Compare expected order → generated order → simulated fill → resulting position → exit → journal.
-- Audit restart/redeployment behavior and broker-state assumptions.
-- Use Codex/GitHub review for regression and execution-path inspection as needed.
+Also established a post-recovery MAE/MFE evidence epoch and preserved the hard halt.
 
-### Goal 4 — Controlled Micro-Live Pilot
+### PR #22 — Prevent unmatched exits from creating synthetic paper cash
 
-Earliest target: **September 2026**, approximately 4–6 weeks from 2026-08-07 if all prior gates pass.
+Merged as:
 
-This stage is intentionally small and should use a more restrictive initial live envelope than the normal paper envelope. Its purpose is execution validation, not maximizing profit.
+`ce51bb72c727147914371b0618dc714d4fcd335e`
 
-Required focus:
+Added matched-lot exit accounting and made incomplete coverage an explicit integrity failure.
 
-- Real fills and bid/ask spread.
-- Partial fills.
-- Broker/API latency.
-- Rejected/cancelled orders.
-- Position and buying-power synchronization.
-- Order-state race conditions.
-- Real slippage versus modeled assumptions.
-- Network/provider interruptions.
-- Market-open execution behavior.
-- Hard-risk enforcement under real broker state.
+### PR #23 — Make daily audit one-link compact and add journal recovery candidate
 
-Do not fund or size the pilot as if full strategy expectancy has already been proven.
+Merged as:
 
-### Goal 5 — Normal Live Operation
+`8fcf06622759cc5775a23361c12de1087f73e4b7`
 
-Target: **October 2026 or later**, only after approximately `15–25` clean live trading days and adequate trade evidence.
+This is the current `main` head covered by this handoff.
 
-Promotion criteria should include:
+## What We Know Works / Should Be Preserved
 
-- Credible positive expectancy or other sufficiently strong risk-adjusted evidence.
-- Drawdowns behaving within modeled limits.
-- Real slippage reasonably consistent with assumptions.
-- No unexplained broker/account reconciliation events.
-- No critical execution failures.
-- No risk-control bypass.
-- Enough completed trades to distinguish strategy behavior from short-run randomness.
-- Continued rules-engine execution authority unless a separate ML promotion is explicitly approved.
+The stabilization audit concluded that the largest failure cluster is **accounting/state reconstruction and overlapping runtime plumbing**, not the market-data/scanner side.
 
-## Promotion Principle
+Preserve these components unless new evidence proves otherwise:
 
-The working launch targets are:
+### Stable Core candidates
 
-- **September 2026:** controlled micro-live candidate.
-- **October 2026:** potential normal live-operation candidate.
+- rules-engine execution authority
+- broad-market momentum discovery
+- canonical bounded detailed scanner
+- scanner ownership / recursion-safety contract
+- opening-surge and breakout participation logic that improves deployment without bypassing hard risk
+- provider timeout/circuit/hygiene protections
+- ORLA/static no-data hygiene
+- persistent Railway volume
+- cycle-completion contract
+- hard risk system
+- after-hours market-closed skipping
+- paper-only execution boundary
 
-These are not deadlines. The system must earn promotion through evidence.
+### Risk boundaries to preserve initially
 
-Primary operating principle between now and live launch:
+- soft daily-loss pause: `1.0%`
+- hard realized-loss halt: `2.5%`
+- hard intraday drawdown halt: `2.5%`
+- absolute daily-loss ceiling: `3.0%`
+- maximum account risk per trade at configured stop: `2.0%`
 
-> Stop adding features unless they solve a demonstrated problem. Accumulate clean evidence, challenge assumptions, and promote only when reliability and expectancy justify it.
+Do not loosen these merely to generate more trades or speed validation.
 
-## Priority Order
+### Scanner / discovery architecture worth preserving
 
-1. Verify PR #17 audit reconciliation in live compact/full payloads: `checked_sections: 11` and provider denominator-safe accounting.
-2. Continue ordinary paper-market observation without forcing trades or loosening thresholds.
-3. Capture at least one naturally occurring newly opened and completed exact-lifecycle trade.
-4. Confirm that trade produces a valid path row and training-eligible enrichment without active contamination.
-5. Verify every shadow-ML training and promotion surface continues excluding invalid or quarantined path features.
-6. Monitor `7–10` consecutive trading days for paper-stability evidence: audits, persistence, cycles, provider accounting, reconciliation, and risk controls.
-7. Build a completed-trade evidence set for entry/exit behavior, stop/profit handling, sizing, slippage assumptions, and scanner-to-execution consistency.
-8. Use LONA for independent robustness/backtest challenges where it materially improves evidence quality.
-9. Use Codex/GitHub tooling for regression review, code inspection, debugging, and deployment when needed.
-10. Investigate repeated HTTP 401 responses from the custom market-wide momentum query while preserving day-gainer and most-active fallbacks.
-11. Continue sector/industry enrichment and classification-coverage measurement only when it does not distract from stabilization evidence.
-12. Evaluate strategy changes only from trustworthy completed outcomes, not from one green or red session.
-13. Begin live-readiness simulation only after paper stability is demonstrated.
-14. Consider micro-live only after all prior gates pass; consider normal live operation only after clean micro-live evidence.
+Historical handoff bounds:
 
-## Non-Negotiable Safety Boundaries
+- maximum retained discovery candidates: `160`
+- maximum broad-momentum slots: `80`
+- maximum base/fallback slots: `25`
+- maximum detailed-scanner input: `110`
+- discovery cache: `900` seconds
 
-- Paper trading only until the live-readiness promotion gates are explicitly approved.
-- Rules engine remains execution authority.
-- ML remains shadow recommendation only.
-- No restoration claims for missing historical TSM/HWM state.
-- No bypass of hard risk, drawdown, daily-entry, spacing, position, sector, bucket, or sizing controls.
-- Never infer deployment success only from a GitHub commit; verify Railway.
-- Never infer persistence only from code; verify `/app/data/state.json` and its backup.
-- Do not weaken thresholds merely to create more trades; diagnose the mechanism first.
-- Do not train on, promote from, or optimize against telemetry that failed integrity checks.
-- Do not equate safe quarantine with completed forward validation.
-- Do not interpret a live bootstrap heartbeat as completed startup; readiness requires `delegate_ready: true`.
-- Do not promote to live simply because a target date has arrived.
+The scanner/provider layer has repeatedly shown healthy request accounting and clean provider operation during good runtime periods.
 
-## Next-Session Instruction
+## Performance Evidence to Preserve — But Treat Carefully
 
-Read this document before modifying the project. Start from the latest merged `main` and fresh live state. Verify bootstrap readiness, both daily-audit modes, persistence, cycle completion, scanner boundary, provider accounting, ML authority, and broad-discovery status. Continue the MAE/MFE effort by collecting trustworthy forward exact-lifecycle evidence, not by loosening strategy controls. Treat the project as being in stabilization/evidence mode. Preserve the user's moderate-to-aggressive risk posture while honoring the 3% daily-loss ceiling, 2% per-trade risk ceiling, and rules-gated paper-only architecture until the explicit live-readiness gates are earned and approved.
+The user recalls an earlier paper period roughly a month into development where the account increased from about `$10,000` to around `$11,000` within roughly a week.
+
+Later captured paper results also showed periods of strong positive account movement. However, because the historical account ledger has now been proven incomplete/contaminated, **do not treat all displayed historical P&L as audited performance evidence**.
+
+What should be preserved is the **strategy configuration and scanner behavior from the stronger periods**, not the corrupted account balances themselves.
+
+The next architecture should attempt to retain those strategy components while simplifying the plumbing around them.
+
+## Stable Core + Performance Lab Architecture
+
+### Stable Core
+
+Production/paper authority should converge toward only:
+
+1. one canonical scanner/selection path
+2. one execution pipeline
+3. one immutable execution ledger
+4. one authoritative account/position state
+5. execution-boundary cash/notional/position invariants
+6. one risk controller
+7. one persistence/backup contract
+8. one compact daily audit
+
+The Stable Core should not depend on experimental ML, crypto, MAE/MFE optimization, or alternative research policies to execute trades.
+
+### Performance Lab
+
+Keep — do not delete — the following as shadow/research systems:
+
+- ML recommendation/counterfactual work
+- MAE/MFE research and future stop/target optimization
+- multi-asset shadow ranker
+- BTC / ETH / SOL research
+- LONA independent backtesting and robustness tests
+- alternate regime/participation policies
+- future walk-forward / Monte Carlo / stress testing
+
+These systems may score, compare, and record what they would have done, but must not mutate live/paper execution authority until promotion gates are satisfied.
+
+## ML / MAE-MFE Status
+
+ML remains shadow-only.
+
+The current evidence epoch guard requires **new clean post-recovery exact-lifecycle evidence** before MAE/MFE-derived evidence can become promotable again.
+
+The latest captured audit before PR #23 showed:
+
+- valid exact-lifecycle rows: `3`
+- post-recovery valid exact-lifecycle rows: `0`
+- promotion evidence eligible: `false`
+- promotion block: `post_accounting_recovery_forward_validation_required`
+
+Do not allow old contaminated/recovery-era rows to satisfy future ML promotion gates.
+
+## Multi-Asset / Crypto Research
+
+PR #19 added the shadow multi-asset ranking foundation and was merged as `1892068...`.
+
+It compares equities/ETFs with BTC, ETH, and SOL while remaining research-only.
+
+It has no execution authority and must remain outside the Stable Core hot path until the base system is stable.
+
+## LONA Status
+
+LONA remains useful for independent validation, but the connector currently has a backend/schema mismatch for datasets that contain multiple frequencies: the backend requires a frequency/timeframe, while the exposed backtest action did not provide a frequency parameter during the last attempt.
+
+Do not modify the trading bot merely to work around that connector limitation.
+
+Use LONA later for independent backtesting, walk-forward validation, Monte Carlo analysis, slippage/commission stress, and comparison against the Stable Core when the connector path supports it.
+
+## Provider / Runtime Health Evidence
+
+Before the accounting incident, provider and runtime infrastructure repeatedly demonstrated healthy behavior:
+
+- provider request accounting reconciled
+- no active recursion errors
+- persistent state matched memory/disk
+- after-hours cycles skipped correctly
+- entry pipeline ownership was stable
+- protected benchmark symbols were not blocked
+- provider circuit remained closed
+
+The accounting incident should therefore not be interpreted as proof that scanner/provider/market-data logic is fundamentally broken.
+
+## Known Operational Weaknesses
+
+### 1. Accounting/state truth
+
+Primary current blocker.
+
+`state.trades` is not a sufficient immutable execution source of truth.
+
+### 2. Overlay accumulation
+
+The runtime currently contains many historical overlays and wrappers. They were useful for diagnosis but create startup complexity and ownership ambiguity.
+
+The medium-term refactor should move important behavior into explicit canonical modules and remove redundant wrappers from the execution hot path.
+
+### 3. Startup duration
+
+Cold-start/runtime registration has often taken roughly 1–3+ minutes. Slow startup alone has not meant failure when heartbeat continues, but Stable Core should reduce this materially if possible.
+
+### 4. Audit payload size
+
+Addressed by PR #23. Routine audit must remain one-link and compact.
+
+## Current Safety State
+
+Until accounting recovery is proven:
+
+- keep hard halt active
+- do not manually reset cash, positions, P&L, or halt based on contaminated state
+- do not trust historical reconstructed P&L as strategy evidence
+- do not promote ML/MAE-MFE authority
+- do not expand execution features
+- do not start live trading
+
+## Revised Stabilization Strategy
+
+Feature freeze for execution authority.
+
+Allowed work:
+
+- canonical ledger/accounting repair or clean-epoch creation
+- execution invariants
+- state/persistence simplification
+- startup simplification
+- one-link audit reliability
+- regression testing
+- removal/bypass of redundant execution-path overlays
+
+Not allowed until Stable Core is proven:
+
+- new execution strategies
+- crypto execution
+- ML execution authority
+- new sizing regimes
+- threshold loosening for more trades
+- speculative architecture additions
+
+## Stable Paper v1 Acceptance Gate
+
+After accounting truth is restored — either by trusted recovery or a clean epoch — run the **same Stable Core unchanged**.
+
+Minimum acceptance target:
+
+- `5` consecutive trading days
+- no state corruption
+- no impossible accounting
+- no duplicate execution
+- no unexplained startup failure
+- no manual state repair
+- one compact daily audit per day
+- provider accounting clean
+- cycle ownership clean
+- risk controls behave as designed
+- entry → fill → position → exit → immutable ledger consistency
+
+A longer `7–10` day evidence window remains preferable if defects recur.
+
+## Live-Readiness Direction
+
+The previous long calendar-based roadmap is now secondary to a shorter evidence-gated path.
+
+Desired sequence:
+
+1. establish accounting truth / clean epoch
+2. freeze Stable Core
+3. complete at least 5 unchanged clean paper trading days
+4. validate actual entry/exit/sizing/risk behavior from the canonical ledger
+5. run live-readiness simulation against broker-state assumptions
+6. move to a controlled live pilot at a funding level large enough to exercise the real strategy architecture without forcing redesign
+
+Do **not** automatically default to an extremely small `$500` pilot if that would distort sizing, diversification, minimum-notional behavior, or transaction-cost assumptions. Determine the minimum viable live capital from the final Stable Core sizing rules.
+
+The user does not want to start so small that the architecture immediately requires redesign once live.
+
+## Performance vs Stability Principle
+
+Do not simplify the strategy merely for simplicity.
+
+**Simplify the plumbing, preserve the performance engine.**
+
+Retain strong scanner/strategy components from the better-performing periods where they can be separated from accounting/runtime complexity.
+
+Keep ML and other future enhancement paths alive in the Performance Lab so they can be promoted later without another architectural rewrite.
+
+## Immediate Priority Order for the Next Chat
+
+1. Verify Railway deploys `8fcf06622759cc5775a23361c12de1087f73e4b7` / startup bridge v10.
+2. Run only the normal compact daily audit.
+3. Inspect the `journal_recovery_candidate` fields from that one audit.
+4. Decide whether the append-only journal is a trusted complete recovery source.
+5. If yes: design one controlled state rebuild with immutable archive and halt preserved until post-rebuild audit passes.
+6. If no: archive contaminated state and intentionally create a **clean accounting epoch** rather than continuing historical repair loops.
+7. Begin Stable Core refactor: canonical ledger + account state + execution invariants + single risk controller + single persistence contract.
+8. Preserve current rules/scanner performance logic unless evidence shows a specific component is defective.
+9. Keep ML/crypto/LONA/MAE-MFE in Performance Lab shadow mode.
+10. Start the 5-day Stable Paper v1 clock only after accounting truth is clean.
+
+## Tooling / Connected Services
+
+Use GitHub/Codex tooling for code inspection, implementation, CI, regression review, and deployment work.
+
+LONA is connected and may be used for independent research/backtesting when its frequency interface is usable.
+
+Railway is the canonical deployment environment, but there is no direct Railway connector in the current toolset. Use the user's Railway logs/status and deployed HTTP audit output for live verification.
+
+## Important User Operating Preferences
+
+- Prefer **one routine test link** per day.
+- Avoid making the user run multiple diagnostics unless a specific failure requires it.
+- Keep the routine audit short enough to copy/paste from iPhone.
+- Prefer complete/codebase-level fixes over repeated manual patches.
+- Prioritize reaching an operational live-ready system sooner rather than indefinite feature work.
+- Do not sacrifice the long-term performance ceiling or future ML capability merely to simplify the current runtime.
+
+## Non-Negotiable Boundaries
+
+- Paper-only until explicit live-readiness approval.
+- Existing hard halt remains until trustworthy accounting/state is established.
+- Rules engine remains sole execution authority.
+- ML remains shadow-only.
+- Multi-asset ranker remains research-only.
+- No risk-threshold weakening merely to create trades.
+- No fabricated ledger rows or synthetic historical entries.
+- No automatic clearing of halt during accounting recovery.
+- Preserve forensic state/backups before any destructive clean-epoch action.
+
+## Continuation Prompt for New Chat
+
+A new chat should begin by reviewing this file and then checking the latest GitHub `main` head / Railway compact audit.
+
+The most important next question is:
+
+**Does PR #23's append-only journal recovery candidate provide complete, economically consistent execution coverage?**
+
+If yes, perform a controlled recovery. If no, start a clean accounting epoch and move immediately into Stable Core validation rather than continuing to patch contaminated history.
