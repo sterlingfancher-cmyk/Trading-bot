@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "final-daily-audit-compactor-2026-08-10-v1"
+VERSION = "final-daily-audit-compactor-2026-08-10-v2-canonical-ledger"
 _REGISTERED = set()
 
 
@@ -23,6 +23,14 @@ def _l(value: Any) -> list:
 def _journal_status(core: Any = None) -> Dict[str, Any]:
     try:
         import paper_journal_forensic_recovery as module
+        return module.status_payload(core)
+    except Exception as exc:
+        return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _ledger_status(core: Any = None) -> Dict[str, Any]:
+    try:
+        import canonical_execution_ledger as module
         return module.status_payload(core)
     except Exception as exc:
         return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
@@ -44,6 +52,7 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
     conclusion = _d(sections.get("11_conclusion"))
     next_action = _d(sections.get("12_next_action"))
     journal = _journal_status(core)
+    ledger = _ledger_status(core)
 
     reasons = []
     for value in _l(risk.get("reasons")) + _l(integrity.get("reasons")):
@@ -110,6 +119,14 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "candidate_cash": journal.get("candidate_cash"),
             "candidate_equity": journal.get("candidate_equity"),
             "trusted_recovery_candidate": journal.get("trusted_recovery_candidate"),
+        },
+        "execution_ledger": {
+            "status": ledger.get("status"),
+            "chain_valid": ledger.get("chain_valid"),
+            "row_count": ledger.get("row_count"),
+            "current_epoch_id": ledger.get("current_epoch_id"),
+            "current_epoch_rows": ledger.get("current_epoch_rows"),
+            "authoritative_for_new_executions": ledger.get("authoritative_for_new_executions"),
         },
         "market_data": {
             "status": integrity.get("status"),
