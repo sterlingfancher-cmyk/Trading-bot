@@ -9,14 +9,17 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-10-v9-matched-exit-recovery"
+VERSION = "data-integrity-startup-bridge-2026-08-10-v10-one-link-journal-recovery"
 MODULES = (
+    # Registered first so Flask executes its after_request handler last.
+    "final_daily_audit_compactor",
     "orla_hygiene_overlay",
     "paper_ledger_matched_exit_guard",
     "paper_trade_action_semantics_recovery",
     "paper_accounting_integrity_guard",
     "paper_accounting_readonly_status",
     "paper_ledger_economic_integrity",
+    "paper_journal_forensic_recovery",
     "intratrade_path_capture",
     "mae_mfe_integration",
     "daily_data_integrity_audit_overlay",
