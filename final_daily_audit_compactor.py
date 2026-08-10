@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "final-daily-audit-compactor-2026-08-10-v2-canonical-ledger"
+VERSION = "final-daily-audit-compactor-2026-08-10-v3-clean-accounting-epoch"
 _REGISTERED = set()
 
 
@@ -36,11 +36,18 @@ def _ledger_status(core: Any = None) -> Dict[str, Any]:
         return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
 
 
+def _epoch_status(core: Any = None) -> Dict[str, Any]:
+    try:
+        import clean_accounting_epoch as module
+        return module.status_payload(core)
+    except Exception as exc:
+        return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
+
+
 def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
     sections = _d(payload.get("sections"))
     account = _d(sections.get("01_account_and_open_position_performance"))
     runner = _d(sections.get("02_auto_runner_liveness"))
-    errors = _d(sections.get("03_active_errors_and_recursion"))
     risk = _d(sections.get("04_risk_controls_and_drawdown"))
     scanner = _d(sections.get("05_scanner_signals_entries_rejections"))
     integrity = _d(sections.get("10b_market_data_and_path_integrity"))
@@ -53,6 +60,7 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
     next_action = _d(sections.get("12_next_action"))
     journal = _journal_status(core)
     ledger = _ledger_status(core)
+    epoch = _epoch_status(core)
 
     reasons = []
     for value in _l(risk.get("reasons")) + _l(integrity.get("reasons")):
@@ -79,6 +87,16 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "realized_today": account.get("realized_today"),
             "unrealized_pnl": account.get("unrealized_pnl"),
         },
+        "accounting_epoch": {
+            "status": epoch.get("status"),
+            "epoch_id": epoch.get("epoch_id"),
+            "starting_cash": epoch.get("starting_cash"),
+            "clean_start": epoch.get("clean_start"),
+            "zero_trade_baseline": epoch.get("zero_trade_baseline"),
+            "historical_recovery_decision": epoch.get("historical_recovery_decision"),
+            "historical_evidence_archived": epoch.get("historical_evidence_archived"),
+            "validation_hold": epoch.get("validation_hold"),
+        },
         "runner": {
             "status": runner.get("status"),
             "enabled": runner.get("enabled"),
@@ -101,6 +119,7 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
         "accounting_integrity": {
             "status": accounting.get("status"),
             "coverage_complete": accounting.get("coverage_complete"),
+            "baseline_type": rebuilt.get("baseline_type"),
             "ignored_trade_rows": rebuilt.get("ignored_trade_rows"),
             "coverage_issue_count": rebuilt.get("coverage_issue_count"),
             "economic_issue_count": economics.get("economic_issue_count"),
@@ -119,6 +138,8 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "candidate_cash": journal.get("candidate_cash"),
             "candidate_equity": journal.get("candidate_equity"),
             "trusted_recovery_candidate": journal.get("trusted_recovery_candidate"),
+            "decision_complete": journal.get("decision_complete"),
+            "historical_recovery_disposition": journal.get("historical_recovery_disposition"),
         },
         "execution_ledger": {
             "status": ledger.get("status"),
@@ -139,6 +160,7 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "promotion_block_reason": forward.get("promotion_block_reason"),
             "valid_exact_lifecycle_rows": forward.get("valid_exact_lifecycle_rows_observed"),
             "post_recovery_valid_exact_lifecycle_rows": forward.get("post_recovery_valid_exact_lifecycle_rows"),
+            "post_epoch_valid_exact_lifecycle_rows": forward.get("post_epoch_valid_exact_lifecycle_rows"),
         },
         "next_action": {
             "status": next_action.get("status"),

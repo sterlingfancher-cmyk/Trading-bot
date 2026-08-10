@@ -4,9 +4,10 @@ The runtime's canonical trade rows contain both ``action`` (entry/exit/partial_e
 and ``side`` (long/short). The accounting incident occurred because reconciliation
 read ``side`` first, causing long exits to be interpreted as additional buys.
 
-This overlay makes ``action`` authoritative, preserves one forensic pre-repair
-snapshot, and invokes the existing paper-only reconciler after semantics are fixed.
-It never clears a hard risk halt and never places orders or changes strategy.
+This overlay makes ``action`` authoritative. Historical recovery behavior remains
+available for the contaminated pre-epoch state, but once a deliberate clean
+accounting epoch exists it installs semantics only and does not create another
+historical-recovery snapshot or replay reconciliation.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ import copy
 import datetime as dt
 from typing import Any, Dict, Tuple
 
-VERSION = "paper-trade-action-semantics-recovery-2026-08-10-v1"
+VERSION = "paper-trade-action-semantics-recovery-2026-08-10-v2-clean-epoch"
 _REGISTERED_APP_IDS: set[int] = set()
 _APPLIED = False
 
@@ -44,6 +45,12 @@ def _portfolio(core: Any) -> Dict[str, Any]:
     return pf if isinstance(pf, dict) else {}
 
 
+def _clean_epoch(core: Any) -> Dict[str, Any]:
+    pf = _portfolio(core)
+    row = pf.get("paper_accounting_epoch")
+    return row if isinstance(row, dict) and row.get("clean_start") else {}
+
+
 def action_first_trade_fields(row: Dict[str, Any]) -> Tuple[str, str, float, float, str]:
     """Return symbol, economic event, qty, price, timestamp.
 
@@ -71,7 +78,6 @@ def action_first_trade_fields(row: Dict[str, Any]) -> Tuple[str, str, float, flo
     elif direction in {"sell", "s"}:
         event = "sell"
     elif direction in {"long", "entry", "open_long"}:
-        # Backward-compatible fallback only for older rows with no action.
         event = "buy"
     elif direction == "short":
         event = "unsupported_short_entry"
@@ -79,6 +85,17 @@ def action_first_trade_fields(row: Dict[str, Any]) -> Tuple[str, str, float, flo
         event = action or direction
 
     return symbol, event, qty, price, timestamp
+
+
+def _install_action_semantics() -> Dict[str, Any]:
+    try:
+        import paper_accounting_integrity_guard as accounting
+        import paper_ledger_economic_integrity as economics
+        accounting._trade_fields = action_first_trade_fields
+        economics._trade_fields = action_first_trade_fields
+        return {"status": "ok"}
+    except Exception as exc:
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _archive_before_repair(core: Any) -> Dict[str, Any]:
@@ -123,23 +140,23 @@ def apply(core: Any = None) -> Dict[str, Any]:
     if core is None:
         return {"status": "pending", "overall": "warn", "version": VERSION, "reason": "runtime_missing"}
 
+    semantics = _install_action_semantics()
+    if semantics.get("status") != "ok":
+        return {"status": "error", "overall": "fail", "version": VERSION, "error": semantics.get("error")}
+
+    clean = _clean_epoch(core)
+    if clean:
+        _APPLIED = True
+        return status_payload(core)
+
     archive = _archive_before_repair(core)
 
-    try:
-        import paper_accounting_integrity_guard as accounting
-        import paper_ledger_economic_integrity as economics
-        accounting._trade_fields = action_first_trade_fields
-        economics._trade_fields = action_first_trade_fields
-    except Exception as exc:
-        return {"status": "error", "overall": "fail", "version": VERSION, "error": f"{type(exc).__name__}: {exc}"}
-
-    # Capture the pre-recovery path-evidence baseline once. Existing rows remain
-    # historical evidence but cannot satisfy the post-recovery promotion gate.
     if int(archive.get("recovery_epoch_valid_path_rows_baseline") or 0) <= 0:
         archive["recovery_epoch_valid_path_rows_baseline"] = _current_valid_path_rows()
 
     before_halt = bool((_portfolio(core).get("risk_controls") or {}).get("halted", False)) if isinstance(_portfolio(core).get("risk_controls"), dict) else False
     try:
+        import paper_accounting_integrity_guard as accounting
         result = accounting.reconcile(core, persist=True)
     except Exception as exc:
         result = {"status": "error", "overall": "fail", "error": f"{type(exc).__name__}: {exc}"}
@@ -174,13 +191,39 @@ def apply(core: Any = None) -> Dict[str, Any]:
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
     pf = _portfolio(core) if core is not None else {}
+    clean = _clean_epoch(core) if core is not None else {}
     row = pf.get("paper_accounting_semantics_recovery") if isinstance(pf.get("paper_accounting_semantics_recovery"), dict) else {}
+    if clean:
+        return {
+            "status": "ok" if _APPLIED else "pending",
+            "overall": "pass" if _APPLIED else "warn",
+            "type": "paper_trade_action_semantics_recovery_status",
+            "version": VERSION,
+            "applied": _APPLIED,
+            "mode": "clean_epoch_semantics_only",
+            "clean_epoch_id": clean.get("id"),
+            "historical_recovery_replayed": False,
+            "post_recovery_validation_required": bool(clean.get("forward_validation_required", True)),
+            "hard_halt_preserved": bool((pf.get("risk_controls") or {}).get("halted", False)) if isinstance(pf.get("risk_controls"), dict) else True,
+            "pre_repair_trade_count": 0,
+            "post_repair": {},
+            "authority": {
+                "paper_state_reconciliation_only": True,
+                "places_orders": False,
+                "clears_hard_halt": False,
+                "changes_strategy": False,
+                "changes_thresholds": False,
+                "changes_risk_or_sizing": False,
+                "changes_live_or_ml_authority": False,
+            },
+        }
     return {
         "status": "ok" if _APPLIED and row else "pending",
         "overall": "pass" if _APPLIED and row and row.get("hard_halt_preserved", True) else "warn",
         "type": "paper_trade_action_semantics_recovery_status",
         "version": VERSION,
         "applied": _APPLIED,
+        "mode": "historical_recovery",
         "recovery_epoch_valid_path_rows_baseline": int(row.get("recovery_epoch_valid_path_rows_baseline") or 0),
         "post_recovery_validation_required": bool(row.get("post_recovery_validation_required", True)),
         "hard_halt_preserved": bool(row.get("hard_halt_preserved", True)),
