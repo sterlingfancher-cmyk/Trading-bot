@@ -1,244 +1,285 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-10 13:06 CDT  
+Last updated: 2026-08-10 after PR #26 merge  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Branch: `main`  
-GitHub main head covered: `6e7500a06935bc75a7f44d8ae742cd37b87bc5f6`  
+Latest runtime-code head covered: `73fa71d662cd7e325373b8f3f1e1dec1cd1e5524`  
 Canonical paper service: `https://web-production-e1796.up.railway.app`  
-Railway deployment of the current GitHub head: **not yet verified from the current session**
+Railway deployment of PR #26: **not yet verified in this handoff**
 
-This is the authoritative handoff for the next conversation. Older `PROJECT_HANDOFF_*` files are historical context unless this file explicitly references them.
+This file is the authoritative continuation point. Older `PROJECT_HANDOFF_*` files are historical context only unless this file explicitly references them.
 
 ## Executive Status
 
-The project is in a **Stable Core + Performance Lab** phase.
+The project remains in the **Stable Core + Performance Lab** phase.
 
-The immediate objective is to establish a stable, operational paper/live-ready core while preserving the strategy/scanner components that previously produced useful participation and preserving future upside from ML, crypto, MAE/MFE, LONA, and shadow ranking.
+The historical accounting-recovery decision is now **resolved**. The live compact audit proved that the older mirrored trade journal cannot establish complete historical entry/exit coverage. We are therefore **not continuing historical repair loops** and are intentionally moving to a clean paper-accounting epoch.
 
-The runtime remains **paper-only**. The rules engine remains the sole execution authority. ML and multi-asset ranking remain shadow/research-only and must not place orders, select or override entries/exits, change sizing, relax hard risk, change thresholds, or obtain live authority without an explicit later promotion decision.
+The objective remains:
 
-The current paper account remains under a **hard risk halt** because of accounting/state contamination discovered on 2026-08-10. Do not clear the halt manually until the account is either reconstructed from trustworthy evidence or a clean accounting epoch is intentionally created.
+**Simplify the plumbing, preserve the performance engine.**
 
-## Operator Workflow — One Routine Test
+Do not strip the trading logic down to a generic or overly conservative system merely to gain stability. Preserve the scanner, momentum/discovery, opening-surge/breakout participation, regime logic, risk framework, and other strategy components associated with the stronger paper periods unless a specific defect is demonstrated.
 
-The user wants **one routine test only** unless a demonstrated blocker requires a targeted diagnostic.
+The runtime remains **paper-only**. Rules remain the sole execution authority. ML, MAE/MFE optimization, crypto/multi-asset ranking, LONA work, and other Performance Lab systems remain shadow/research-only.
 
-Routine test:
+## One Routine Operator Test
+
+Use only this routine test unless a demonstrated blocker requires a targeted diagnostic:
 
 `https://web-production-e1796.up.railway.app/paper/daily-audit`
 
-Full forensic output only when necessary:
+Full forensic output only when specifically needed:
 
 `https://web-production-e1796.up.railway.app/paper/daily-audit?full=1`
 
-Do not make bootstrap + multiple accounting + multiple audit endpoints the normal workflow. The compact audit must remain short enough to copy/paste from iPhone.
+Do not return to a normal workflow requiring multiple bootstrap/accounting/debug URLs. Keep the routine audit compact and iPhone copy/paste friendly.
 
-After PR #24 is deployed, the compact audit should include both:
+## Decisive Live Audit — 2026-08-10 13:11:55 CDT
 
-- `journal_recovery_candidate` — historical recovery evidence from the existing mirrored journal
-- `execution_ledger` — health of the new canonical append-only ledger for **new** executions
+The first deployed audit after PR #24 produced the evidence required by the handoff.
 
-## Current GitHub Head / Latest Change
+### Contaminated account still present
 
-PR #24 — **Add canonical execution ledger for Stable Core** — passed both repository CI workflows and was squash-merged into `main` as:
+- cash: `-1588422.0876077376`
+- equity: `-1559883.6`
+- positions: `AI`, `CRWD`, `QQQ`
+- realized today: `-15647.57`
+- unrealized P&L: `4707.06`
+- risk halt: active
+- halt reason: `absolute daily equity loss halt (3.00%)`
+- reported intraday drawdown: `100%`
+- reported net daily loss: `100%`
 
-`6e7500a06935bc75a7f44d8ae742cd37b87bc5f6`
+These values are contaminated bookkeeping and are **not valid strategy-performance evidence**.
 
-PR #24 adds:
+### `state.trades` reconstruction remained incomplete
 
-- `canonical_execution_ledger.py`
-- an append-only JSONL execution ledger on the persistent state volume
-- a SHA-256 hash chain across execution rows
-- a durable `execution_id` for every new `entry`, `exit`, and `partial_exit`
-- accounting epoch id and ledger hash metadata propagated into the corresponding `state.trades` row
-- direct wiring at the canonical `record_trade` boundary
-- fail-safe hard-halt behavior if the canonical ledger cannot be written or its hash chain is invalid
-- preservation of an already-active halt reason rather than overwriting it
-- `/paper/canonical-execution-ledger-status`
-- compact `execution_ledger` health inside `/paper/daily-audit`
-- regression coverage for hash chaining, tamper detection, state-row linkage, fail-safe halting, and compact audit exposure
-- startup bridge version `data-integrity-startup-bridge-2026-08-10-v11-canonical-execution-ledger`
-- compact audit compactor version `final-daily-audit-compactor-2026-08-10-v2-canonical-ledger`
-
-Important boundary: the canonical ledger is authoritative for **new executions after it is deployed and hooked**. It is deliberately **not** a fabricated historical recovery source and does not claim to reconstruct the contaminated pre-ledger account.
-
-The two repository validation workflows passed before merge:
-
-- Repository Safety and Performance Audit Validation
-- Refactor, Ownership, Configuration, State, Decision, Runtime, Startup, and Research Audit
-
-## Accounting Incident — Root Cause and Current Understanding
-
-On 2026-08-10 the paper account began reporting economically impossible values, including very large negative cash and oversized positions. Symptoms included repeated apparent MARA purchases and an impossible QQQ cost basis.
-
-### Defect 1 — side-first reconstruction
-
-Canonical trade rows store `action` separately from `side`, for example:
-
-- `action="exit"`
-- `side="long"`
-
-Older reconstruction treated `side="long"` as a buy before consulting `action`. Legitimate long exits were therefore reconstructed as additional buys, causing fake position growth, negative cash, and contaminated P&L/account state.
-
-PR #21 corrected this by making **action authoritative**.
-
-### Defect 2 — unmatched exits creating synthetic cash
-
-Once action semantics were corrected, unmatched/duplicate exits could still credit proceeds even when no reconstructed lot existed.
-
-PR #22 changed reconstruction so exit proceeds are credited only for quantity proven to exist in reconstructed lots.
-
-### Remaining historical coverage problem
-
-The latest captured pre-PR #23 audit showed:
-
-- `state.trades`: **30 execution rows**
-- unmatched exit/partial-exit rows: **19**
 - `coverage_complete: false`
+- coverage issues: `20`
+- ignored rows: `20`
+- economic issue count reported by the combined accounting audit: `20`
+- bounded reconstructed cash: `14386.326092`
+- bounded reconstructed equity: `17997.655015`
 
-Therefore exact historical reconstruction from `state.trades` alone is impossible.
+These reconstructed values are not trusted because execution coverage is incomplete.
 
-The bounded reconstructed candidate at that point was approximately:
+### Historical journal recovery candidate — decisive result
 
-- cash: `$14,386.33`
-- equity: `$18,004.11`
-- one reconstructed QQQ lot
-- ignored/unmatched execution rows: `19`
+- journal rows: `147`
+- semantic-deduplicated execution rows: `34`
+- entry rows: `5`
+- exit/partial-exit rows: `29`
+- coverage issues: `23`
+- `coverage_complete: false`
+- economic issues after matched-exit protection: `0`
+- candidate cash/equity: `14431.497124`
+- `trusted_recovery_candidate: false`
 
-Those values are **not trusted account values** because ledger coverage is incomplete.
+**Decision: historical recovery is rejected.**
 
-## Historical Append-Only Journal Recovery Candidate
+The `$14,431.50` candidate is not carried into the new account because the journal cannot prove the missing entries. Do not fabricate entries or treat that candidate as real paper equity.
 
-The bot has an older persistent mirrored journal at `/data/trade_journal.json` through `trade_journal.py`.
+### New canonical execution ledger — healthy before cutover
 
-It:
+- `chain_valid: true`
+- `authoritative_for_new_executions: true`
+- `row_count: 0`
+- `current_epoch_rows: 0`
+- pre-cutover epoch id: `legacy-pre-stable-core`
 
-- mirrors trade history from state and backup files
-- does not shrink existing journal history
-- maintains a backup journal
-- seeds from state backups and current state
-- does not write to `state.json`
+This is the ideal cutover point because no post-ledger executions need migration.
 
-PR #23 added `paper_journal_forensic_recovery.py`, which builds a **read-only semantic-deduplicated execution candidate** from that journal and analyzes it through the matched-exit accounting guard.
+### Provider observation from the same audit
 
-The routine audit reports whether this historical journal candidate is:
+- provider requests: `60`
+- classified terminal outcomes: `59`
+- provider circuit open: `false`
 
-- available
-- complete
-- economically consistent
-- a `trusted_recovery_candidate`
+The one-request accounting mismatch is secondary to the accounting reset, but it must be clean before Stable Paper v1 can pass its acceptance gate.
 
-### Historical Recovery Decision Rule
+## Historical Accounting Incident — Root Cause
 
-1. If `journal_recovery_candidate.trusted_recovery_candidate == true`, use the journal as the evidence base for **one controlled state rebuild**.
-2. If the journal candidate remains incomplete or economically inconsistent, **stop reverse-engineering contaminated history**.
-3. Archive current state/journal/backups as forensic evidence and start a **clean accounting epoch** using the existing proven strategy logic.
-4. Do not carry contaminated historical MAE/MFE promotion evidence into the new epoch.
+Two confirmed defects drove the repair work:
 
-This decision has **not** been made yet because the current session could not reach the deployed Railway audit endpoint to read the live candidate. Do not guess the answer from repository code alone.
+1. **Side-first reconstruction.** Canonical rows store `action` separately from `side`. A row such as `action="exit", side="long"` was previously interpreted as a buy because `side="long"` was consulted first. PR #21 made `action` authoritative.
+2. **Unmatched exits creating synthetic cash.** Once action semantics were corrected, unmatched/duplicate exits could still credit proceeds without a reconstructed lot. PR #22 changed reconstruction so proceeds are credited only for quantity proven to exist.
 
-## New Canonical Execution Ledger — Stable Core Foundation
+Those bugs are corrected, but neither correction can manufacture the missing historical entry rows. That is why the journal-recovery decision was necessary.
 
-PR #24 closes the forward-looking execution-history gap that allowed `state.trades` resets/truncation to become existential accounting problems.
+## PR #24 — Canonical Execution Ledger
 
-For each new execution, the ledger records before the event is mirrored into the capped state trade list:
-
-- `execution_id`
-- ledger version
-- local timestamp
-- accounting epoch id
-- action
-- symbol
-- side
-- fill price
-- shares
-- execution metadata
-- previous event hash
-- event hash
-
-The ledger is append-only and hash-chained. Existing rows are verified before a new row is appended.
-
-If the ledger is unreadable, unparseable, hash-invalid, or unwritable, the runtime records the error in risk state and ensures a hard halt is active. An already-active halt and its reason are preserved.
-
-The new ledger does **not**:
-
-- clear the current accounting halt
-- repair historical state
-- place orders itself
-- change scanner or strategy logic
-- change thresholds
-- change sizing
-- loosen risk
-- enable crypto execution
-- grant live authority
-- grant ML authority
-
-Default epoch label before a deliberate clean/recovered epoch is established:
-
-`legacy-pre-stable-core`
-
-A future controlled recovery or clean-epoch action should establish an explicit new accounting epoch id so forward evidence is cleanly separable from contaminated history.
-
-## PR History — Accounting / Stable Core Incident
-
-### PR #20 — Harden paper ledger economics and block ORLA
-
-Merged as `73e118a...`.
-
-Added economic-ledger validation, cash overspend detection, negative reconstructed-cash detection, MAE/MFE promotion blocking while accounting is dirty, and ORLA static no-data/delisting hygiene.
-
-### PR #21 — Recover paper ledger with action-first trade semantics
-
-Merged as:
-
-`60014694b829c2433e20bca32bd41920e7801095`
-
-Made `action` authoritative and established a post-recovery MAE/MFE evidence epoch while preserving the hard halt.
-
-### PR #22 — Prevent unmatched exits from creating synthetic paper cash
-
-Merged as:
-
-`ce51bb72c727147914371b0618dc714d4fcd335e`
-
-Added matched-lot exit accounting and explicit incomplete-coverage failure.
-
-### PR #23 — Make daily audit one-link compact and add journal recovery candidate
-
-Merged as:
-
-`8fcf06622759cc5775a23361c12de1087f73e4b7`
-
-Added final response-stage compacting and the read-only historical journal recovery candidate.
-
-### PR #24 — Add canonical execution ledger for Stable Core
-
-Merged as:
+Merged runtime commit:
 
 `6e7500a06935bc75a7f44d8ae742cd37b87bc5f6`
 
-Established the immutable source of truth for **new** execution events and exposed its health in the one-link audit.
+PR #24 established the forward execution source of truth:
 
-## What We Know Works / Should Be Preserved
+- append-only JSONL ledger on the persistent volume
+- SHA-256 hash chain
+- durable `execution_id` for each new entry/exit/partial exit
+- accounting epoch id attached to each event
+- ledger hash/id propagated into the corresponding `state.trades` row
+- direct hook at the canonical `record_trade` boundary
+- hard fail-safe if the ledger cannot be written or verified
+- compact ledger health in the one-link audit
 
-The stabilization audit indicates the largest failure cluster is **accounting/state reconstruction and overlapping runtime plumbing**, not the market-data/scanner side.
+It is authoritative for **new** executions only and never claimed to recover missing historical rows.
 
-Preserve unless new evidence proves a specific defect:
+## PR #26 — Clean Accounting Epoch
+
+PR #26 passed both repository CI workflows, including the exact Gunicorn startup smoke, and was squash-merged as:
+
+`73fa71d662cd7e325373b8f3f1e1dec1cd1e5524`
+
+Target accounting epoch:
+
+`stable-paper-v1-20260810-clean01`
+
+Starting paper capital:
+
+`$10,000`
+
+The clean-epoch migration is intentionally guarded and one-time. It runs only when:
+
+- runtime is paper-only
+- the known contaminated halted state is present
+- historical journal recovery is explicitly untrusted
+- canonical execution ledger is healthy and still empty
+
+### What PR #26 does
+
+1. Archives the persistent state directory before mutation and writes a forensic manifest with file hashes and the recovery evidence.
+2. Builds a fresh `$10,000` paper state with zero positions, zero trades, zero realized P&L, and zero unrealized P&L.
+3. Establishes the explicit new accounting epoch id.
+4. Replaces active state fallback backups, including `state_backup_largest.json`, so stale contaminated backups cannot resurrect the old state.
+5. Rotates the mirrored trade journal and its backup into the clean epoch.
+6. Rotates the snapshot archive so its monotonic-history guard cannot restore contaminated trade history.
+7. Keeps the canonical execution ledger clean and associates future events with the new epoch.
+8. Treats the failed historical journal as archived forensic evidence after the decision rather than a recurring recovery warning.
+9. Makes a rigorously verified zero-trade clean epoch count as complete accounting coverage.
+10. Prevents action-semantics recovery from replaying historical reconstruction after the clean epoch exists.
+11. Resets MAE/MFE/ML promotion evidence to require new clean forward lifecycle evidence.
+12. Leaves the system on a hard **clean accounting epoch validation hold** after migration.
+
+### Migration failure safety
+
+The migration was hardened before merge:
+
+- no nested `trade_journal.mirror_state()` while journal/state locks are held
+- backup copies use a portable durable fsync path
+- all clean fallback backups are written first
+- the primary `state.json` is atomically swapped **last**
+
+If backup preparation fails, the old hard-halted primary state remains intact and the migration can be retried instead of leaving a half-migrated account.
+
+The temporary migration safety shim can be removed after the clean epoch is deployed and validated.
+
+## Expected First Audit After PR #26 Deploys
+
+Do **not** clear the validation hold before checking the normal one-link audit.
+
+Expected clean baseline:
+
+- compactor version: `final-daily-audit-compactor-2026-08-10-v3-clean-accounting-epoch`
+- account cash: about `$10,000`
+- account equity: about `$10,000`
+- positions: none
+- realized today: `$0`
+- unrealized P&L: `$0`
+- accounting epoch id: `stable-paper-v1-20260810-clean01`
+- `clean_start: true`
+- `zero_trade_baseline: true`
+- historical recovery decision: `clean_epoch`
+- historical evidence archived: `true`
+- validation hold: `true`
+- accounting coverage: complete
+- accounting baseline type: `clean_zero_trade_epoch`
+- coverage issue count: `0`
+- journal status/disposition: archived / decision complete
+- canonical ledger: chain valid, authoritative, row count `0`, current epoch rows `0`, current epoch id equal to the clean epoch id
+- risk halted: `true`
+- halt reason: `clean accounting epoch validation hold`
+- drawdown/loss metrics: reset to normal clean-baseline values
+- ML/MAE-MFE promotion remains blocked for new clean forward evidence
+
+The overall audit may remain non-pass solely because the deliberate validation hold and clean-evidence gate are active. That is expected. What is **not** acceptable is contaminated cash/equity, old positions/trades resurfacing, accounting coverage issues, ledger mismatch, or stale loss/drawdown values.
+
+## Release Rule for the Validation Hold
+
+Do not manually clear the hold merely because the deploy succeeded.
+
+Release requires the post-deploy one-link audit to prove:
+
+- clean `$10,000` account baseline
+- no positions/trades carried over
+- clean epoch id correct
+- forensic archive recorded
+- active backups/journal/snapshot no longer reintroduce old history
+- accounting coverage complete with zero issues
+- canonical ledger healthy and epoch-aligned
+- no unexplained state/persistence error
+
+If any of those fail, keep the hold and fix the specific persistence/accounting defect.
+
+## Important Next Stable Core Work Before the 5-Day Clock
+
+After the clean baseline is verified, continue the Stable Core refactor rather than adding new strategy features.
+
+Priority order:
+
+1. Verify PR #26 deployment with the one routine audit.
+2. Keep the validation hold until the clean baseline passes.
+3. Establish one authoritative account/position state derived consistently from canonical execution events plus current marks.
+4. Add execution-boundary invariants for cash, notional, lot ownership, quantity, duplicate execution ids, and ledger/state synchronization.
+5. Resolve a known accounting limitation before a bear-regime short can participate in Stable Paper v1: the current historical long-lot reconciler deliberately marks short lifecycle rows as unsupported. Either add canonical short-lot accounting or explicitly keep paper shorts blocked until that accounting path is proven. Do **not** silently ignore short rows.
+6. Recheck provider request accounting; the latest audit had `60` requests vs `59` classified outcomes.
+7. Remove/bypass redundant historical execution-path wrappers gradually with regression gates.
+8. Remove the temporary clean-epoch migration shim after the epoch is established and proven persistent.
+9. Only then release the validation hold and start the Stable Paper v1 acceptance clock.
+
+## Stable Paper v1 Acceptance Gate
+
+Run the **same Stable Core unchanged** for at least `5` consecutive trading days after the validation hold is released.
+
+Minimum acceptance requirements:
+
+- no state corruption
+- no impossible accounting
+- no duplicate execution
+- canonical hash chain remains valid
+- every state execution maps to a canonical `execution_id`
+- account/position state reconciles with the canonical ledger
+- long and any enabled short lifecycle accounting is complete
+- no unexplained startup failure
+- no manual state repair
+- one compact daily audit per day
+- provider request accounting clean
+- cycle ownership clean
+- risk controls behave as designed
+- entry → fill → position → exit → immutable ledger consistency
+
+If defects recur, prefer a longer `7–10` day unchanged evidence window.
+
+## Strategy / Risk Components to Preserve
+
+Do not simplify away the performance engine merely for convenience.
+
+Preserve unless evidence identifies a specific defect:
 
 - rules-engine execution authority
 - broad-market momentum discovery
 - canonical bounded detailed scanner
 - scanner ownership / recursion-safety contract
-- opening-surge and breakout participation logic that improves deployment without bypassing hard risk
+- opening-surge and breakout participation logic
 - provider timeout/circuit/hygiene protections
 - ORLA/static no-data hygiene
 - persistent Railway volume
 - cycle-completion contract
-- hard risk system
 - after-hours market-closed skipping
 - paper-only execution boundary
 
-### Risk boundaries to preserve initially
+Initial risk boundaries remain:
 
 - soft daily-loss pause: `1.0%`
 - hard realized-loss halt: `2.5%`
@@ -246,262 +287,69 @@ Preserve unless new evidence proves a specific defect:
 - absolute daily-loss ceiling: `3.0%`
 - maximum account risk per trade at configured stop: `2.0%`
 
-Do not loosen these merely to generate more trades or accelerate validation.
+Do not loosen those merely to manufacture trades or accelerate validation.
 
-### Scanner / discovery architecture worth preserving
+Historical scanner/discovery bounds worth preserving unless later evidence says otherwise:
 
-Historical handoff bounds:
-
-- maximum retained discovery candidates: `160`
-- maximum broad-momentum slots: `80`
-- maximum base/fallback slots: `25`
-- maximum detailed-scanner input: `110`
+- retained discovery candidates: `160`
+- broad-momentum slots: `80`
+- base/fallback slots: `25`
+- detailed-scanner input: `110`
 - discovery cache: `900` seconds
 
-Provider/scanner infrastructure repeatedly showed healthy request accounting and clean operation during good runtime periods.
+## Performance Lab — Preserve, Do Not Promote Yet
 
-## Performance Evidence — Preserve the Engine, Not Corrupted P&L
+Keep the following systems and development paths alive in parallel:
 
-There were earlier paper periods with strong positive account movement, including a remembered period from roughly `$10,000` to around `$11,000` in about a week.
-
-Because historical accounting has now been proven incomplete/contaminated, do **not** treat all displayed historical P&L as audited evidence.
-
-Preserve the strategy configuration, scanner behavior, participation logic, and risk architecture from stronger periods where they can be separated from accounting/runtime defects.
-
-Principle:
-
-**Simplify the plumbing, preserve the performance engine.**
-
-## Stable Core + Performance Lab Architecture
-
-### Stable Core
-
-Production/paper authority should converge toward:
-
-1. one canonical scanner/selection path
-2. one execution pipeline
-3. one immutable execution ledger — **forward foundation now added in PR #24**
-4. one authoritative account/position state
-5. execution-boundary cash/notional/position invariants
-6. one risk controller
-7. one persistence/backup contract
-8. one compact daily audit
-
-The next Stable Core engineering work, after the historical recovery-vs-clean-epoch decision, should focus on items 4–7 and reducing redundant execution-path wrappers.
-
-### Performance Lab
-
-Keep, but do not grant execution authority to:
-
-- ML recommendation/counterfactual work
+- ML recommendations/counterfactual research
 - MAE/MFE research and future stop/target optimization
-- multi-asset shadow ranker
+- adaptive/multi-asset shadow ranking
 - BTC / ETH / SOL research
-- LONA independent backtesting and robustness tests
+- LONA independent validation
 - alternate regime/participation policies
-- future walk-forward / Monte Carlo / stress testing
+- walk-forward, Monte Carlo, slippage, commission, and stress testing
 
-## ML / MAE-MFE Status
+They may evaluate what would have improved actual paper trades, but they must not destabilize the Stable Core or obtain execution authority before promotion gates are met.
 
-ML remains shadow-only.
-
-The evidence-epoch guard requires new clean exact-lifecycle evidence after accounting truth is restored.
-
-Latest captured pre-PR #23 state:
-
-- valid exact-lifecycle rows: `3`
-- post-recovery valid exact-lifecycle rows: `0`
-- promotion evidence eligible: `false`
-- promotion block: `post_accounting_recovery_forward_validation_required`
-
-Old contaminated/recovery-era rows must not satisfy future ML promotion gates.
-
-## Multi-Asset / Crypto Research
-
-PR #19 added the shadow multi-asset ranking foundation, merged as `1892068...`.
-
-It compares equities/ETFs with BTC, ETH, and SOL while remaining research-only.
-
-No crypto execution until Stable Core is proven.
-
-## LONA Status
-
-LONA remains useful for independent validation. The last known limitation was a connector/backend schema mismatch for datasets with multiple frequencies: the backend required a timeframe/frequency while the exposed backtest action did not provide one.
-
-Do not modify the trading bot merely to work around that connector limitation.
-
-Use LONA later for independent backtesting, walk-forward validation, Monte Carlo analysis, slippage/commission stress, and Stable Core comparison when the connector interface supports it.
-
-## Provider / Runtime Health Evidence
-
-Before the accounting incident, runtime/provider infrastructure repeatedly demonstrated:
-
-- provider request accounting reconciled
-- no active recursion errors
-- persistent state matched memory/disk
-- after-hours cycles skipped correctly
-- entry-pipeline ownership stable
-- protected benchmark symbols not blocked
-- provider circuit closed
-
-The accounting incident is not evidence that scanner/provider/market-data logic is fundamentally broken.
-
-## Known Operational Weaknesses
-
-### 1. Historical accounting/state truth — primary blocker
-
-`state.trades` is incomplete for the contaminated history. The older mirrored journal may or may not contain enough evidence; the live compact audit must decide that.
-
-PR #24 prevents this same class of forward execution-history loss from depending solely on `state.trades`, but it cannot retroactively create missing historical entries.
-
-### 2. Authoritative account/position state
-
-After recovery or clean epoch, Stable Core still needs one explicit account/position authority derived consistently from the canonical execution ledger plus current marks.
-
-### 3. Execution invariants
-
-Add explicit execution-boundary invariants for cash, notional, lot ownership, position quantity, duplicate execution ids, and ledger/state synchronization.
-
-### 4. Overlay accumulation
-
-The runtime contains many historical overlays/wrappers. They were useful diagnostically but create startup complexity and ownership ambiguity.
-
-Move important behavior into explicit canonical modules and remove/bypass redundant execution-path wrappers gradually, with regression gates.
-
-### 5. Startup duration
-
-Cold-start/runtime registration has often taken roughly 1–3+ minutes. Slow startup alone has not meant failure when heartbeat continues, but Stable Core should reduce this materially where possible.
-
-### 6. Audit payload size
-
-Addressed by PR #23 and extended carefully by PR #24. Routine audit must remain one-link and compact.
-
-## Current Safety State
-
-Until accounting truth is established:
-
-- keep hard halt active
-- do not manually reset cash, positions, P&L, or halt based on contaminated state
-- do not trust historical reconstructed P&L as strategy evidence
-- do not promote ML/MAE-MFE authority
-- do not expand execution strategies
-- do not enable crypto execution
-- do not start live trading
-
-## Revised Stabilization Strategy
-
-Execution-authority feature freeze remains in force.
-
-Allowed work:
-
-- historical recovery or clean-epoch creation
-- canonical ledger/account-state integration
-- execution invariants
-- state/persistence simplification
-- startup simplification
-- one-link audit reliability
-- regression testing
-- removal/bypass of redundant execution-path overlays
-
-Not allowed until Stable Core is proven:
-
-- new execution strategies
-- crypto execution
-- ML execution authority
-- new sizing regimes
-- threshold loosening for more trades
-- speculative architecture additions
-
-## Stable Paper v1 Acceptance Gate
-
-After accounting truth is restored — by trusted recovery or clean epoch — run the **same Stable Core unchanged**.
-
-Minimum acceptance target:
-
-- `5` consecutive trading days
-- no state corruption
-- no impossible accounting
-- no duplicate execution
-- canonical execution hash chain remains valid
-- every state execution maps to a canonical `execution_id`
-- no unexplained startup failure
-- no manual state repair
-- one compact daily audit per day
-- provider accounting clean
-- cycle ownership clean
-- risk controls behave as designed
-- entry → fill → position → exit → immutable ledger consistency
-
-A longer `7–10` day evidence window remains preferable if defects recur.
+Old contaminated/recovery-era MAE/MFE rows must not qualify for future promotion. PR #26 changes the forward block to the clean-accounting-epoch evidence gate.
 
 ## Live-Readiness Direction
 
-Desired sequence:
+The evidence-gated sequence is:
 
-1. verify current GitHub head is deployed
-2. determine trusted historical recovery vs clean epoch from one compact audit
-3. establish accounting truth and an explicit clean accounting epoch id
-4. finish authoritative account state + execution invariants + persistence contract
-5. freeze Stable Core
-6. complete at least 5 unchanged clean paper trading days
-7. validate entry/exit/sizing/risk behavior from the canonical ledger
-8. run live-readiness simulation against broker-state assumptions
-9. move to a controlled live pilot at a funding level large enough to exercise the real architecture without forcing immediate redesign
+1. establish and verify clean accounting truth
+2. finish canonical account-state/invariant work
+3. freeze Stable Core
+4. complete at least 5 unchanged clean paper trading days
+5. validate actual entry/exit/sizing/risk behavior from canonical records
+6. run live-readiness simulation against broker-state assumptions
+7. only then consider a controlled live pilot
 
-Do **not** automatically default to an extremely small `$500` pilot if that would distort sizing, diversification, minimum-notional behavior, or transaction-cost assumptions. Determine minimum viable live capital from final Stable Core sizing rules.
-
-## Immediate Priority Order for the Next Chat
-
-1. Verify Railway deploys GitHub head `6e7500a06935bc75a7f44d8ae742cd37b87bc5f6` and startup bridge v11.
-2. Run **only** the normal compact daily audit.
-3. Confirm `execution_ledger` reports a healthy hook/hash chain and is authoritative for new executions.
-4. Inspect `journal_recovery_candidate.trusted_recovery_candidate`.
-5. If trusted: implement one controlled journal-based state rebuild with immutable forensic archive and halt preserved until the post-rebuild audit passes.
-6. If not trusted: archive contaminated state/journal/backups and intentionally create a **clean accounting epoch** rather than continuing historical repair loops.
-7. Establish an explicit accounting epoch id for all new canonical ledger rows.
-8. Build authoritative account/position state and execution-boundary invariants around the canonical ledger.
-9. Simplify persistence/risk ownership and remove redundant hot-path wrappers incrementally.
-10. Preserve current rules/scanner performance logic unless evidence proves a specific component defective.
-11. Keep ML/crypto/LONA/MAE-MFE in Performance Lab shadow mode.
-12. Start the 5-day Stable Paper v1 clock only after accounting truth is clean.
-
-## Tooling / Connected Services
-
-Use GitHub/Codex tooling for code inspection, implementation, CI, regression review, and deployment work.
-
-LONA is connected and may be used for independent research/backtesting when its frequency interface is usable.
-
-Railway is the canonical deployment environment, but there is no direct Railway connector in the current toolset. Use deployed HTTP audit output and/or user-provided Railway status/logs for live verification.
-
-## Important User Operating Preferences
-
-- Prefer **one routine test link** per day.
-- Avoid multiple diagnostics unless a specific failure requires them.
-- Keep routine audit output short enough to copy/paste from iPhone.
-- Prefer complete/codebase-level fixes over repeated manual patches.
-- Prioritize reaching an operational live-ready system sooner rather than indefinite feature work.
-- Do not sacrifice long-term performance ceiling or future ML capability merely to simplify the current runtime.
+Do not default automatically to an extremely small live account if it would distort the final strategy architecture. Determine minimum viable live capital from the proven Stable Core sizing/diversification rules at that later stage.
 
 ## Non-Negotiable Boundaries
 
 - Paper-only until explicit live-readiness approval.
-- Existing hard halt remains until trustworthy accounting/state is established.
-- Rules engine remains sole execution authority.
+- No fabricated historical ledger rows.
+- Historical journal recovery decision is final: **clean epoch**, not more reverse-engineering.
+- Clean-epoch validation hold remains until the post-deploy baseline audit passes.
+- Rules remain sole execution authority.
 - ML remains shadow-only.
-- Multi-asset ranker remains research-only.
+- Crypto/multi-asset execution remains disabled.
 - No risk-threshold weakening merely to create trades.
-- No fabricated ledger rows or synthetic historical entries.
-- No automatic clearing of halt during accounting recovery.
-- Preserve forensic state/backups before any destructive clean-epoch action.
-- The new canonical execution ledger is authoritative only for executions actually recorded through it; do not use it to invent pre-deployment history.
+- Preserve forensic archives before removing any temporary migration components.
+- Preserve the performance engine while simplifying accounting/runtime plumbing.
 
-## Continuation Prompt for New Chat
+## Immediate Continuation Prompt
 
-A new chat should begin by reviewing this file, confirming the latest GitHub `main` head, and then using only the normal Railway compact audit.
+Start by reading this file, then inspect **only** the latest normal Railway audit unless it identifies a specific blocker:
 
-The two immediate questions are:
+`https://web-production-e1796.up.railway.app/paper/daily-audit`
 
-1. **Is PR #24 deployed and is `execution_ledger` healthy/authoritative for new executions?**
-2. **Does `journal_recovery_candidate.trusted_recovery_candidate` provide complete, economically consistent historical coverage?**
+The next question is no longer whether historical recovery is possible. That decision is complete.
 
-If the journal candidate is trusted, perform a controlled recovery. If it is not trusted, start a clean accounting epoch and move immediately into Stable Core validation rather than continuing to patch contaminated history.
+The next question is:
+
+**Did PR #26 establish a persistent clean `$10,000` epoch with zero carried-over trades/positions, complete zero-trade accounting coverage, an empty healthy epoch-aligned canonical ledger, and only the intentional validation hold remaining?**
+
+If yes, proceed to authoritative account-state/execution-invariant work and controlled validation-hold release. If no, keep the hold and fix only the demonstrated persistence/accounting blocker.
