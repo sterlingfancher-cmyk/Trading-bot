@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-10-v8-action-semantics-recovery"
+VERSION = "data-integrity-startup-bridge-2026-08-10-v9-matched-exit-recovery"
 MODULES = (
     "orla_hygiene_overlay",
+    "paper_ledger_matched_exit_guard",
     "paper_trade_action_semantics_recovery",
     "paper_accounting_integrity_guard",
     "paper_accounting_readonly_status",
