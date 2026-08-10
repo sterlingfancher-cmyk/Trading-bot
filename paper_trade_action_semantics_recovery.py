@@ -113,7 +113,7 @@ def _current_valid_path_rows() -> int:
     try:
         import intratrade_path_capture as path
         status = path.status_payload() if callable(getattr(path, "status_payload", None)) else {}
-        return int((status or {}).get("valid_rows") or 0)
+        return int((status or {}).get("training_eligible_rows") or 0)
     except Exception:
         return 0
 
