@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-11-v16-entry-count-reporting"
+VERSION = "data-integrity-startup-bridge-2026-08-11-v17-surge-canonical-execution"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
@@ -19,6 +19,10 @@ MODULES = (
     "daily_audit_entry_count_bridge",
     # Stable Core execution truth: durable append-only hash-chained events.
     "canonical_execution_ledger",
+    # Market-surge paper deployment previously bypassed record_trade and wrote
+    # custom state.trades rows. Route all future surge entries through the same
+    # canonical execution boundary before accounting/reconciliation is applied.
+    "market_surge_canonical_execution_bridge",
     "orla_hygiene_overlay",
     "paper_ledger_matched_exit_guard",
     "paper_trade_action_semantics_recovery",
@@ -34,7 +38,8 @@ MODULES = (
     # the administrative clean-epoch hold is eligible for release.
     "paper_bidirectional_accounting_guard",
     # Canonical record_trade rows use epoch-second timestamps. Normalize them for
-    # session P&L reconstruction and require explicit canonical long/short sides.
+    # session P&L reconstruction, require explicit canonical long/short sides,
+    # and recognize narrowly verified pre-bridge surge entry rows.
     "paper_execution_timestamp_semantics",
     # A validation hold is an administrative execution block, not a loss event.
     "administrative_halt_classification_guard",
