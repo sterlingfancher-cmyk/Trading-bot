@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-10-v15-stable-paper-release-timestamp-safe"
+VERSION = "data-integrity-startup-bridge-2026-08-11-v16-entry-count-reporting"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
+    # Reporting-only fallback for a scanner section that omits latest-cycle
+    # entries_count even though auto_runner.last_result.entries is available.
+    "daily_audit_entry_count_bridge",
     # Stable Core execution truth: durable append-only hash-chained events.
     "canonical_execution_ledger",
     "orla_hygiene_overlay",
