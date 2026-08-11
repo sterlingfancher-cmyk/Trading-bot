@@ -1,9 +1,9 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-10 after PR #28 merge  
+Last updated: 2026-08-11 after Stable Paper Day 1 opening audit and PR #30 merge  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Branch: `main`  
-Latest runtime-code head covered: `a02d893c4682905f05508bd03b5ed4d02fc2143b`  
+Latest runtime-code head covered: `619619418528b584b539ed1d549e64a2ee8fc2ad`  
 Canonical paper service: `https://web-production-e1796.up.railway.app`
 
 This file is the authoritative continuation point. Older `PROJECT_HANDOFF_*` files are historical context only unless this file explicitly references them.
@@ -12,15 +12,15 @@ This file is the authoritative continuation point. Older `PROJECT_HANDOFF_*` fil
 
 The project is in the **Stable Core + Performance Lab** phase.
 
-The historical accounting incident is resolved by a deliberate clean paper-accounting epoch. The project must **not** return to repeated historical reconstruction attempts.
+The historical accounting incident is resolved by a deliberate clean paper-accounting epoch. Do **not** return to repeated historical reconstruction attempts.
 
-The current objective remains:
+Current objective:
 
 **Simplify the plumbing, preserve the performance engine.**
 
-Preserve the scanner, broad momentum/discovery path, opening-surge/breakout participation, regime logic, long/short capability, provider protections, and risk framework unless a demonstrated defect requires a targeted change.
+Preserve the scanner, broad momentum/discovery path, opening-surge/breakout participation, regime logic, long/short capability, provider protections, and risk framework unless a demonstrated correctness defect requires a targeted change.
 
-Runtime remains **paper-only**. Rules remain the sole execution authority. ML, MAE/MFE optimization, crypto/multi-asset ranking, LONA, adaptive policies, and other Performance Lab work remain shadow/research-only until explicit promotion gates are satisfied.
+Runtime remains **paper-only**. Rules remain the sole execution authority. ML, MAE/MFE optimization, crypto/multi-asset ranking, LONA, adaptive policies, and other Performance Lab systems remain shadow/research-only until explicit promotion gates are satisfied.
 
 ## One Routine Operator Test
 
@@ -36,14 +36,7 @@ Do not return to a daily workflow requiring multiple bootstrap/accounting/debug 
 
 ## Historical Recovery Decision — Final
 
-The decisive 2026-08-10 audit showed:
-
-- historical journal rows: `147`
-- semantic-deduplicated execution rows: `34`
-- entry rows: `5`
-- exit/partial-exit rows: `29`
-- unresolved coverage issues: `23`
-- `trusted_recovery_candidate: false`
+The decisive 2026-08-10 audit showed incomplete historical execution coverage and `trusted_recovery_candidate: false`.
 
 The historical candidate equity around `$14.4k` was rejected because missing entries could not be proven.
 
@@ -82,74 +75,18 @@ Starting paper capital:
 
 `$10,000`
 
-PR #26:
+PR #26 archived contaminated state/journal/backups, established a clean `$10,000` account, removed carried-over positions/trades/P&L, replaced stale fallback backups, rotated journal/snapshot state, preserved the new canonical ledger, and deliberately left the runtime on a validation hold.
 
-- archived contaminated state/journal/backups before mutation
-- established clean `$10,000` cash/equity
-- removed carried-over positions/trades/P&L
-- replaced stale fallback backups so old contamination could not resurrect
-- rotated journal/snapshot state into the new epoch
-- preserved canonical ledger cleanliness
-- converted the failed historical journal to archived forensic evidence
-- made a rigorously verified zero-trade epoch a valid accounting baseline
-- reset ML/MAE-MFE promotion evidence to require clean forward lifecycle data
-- deliberately left the runtime on a clean-epoch validation hold
+The 2026-08-10 post-cutover Railway audit verified:
 
-Migration writes clean fallback backups first and swaps primary `state.json` last so migration failure leaves the old halted primary recoverable.
-
-## Verified Post-Cutover Railway Audit — 2026-08-10 13:36:18 CDT
-
-The clean epoch was successfully established.
-
-### Account
-
-- cash: `$10,000`
-- equity: `$10,000`
-- positions: none
-- realized today: `$0`
-- unrealized P&L: `$0`
-
-### Epoch
-
-- `epoch_id: stable-paper-v1-20260810-clean01`
-- `clean_start: true`
-- `zero_trade_baseline: true`
-- `historical_evidence_archived: true`
-- `historical_recovery_decision: clean_epoch`
-
-### Accounting integrity
-
-- `coverage_complete: true`
-- `baseline_type: clean_zero_trade_epoch`
-- coverage issues: `0`
-- economic issues: `0`
-- reconstructed cash: `$10,000`
-- reconstructed equity: `$10,000`
-
-### Canonical ledger
-
-- `chain_valid: true`
-- `authoritative_for_new_executions: true`
-- `row_count: 0`
-- `current_epoch_rows: 0`
-- `current_epoch_id: stable-paper-v1-20260810-clean01`
-
-### Historical journal
-
-- status: archived
-- recovery decision complete
-- `trusted_recovery_candidate: false`
-
-The contaminated account did not reappear. The clean-epoch cutover therefore passed its baseline verification.
-
-## Findings From the Post-Cutover Audit
-
-Two important implementation issues were identified before releasing Stable Paper:
-
-1. The performance-risk layer treated **any** `risk.halted` state as a hard performance/self-defense halt. The clean-epoch administrative validation hold was therefore incorrectly reported as loss-driven self-defense despite `0%` loss and drawdown.
-2. The prior accounting reconciler was long-lot oriented and could not safely validate a future legitimate short lifecycle. Stable Paper must not resume with a long/short strategy while accounting silently ignores short rows.
-
-The compact audit also used the combined market-data/path/ML section status as `market_data.status`, causing the clean-forward MAE/MFE evidence gate to look like a provider failure. Provider request accounting itself can have a one-request in-flight snapshot gap; that is distinct from ML promotion readiness.
+- cash/equity exactly `$10,000 / $10,000`
+- no positions
+- zero realized/unrealized P&L
+- complete accounting coverage
+- zero coverage/economic issues
+- canonical ledger healthy, authoritative, empty, and epoch-aligned
+- historical journal archived
+- contaminated account did not reappear
 
 ## PR #28 — Stable Paper Post-Cutover Release Guards
 
@@ -159,67 +96,113 @@ Merged runtime commit:
 
 Both repository workflows passed, including the exact Gunicorn startup smoke.
 
-PR #28 adds the release-critical protections required before forward Stable Paper validation:
+PR #28 added:
 
-### Bidirectional long/short accounting
-
-The paper reconciler now models the runtime's actual cash/margin semantics:
-
-- long entry reserves entry notional
-- long exit/partial exit releases matched sale proceeds
-- short entry reserves entry notional as margin
-- short exit/partial exit releases matched margin plus realized P&L
-- unmatched exits cannot create synthetic cash
+- bidirectional long/short accounting using the runtime cash/margin semantics
+- unmatched-exit protection for both directions
 - unknown execution side fails accounting coverage instead of silently defaulting to long
+- epoch-second execution timestamp normalization for `realized_today`
+- administrative-halt classification so a clean validation hold is not mislabeled as a loss event
+- guarded release that can clear **only** the exact clean-accounting validation hold after re-verifying the clean baseline
+- provider-health reporting separated from ML/MAE-MFE promotion readiness
+- focused regression tests
 
-This preserves short capability while making short accounting auditable.
+The clean-accounting validation hold was released at:
 
-### Execution timestamp semantics
+`2026-08-10 16:11:51 CDT`
 
-Canonical `record_trade()` rows may store epoch seconds. The accounting boundary now normalizes epoch-second execution times into calendar timestamps so `realized_today` is reconstructed correctly.
+No genuine risk halt was present.
 
-### Administrative-halt classification
+## Stable Paper Day 1 — 2026-08-11 08:50:42 CDT Audit
 
-A clean-accounting validation hold is now classified as an **administrative execution block**, not a loss event. The hold itself remains enforced until the release guard validates it.
+This is the first clean forward execution evidence after the new epoch and release.
 
-### Guarded clean-epoch validation release
+### Account
 
-The release module may clear **only** the exact `clean accounting epoch validation hold` and only after rechecking:
+- cash: `$8,400.00`
+- equity: `$10,005.39`
+- open position: `CLSK`
+- realized today: `$0.00`
+- unrealized P&L: `$5.39`
 
-- paper-only runtime
-- correct clean epoch id
-- clean-start/zero-trade epoch markers
-- archived historical evidence
-- `$10,000` cash/equity baseline
-- zero positions and state trades
-- zero realized/unrealized P&L
-- zero loss/drawdown metrics
-- healthy authoritative empty canonical ledger aligned to the clean epoch
-- bidirectional long/short accounting installed
-- complete zero-trade accounting coverage with zero issues
-- historical journal decision complete and still untrusted
+### Accounting integrity
 
-Any unrelated risk halt is preserved and cannot be cleared by this module.
+- model: `bidirectional_margin_v1`
+- long/short support: `true`
+- `coverage_complete: true`
+- coverage issues: `0`
+- economic issues: `0`
+- ignored trade rows: `0`
+- reconstructed cash: `$8,400.000020`
+- reconstructed equity: `$10,005.387216`
 
-### Audit/readiness separation
+Stored and reconstructed account values agree within normal rounding tolerance.
 
-The compact daily audit now distinguishes provider health from clean-forward ML/MAE-MFE evidence readiness instead of labeling the latter as a market-data failure.
+### Canonical execution ledger
 
-### Regression coverage
+- `chain_valid: true`
+- `authoritative_for_new_executions: true`
+- current epoch id: `stable-paper-v1-20260810-clean01`
+- current epoch rows: `1`
+- total ledger rows: `1`
 
-Focused tests were added for:
+The first clean forward entry therefore reached the canonical ledger successfully.
 
-- epoch-second timestamp normalization
-- unknown-side fail-closed behavior
-- complete long + short round-trip accounting
-- administrative hold classification without clearing the halt
-- proof that an unrelated performance-risk halt cannot be cleared by the clean-epoch release module
+### Provider accounting
+
+- requests: `4,622`
+- classified terminal outcomes: `4,622`
+- in-flight/unclassified: `0`
+- provider circuit open: `false`
+- status: `pass`
+
+### Risk
+
+- halted: `false`
+- self-defense active: `false`
+- intraday drawdown: `0%`
+- net daily loss: `0%`
+- status: `pass`
+
+### Clean-forward research evidence
+
+- post-epoch valid exact lifecycle rows: `1`
+- promotion evidence eligible: `true`
+- ML evidence status: `pass`
+
+This does **not** grant ML execution authority. It only means the clean-forward evidence gate has begun receiving valid lifecycle data.
+
+### Only remaining warning in this audit
+
+`scanner.entries_count` was `null`, producing `entry_count_missing` even though the bot had clearly executed a real clean entry and the canonical ledger showed one execution.
+
+This was proven to be an observability/reporting gap rather than a trading-path failure.
+
+## PR #30 — Audit Entry-Count Reporting Fix
+
+Merged runtime commit:
+
+`619619418528b584b539ed1d549e64a2ee8fc2ad`
+
+Both repository validation workflows passed, including exact Gunicorn startup smoke.
+
+PR #30 is **reporting-only**:
+
+- if scanner `entries_count` is missing, it uses the already-persisted `auto_runner.last_result.entries` list for the latest-cycle count
+- it does not overwrite an explicit scanner-provided count
+- if no fallback exists, it leaves the warning in place instead of fabricating a count
+- it clears the obsolete `entry_count_missing` next-action only when the fallback is actually available
+- regression tests cover all three cases
+
+PR #30 changes no scanner logic, signals, thresholds, sizing, risk limits, execution behavior, live authority, or ML authority.
+
+**PR #30 does not reset the Stable Paper validation clock.**
 
 ## Stable Paper v1 Acceptance Clock
 
-After Railway deploys PR #28 and the routine audit confirms the validation hold is released without any new blocker, begin the Stable Paper v1 acceptance window.
+Day 1 is **2026-08-11**.
 
-Run the **same Stable Core unchanged** for at least `5` consecutive trading days.
+Run the same Stable Core behavior unchanged for at least `5` consecutive trading days. Reporting-only observability corrections do not reset the clock. Strategy, execution, accounting-semantic, sizing, or risk-behavior changes generally do reset the unchanged-evidence window unless they are required to correct a safety/correctness defect.
 
 Minimum acceptance requirements:
 
@@ -233,28 +216,27 @@ Minimum acceptance requirements:
 - no unexplained startup failure
 - no manual state repair
 - one compact daily audit per trading day
-- provider accounting remains clean or any snapshot gap is explicitly classified as in-flight rather than unexplained
+- provider accounting remains clean or any snapshot gap is explicitly classified as in-flight
 - cycle ownership remains clean
 - risk controls behave as designed
 - entry → fill → position → exit → immutable ledger consistency
 
-If defects recur, extend the unchanged evidence window to `7–10` trading days after the defect is corrected.
+If a correctness defect occurs, repair it and extend/restart the unchanged evidence window as appropriate. If only reporting/observability is corrected without trading-behavior changes, preserve the clock.
 
-## Immediate Stable Core Priorities
+## Immediate Stable Core Priorities During the 5-Day Window
 
 Do not add new strategy features merely because the account is now clean.
 
 Priority order:
 
-1. Verify the deployed PR #28 runtime with the one normal daily audit.
-2. Confirm the clean-epoch administrative validation hold is released and not replaced by any unrelated risk halt.
-3. Confirm bidirectional accounting reports healthy before and after the first real long/short lifecycle.
-4. Confirm the canonical ledger receives the first new execution with correct epoch id, execution id, and valid hash chain.
-5. Establish one authoritative account/position state consistently derived from canonical executions plus current marks.
-6. Continue execution-boundary invariants for cash, notional, lot ownership, quantity, duplicate ids, and ledger/state synchronization.
-7. Remove/bypass redundant historical execution/persistence wrappers gradually behind regression gates.
-8. Remove the temporary clean-epoch migration safety shim only after the new epoch has remained persistent through redeploys/restarts.
-9. Keep Stable Core logic frozen during the 5-day acceptance window unless a correctness defect requires repair.
+1. Continue the one-link daily audit each trading day.
+2. Verify PR #30 reporting after Railway deploys; `entries_count` should no longer be null when latest-cycle runner entries are available.
+3. Observe the CLSK lifecycle through management and eventual exit; verify entry → position → exit → canonical ledger/accounting consistency.
+4. Confirm bidirectional accounting remains healthy before and after the first legitimate short lifecycle if one occurs naturally under existing rules.
+5. Confirm every new execution increases the canonical ledger without chain or epoch mismatch.
+6. Continue account-state/execution-invariant work only if it can be done without changing Stable Core trading behavior during the acceptance window.
+7. Remove/bypass redundant historical wrappers only behind regression gates and only if the change cannot alter trading decisions during the clock.
+8. Remove the temporary clean-epoch migration safety shim only after the epoch has remained persistent through redeploys/restarts.
 
 ## Strategy / Risk Components to Preserve
 
@@ -291,7 +273,7 @@ Historical scanner/discovery bounds worth preserving unless evidence says otherw
 - detailed-scanner input: `110`
 - discovery cache: `900` seconds
 
-## Performance Lab — Preserve, Do Not Promote Yet
+## Performance Lab — Preserve, Do Not Promote Execution Authority Yet
 
 Keep alive in parallel:
 
@@ -303,23 +285,20 @@ Keep alive in parallel:
 - alternate regime/participation policies
 - walk-forward, Monte Carlo, slippage, commission, and stress testing
 
-Old contaminated/recovery-era rows do not qualify for promotion. Clean-forward evidence must come from the new epoch.
-
-These systems may study what would have improved paper trades, but they must not destabilize Stable Core or obtain execution authority before promotion gates are met.
+Clean-forward evidence may now be collected and evaluated, but these systems must not destabilize Stable Core or obtain execution authority before explicit promotion gates are met.
 
 ## Live-Readiness Direction
 
 Evidence-gated sequence:
 
 1. maintain clean accounting truth
-2. finish canonical account-state/invariant work
-3. freeze Stable Core
-4. complete at least 5 unchanged clean paper trading days
-5. validate actual entry/exit/sizing/risk behavior from canonical records
-6. run live-readiness simulation against broker-state assumptions
-7. only then consider a controlled live pilot
+2. complete the unchanged Stable Paper validation window
+3. validate actual entry/exit/sizing/risk behavior from canonical records
+4. finish canonical account-state/invariant work
+5. run live-readiness simulation against broker-state assumptions
+6. only then consider a controlled live pilot
 
-Do not automatically choose an arbitrarily tiny live account if it would distort the proven architecture. Determine minimum viable live capital later from the validated sizing/diversification rules.
+Do not automatically choose an arbitrarily tiny live account if it would distort the proven architecture. Determine minimum viable live capital later from validated sizing/diversification rules.
 
 ## Non-Negotiable Boundaries
 
@@ -327,12 +306,12 @@ Do not automatically choose an arbitrarily tiny live account if it would distort
 - No fabricated historical ledger rows.
 - Historical recovery decision is final: **clean epoch**.
 - Rules remain sole execution authority.
-- ML remains shadow-only.
+- ML remains shadow-only for execution.
 - Crypto/multi-asset execution remains disabled.
 - No risk-threshold weakening merely to create trades.
 - Preserve forensic archives before deleting temporary migration components.
 - Preserve the performance engine while simplifying accounting/runtime plumbing.
-- Any future halt caused by real risk metrics must remain authoritative and must not be cleared by administrative-release code.
+- Any future halt caused by real risk metrics remains authoritative and must not be cleared by administrative-release code.
 
 ## Immediate Continuation Prompt
 
@@ -340,8 +319,10 @@ Start by reading this file, then inspect only the latest normal Railway audit un
 
 `https://web-production-e1796.up.railway.app/paper/daily-audit`
 
-The next question is:
+The current question is no longer whether the clean epoch works. It does.
 
-**Did deployed PR #28 safely release the clean-epoch administrative hold while preserving zero-loss accounting integrity, bidirectional long/short accounting, canonical ledger health, and all genuine risk controls?**
+The current question is:
 
-If yes, start/continue the unchanged Stable Paper v1 forward-validation clock and focus on canonical account-state/execution invariants. If no, keep execution blocked and fix only the demonstrated correctness issue.
+**Does Stable Paper remain internally consistent through each new clean execution and position lifecycle for at least five consecutive trading days without strategy/risk behavior changes?**
+
+If yes, continue the acceptance clock. If a genuine accounting, execution, persistence, startup, or risk correctness defect appears, fix only that defect and determine whether the unchanged-evidence window must restart.
