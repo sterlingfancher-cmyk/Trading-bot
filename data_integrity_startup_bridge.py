@@ -10,22 +10,24 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-11-v17-surge-canonical-execution"
+VERSION = "data-integrity-startup-bridge-2026-08-11-v18-accounting-order"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
     # Reporting-only fallback for a scanner section that omits latest-cycle
     # entries_count even though auto_runner.last_result.entries is available.
     "daily_audit_entry_count_bridge",
+    # Correctness-critical bootstrap.  It installs canonical execution routing
+    # plus final bidirectional/timestamp semantics before any reconciler runs.
+    "stable_paper_accounting_bootstrap",
     # Stable Core execution truth: durable append-only hash-chained events.
     "canonical_execution_ledger",
-    # Market-surge paper deployment previously bypassed record_trade and wrote
-    # custom state.trades rows. Route all future surge entries through the same
-    # canonical execution boundary before accounting/reconciliation is applied.
     "market_surge_canonical_execution_bridge",
     "orla_hygiene_overlay",
     "paper_ledger_matched_exit_guard",
     "paper_trade_action_semantics_recovery",
+    # Reconciliation now runs only after the bootstrap above has installed the
+    # final clean-epoch event semantics.
     "paper_accounting_integrity_guard",
     "paper_accounting_readonly_status",
     "paper_ledger_economic_integrity",
@@ -34,12 +36,7 @@ MODULES = (
     # Disable the unnecessary nested journal mirror while the cutover owns locks.
     "clean_accounting_epoch_lock_safety",
     "clean_accounting_epoch",
-    # Stable Paper must support the runtime's actual long/short lifecycle before
-    # the administrative clean-epoch hold is eligible for release.
     "paper_bidirectional_accounting_guard",
-    # Canonical record_trade rows use epoch-second timestamps. Normalize them for
-    # session P&L reconstruction, require explicit canonical long/short sides,
-    # and recognize narrowly verified pre-bridge surge entry rows.
     "paper_execution_timestamp_semantics",
     # A validation hold is an administrative execution block, not a loss event.
     "administrative_halt_classification_guard",
