@@ -6,6 +6,13 @@ calendar-day string so realized P&L for the current session is reconstructed
 correctly.  This compatibility shim also refuses to silently coerce an unknown
 canonical side to ``long``.
 
+The pre-bridge market-surge paper path wrote verified entry rows directly to
+``state.trades`` using ``entry`` for the fill price, ``side=buy``, and explicit
+``source/type`` markers.  Those narrowly identified rows are accepted so the
+clean epoch can reconcile them without fabricating executions.  Future surge
+entries are routed through the canonical ``record_trade`` boundary by the surge
+canonical-execution bridge.
+
 Paper-accounting compatibility only.  No strategy, threshold, sizing, order,
 risk-limit, live-authority, or ML-authority behavior is changed.
 """
@@ -14,7 +21,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, Tuple
 
-VERSION = "paper-execution-timestamp-semantics-2026-08-10-v1"
+VERSION = "paper-execution-timestamp-semantics-2026-08-11-v2-surge-entry"
 _APPLIED = False
 
 
@@ -48,13 +55,25 @@ def _timestamp_text(row: Dict[str, Any]) -> str:
     if text:
         try:
             numeric = float(text)
-            # Epoch seconds are currently ~1.8e9.  Bound the conversion so a
-            # YYYYMMDD-like identifier is not mistaken for a timestamp.
             if 946684800 <= numeric <= 4102444800:
                 return dt.datetime.fromtimestamp(numeric, tz=dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         except Exception:
             pass
     return text
+
+
+def _verified_legacy_surge_entry(row: Dict[str, Any]) -> bool:
+    source = str(row.get("source") or "").strip().lower()
+    row_type = str(row.get("type") or "").strip().lower()
+    side = str(row.get("side") or "").strip().lower()
+    return (
+        source == "market_surge_deployment_mode"
+        and row_type == "paper_market_surge_deployment"
+        and side in {"buy", "b", "long"}
+        and _f(row.get("entry"), 0.0) > 0.0
+        and _f(row.get("shares", row.get("qty", row.get("quantity"))), 0.0) > 0.0
+        and bool(str(row.get("symbol") or row.get("ticker") or "").strip())
+    )
 
 
 def normalized_event_fields(row: Dict[str, Any]) -> Tuple[str, str, str, float, float, str]:
@@ -64,6 +83,10 @@ def normalized_event_fields(row: Dict[str, Any]) -> Tuple[str, str, str, float, 
     qty = _f(row.get("qty", row.get("shares", row.get("quantity"))), 0.0)
     price = _f(row.get("price", row.get("fill_price", row.get("entry_price", row.get("exit_price")))), 0.0)
     timestamp = _timestamp_text(row)
+
+    legacy_surge_entry = _verified_legacy_surge_entry(row)
+    if price <= 0.0 and legacy_surge_entry:
+        price = _f(row.get("entry"), 0.0)
 
     long_aliases = {"long", "buy", "b", "open_long", "close_long", "sell", "s"}
     short_aliases = {"short", "open_short", "close_short", "cover"}
@@ -77,15 +100,14 @@ def normalized_event_fields(row: Dict[str, Any]) -> Tuple[str, str, str, float, 
     elif action in {"open_long", "close_long"}:
         side = "long"
     else:
-        # Canonical entry/exit rows are required to declare long/short.  Leaving
-        # this empty makes the reconciler flag incomplete coverage instead of
-        # fabricating a long lot.
         side = ""
 
     if action in {"entry", "buy", "open", "open_long", "open_short"}:
         event = "entry"
     elif action in {"exit", "partial_exit", "sell", "close", "close_long", "close_short", "cover"}:
         event = "exit"
+    elif legacy_surge_entry:
+        event, side = "entry", "long"
     elif raw_side in {"buy", "b"}:
         event, side = "entry", "long"
     elif raw_side in {"sell", "s"}:
@@ -117,6 +139,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "applied": _APPLIED,
         "epoch_seconds_normalized": True,
         "unknown_side_fails_coverage": True,
+        "verified_legacy_surge_entry_supported": True,
         "authority": {
             "paper_accounting_compatibility_only": True,
             "changes_strategy": False,
