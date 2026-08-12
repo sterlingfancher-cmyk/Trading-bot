@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-12-v22-final-accounting-bootstrap-order"
+VERSION = "data-integrity-startup-bridge-2026-08-12-v23-paper-exit-price-integrity"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
@@ -25,6 +25,9 @@ MODULES = (
     "canonical_execution_ledger",
     "market_surge_canonical_execution_bridge",
     "market_surge_queue_canonical_execution_bridge",
+    # Fail closed on catastrophic paper exit quote anomalies before they can
+    # mutate cash/positions or become canonical execution records.
+    "paper_exit_price_integrity_guard",
     "orla_hygiene_overlay",
     # Legacy compatibility layers may replace accounting functions/parsers. Keep
     # them before the final bootstrap so they cannot clobber canonical semantics
