@@ -2,9 +2,9 @@
 
 When accounting coverage fails, the compact daily audit needs enough evidence to
 identify whether an unmatched exit has a real pre-existing entry row without
-mutating state or inventing executions.  This bridge exposes all bounded coverage
-issues plus a few earlier same-symbol entry-like rows from the persisted trade
-mirror for forensic comparison.
+mutating state or inventing executions. This bridge exposes bounded coverage
+issues, prior same-symbol entry-like rows, and a compact first-row trade window
+for forensic comparison.
 
 No state repair, execution, strategy, sizing, risk, live, or ML authority is
 changed.
@@ -14,10 +14,11 @@ from __future__ import annotations
 import functools
 from typing import Any, Dict, List
 
-VERSION = "daily-audit-accounting-issue-bridge-2026-08-12-v2-entry-evidence"
+VERSION = "daily-audit-accounting-issue-bridge-2026-08-12-v3-trade-window"
 _APPLIED = False
 _MAX_ISSUES = 10
 _MAX_CANDIDATES_PER_ISSUE = 3
+_MAX_TRADE_ROWS = 12
 
 
 def _d(value: Any) -> Dict[str, Any]:
@@ -52,9 +53,10 @@ def _entry_like(row: Dict[str, Any]) -> bool:
 def _safe_trade_evidence(index: int, row: Dict[str, Any]) -> Dict[str, Any]:
     keys = (
         "action", "side", "source", "type", "symbol", "ticker", "qty", "shares",
-        "quantity", "price", "entry", "entry_price", "fill_price", "time",
-        "timestamp", "ts_local", "execution_id", "accounting_epoch_id",
-        "canonical_ledger_version", "entry_tag", "trade_authority",
+        "quantity", "price", "entry", "entry_price", "exit_price", "fill_price",
+        "value", "pnl", "realized_pnl", "reason", "time", "timestamp", "ts_local",
+        "execution_id", "accounting_epoch_id", "canonical_ledger_version",
+        "canonical_ledger_event_hash", "entry_tag", "trade_authority",
     )
     out = {"trade_index": index}
     for key in keys:
@@ -85,6 +87,16 @@ def _candidate_entries(core: Any, issue: Dict[str, Any]) -> List[Dict[str, Any]]
     return found[-_MAX_CANDIDATES_PER_ISSUE:]
 
 
+def _trade_row_window(core: Any) -> List[Dict[str, Any]]:
+    rows = []
+    for index, raw in enumerate(_l(_portfolio(core).get("trades"))[:_MAX_TRADE_ROWS]):
+        if isinstance(raw, dict):
+            rows.append(_safe_trade_evidence(index, raw))
+        else:
+            rows.append({"trade_index": index, "row_type": type(raw).__name__})
+    return rows
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     global _APPLIED
     try:
@@ -108,6 +120,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
         if not isinstance(out, dict):
             return out
 
+        active_core = runtime_core or core
         sections = _d(payload.get("sections"))
         integrity = _d(sections.get("10b_market_data_and_path_integrity"))
         accounting = _d(integrity.get("paper_accounting_integrity"))
@@ -121,7 +134,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
                 continue
             evidence.append({
                 "issue": issue,
-                "prior_same_symbol_entry_candidates": _candidate_entries(runtime_core or core, issue),
+                "prior_same_symbol_entry_candidates": _candidate_entries(active_core, issue),
             })
 
         target = _d(out.get("accounting_integrity"))
@@ -131,6 +144,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
         )
         target["coverage_issues"] = coverage_issues
         target["unmatched_exit_entry_evidence"] = evidence
+        target["trade_row_window"] = _trade_row_window(active_core)
         target["reconstructed_open_positions"] = sorted(
             str(symbol) for symbol in _d(rebuilt.get("open_positions")).keys()
         )
@@ -153,8 +167,10 @@ def status_payload() -> Dict[str, Any]:
         "reporting_only": True,
         "surfaces_bounded_coverage_issues": True,
         "surfaces_prior_same_symbol_entry_candidates": True,
+        "surfaces_trade_row_window": True,
         "max_issues": _MAX_ISSUES,
         "max_candidates_per_issue": _MAX_CANDIDATES_PER_ISSUE,
+        "max_trade_rows": _MAX_TRADE_ROWS,
     }
 
 
