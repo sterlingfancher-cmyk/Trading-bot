@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-12-v20-absolute-daily-halt-lifecycle"
+VERSION = "data-integrity-startup-bridge-2026-08-12-v21-surge-queue-canonical-execution"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
@@ -26,6 +26,10 @@ MODULES = (
     # Stable Core execution truth: durable append-only hash-chained events.
     "canonical_execution_ledger",
     "market_surge_canonical_execution_bridge",
+    # The older surge queue executor also predates the canonical execution
+    # boundary. Replace only newly appended queue rows through record_trade while
+    # preserving its selection, sizing, cash mutation, and risk gates.
+    "market_surge_queue_canonical_execution_bridge",
     "orla_hygiene_overlay",
     "paper_ledger_matched_exit_guard",
     "paper_trade_action_semantics_recovery",
