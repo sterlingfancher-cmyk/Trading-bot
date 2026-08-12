@@ -10,14 +10,17 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-11-v18-accounting-order"
+VERSION = "data-integrity-startup-bridge-2026-08-11-v19-accounting-issue-diagnostics"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
     # Reporting-only fallback for a scanner section that omits latest-cycle
     # entries_count even though auto_runner.last_result.entries is available.
     "daily_audit_entry_count_bridge",
-    # Correctness-critical bootstrap.  It installs canonical execution routing
+    # Reporting-only integrity detail so one compact audit identifies the exact
+    # persisted row/reason when accounting coverage fails.
+    "daily_audit_accounting_issue_bridge",
+    # Correctness-critical bootstrap. It installs canonical execution routing
     # plus final bidirectional/timestamp semantics before any reconciler runs.
     "stable_paper_accounting_bootstrap",
     # Stable Core execution truth: durable append-only hash-chained events.
