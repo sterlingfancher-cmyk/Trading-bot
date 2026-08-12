@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-12-v24-verified-snapshot-recovery"
+VERSION = "data-integrity-startup-bridge-2026-08-12-v25-verified-snapshot-lock-safety"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -31,6 +31,10 @@ MODULES = (
     "clean_accounting_epoch",
     "paper_bidirectional_accounting_guard",
     "paper_execution_timestamp_semantics",
+    # Patch the exact one-shot recovery's journal rotation before the recovery
+    # runs. The migration already owns the journal lock, so it must not call the
+    # journal mirror recursively from inside that critical section.
+    "verified_snapshot_epoch_recovery_lock_safety",
     # Exact-signature one-time recovery for the proven 2026-08-12 bad-tick
     # incident. It archives the contaminated epoch and starts a verified snapshot
     # epoch under a validation hold; it is not a generic loss reset.
