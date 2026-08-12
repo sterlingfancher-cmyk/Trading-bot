@@ -1,0 +1,56 @@
+name: repo-agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      instruction:
+        description: "Concise repo task for the agent"
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+jobs:
+  run-agent:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.comment.author_association == 'OWNER' &&
+        startsWith(github.event.comment.body, '/agent ')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install repository dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
+          python -m pip install pytest
+
+      - name: Run guarded repo agent
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          AGENT_MANUAL_INSTRUCTION: ${{ inputs.instruction }}
+          GIT_USER_NAME: "repo-agent[bot]"
+          GIT_USER_EMAIL: "repo-agent@users.noreply.github.com"
+        run: python scripts/repo_agent.py
