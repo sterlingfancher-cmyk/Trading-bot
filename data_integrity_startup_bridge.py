@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-12-v25-verified-snapshot-lock-safety"
+VERSION = "data-integrity-startup-bridge-2026-08-12-v26-clean-epoch-successor-compatibility"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -28,6 +28,7 @@ MODULES = (
     "paper_ledger_economic_integrity",
     "paper_journal_forensic_recovery",
     "clean_accounting_epoch_lock_safety",
+    "clean_epoch_successor_compatibility",
     "clean_accounting_epoch",
     "paper_bidirectional_accounting_guard",
     "paper_execution_timestamp_semantics",
