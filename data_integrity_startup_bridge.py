@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-12-v21-surge-queue-canonical-execution"
+VERSION = "data-integrity-startup-bridge-2026-08-12-v22-final-accounting-bootstrap-order"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
@@ -20,21 +20,21 @@ MODULES = (
     # Reporting-only integrity detail so one compact audit identifies the exact
     # persisted row/reason when accounting coverage fails.
     "daily_audit_accounting_issue_bridge",
-    # Correctness-critical bootstrap. It installs canonical execution routing
-    # plus final bidirectional/timestamp semantics before any reconciler runs.
-    "stable_paper_accounting_bootstrap",
-    # Stable Core execution truth: durable append-only hash-chained events.
+    # Stable Core execution truth and paper-only execution bridges are installed
+    # before any accounting compatibility modules are loaded.
     "canonical_execution_ledger",
     "market_surge_canonical_execution_bridge",
-    # The older surge queue executor also predates the canonical execution
-    # boundary. Replace only newly appended queue rows through record_trade while
-    # preserving its selection, sizing, cash mutation, and risk gates.
     "market_surge_queue_canonical_execution_bridge",
     "orla_hygiene_overlay",
+    # Legacy compatibility layers may replace accounting functions/parsers. Keep
+    # them before the final bootstrap so they cannot clobber canonical semantics
+    # immediately before reconciliation.
     "paper_ledger_matched_exit_guard",
     "paper_trade_action_semantics_recovery",
-    # Reconciliation now runs only after the bootstrap above has installed the
-    # final clean-epoch event semantics.
+    # Correctness-critical final bootstrap. Reassert canonical execution routing,
+    # bidirectional accounting, and final timestamp/surge-row semantics after all
+    # legacy compatibility overlays and immediately before reconciliation.
+    "stable_paper_accounting_bootstrap",
     "paper_accounting_integrity_guard",
     "paper_accounting_readonly_status",
     "paper_ledger_economic_integrity",
