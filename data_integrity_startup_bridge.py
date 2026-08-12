@@ -10,54 +10,37 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-12-v23-paper-exit-price-integrity"
+VERSION = "data-integrity-startup-bridge-2026-08-12-v24-verified-snapshot-recovery"
 MODULES = (
-    # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
-    # Reporting-only fallback for a scanner section that omits latest-cycle
-    # entries_count even though auto_runner.last_result.entries is available.
     "daily_audit_entry_count_bridge",
-    # Reporting-only integrity detail so one compact audit identifies the exact
-    # persisted row/reason when accounting coverage fails.
     "daily_audit_accounting_issue_bridge",
-    # Stable Core execution truth and paper-only execution bridges are installed
-    # before any accounting compatibility modules are loaded.
     "canonical_execution_ledger",
     "market_surge_canonical_execution_bridge",
     "market_surge_queue_canonical_execution_bridge",
-    # Fail closed on catastrophic paper exit quote anomalies before they can
-    # mutate cash/positions or become canonical execution records.
     "paper_exit_price_integrity_guard",
     "orla_hygiene_overlay",
-    # Legacy compatibility layers may replace accounting functions/parsers. Keep
-    # them before the final bootstrap so they cannot clobber canonical semantics
-    # immediately before reconciliation.
     "paper_ledger_matched_exit_guard",
     "paper_trade_action_semantics_recovery",
-    # Correctness-critical final bootstrap. Reassert canonical execution routing,
-    # bidirectional accounting, and final timestamp/surge-row semantics after all
-    # legacy compatibility overlays and immediately before reconciliation.
     "stable_paper_accounting_bootstrap",
     "paper_accounting_integrity_guard",
     "paper_accounting_readonly_status",
     "paper_ledger_economic_integrity",
-    # Historical recovery evidence is evaluated before the one-time cutover.
     "paper_journal_forensic_recovery",
-    # Disable the unnecessary nested journal mirror while the cutover owns locks.
     "clean_accounting_epoch_lock_safety",
     "clean_accounting_epoch",
     "paper_bidirectional_accounting_guard",
     "paper_execution_timestamp_semantics",
-    # The absolute 3% daily-loss ceiling remains unchanged. This guard only lets
-    # its stale persisted reason use the normal managed-halt recovery lifecycle
-    # after the current metric has recovered below the ceiling.
+    # Exact-signature one-time recovery for the proven 2026-08-12 bad-tick
+    # incident. It archives the contaminated epoch and starts a verified snapshot
+    # epoch under a validation hold; it is not a generic loss reset.
+    "verified_snapshot_epoch_recovery",
+    # Final accounting adapter so the new epoch can begin from verified cash plus
+    # the restored open LRCX lot and all future executions remain canonical.
+    "verified_snapshot_accounting_baseline",
     "absolute_daily_halt_lifecycle_guard",
-    # A validation hold is an administrative execution block, not a loss event.
     "administrative_halt_classification_guard",
-    # Re-verifies the deployed zero-trade baseline and clears only that exact
-    # administrative hold. Any other risk halt remains untouched.
     "clean_epoch_validation_release",
-    # All research/path layers run only after the accounting epoch is established.
     "intratrade_path_capture",
     "mae_mfe_integration",
     "daily_data_integrity_audit_overlay",
