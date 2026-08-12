@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-11-v19-accounting-issue-diagnostics"
+VERSION = "data-integrity-startup-bridge-2026-08-12-v20-absolute-daily-halt-lifecycle"
 MODULES = (
     # Registered first so Flask executes its after_request handler last.
     "final_daily_audit_compactor",
@@ -41,6 +41,10 @@ MODULES = (
     "clean_accounting_epoch",
     "paper_bidirectional_accounting_guard",
     "paper_execution_timestamp_semantics",
+    # The absolute 3% daily-loss ceiling remains unchanged. This guard only lets
+    # its stale persisted reason use the normal managed-halt recovery lifecycle
+    # after the current metric has recovered below the ceiling.
+    "absolute_daily_halt_lifecycle_guard",
     # A validation hold is an administrative execution block, not a loss event.
     "administrative_halt_classification_guard",
     # Re-verifies the deployed zero-trade baseline and clears only that exact
