@@ -1,261 +1,160 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-11 after Stable Paper Day 1 opening audit and PR #30 merge  
+Last updated: 2026-08-13 after PR #54 deployment validation  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Branch: `main`  
-Latest runtime-code head covered: `619619418528b584b539ed1d549e64a2ee8fc2ad`  
-Canonical paper service: `https://web-production-e1796.up.railway.app`
+Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
 
 This file is the authoritative continuation point. Older `PROJECT_HANDOFF_*` files are historical context only unless this file explicitly references them.
 
 ## Executive Status
 
-The project is in the **Stable Core + Performance Lab** phase.
+The project is in **Stable Core repair/validation + Performance Lab shadow** mode.
 
-The historical accounting incident is resolved by a deliberate clean paper-accounting epoch. Do **not** return to repeated historical reconstruction attempts.
+Runtime remains **paper-only**. Rules remain the sole execution authority. Live authority is disabled. ML/AI, MAE/MFE optimization, crypto/multi-asset ranking, LONA, adaptive policies, and other research systems remain shadow/research-only unless an explicit later promotion decision is made.
 
-Current objective:
+The correct architectural direction remains: preserve the performance engine, simplify ownership/runtime plumbing, and avoid broad wrapper-style repairs when a narrow correctness fix is available.
 
-**Simplify the plumbing, preserve the performance engine.**
+## Canonical Service / State
 
-Preserve the scanner, broad momentum/discovery path, opening-surge/breakout participation, regime logic, long/short capability, provider protections, and risk framework unless a demonstrated correctness defect requires a targeted change.
+Use only this Railway service for the Stable Paper runtime:
 
-Runtime remains **paper-only**. Rules remain the sole execution authority. ML, MAE/MFE optimization, crypto/multi-asset ranking, LONA, adaptive policies, and other Performance Lab systems remain shadow/research-only until explicit promotion gates are satisfied.
+`https://web-production-e1796.up.railway.app`
 
-## One Routine Operator Test
+Do **not** use `trading-bot-clean.up.railway.app` for validation. It was proven to be attached to a different stale/legacy persistent state lineage (`/data/state.json`) and produced invalid accounting/risk state.
 
-Use only this routine test unless it identifies a specific blocker:
+The canonical service uses `/app/data/state.json` and carries the verified Stable Paper v2 state.
 
-`https://web-production-e1796.up.railway.app/paper/daily-audit`
+## Current Accounting Epoch — Authoritative
 
-Use the forensic form only when specifically needed:
+Current epoch:
 
-`https://web-production-e1796.up.railway.app/paper/daily-audit?full=1`
+`stable-paper-v2-20260812-verified01`
 
-Do not return to a daily workflow requiring multiple bootstrap/accounting/debug URLs.
-
-## Historical Recovery Decision — Final
-
-The decisive 2026-08-10 audit showed incomplete historical execution coverage and `trusted_recovery_candidate: false`.
-
-The historical candidate equity around `$14.4k` was rejected because missing entries could not be proven.
-
-**Historical recovery is permanently closed. Do not fabricate missing entries or restart the forensic-recovery loop.**
-
-## PR #24 — Canonical Execution Ledger
-
-Merged runtime commit:
-
-`6e7500a06935bc75a7f44d8ae742cd37b87bc5f6`
-
-Established the forward execution source of truth:
-
-- append-only persistent JSONL execution ledger
-- SHA-256 hash chain
-- durable `execution_id`
-- accounting epoch id on each execution
-- execution id/hash propagated into `state.trades`
-- hook at canonical `record_trade`
-- fail-safe halt if ledger durability/integrity fails
-- ledger health in the routine daily audit
-
-It is authoritative for new executions and never claimed to reconstruct missing historical rows.
-
-## PR #26 — Clean Accounting Epoch
-
-Merged runtime commit:
-
-`73fa71d662cd7e325373b8f3f1e1dec1cd1e5524`
-
-Target epoch:
+Prior epoch:
 
 `stable-paper-v1-20260810-clean01`
 
-Starting paper capital:
+Current baseline type:
 
-`$10,000`
+`verified_snapshot_with_open_position`
 
-PR #26 archived contaminated state/journal/backups, established a clean `$10,000` account, removed carried-over positions/trades/P&L, replaced stale fallback backups, rotated journal/snapshot state, preserved the new canonical ledger, and deliberately left the runtime on a validation hold.
+Historical recovery decision:
 
-The 2026-08-10 post-cutover Railway audit verified:
+`verified_snapshot_rollforward`
 
-- cash/equity exactly `$10,000 / $10,000`
-- no positions
-- zero realized/unrealized P&L
-- complete accounting coverage
-- zero coverage/economic issues
-- canonical ledger healthy, authoritative, empty, and epoch-aligned
-- historical journal archived
-- contaminated account did not reappear
+Why v2 exists: independent evidence proved the catastrophic LRCX paper exit near `$36.26` was a bad tick. The legitimate remaining LRCX lot therefore could not honestly be discarded as if the account had a zero-position clean baseline.
 
-## PR #28 — Stable Paper Post-Cutover Release Guards
+Verified v2 starting state:
 
-Merged runtime commit:
+- starting cash: approximately `$10,768.497731`
+- starting equity: approximately `$11,885.824057`
+- verified open LRCX lot: `3.42486` long shares at approximately `$312.90`
+- historical evidence archived
+- forward validation required
 
-`a02d893c4682905f05508bd03b5ed4d02fc2143b`
+Do not revert to the old v1 zero-position interpretation and do not fabricate historical executions.
 
-Both repository workflows passed, including the exact Gunicorn startup smoke.
+## Canonical Execution Ledger
 
-PR #28 added:
+The append-only canonical execution ledger remains authoritative for new executions.
 
-- bidirectional long/short accounting using the runtime cash/margin semantics
-- unmatched-exit protection for both directions
-- unknown execution side fails accounting coverage instead of silently defaulting to long
-- epoch-second execution timestamp normalization for `realized_today`
-- administrative-halt classification so a clean validation hold is not mislabeled as a loss event
-- guarded release that can clear **only** the exact clean-accounting validation hold after re-verifying the clean baseline
-- provider-health reporting separated from ML/MAE-MFE promotion readiness
-- focused regression tests
-
-The clean-accounting validation hold was released at:
-
-`2026-08-10 16:11:51 CDT`
-
-No genuine risk halt was present.
-
-## Stable Paper Day 1 — 2026-08-11 08:50:42 CDT Audit
-
-This is the first clean forward execution evidence after the new epoch and release.
-
-### Account
-
-- cash: `$8,400.00`
-- equity: `$10,005.39`
-- open position: `CLSK`
-- realized today: `$0.00`
-- unrealized P&L: `$5.39`
-
-### Accounting integrity
-
-- model: `bidirectional_margin_v1`
-- long/short support: `true`
-- `coverage_complete: true`
-- coverage issues: `0`
-- economic issues: `0`
-- ignored trade rows: `0`
-- reconstructed cash: `$8,400.000020`
-- reconstructed equity: `$10,005.387216`
-
-Stored and reconstructed account values agree within normal rounding tolerance.
-
-### Canonical execution ledger
+Required invariants:
 
 - `chain_valid: true`
 - `authoritative_for_new_executions: true`
-- current epoch id: `stable-paper-v1-20260810-clean01`
-- current epoch rows: `1`
-- total ledger rows: `1`
+- ledger epoch must equal `stable-paper-v2-20260812-verified01`
+- every new state execution must map to a canonical `execution_id`
+- no fabricated rows
 
-The first clean forward entry therefore reached the canonical ledger successfully.
+## Routine Operator Test
 
-### Provider accounting
+Use this one routine test:
 
-- requests: `4,622`
-- classified terminal outcomes: `4,622`
-- in-flight/unclassified: `0`
-- provider circuit open: `false`
-- status: `pass`
+`https://web-production-e1796.up.railway.app/paper/daily-audit`
 
-### Risk
+For targeted forensic detail only when the routine audit identifies a blocker:
 
-- halted: `false`
-- self-defense active: `false`
-- intraday drawdown: `0%`
-- net daily loss: `0%`
-- status: `pass`
+`https://web-production-e1796.up.railway.app/paper/daily-audit?full=1`
 
-### Clean-forward research evidence
+Useful targeted diagnostics currently include:
 
-- post-epoch valid exact lifecycle rows: `1`
-- promotion evidence eligible: `true`
-- ML evidence status: `pass`
+- `/paper/runtime-errors`
+- `/paper/exit-price-integrity-status`
+- `/paper/state-persistence-contract-status`
+- `/bootstrap-status`
 
-This does **not** grant ML execution authority. It only means the clean-forward evidence gate has begun receiving valid lifecycle data.
+Do not manually run `/paper/run` unless a future explicit validation plan requires it.
 
-### Only remaining warning in this audit
+## PR #54 — Verified-Snapshot Accounting Concurrency Fix
 
-`scanner.entries_count` was `null`, producing `entry_count_missing` even though the bot had clearly executed a real clean entry and the canonical ledger showed one execution.
+Production traceback proved an automatic cycle could fail with:
 
-This was proven to be an observability/reporting gap rather than a trading-path failure.
+`RuntimeError: dictionary changed size during iteration`
 
-## PR #30 — Audit Entry-Count Reporting Fix
+Exact boundary:
 
-Merged runtime commit:
+`verified_snapshot_accounting_baseline.py` called `copy.deepcopy(pf)` while unrelated live telemetry dictionaries were being mutated by another runtime thread.
 
-`619619418528b584b539ed1d549e64a2ee8fc2ad`
+The accepted fix was surgical: preserve the original verified-snapshot accounting adapter and replace only the whole-portfolio deepcopy with a detached accounting-only working view containing the fields required by the bidirectional accounting analyzer.
 
-Both repository validation workflows passed, including exact Gunicorn startup smoke.
+Final runtime-file diff on PR #54 was only 9 additions / 2 deletions, plus focused regression coverage. Both authoritative CI workflows passed.
 
-PR #30 is **reporting-only**:
+Post-deploy evidence on 2026-08-13 showed:
 
-- if scanner `entries_count` is missing, it uses the already-persisted `auto_runner.last_result.entries` list for the latest-cycle count
-- it does not overwrite an explicit scanner-provided count
-- if no fallback exists, it leaves the warning in place instead of fabricating a count
-- it clears the obsolete `entry_count_missing` next-action only when the fallback is actually available
-- regression tests cover all three cases
+- runner `active_error: false`
+- automatic cycles completing successfully
+- accounting coverage complete
+- zero accounting/economic issues
+- canonical v2 epoch aligned
 
-PR #30 changes no scanner logic, signals, thresholds, sizing, risk limits, execution behavior, live authority, or ML authority.
+`last_error` may still display the historical dictionary error as telemetry, but it is not active when `active_error: false` and a later successful run exists.
 
-**PR #30 does not reset the Stable Paper validation clock.**
+## Current 2026-08-13 Post-Deploy Account Evidence
 
-## Stable Paper v1 Acceptance Clock
+Latest compact audit supplied after PR #54 deployment:
 
-Day 1 is **2026-08-11**.
+- cash: approximately `$7,836.229902`
+- equity: approximately `$15,091.64`
+- positions: `LRCX`, `QQQ`, `UCTT`, `TEM`
+- realized today: approximately `$1,403.75`
+- unrealized P&L: approximately `$1,847.75`
+- accounting coverage complete: `true`
+- coverage issues: `0`
+- economic issues: `0`
+- parsed post-v2 trade rows: `4`
+- reconstructed positions match runtime positions
+- canonical ledger chain valid
+- canonical current epoch rows: `8`
 
-Run the same Stable Core behavior unchanged for at least `5` consecutive trading days. Reporting-only observability corrections do not reset the clock. Strategy, execution, accounting-semantic, sizing, or risk-behavior changes generally do reset the unchanged-evidence window unless they are required to correct a safety/correctness defect.
+Forward evidence has now produced at least one valid post-recovery exact lifecycle row. `promotion_evidence_eligible: true` does **not** grant ML execution authority; ML remains shadow-only.
 
-Minimum acceptance requirements:
+## Active Blocker — Paper Exit Quote Integrity Halt
 
-- no state corruption
-- no impossible accounting
-- no duplicate executions
-- canonical ledger hash chain remains valid
-- every state execution maps to a canonical `execution_id`
-- account/position state reconciles with canonical execution events
-- long and enabled short lifecycle accounting remains complete
-- no unexplained startup failure
-- no manual state repair
-- one compact daily audit per trading day
-- provider accounting remains clean or any snapshot gap is explicitly classified as in-flight
-- cycle ownership remains clean
-- risk controls behave as designed
-- entry → fill → position → exit → immutable ledger consistency
+The current runtime blocker is **not** the prior dictionary concurrency failure.
 
-If a correctness defect occurs, repair it and extend/restart the unchanged evidence window as appropriate. If only reporting/observability is corrected without trading-behavior changes, preserve the clock.
+Active risk state:
 
-## Immediate Stable Core Priorities During the 5-Day Window
+- `halted: true`
+- `self_defense_active: true`
+- halt reason: `paper exit quote integrity halt`
 
-Do not add new strategy features merely because the account is now clean.
+The quote-integrity guard captured this exact blocked exit attempt:
 
-Priority order:
+- symbol: `LRCX`
+- boundary: `exit_position`
+- verified entry: `$312.90`
+- attempted exit price: `$18.401199340820312`
+- price/entry ratio: approximately `0.05881`
+- reason: `catastrophic_long_exit_price_outlier`
 
-1. Continue the one-link daily audit each trading day.
-2. Verify PR #30 reporting after Railway deploys; `entries_count` should no longer be null when latest-cycle runner entries are available.
-3. Observe the CLSK lifecycle through management and eventual exit; verify entry → position → exit → canonical ledger/accounting consistency.
-4. Confirm bidirectional accounting remains healthy before and after the first legitimate short lifecycle if one occurs naturally under existing rules.
-5. Confirm every new execution increases the canonical ledger without chain or epoch mismatch.
-6. Continue account-state/execution-invariant work only if it can be done without changing Stable Core trading behavior during the acceptance window.
-7. Remove/bypass redundant historical wrappers only behind regression gates and only if the change cannot alter trading decisions during the clock.
-8. Remove the temporary clean-epoch migration safety shim only after the epoch has remained persistent through redeploys/restarts.
+The guard is fail-closed and behaved correctly. It must **not** be weakened or bypassed merely to resume trading.
 
-## Strategy / Risk Components to Preserve
+Current task: trace which market-data/provider/cache path produced the impossible `$18.40` LRCX exit price, contain that source, add regression coverage if needed, run both authoritative CI workflows, deploy, then confirm the bad quote cannot reach the exit boundary again before clearing any persisted halt.
 
-Preserve unless evidence identifies a specific defect:
+Do not clear the current quote-integrity halt until the source is understood and contained.
 
-- rules-engine execution authority
-- broad-market momentum discovery
-- canonical bounded detailed scanner
-- scanner ownership / recursion-safety contract
-- opening-surge and breakout participation logic
-- long/short regime capability
-- provider timeout/circuit/hygiene protections
-- ORLA/static no-data hygiene
-- persistent Railway volume
-- cycle-completion contract
-- after-hours market-closed skipping
-- paper-only execution boundary
-
-Risk boundaries remain:
+## Risk Boundaries — Preserve
 
 - soft daily-loss pause: `1.0%`
 - hard realized-loss halt: `2.5%`
@@ -263,66 +162,77 @@ Risk boundaries remain:
 - absolute daily-loss ceiling: `3.0%`
 - maximum configured account risk per trade at stop: `2.0%`
 
-Do not loosen these merely to create trades or accelerate validation.
+Do not weaken risk controls to create trades or accelerate validation.
 
-Historical scanner/discovery bounds worth preserving unless evidence says otherwise:
+The paper exit quote-integrity guard currently blocks long exit prices at or below 40% of entry and short exit prices at or above 2.5x entry. Treat it as a safety boundary unless later evidence proves the guard itself is incorrect.
 
-- retained discovery candidates: `160`
-- broad-momentum slots: `80`
-- base/fallback slots: `25`
-- detailed-scanner input: `110`
-- discovery cache: `900` seconds
+## Architecture Direction
 
-## Performance Lab — Preserve, Do Not Promote Execution Authority Yet
+Preferred direction remains **clean side-by-side v2 core / explicit ownership**, rather than indefinitely extending the legacy wrapper graph.
 
-Keep alive in parallel:
+Target ownership model:
 
-- ML recommendations/counterfactual research
-- MAE/MFE research and future stop/target optimization
-- adaptive/multi-asset shadow ranking
-- BTC / ETH / SOL research
-- LONA independent validation
-- alternate regime/participation policies
-- walk-forward, Monte Carlo, slippage, commission, and stress testing
+- one authoritative persistent state owner
+- one canonical execution ledger owner
+- one accounting owner
+- one orchestration/cycle owner
+- one risk owner
+- one market-data owner
+- explicit paper/live separation
+- no migration logic in normal steady-state startup
+- no duplicate state owners
+- fail-closed risk behavior
+- ML shadow-only unless explicitly promoted
+- reproducible CI and post-deploy validation
 
-Clean-forward evidence may now be collected and evaluated, but these systems must not destabilize Stable Core or obtain execution authority before explicit promotion gates are met.
-
-## Live-Readiness Direction
-
-Evidence-gated sequence:
-
-1. maintain clean accounting truth
-2. complete the unchanged Stable Paper validation window
-3. validate actual entry/exit/sizing/risk behavior from canonical records
-4. finish canonical account-state/invariant work
-5. run live-readiness simulation against broker-state assumptions
-6. only then consider a controlled live pilot
-
-Do not automatically choose an arbitrarily tiny live account if it would distort the proven architecture. Determine minimum viable live capital later from validated sizing/diversification rules.
+Do not destabilize the current Stable Paper runtime while building/refactoring toward that model.
 
 ## Non-Negotiable Boundaries
 
 - Paper-only until explicit live-readiness approval.
 - No fabricated historical ledger rows.
-- Historical recovery decision is final: **clean epoch**.
 - Rules remain sole execution authority.
 - ML remains shadow-only for execution.
 - Crypto/multi-asset execution remains disabled.
 - No risk-threshold weakening merely to create trades.
-- Preserve forensic archives before deleting temporary migration components.
-- Preserve the performance engine while simplifying accounting/runtime plumbing.
-- Any future halt caused by real risk metrics remains authoritative and must not be cleared by administrative-release code.
+- Do not alter account state to make an audit pass.
+- Do not clear a genuine safety halt without diagnosing its cause.
+- Preserve forensic evidence before deleting or migrating state.
+- Prefer targeted correctness fixes over broad rewrites.
+- Both authoritative GitHub CI workflows must pass before runtime changes are merged/deployed.
 
-## Immediate Continuation Prompt
+## User Operating Preferences — Permanent Project Protocol
 
-Start by reading this file, then inspect only the latest normal Railway audit unless it identifies a specific blocker:
+### Proactive Status / Next-Step Protocol
 
-`https://web-production-e1796.up.railway.app/paper/daily-audit`
+The user should **not** have to repeatedly ask `Done?` or `What next?`.
 
-The current question is no longer whether the clean epoch works. It does.
+During active project work:
 
-The current question is:
+1. Continue routine investigation/fix/PR/CI/review work automatically when it is within the already-agreed scope.
+2. When a task finishes, proactively report whether it passed or failed and immediately state the next action.
+3. When a task is still running, proactively state what is still in progress and what is being waited on.
+4. If a manual user action becomes unavoidable, provide exact numbered step-by-step instructions automatically, including exactly what to click/open and what result to send back.
+5. Do not ask the user to manually edit Python/runtime code when a GitHub/agent/connector path can perform the change.
+6. Stop for new approval only for genuinely high-impact actions outside the agreed scope, such as changing live authority, ML execution authority, risk limits, strategy intent, or manually altering account state.
 
-**Does Stable Paper remain internally consistent through each new clean execution and position lifecycle for at least five consecutive trading days without strategy/risk behavior changes?**
+### Conversation Continuity Protocol
 
-If yes, continue the acceptance clock. If a genuine accounting, execution, persistence, startup, or risk correctness defect appears, fix only that defect and determine whether the unchanged-evidence window must restart.
+Proactively warn the user **before** the current ChatGPT conversation becomes too long for safe continuity.
+
+Before recommending a new conversation:
+
+1. Update this `PROJECT_HANDOFF_CURRENT.md` with all material current state.
+2. Record current branch/PR/commit/deployment status, unresolved blocker(s), latest validation evidence, safety boundaries, and exact next action.
+3. Then provide one exact copy/paste continuation command for the new conversation.
+4. The user should never need to request this protocol again.
+
+Default continuation command template:
+
+```text
+Use the direct @GitHub connector and continue the Trading-bot project from sterlingfancher-cmyk/Trading-bot. Read PROJECT_HANDOFF_CURRENT.md first and treat it as the authoritative continuation state. Verify the current GitHub branch/PR/commit and latest canonical Railway daily audit before making changes. Continue from the exact next action documented in the handoff. Preserve all Stable Core safety, accounting, execution-authority, risk, paper-only, and ML-shadow boundaries. Do not restart completed historical investigations unless new evidence proves they are relevant. Continue routine in-scope fixes, PR review, CI validation, and handoff maintenance without waiting for repeated approvals. Proactively tell me when work completes, fails, is still in progress, or requires a manual step. If a manual step is unavoidable, give exact numbered instructions. Also follow the Conversation Continuity Protocol in PROJECT_HANDOFF_CURRENT.md: warn me before this conversation becomes too long, update the handoff completely, and give me the exact continuation command for the next chat.
+```
+
+## Exact Next Action
+
+Trace the source of the blocked LRCX `$18.401199340820312` exit quote through the market-data/provider/cache/position-management path. Preserve the quote-integrity halt while diagnosing. Fix only the proven source/boundary if a code defect is found, add focused regression coverage, run both authoritative CI workflows, deploy, then verify via the canonical daily audit and `/paper/exit-price-integrity-status` before considering any halt release.
