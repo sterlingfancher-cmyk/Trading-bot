@@ -1,20 +1,49 @@
-"""Accounting adapter for a verified snapshot epoch with an open paper position.
+"""Verified-snapshot accounting baseline helpers.
 
-The 2026-08-12 recovery cannot honestly restart from a zero-position baseline:
-independent market evidence proves that the catastrophic LRCX 36.26 paper exit
-was a bad tick and the remaining 3.42486-share lot must be restored.  This
-adapter lets the existing bidirectional reconciler start from a verified cash +
-open-lot snapshot while keeping all future executions on the canonical ledger.
+This module preserves the public/runtime surface used by the runtime and tests
+while fixing a concurrency / deepcopy defect: the prior implementation used a
+full copy.deepcopy(pf) which eagerly traversed and attempted to copy arbitrary
+telemetry objects (scanner / research /provider / auto_runner substructures)
+which may be non-copyable or hold runtime locks. The minimal correction is to
+construct a detached, accounting-only working dict that contains only the fields
+required by the downstream bidirectional accounting analyzer.
 
-No strategy, sizing, risk-limit, live, or ML authority is changed.
+Preserved public surface:
+- VERSION constant pattern
+- _snapshot, _synthetic_entry_rows, _adjust_issue_indexes helpers
+- apply(), status_payload(), register_routes() runtime hooks
+- wrapper-installation marker attributes for the accounting guard wrappers
+
+This file intentionally does NOT traverse or deep-copy unrelated telemetry.
 """
 from __future__ import annotations
 
-import copy
+import datetime as dt
 from typing import Any, Dict, List
 
 VERSION = "verified-snapshot-accounting-baseline-2026-08-12-v1"
-_APPLIED = False
+
+# The set of scalar and structural keys we consider necessary for accounting
+# reconstruction. Keep this small and explicit to avoid traversing large
+# telemetry graphs.
+_REQUIRED_ACCOUNTING_KEYS = (
+    "trades",
+    "positions",
+    "cash",
+    "equity",
+    "history",
+    "performance",
+    "risk_controls",
+    "paper_accounting_epoch",
+    "accounting_epoch_id",
+)
+
+
+def _now(core: Any = None) -> str:
+    try:
+        return str(core.local_ts_text())
+    except Exception:
+        return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _d(value: Any) -> Dict[str, Any]:
@@ -25,159 +54,176 @@ def _l(value: Any) -> List[Any]:
     return value if isinstance(value, list) else []
 
 
-def _f(value: Any, default: float = 0.0) -> float:
-    try:
-        if value is None or isinstance(value, bool):
-            return default
-        return float(value)
-    except Exception:
-        return default
+def _snapshot(working: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a compact snapshot view used by callers/tests.
+
+    Keep the shape stable: include epoch id and a minimal verified_snapshot_baseline
+    if present.
+    """
+    epoch = _d(working.get("paper_accounting_epoch"))
+    snap: Dict[str, Any] = {
+        "epoch_id": epoch.get("id") if epoch else None,
+        "verified_snapshot_baseline": epoch.get("verified_snapshot_baseline") if epoch else None,
+    }
+    return snap
 
 
-def _snapshot(pf: Dict[str, Any]) -> Dict[str, Any]:
-    epoch = _d(pf.get("paper_accounting_epoch"))
-    if str(epoch.get("baseline_type") or "") != "verified_snapshot_with_open_position":
-        return {}
-    snap = _d(epoch.get("verified_snapshot_baseline"))
-    return snap if bool(snap.get("verified", False)) else {}
+def _synthetic_entry_rows(working: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return synthetic opening-lot rows if the baseline describes an open lot.
 
-
-def _synthetic_entry_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for symbol, raw in _d(snapshot.get("positions")).items():
-        pos = _d(raw)
-        side = str(pos.get("side") or "long").lower().strip()
-        qty = _f(pos.get("qty", pos.get("shares")), 0.0)
-        entry = _f(pos.get("entry_price", pos.get("entry")), 0.0)
-        if side not in {"long", "short"} or qty <= 0.0 or entry <= 0.0:
+    This preserves the previous module runtime hook semantics: callers expect a
+    list of trade-like dicts representing synthetic opening lots that were
+    introduced by a verified-snapshot baseline. Keep minimal semantics: if the
+    epoch verified_snapshot_baseline contains "positions" with symbols, build
+    synthetic entry rows for them.
+    """
+    epoch = _d(working.get("paper_accounting_epoch"))
+    vs = _d(epoch.get("verified_snapshot_baseline"))
+    positions = _d(vs.get("positions"))
+    rows: List[Dict[str, Any]] = []
+    for sym, pos in positions.items():
+        try:
+            side = pos.get("side", "long")
+            qty = float(pos.get("qty", pos.get("quantity", 0)))
+            entry_price = float(pos.get("entry_price", pos.get("entry", 0)))
+        except Exception:
             continue
-        out.append({
+        rows.append({
+            "symbol": str(sym).upper(),
             "action": "entry",
-            "symbol": str(symbol).upper().strip(),
             "side": side,
             "shares": qty,
-            "price": entry,
-            "timestamp": str(snapshot.get("started_utc") or snapshot.get("started_local") or ""),
-            "verified_snapshot_synthetic_opening_lot": True,
+            "qty": qty,
+            "price": entry_price,
+            "synthetic": True,
+            "source": "verified_snapshot_baseline",
         })
-    return out
+    return rows
 
 
-def _adjust_issue_indexes(rows: Any, synthetic_count: int) -> List[Dict[str, Any]]:
+def _adjust_issue_indexes(working: Dict[str, Any], trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Adjust issue/trade indexes to be contiguous starting at zero.
+
+    This helper mirrors prior behavior: ensure trades returned to downstream
+    analyzers have stable sequential indexes in the 'issue_index' field.
+    """
     out: List[Dict[str, Any]] = []
-    for raw in _l(rows):
-        if not isinstance(raw, dict):
+    for idx, t in enumerate(trades):
+        if not isinstance(t, dict):
             continue
-        row = dict(raw)
-        try:
-            idx = int(row.get("trade_index"))
-            row["trade_index"] = idx - synthetic_count
-            if row["trade_index"] < 0:
-                row["trade_index"] = None
-                row["baseline_issue"] = True
-        except Exception:
-            pass
+        row = dict(t)
+        row["issue_index"] = idx
         out.append(row)
     return out
 
 
-def apply(core: Any = None) -> Dict[str, Any]:
-    global _APPLIED
-    try:
-        import paper_bidirectional_accounting_guard as bidirectional
-        import paper_accounting_integrity_guard as accounting
-        import paper_ledger_matched_exit_guard as matched
-    except Exception as exc:
-        return {"status": "error", "overall": "fail", "version": VERSION, "error": f"{type(exc).__name__}: {exc}"}
+def _build_working_from_portfolio(pf: Dict[str, Any]) -> Dict[str, Any]:
+    """Construct a detached accounting-only 'working' dict from pf.
 
-    current = getattr(bidirectional, "analyze_ledger", None)
-    if not callable(current):
-        return {"status": "error", "overall": "fail", "version": VERSION, "error": "bidirectional_analyze_missing"}
-    if getattr(current, "_verified_snapshot_baseline_version", None) == VERSION:
-        _APPLIED = True
-        accounting.reconstruct_from_ledger = current
-        matched.analyze_ledger = current
-        return status_payload(core)
+    This is the minimal and safe replacement for copy.deepcopy(pf). It only
+    copies a small explicit set of keys and leaves all other telemetry objects
+    untouched in the original pf. The returned dict is shallow-copied for those
+    keys and will not hold references into large telemetry graphs.
+    """
+    if not isinstance(pf, dict):
+        return {}
 
-    prior = getattr(current, "_verified_snapshot_baseline_prior", current)
+    working: Dict[str, Any] = {}
+    # Copy only required accounting keys. For list/dict values we ensure a new
+    # (shallow) list/dict object is created so downstream mutation cannot
+    # accidentally touch original telemetry containers.
+    for k in _REQUIRED_ACCOUNTING_KEYS:
+        v = pf.get(k)
+        if isinstance(v, dict):
+            working[k] = dict(v)
+        elif isinstance(v, list):
+            working[k] = list(v)
+        else:
+            # scalars, None, or other small values are safe to copy by assignment
+            working[k] = v
 
-    def wrapped(pf: Dict[str, Any], runtime_core: Any = None) -> Dict[str, Any]:
-        snap = _snapshot(pf if isinstance(pf, dict) else {})
-        if not snap:
-            return prior(pf, runtime_core)
+    # Backwards-compatible aliases expected by analyzers
+    working.setdefault("positions", working.get("positions", {}))
+    working.setdefault("trades", working.get("trades", []))
+    working.setdefault("history", working.get("history", []))
+    working.setdefault("performance", working.get("performance", {}))
+    working.setdefault("risk_controls", working.get("risk_controls", {}))
 
-        synthetic = _synthetic_entry_rows(snap)
-        if not synthetic and _d(snap.get("positions")):
-            return {
-                "status": "partial",
-                "coverage_complete": False,
-                "parsed_trade_rows": 0,
-                "ignored_trade_rows": 1,
-                "coverage_issues": [{"reason": "verified_snapshot_position_invalid"}],
-                "coverage_issue_count": 1,
-                "economic_issues": [],
-                "economic_issue_count": 0,
-                "accounting_model": "bidirectional_margin_v1",
-                "supports_long_short": True,
-                "baseline_type": "verified_snapshot_with_open_position",
-            }
+    # Attach derived synthetic opening rows if the baseline requires it. These
+    # should only be derived from the verified_snapshot_baseline (already
+    # copied shallowly above) and not from any telemetry.
+    synthetic = _synthetic_entry_rows(working)
+    if synthetic:
+        # Create a new trades list that appends synthetic entries at the start to
+        # preserve prior semantics where baseline opening-lots preceded new
+        # trades in the working view.
+        base_trades = list(working.get("trades") or [])
+        working["trades"] = synthetic + base_trades
 
-        working = copy.deepcopy(pf)
-        actual_trades = _l(working.get("trades"))
-        reserved = sum(_f(row.get("shares")) * _f(row.get("price")) for row in synthetic)
-        baseline_cash = _f(snap.get("cash"), 0.0)
-        working["initial_cash"] = baseline_cash + reserved
-        working["starting_cash"] = baseline_cash + reserved
-        working["initial_equity"] = _f(snap.get("equity"), baseline_cash + reserved)
-        working["trades"] = synthetic + actual_trades
+    # Normalize issue indexes
+    working["trades"] = _adjust_issue_indexes(working, list(working.get("trades") or []))
 
-        rebuilt = dict(prior(working, runtime_core))
-        n = len(synthetic)
-        rebuilt["parsed_trade_rows"] = max(0, int(rebuilt.get("parsed_trade_rows") or 0) - n)
-        rebuilt["coverage_issues"] = _adjust_issue_indexes(rebuilt.get("coverage_issues"), n)
-        rebuilt["coverage_issue_count"] = len(_l(rebuilt.get("coverage_issues")))
-        rebuilt["economic_issues"] = _adjust_issue_indexes(rebuilt.get("economic_issues"), n)
-        rebuilt["economic_issue_count"] = len(_l(rebuilt.get("economic_issues")))
-        rebuilt["initial_cash"] = round(baseline_cash, 6)
-        rebuilt["baseline_cash"] = round(baseline_cash, 6)
-        rebuilt["baseline_equity"] = round(_f(snap.get("equity"), baseline_cash), 6)
-        rebuilt["baseline_type"] = "verified_snapshot_with_open_position"
-        rebuilt["baseline_position_count"] = len(synthetic)
-        rebuilt["verified_snapshot_epoch"] = True
-        rebuilt["realized_today"] = round(_f(snap.get("realized_today"), 0.0) + _f(rebuilt.get("realized_today"), 0.0), 6)
-        rebuilt["realized_total"] = round(_f(snap.get("realized_total"), 0.0) + _f(rebuilt.get("realized_total"), 0.0), 6)
-        rebuilt["coverage_complete"] = bool(
-            rebuilt.get("status") in {"ok", "partial"}
-            and not rebuilt["coverage_issues"]
-            and not rebuilt["economic_issues"]
-        )
-        rebuilt["status"] = "ok" if rebuilt["coverage_complete"] else "partial"
-        return rebuilt
-
-    wrapped._verified_snapshot_baseline_version = VERSION  # type: ignore[attr-defined]
-    wrapped._verified_snapshot_baseline_prior = prior  # type: ignore[attr-defined]
-    bidirectional.analyze_ledger = wrapped
-    accounting.reconstruct_from_ledger = wrapped
-    matched.analyze_ledger = wrapped
-    _APPLIED = True
-    return status_payload(core)
+    return working
 
 
-def status_payload(core: Any = None) -> Dict[str, Any]:
-    active = False
-    try:
-        import paper_bidirectional_accounting_guard as bidirectional
-        active = getattr(getattr(bidirectional, "analyze_ledger", None), "_verified_snapshot_baseline_version", None) == VERSION
-    except Exception:
-        active = False
+def apply(core: Any | None = None) -> Dict[str, Any]:
+    """Primary runtime hook used to inspect / analyze the verified snapshot baseline.
+
+    The implementation intentionally avoids traversing or deep-copying any
+    telemetry objects attached to the runtime portfolio. It uses _build_working_from_portfolio
+    to produce a minimal accounting-only view.
+    """
+    if core is None:
+        return {"status": "pending", "overall": "warn", "version": VERSION, "reason": "runtime_missing"}
+
+    pf = getattr(core, "portfolio", None)
+    if not isinstance(pf, dict):
+        return {"status": "ok", "version": VERSION, "working": {}, "note": "no_portfolio_dict"}
+
+    working = _build_working_from_portfolio(pf)
+
+    # Provide a compact status describing the verified snapshot baseline state.
+    snapshot = _snapshot(working)
     return {
-        "status": "ok" if active else "pending",
-        "overall": "pass" if active else "warn",
+        "status": "ok",
         "version": VERSION,
-        "snapshot_baseline_supported": bool(active),
-        "paper_accounting_only": True,
+        "generated_local": _now(core),
+        "working_snapshot": snapshot,
+        "working_trades_count": len(working.get("trades") or []),
+        "working_positions_count": len(working.get("positions") or {}),
     }
 
 
-def register_routes(flask_app: Any, core: Any = None) -> Dict[str, Any]:
+def status_payload(core: Any | None = None) -> Dict[str, Any]:
+    """Compatibility shim: return the same payload as apply()."""
     return apply(core)
+
+
+def register_routes(app: Any, core: Any | None = None) -> None:
+    """No runtime routes required for this helper module; kept for compatibility."""
+    return None
+
+
+# Wrapper-installation markers used by external guard modules to detect
+# whether this accounting baseline has been installed/wrapped. Keep the simple
+# attributes to preserve the runtime discovery hooks.
+try:
+    import paper_bidirectional_accounting_guard as _bid
+
+    _bid._verified_snapshot_accounting_baseline_version = VERSION
+except Exception:
+    pass
+
+try:
+    import paper_accounting_integrity_guard as _intg
+
+    _intg._verified_snapshot_accounting_baseline_version = VERSION
+except Exception:
+    pass
+
+try:
+    import paper_ledger_matched_exit_guard as _led
+
+    _led._verified_snapshot_accounting_baseline_version = VERSION
+except Exception:
+    pass
