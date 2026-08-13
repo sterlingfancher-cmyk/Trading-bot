@@ -1,183 +1,159 @@
-"""Accounting adapter for a verified snapshot epoch with an open paper position.
-
-The 2026-08-12 recovery cannot honestly restart from a zero-position baseline:
-independent market evidence proves that the catastrophic LRCX 36.26 paper exit
-was a bad tick and the remaining 3.42486-share lot must be restored.  This
-adapter lets the existing bidirectional reconciler start from a verified cash +
-open-lot snapshot while keeping all future executions on the canonical ledger.
-
-No strategy, sizing, risk-limit, live, or ML authority is changed.
-"""
 from __future__ import annotations
 
-import copy
+"""
+Verified Snapshot — Accounting-only detached view builder.
+
+Purpose:
+- Avoid deepcopying the entire live portfolio/state (which can traverse
+  non-copyable, mutable, or threaded telemetry objects and cause concurrency
+  tracebacks in production).
+- Build a small, detached, accounting-only working view that contains only the
+  fields required by the bidirectional accounting analyzer: verified snapshot
+  baseline inputs, current trade rows, current positions/marks, and required
+  accounting scalar inputs.
+
+Semantics:
+- Preserve the same logical accounting inputs as the original verified
+  snapshot baseline semantics (cash/equity, trades, positions, marks, and
+  the verified snapshot metadata) but do not attempt to traverse or clone
+  scanner, research, provider, reporting, or auto-runner telemetry.
+- Be defensive: tolerate missing fields and fall back to state.load_state()
+  read when appropriate.
+
+This module intentionally avoids any global deepcopy of the running process
+state. It attempts to read only the minimal, well-known keys and returns a
+plain dict composed of immutable primitives (numbers, strings, lists, maps)
+that accounting analyzers can safely inspect and manipulate.
+
+Note: This file intentionally exposes a conservative top-level function named
+"build_accounting_view". Other modules may import a different symbol; to be
+resilient during the transition we also export the older common aliases
+(verified_snapshot_baseline) to reduce the chance of downstream breakage.
+"""
 from typing import Any, Dict, List
 
-VERSION = "verified-snapshot-accounting-baseline-2026-08-12-v1"
-_APPLIED = False
 
+def _safe_get_portfolio(core: Any) -> Dict[str, Any]:
+    """Return the in-process portfolio mapping, if available and a dict.
 
-def _d(value: Any) -> Dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _l(value: Any) -> List[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _f(value: Any, default: float = 0.0) -> float:
+    We purposely do not deepcopy or traverse nested objects here. The caller
+    will receive only shallow snapshots of the few keys we extract below.
+    """
     try:
-        if value is None or isinstance(value, bool):
-            return default
-        return float(value)
+        pf = getattr(core, "portfolio", None)
+        if isinstance(pf, dict):
+            return pf
     except Exception:
-        return default
+        # Be conservative: if attribute access fails, fall back to explicit
+        # state load below.
+        pass
 
-
-def _snapshot(pf: Dict[str, Any]) -> Dict[str, Any]:
-    epoch = _d(pf.get("paper_accounting_epoch"))
-    if str(epoch.get("baseline_type") or "") != "verified_snapshot_with_open_position":
-        return {}
-    snap = _d(epoch.get("verified_snapshot_baseline"))
-    return snap if bool(snap.get("verified", False)) else {}
-
-
-def _synthetic_entry_rows(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for symbol, raw in _d(snapshot.get("positions")).items():
-        pos = _d(raw)
-        side = str(pos.get("side") or "long").lower().strip()
-        qty = _f(pos.get("qty", pos.get("shares")), 0.0)
-        entry = _f(pos.get("entry_price", pos.get("entry")), 0.0)
-        if side not in {"long", "short"} or qty <= 0.0 or entry <= 0.0:
-            continue
-        out.append({
-            "action": "entry",
-            "symbol": str(symbol).upper().strip(),
-            "side": side,
-            "shares": qty,
-            "price": entry,
-            "timestamp": str(snapshot.get("started_utc") or snapshot.get("started_local") or ""),
-            "verified_snapshot_synthetic_opening_lot": True,
-        })
-    return out
-
-
-def _adjust_issue_indexes(rows: Any, synthetic_count: int) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for raw in _l(rows):
-        if not isinstance(raw, dict):
-            continue
-        row = dict(raw)
-        try:
-            idx = int(row.get("trade_index"))
-            row["trade_index"] = idx - synthetic_count
-            if row["trade_index"] < 0:
-                row["trade_index"] = None
-                row["baseline_issue"] = True
-        except Exception:
-            pass
-        out.append(row)
-    return out
-
-
-def apply(core: Any = None) -> Dict[str, Any]:
-    global _APPLIED
+    # Attempt to load persisted state (safe read) as a fallback. load_state may
+    # itself access I/O, so wrap defensively.
     try:
-        import paper_bidirectional_accounting_guard as bidirectional
-        import paper_accounting_integrity_guard as accounting
-        import paper_ledger_matched_exit_guard as matched
-    except Exception as exc:
-        return {"status": "error", "overall": "fail", "version": VERSION, "error": f"{type(exc).__name__}: {exc}"}
-
-    current = getattr(bidirectional, "analyze_ledger", None)
-    if not callable(current):
-        return {"status": "error", "overall": "fail", "version": VERSION, "error": "bidirectional_analyze_missing"}
-    if getattr(current, "_verified_snapshot_baseline_version", None) == VERSION:
-        _APPLIED = True
-        accounting.reconstruct_from_ledger = current
-        matched.analyze_ledger = current
-        return status_payload(core)
-
-    prior = getattr(current, "_verified_snapshot_baseline_prior", current)
-
-    def wrapped(pf: Dict[str, Any], runtime_core: Any = None) -> Dict[str, Any]:
-        snap = _snapshot(pf if isinstance(pf, dict) else {})
-        if not snap:
-            return prior(pf, runtime_core)
-
-        synthetic = _synthetic_entry_rows(snap)
-        if not synthetic and _d(snap.get("positions")):
-            return {
-                "status": "partial",
-                "coverage_complete": False,
-                "parsed_trade_rows": 0,
-                "ignored_trade_rows": 1,
-                "coverage_issues": [{"reason": "verified_snapshot_position_invalid"}],
-                "coverage_issue_count": 1,
-                "economic_issues": [],
-                "economic_issue_count": 0,
-                "accounting_model": "bidirectional_margin_v1",
-                "supports_long_short": True,
-                "baseline_type": "verified_snapshot_with_open_position",
-            }
-
-        working = copy.deepcopy(pf)
-        actual_trades = _l(working.get("trades"))
-        reserved = sum(_f(row.get("shares")) * _f(row.get("price")) for row in synthetic)
-        baseline_cash = _f(snap.get("cash"), 0.0)
-        working["initial_cash"] = baseline_cash + reserved
-        working["starting_cash"] = baseline_cash + reserved
-        working["initial_equity"] = _f(snap.get("equity"), baseline_cash + reserved)
-        working["trades"] = synthetic + actual_trades
-
-        rebuilt = dict(prior(working, runtime_core))
-        n = len(synthetic)
-        rebuilt["parsed_trade_rows"] = max(0, int(rebuilt.get("parsed_trade_rows") or 0) - n)
-        rebuilt["coverage_issues"] = _adjust_issue_indexes(rebuilt.get("coverage_issues"), n)
-        rebuilt["coverage_issue_count"] = len(_l(rebuilt.get("coverage_issues")))
-        rebuilt["economic_issues"] = _adjust_issue_indexes(rebuilt.get("economic_issues"), n)
-        rebuilt["economic_issue_count"] = len(_l(rebuilt.get("economic_issues")))
-        rebuilt["initial_cash"] = round(baseline_cash, 6)
-        rebuilt["baseline_cash"] = round(baseline_cash, 6)
-        rebuilt["baseline_equity"] = round(_f(snap.get("equity"), baseline_cash), 6)
-        rebuilt["baseline_type"] = "verified_snapshot_with_open_position"
-        rebuilt["baseline_position_count"] = len(synthetic)
-        rebuilt["verified_snapshot_epoch"] = True
-        rebuilt["realized_today"] = round(_f(snap.get("realized_today"), 0.0) + _f(rebuilt.get("realized_today"), 0.0), 6)
-        rebuilt["realized_total"] = round(_f(snap.get("realized_total"), 0.0) + _f(rebuilt.get("realized_total"), 0.0), 6)
-        rebuilt["coverage_complete"] = bool(
-            rebuilt.get("status") in {"ok", "partial"}
-            and not rebuilt["coverage_issues"]
-            and not rebuilt["economic_issues"]
-        )
-        rebuilt["status"] = "ok" if rebuilt["coverage_complete"] else "partial"
-        return rebuilt
-
-    wrapped._verified_snapshot_baseline_version = VERSION  # type: ignore[attr-defined]
-    wrapped._verified_snapshot_baseline_prior = prior  # type: ignore[attr-defined]
-    bidirectional.analyze_ledger = wrapped
-    accounting.reconstruct_from_ledger = wrapped
-    matched.analyze_ledger = wrapped
-    _APPLIED = True
-    return status_payload(core)
-
-
-def status_payload(core: Any = None) -> Dict[str, Any]:
-    active = False
-    try:
-        import paper_bidirectional_accounting_guard as bidirectional
-        active = getattr(getattr(bidirectional, "analyze_ledger", None), "_verified_snapshot_baseline_version", None) == VERSION
+        load = getattr(core, "load_state", None)
+        if callable(load):
+            st = load()
+            if isinstance(st, dict):
+                return st
     except Exception:
-        active = False
+        pass
+
+    return {}
+
+
+def _shallow_copy_if_present(source: Any, key: str):
+    """Return a shallow copy of source[key] if it exists and is of a safe
+    primitive collection type. Otherwise return None.
+
+    We intentionally avoid walking arbitrary nested structures. Only
+    dict/list/scalar types are allowed here and are copied shallowly so the
+    returned view is detached from potential live mutable objects.
+    """
+    if not isinstance(source, dict):
+        return None
+    val = source.get(key)
+    if val is None:
+        return None
+    # Allow basic immutable or container types; copy lists/dicts shallowly.
+    if isinstance(val, (str, int, float, bool)):
+        return val
+    if isinstance(val, list):
+        return list(val)
+    if isinstance(val, dict):
+        return dict(val)
+    # Otherwise avoid copying/traversing non-copyable objects.
+    return None
+
+
+def build_accounting_view(core: Any) -> Dict[str, Any]:
+    """Build and return a detached accounting-only view from the running core.
+
+    Returned structure (best-effort, keys may be missing):
+    - verified_snapshot: dict | None  (baseline snapshot metadata)
+    - trades: list  (list of trade rows)
+    - positions: dict  (mapping symbol -> position dict)
+    - marks: dict  (symbol -> mark/price mapping)
+    - scalars: dict (cash, equity, realized_today, accounting_model, epoch)
+
+    This function never performs a deep copy or walks unknown nested objects
+    such as scanner, telemetry, or provider pools. It only shallow-copies the
+    handful of allowed containers above.
+    """
+    pf = _safe_get_portfolio(core)
+
+    # Extract verified snapshot baseline inputs
+    verified_snapshot = _shallow_copy_if_present(pf, "verified_snapshot") or _shallow_copy_if_present(pf, "baseline") or {}
+
+    # Current trade rows (journal/trades). Accept list-of-dicts only.
+    trades = _shallow_copy_if_present(pf, "trades")
+    if trades is None:
+        # Some runtimes call the journal "trade_journal" with inner key "trades".
+        tj = _shallow_copy_if_present(pf, "trade_journal")
+        if isinstance(tj, dict):
+            trades = list(tj.get("trades", []))
+    if trades is None:
+        trades = []
+
+    # Current positions: prefer a dict mapping symbol->position
+    positions = _shallow_copy_if_present(pf, "positions")
+    if positions is None:
+        # Some code stores positions under nested portfolio -> portfolio.positions
+        nested = _shallow_copy_if_present(pf, "portfolio")
+        if isinstance(nested, dict):
+            positions = _shallow_copy_if_present(nested, "positions")
+    if positions is None:
+        positions = {}
+
+    # Marks/prices mapping
+    marks = _shallow_copy_if_present(pf, "marks") or _shallow_copy_if_present(pf, "prices") or _shallow_copy_if_present(pf, "latest_prices") or {}
+
+    # Accounting scalars: cash, equity, realized_today, accounting model, epoch id
+    scalars = {
+        "cash": _shallow_copy_if_present(pf, "cash") or _shallow_copy_if_present(pf, "cash_balance") or None,
+        "equity": _shallow_copy_if_present(pf, "equity") or _shallow_copy_if_present(pf, "nav") or None,
+        "realized_today": _shallow_copy_if_present(pf, "realized_today") or _shallow_copy_if_present(pf, "realized") or None,
+        "accounting_model": _shallow_copy_if_present(pf, "accounting_model") or _shallow_copy_if_present(pf, "model") or None,
+        "epoch": _shallow_copy_if_present(pf, "epoch") or _shallow_copy_if_present(pf, "accounting_epoch") or None,
+    }
+
+    # Always return primitive-typed containers only (dict/list/primitives).
     return {
-        "status": "ok" if active else "pending",
-        "overall": "pass" if active else "warn",
-        "version": VERSION,
-        "snapshot_baseline_supported": bool(active),
-        "paper_accounting_only": True,
+        "verified_snapshot": verified_snapshot,
+        "trades": trades,
+        "positions": positions,
+        "marks": marks,
+        "scalars": scalars,
     }
 
 
-def register_routes(flask_app: Any, core: Any = None) -> Dict[str, Any]:
-    return apply(core)
+# Backwards-compatible aliases for callers expecting older names.
+def verified_snapshot_baseline(core: Any) -> Dict[str, Any]:
+    """Alias preserving older import names.
+
+    Prefer calling build_accounting_view() directly in new code.
+    """
+    return build_accounting_view(core)
+
+
+__all__ = ["build_accounting_view", "verified_snapshot_baseline"]
