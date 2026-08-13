@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "final-daily-audit-compactor-2026-08-10-v4-stable-paper-release"
+VERSION = "final-daily-audit-compactor-2026-08-13-v5-active-epoch-runner-diagnostics"
 _REGISTERED = set()
 
 
@@ -45,12 +45,37 @@ def _ledger_status(core: Any = None) -> Dict[str, Any]:
         return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
 
 
-def _epoch_status(core: Any = None) -> Dict[str, Any]:
+def _legacy_epoch_status(core: Any = None) -> Dict[str, Any]:
     try:
         import clean_accounting_epoch as module
         return module.status_payload(core)
     except Exception as exc:
         return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _active_epoch_status(core: Any = None) -> Dict[str, Any]:
+    """Report the active persisted epoch before falling back to legacy migration status."""
+    portfolio = _d(getattr(core, "portfolio", None)) if core is not None else {}
+    epoch = _d(portfolio.get("paper_accounting_epoch"))
+    epoch_id = epoch.get("id") or portfolio.get("accounting_epoch_id")
+    if epoch or epoch_id:
+        return {
+            "status": "ok" if epoch_id else "warn",
+            "epoch_id": epoch_id,
+            "starting_cash": epoch.get("starting_cash"),
+            "starting_equity": epoch.get("starting_equity"),
+            "clean_start": epoch.get("clean_start"),
+            "zero_trade_baseline": epoch.get("zero_trade_baseline"),
+            "baseline_type": epoch.get("baseline_type"),
+            "historical_recovery_decision": epoch.get("historical_recovery_decision"),
+            "historical_evidence_archived": epoch.get("historical_evidence_archived"),
+            "validation_hold": epoch.get("validation_hold"),
+            "forward_validation_required": epoch.get("forward_validation_required"),
+            "prior_epoch_id": epoch.get("prior_epoch_id"),
+            "source": "active_portfolio_epoch",
+        }
+    legacy = _legacy_epoch_status(core)
+    return {**legacy, "source": "legacy_clean_epoch_status_fallback"}
 
 
 def _release_status(core: Any = None) -> Dict[str, Any]:
@@ -67,6 +92,19 @@ def _bidirectional_status(core: Any = None) -> Dict[str, Any]:
         return module.status_payload(core)
     except Exception as exc:
         return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _runner_diagnostics(core: Any = None) -> Dict[str, Any]:
+    portfolio = _d(getattr(core, "portfolio", None)) if core is not None else {}
+    auto = _d(portfolio.get("auto_runner"))
+    return {
+        "last_error": auto.get("last_error"),
+        "last_attempt": auto.get("last_attempt_local") or auto.get("last_attempt_ts"),
+        "last_attempt_source": auto.get("last_attempt_source"),
+        "last_run": auto.get("last_run_local") or auto.get("last_run_ts"),
+        "last_successful_run": auto.get("last_successful_run_local") or auto.get("last_successful_run_ts"),
+        "last_successful_run_source": auto.get("last_successful_run_source"),
+    }
 
 
 def _market_data_status(integrity: Dict[str, Any], provider: Dict[str, Any]) -> str:
@@ -102,9 +140,10 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
     next_action = _d(sections.get("12_next_action"))
     journal = _journal_status(core)
     ledger = _ledger_status(core)
-    epoch = _epoch_status(core)
+    epoch = _active_epoch_status(core)
     release = _release_status(core)
     bidirectional = _bidirectional_status(core)
+    runner_diagnostics = _runner_diagnostics(core)
 
     reasons = []
     for value in _l(risk.get("reasons")) + _l(integrity.get("reasons")):
@@ -148,11 +187,16 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "status": epoch.get("status"),
             "epoch_id": epoch.get("epoch_id"),
             "starting_cash": epoch.get("starting_cash"),
+            "starting_equity": epoch.get("starting_equity"),
             "clean_start": epoch.get("clean_start"),
             "zero_trade_baseline": epoch.get("zero_trade_baseline"),
+            "baseline_type": epoch.get("baseline_type"),
             "historical_recovery_decision": epoch.get("historical_recovery_decision"),
             "historical_evidence_archived": epoch.get("historical_evidence_archived"),
             "validation_hold": epoch.get("validation_hold"),
+            "forward_validation_required": epoch.get("forward_validation_required"),
+            "prior_epoch_id": epoch.get("prior_epoch_id"),
+            "source": epoch.get("source"),
             "validation_release_status": release.get("status"),
             "validation_released": release.get("released"),
             "validation_released_local": release.get("released_local"),
@@ -162,6 +206,8 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "enabled": runner.get("enabled"),
             "last_completed_cycle": runner.get("last_completed_cycle_contract") or runner.get("last_completed_cycle"),
             "last_completed_cycle_duration_seconds": runner.get("last_completed_cycle_duration_seconds"),
+            "active_error": bool(next_reason == "active_auto_runner_error"),
+            **runner_diagnostics,
         },
         "risk": {
             "status": risk.get("status"),
