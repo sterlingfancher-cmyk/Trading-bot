@@ -10,7 +10,6 @@ No strategy, sizing, risk-limit, live, or ML authority is changed.
 """
 from __future__ import annotations
 
-import copy
 from typing import Any, Dict, List
 
 VERSION = "verified-snapshot-accounting-baseline-2026-08-12-v1"
@@ -122,7 +121,15 @@ def apply(core: Any = None) -> Dict[str, Any]:
                 "baseline_type": "verified_snapshot_with_open_position",
             }
 
-        working = copy.deepcopy(pf)
+        working = {
+            "trades": [dict(row) if isinstance(row, dict) else row for row in _l(pf.get("trades"))],
+            "positions": {symbol: dict(raw) if isinstance(raw, dict) else raw for symbol, raw in _d(pf.get("positions")).items()},
+        }
+        for key in ("initial_cash", "starting_cash", "starting_equity", "initial_equity"):
+            if key in pf:
+                working[key] = pf.get(key)
+        if isinstance(pf.get("history"), list):
+            working["history"] = list(pf.get("history") or [])
         actual_trades = _l(working.get("trades"))
         reserved = sum(_f(row.get("shares")) * _f(row.get("price")) for row in synthetic)
         baseline_cash = _f(snap.get("cash"), 0.0)
