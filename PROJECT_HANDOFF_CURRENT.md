@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-13 after PR #54 deployment validation  
+Last updated: 2026-08-13 after PR #56 source-quote review  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Branch: `main`  
 Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
@@ -150,9 +150,46 @@ The quote-integrity guard captured this exact blocked exit attempt:
 
 The guard is fail-closed and behaved correctly. It must **not** be weakened or bypassed merely to resume trading.
 
-Current task: trace which market-data/provider/cache path produced the impossible `$18.40` LRCX exit price, contain that source, add regression coverage if needed, run both authoritative CI workflows, deploy, then confirm the bad quote cannot reach the exit boundary again before clearing any persisted halt.
+Root tracing established that `app.latest_price()` trusts the terminal yfinance 5-minute `Close`, caches it for 60 seconds, and position management then writes that price into the open position before exit evaluation. The existing market-data resilience layer sanitizes requests, disables threaded yfinance downloads, and handles timeout/backoff/provider-circuit behavior, but it does not validate a successful terminal bar for price plausibility.
 
-Do not clear the current quote-integrity halt until the source is understood and contained.
+Do not clear the current quote-integrity halt until the source is contained and post-deploy evidence confirms containment.
+
+## PR #56 — Source Quote Plausibility Containment — HOLD
+
+PR #56: `Reject catastrophic terminal quotes before latest-price cache`
+
+Branch:
+
+`fix-source-quote-plausibility-20260813`
+
+Current reviewed head before required correction:
+
+`890227d40db5fcb317ec4e563089e2e34d60faaa`
+
+Scope is intentionally narrow: extend `paper_exit_price_integrity_guard.py` with a paper-only source-level `latest_price` plausibility boundary and focused regression coverage. It does not rewrite `market_data_resilience.py`, alter account state, clear the persisted halt, change strategy/risk/sizing, or grant live/ML authority.
+
+Both authoritative GitHub CI workflows passed on that head:
+
+- `Repository Safety and Performance Audit Validation`: success
+- `Refactor, Ownership, Configuration, State, Decision, Runtime, Startup, and Research Audit`: success
+
+**Do not merge PR #56 yet despite green CI.** Manual review found a startup-order ownership hazard not covered by the current tests:
+
+- `_wrap_latest_price` captures `core.download_prices` once at guard installation time.
+- `market_data_resilience` is installed/reinstalled through `usercustomize` and its watchdog.
+- `paper_exit_price_integrity_guard` is applied through `data_integrity_startup_bridge` on a separate startup path.
+- Depending on registration timing, the captured function can be the pre-resilience `download_prices` implementation, so later fresh-price requests could bypass provider timeout/backoff/hygiene protections even though `core.download_prices` is subsequently wrapped correctly.
+
+Required surgical correction before merge:
+
+1. Do not capture `download_prices` outside the `latest_price` wrapper.
+2. At each fresh fetch, resolve the current `download = getattr(core, "download_prices", None)` and require it to be callable.
+3. Call that current owner so market-data resilience remains authoritative regardless of startup order.
+4. Add/adjust a focused regression test proving that if `core.download_prices` is replaced after quote-guard installation, `latest_price()` uses the replacement/current callable rather than the earlier one.
+5. Preserve the existing 60-second cache, source-plausibility thresholds, exit guard, account state, paper-only boundary, strategy/risk/sizing behavior, and live/ML authority.
+6. Rerun both authoritative CI workflows after the correction.
+
+A PR conversation hold comment documents this exact requirement. The connected GitHub safety layer blocked a direct runtime-code edit during the automated review, so no unsafe bypass was attempted and no merge occurred.
 
 ## Risk Boundaries — Preserve
 
@@ -235,4 +272,4 @@ Use the direct @GitHub connector and continue the Trading-bot project from sterl
 
 ## Exact Next Action
 
-Trace the source of the blocked LRCX `$18.401199340820312` exit quote through the market-data/provider/cache/position-management path. Preserve the quote-integrity halt while diagnosing. Fix only the proven source/boundary if a code defect is found, add focused regression coverage, run both authoritative CI workflows, deploy, then verify via the canonical daily audit and `/paper/exit-price-integrity-status` before considering any halt release.
+Keep PR #56 unmerged. Correct the startup-order ownership hazard so source-level `latest_price` plausibility validation dynamically calls the current `core.download_prices` owner rather than a captured pre-resilience reference. Add the focused replacement-owner regression test, rerun both authoritative CI workflows, then review the exact diff again. Only after that correction is green may PR #56 be merged/deployed. After deploy, verify the canonical `/paper/daily-audit` and `/paper/exit-price-integrity-status` confirm source plausibility is installed and the bad LRCX quote cannot reach the exit boundary before considering any halt release.
