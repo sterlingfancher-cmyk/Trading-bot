@@ -140,10 +140,9 @@ def _mark_source_block(symbol: str, issue: Dict[str, Any]) -> None:
 
 def _wrap_latest_price(core: Any) -> bool:
     current = getattr(core, "latest_price", None)
-    download = getattr(core, "download_prices", None)
     price_series = getattr(core, "price_series", None)
     cache = getattr(core, "_price_cache", None)
-    if not callable(current) or not callable(download) or not callable(price_series) or not isinstance(cache, dict):
+    if not callable(current) or not callable(price_series) or not isinstance(cache, dict):
         return False
 
     marker = "_latest_price_paper_exit_price_integrity_version"
@@ -165,6 +164,9 @@ def _wrap_latest_price(core: Any) -> bool:
                 return cached_price
 
         try:
+            download = getattr(core, "download_prices", None)
+            if not callable(download):
+                return None
             frame = download(key, period="1d", interval="5m")
             prices = price_series(frame, "Close")
             if len(prices) == 0:
