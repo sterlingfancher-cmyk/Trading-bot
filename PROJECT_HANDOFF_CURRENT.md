@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-14 after rejection of PR #67 and TEM duplicate-exit investigation retry  
+Last updated: 2026-08-14 after rejection of PR #68 and TEM duplicate-exit investigation retry  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
 
@@ -65,11 +65,21 @@ Issue #66 tracks this defect.
 
 ### PR #67 — Rejected and Closed Unmerged
 
-PR #67 claimed a narrow TEM ownership fix but changed only `ml_recommendation_counterfactual_ledger.py`, a shadow/counterfactual labeling module, without proving it emitted the two canonical TEM executions. Exact diff was materially unsafe: 32 additions and 1,092 deletions, including removal of most of that module and unrelated global-name changes. Both authoritative workflows completed `action_required`.
+PR #67 changed only `ml_recommendation_counterfactual_ledger.py`, a shadow/counterfactual labeling module, without proving it emitted the two canonical TEM executions. Exact diff was materially unsafe: 32 additions and 1,092 deletions, including removal of most of that module and unrelated global-name changes. Both authoritative workflows completed `action_required`. A formal `REQUEST_CHANGES` review was submitted and PR #67 was closed unmerged.
 
-A formal `REQUEST_CHANGES` review was submitted and PR #67 was closed unmerged. No code from PR #67 entered `main`.
+### PR #68 — Rejected and Closed Unmerged
 
-A stricter repo-agent retry is running as workflow `31822658884` from main commit `163dfee70efadbc79b16c356b6ed456698695f86`. It must trace the actual functions that emitted the two canonical TEM exit execution IDs, prove the duplicate-dispatch/close-ownership mechanism, and only then propose the smallest prospective execution-boundary fix with an exact production-shaped regression. It must not touch ML shadow matching as a substitute for execution-path evidence.
+Repo-agent workflow `31822658884` completed successfully and opened PR #68. Exact review showed the proposed guard was not production-shaped and was not wired into the actual canonical execution path:
+
+- it required `entry_execution_id`, but the actual v2 TEM exit rows in the production audit do not carry that field;
+- it read `size`/`qty`, while the actual rows use `shares`;
+- its regression mislabeled the real execution IDs: `d647d8...` is the TEM entry, `7b13d9...` is the first exit, and `3530db...` is the second exit;
+- it added an isolated helper rather than tracing or guarding the proven canonical close/append boundary;
+- both authoritative workflows completed `action_required`.
+
+A formal `REQUEST_CHANGES` review was submitted and PR #68 was closed unmerged. No code from PR #68 entered `main`.
+
+A stricter repo-agent retry is running as workflow `31827367087` from main commit `6799a050fcfae9c59c1208371ab6832395425814`. It must trace the actual canonical paper execution/close path that emitted execution IDs `7b13d9194a23407f926667b2f48d4057` and `3530dbf965db4894ba93b7098cec3696`, reproduce the literal production row shape (`action`, `shares`, epoch/execution metadata), and only then propose the smallest prospective position-consumption/idempotency fix at that proven boundary. Unwired helpers and synthetic schema substitutions are not acceptable.
 
 ## Remaining Separate Forensic Blocker — UCTT Contaminated Peak Provenance
 
@@ -132,4 +142,4 @@ Use the direct @GitHub connector and continue the Trading-bot project from sterl
 
 ## Exact Next Action
 
-Wait for repo-agent workflow `31822658884`. If it opens a PR, inspect the exact diff before considering advancement. Accept only a narrow prospective fix at the actual canonical paper execution/close boundary that prevents a second full close after the first has consumed the position, preserves all historical rows/state, includes the exact TEM production-shaped regression, and passes both authoritative workflows. Reject any ML-shadow-only explanation, broad rewrite, account-state repair, risk change, or quote-guard change. Do not merge automatically.
+Wait for repo-agent workflow `31827367087`. If it opens a PR, inspect the exact diff before considering advancement. Accept only a narrow prospective fix at the actual canonical paper execution/close boundary that prevents a second full close after the first has consumed the position, uses the literal production row schema and execution IDs, preserves all historical rows/state, includes the exact TEM production-shaped regression, and passes both authoritative workflows. Reject any unwired helper, synthetic schema substitution, ML-shadow-only explanation, broad rewrite, account-state repair, risk change, or quote-guard change. Do not merge automatically.
