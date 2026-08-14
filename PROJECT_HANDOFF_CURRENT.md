@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-14 after PR #65 rejection  
+Last updated: 2026-08-14 after stale PR #53 cleanup  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
 
@@ -49,6 +49,12 @@ The existing exit quote-integrity guard must not be weakened or cleared.
 ## Historical Workflow Check
 
 Repo-agent workflow `31737484525` completed successfully on 2026-08-13 from historical main commit `106a217ef60a6bc659ab2545ebf65e5cdc1e372e`. It is superseded by the later merged PR #56 state and requires no further action.
+
+## Repository Cleanup
+
+PR #53, an older repo-agent rewrite for the verified-snapshot accounting concurrency defect, remained open after the narrower compatible repair was accepted through PR #54. Exact review showed PR #53 replaced substantial portions of `verified_snapshot_accounting_baseline.py` (200 additions / 169 deletions across two files), removed established runtime surface/adapter behavior, and had no commit-status evidence on its head. It was closed unmerged on 2026-08-14 as stale/superseded. No runtime or account state changed.
+
+Previously rejected competing source/forensic PRs remain closed and must not be revived merely to resume trading.
 
 ## Remaining Blocker — UCTT Contaminated Peak Provenance
 
