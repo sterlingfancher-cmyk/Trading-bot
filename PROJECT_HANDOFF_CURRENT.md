@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-14 after rejection of PR #68 and TEM duplicate-exit investigation retry  
+Last updated: 2026-08-14 after rejection of PR #69  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
 
@@ -47,11 +47,11 @@ The existing source and exit quote-integrity guards must not be weakened or clea
 
 ## Historical Workflow Check
 
-Repo-agent workflow `31737484525` completed successfully on 2026-08-13 from historical main commit `106a217ef60a6bc659ab2545ebf65e5cdc1e372e`. It is superseded by merged PR #56 and requires no further action.
+Repo-agent workflow `31737484525` completed successfully on 2026-08-13 from historical main commit `106a217ef60a6bc659ab2545ebf65e5cdc1e372e`. It produced no directly actionable PR and is superseded by merged PR #56. No further action is required on that historical run.
 
 ## Current Highest-Priority Runtime Blocker — Duplicate TEM Full Exit
 
-Fresh production audit generated `2026-08-14 11:31:52 CDT` exposed a new accounting-integrity defect in the active v2 epoch:
+Production audit generated `2026-08-14 11:31:52 CDT` exposed a separate accounting-integrity defect in active v2:
 
 1. TEM `entry`, long `29.640567` @ `$54.885`, execution `d647d8a0580b44edbab0224e6c339bfd`;
 2. TEM full `exit`, long `29.640567` @ `$53.105`, execution `7b13d9194a23407f926667b2f48d4057`;
@@ -59,27 +59,25 @@ Fresh production audit generated `2026-08-14 11:31:52 CDT` exposed a new account
 
 The second exit has no reconstructed position left to close. Audit result: `exit_exceeds_reconstructed_position`, `coverage_complete=false`, `economic_issue_count=1`, accounting integrity not reconciled, and journal recovery candidate not trusted. The current account has only QQQ open.
 
-This is separate from the LRCX source fix and separate from the older UCTT contaminated-peak issue. Do not repair it by rewriting ledger history or account state. Required direction is a prospective, production-shaped duplicate-close/idempotency fix only after the actual canonical execution path is proven.
+This is separate from the LRCX source fix and from the older UCTT contaminated-peak issue. Do not repair it by rewriting ledger history or account state. Required direction is a prospective duplicate-close/idempotency fix only after the actual canonical execution/close boundary that emitted both exits is proven.
 
 Issue #66 tracks this defect.
 
 ### PR #67 — Rejected and Closed Unmerged
 
-PR #67 changed only `ml_recommendation_counterfactual_ledger.py`, a shadow/counterfactual labeling module, without proving it emitted the two canonical TEM executions. Exact diff was materially unsafe: 32 additions and 1,092 deletions, including removal of most of that module and unrelated global-name changes. Both authoritative workflows completed `action_required`. A formal `REQUEST_CHANGES` review was submitted and PR #67 was closed unmerged.
+PR #67 modified the ML counterfactual labeling module instead of the proven canonical paper execution path, with 32 additions and 1,092 deletions. Both authoritative workflows completed `action_required`. It was formally rejected and closed unmerged.
 
 ### PR #68 — Rejected and Closed Unmerged
 
-Repo-agent workflow `31822658884` completed successfully and opened PR #68. Exact review showed the proposed guard was not production-shaped and was not wired into the actual canonical execution path:
+PR #68 introduced an unwired helper using a schema that did not match production: it required `entry_execution_id`, read `size/qty` instead of `shares`, mislabeled the real TEM execution IDs, and did not trace or guard the real execution writer. Both authoritative workflows completed `action_required`. It was formally rejected and closed unmerged.
 
-- it required `entry_execution_id`, but the actual v2 TEM exit rows in the production audit do not carry that field;
-- it read `size`/`qty`, while the actual rows use `shares`;
-- its regression mislabeled the real execution IDs: `d647d8...` is the TEM entry, `7b13d9...` is the first exit, and `3530db...` is the second exit;
-- it added an isolated helper rather than tracing or guarding the proven canonical close/append boundary;
-- both authoritative workflows completed `action_required`.
+### PR #69 — Rejected and Closed Unmerged
 
-A formal `REQUEST_CHANGES` review was submitted and PR #68 was closed unmerged. No code from PR #68 entered `main`.
+Repo-agent workflow `31827367087` opened PR #69. Exact diff review showed it changed only `tests/test_duplicate_exit_tems.py` with 111 additions and no production code. The test demonstrated that `journal_truth` preserves both TEM exits if both already exist in `state.trades`, but it still did not trace the actual canonical close/append boundary or identify why the second full exit was emitted. It also substituted synthetic timestamps rather than the literal production timestamps while describing the fixture as production-shaped.
 
-A stricter repo-agent retry is running as workflow `31827367087` from main commit `6799a050fcfae9c59c1208371ab6832395425814`. It must trace the actual canonical paper execution/close path that emitted execution IDs `7b13d9194a23407f926667b2f48d4057` and `3530dbf965db4894ba93b7098cec3696`, reproduce the literal production row shape (`action`, `shares`, epoch/execution metadata), and only then propose the smallest prospective position-consumption/idempotency fix at that proven boundary. Unwired helpers and synthetic schema substitutions are not acceptable.
+Both authoritative workflows on head `e4364c65c48abbae2f1364cad8fe6009790d3a65` completed `action_required`. A formal `REQUEST_CHANGES` review was submitted and PR #69 was closed unmerged. No code from PR #69 entered `main`.
+
+Do not spawn another helper-only or evidence-only PR. The next code change must start from static tracing of the actual functions that mutate the position, append the state trade row, and append the canonical execution ledger row for a paper exit. Only if that trace proves a duplicate-dispatch or stale-position race should a minimal prospective guard be proposed at that boundary.
 
 ## Remaining Separate Forensic Blocker — UCTT Contaminated Peak Provenance
 
@@ -142,4 +140,4 @@ Use the direct @GitHub connector and continue the Trading-bot project from sterl
 
 ## Exact Next Action
 
-Wait for repo-agent workflow `31827367087`. If it opens a PR, inspect the exact diff before considering advancement. Accept only a narrow prospective fix at the actual canonical paper execution/close boundary that prevents a second full close after the first has consumed the position, uses the literal production row schema and execution IDs, preserves all historical rows/state, includes the exact TEM production-shaped regression, and passes both authoritative workflows. Reject any unwired helper, synthetic schema substitution, ML-shadow-only explanation, broad rewrite, account-state repair, risk change, or quote-guard change. Do not merge automatically.
+Do not modify the merged PR #56 LRCX source guard unless new deployed evidence proves a new source-level quote plausibility defect. For the fresh TEM accounting blocker, trace the actual canonical paper exit path in existing runtime code before creating another PR: identify the function that consumes/removes the position, the function that appends the state trade row, and the canonical ledger append for exit execution IDs. Determine whether the two TEM exits can be emitted by concurrent/stale cycle ownership or by two distinct close callers. Only after that path is proven may a narrow prospective idempotency/position-consumption fix be proposed. Any PR must use the literal production row schema and execution IDs, preserve all historical rows/state and all risk/authority boundaries, and pass both authoritative workflows. Reject helper-only, evidence-only, ML-shadow-only, broad rewrite, account-state repair, risk-change, or quote-guard-change proposals. Do not merge automatically.
