@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-14 after stale PR #53 cleanup  
+Last updated: 2026-08-14 after rejection of PR #67 and TEM duplicate-exit investigation retry  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
 
@@ -19,7 +19,7 @@ Starting cash: approximately `$10,768.497731`
 Starting equity: approximately `$11,885.824057`  
 Verified LRCX lot: `3.42486` long shares at approximately `$312.90`
 
-The append-only canonical execution ledger remains authoritative. Do not fabricate historical rows or revert to the old zero-position interpretation.
+The append-only canonical execution ledger remains authoritative. Do not fabricate, rewrite, or delete historical execution rows.
 
 ## Routine Validation
 
@@ -34,7 +34,6 @@ Do not manually run `/paper/run` unless an explicit future validation plan requi
 PR #56, `Reject catastrophic terminal quotes before latest-price cache`, is merged into `main` at commit `03352a57d4a9ffde913ffd62f80f505a28e88793`.
 
 Accepted behavior:
-
 - preserves the existing entry-anchored paper exit quote-integrity guard as an independent fail-closed layer;
 - preserves normal 60-second valid-price caching;
 - validates a fresh terminal close against recent same-symbol prior closes;
@@ -42,39 +41,46 @@ Accepted behavior:
 - dynamically resolves the current `core.download_prices` owner so startup order cannot bypass provider resilience;
 - changes no strategy, sizing, normal stops, risk thresholds, account state, live authority, or ML authority.
 
-Both authoritative repository workflows passed before PR #56 was merged. Post-deploy source status confirmed source plausibility installed and preserved the historical LRCX blocked attempt at approximately `$18.40` versus verified entry `$312.90`.
+Post-deploy evidence confirmed the source guard is active. A later legitimate LRCX exit recorded near `$333.12`, while the historical blocked bad attempt remains approximately `$18.40` versus verified entry `$312.90`.
 
-The existing exit quote-integrity guard must not be weakened or cleared.
+The existing source and exit quote-integrity guards must not be weakened or cleared.
 
 ## Historical Workflow Check
 
-Repo-agent workflow `31737484525` completed successfully on 2026-08-13 from historical main commit `106a217ef60a6bc659ab2545ebf65e5cdc1e372e`. It is superseded by the later merged PR #56 state and requires no further action.
+Repo-agent workflow `31737484525` completed successfully on 2026-08-13 from historical main commit `106a217ef60a6bc659ab2545ebf65e5cdc1e372e`. It is superseded by merged PR #56 and requires no further action.
 
-## Repository Cleanup
+## Current Highest-Priority Runtime Blocker — Duplicate TEM Full Exit
 
-PR #53, an older repo-agent rewrite for the verified-snapshot accounting concurrency defect, remained open after the narrower compatible repair was accepted through PR #54. Exact review showed PR #53 replaced substantial portions of `verified_snapshot_accounting_baseline.py` (200 additions / 169 deletions across two files), removed established runtime surface/adapter behavior, and had no commit-status evidence on its head. It was closed unmerged on 2026-08-14 as stale/superseded. No runtime or account state changed.
+Fresh production audit generated `2026-08-14 11:31:52 CDT` exposed a new accounting-integrity defect in the active v2 epoch:
 
-Previously rejected competing source/forensic PRs remain closed and must not be revived merely to resume trading.
+1. TEM `entry`, long `29.640567` @ `$54.885`, execution `d647d8a0580b44edbab0224e6c339bfd`;
+2. TEM full `exit`, long `29.640567` @ `$53.105`, execution `7b13d9194a23407f926667b2f48d4057`;
+3. a second TEM full `exit`, long `29.640567` @ `$52.905`, execution `3530dbf965db4894ba93b7098cec3696`.
 
-## Remaining Blocker — UCTT Contaminated Peak Provenance
+The second exit has no reconstructed position left to close. Audit result: `exit_exceeds_reconstructed_position`, `coverage_complete=false`, `economic_issue_count=1`, accounting integrity not reconciled, and journal recovery candidate not trusted. The current account has only QQQ open.
 
-The LRCX source defect is contained. A separate pre-fix UCTT quote anomaly remains relevant to the persisted intraday-peak risk halt:
+This is separate from the LRCX source fix and separate from the older UCTT contaminated-peak issue. Do not repair it by rewriting ledger history or account state. Required direction is a prospective, production-shaped duplicate-close/idempotency fix only after the actual canonical execution path is proven.
 
-1. `entry` UCTT, `side=long`, `price=93.22`;
-2. `partial_exit` UCTT, `side=long`, `price=337.54`, with no `entry_price` on that row;
-3. final `exit` UCTT, `side=long`, `price=94.025`.
+Issue #66 tracks this defect.
 
-The `$337.54` partial is approximately `3.62x` the entry and is implausible relative to surrounding execution prices. Current forensic policy is conservative: do not use stored `risk_controls.day_peak_equity` or stored `intraday_drawdown_pct` as independent support for any candidate corrected peak. If independent evidence is insufficient, report `insufficient_evidence` rather than alter state.
+### PR #67 — Rejected and Closed Unmerged
 
-**Do not clear the halt. Do not alter account state.**
+PR #67 claimed a narrow TEM ownership fix but changed only `ml_recommendation_counterfactual_ledger.py`, a shadow/counterfactual labeling module, without proving it emitted the two canonical TEM executions. Exact diff was materially unsafe: 32 additions and 1,092 deletions, including removal of most of that module and unrelated global-name changes. Both authoritative workflows completed `action_required`.
 
-## Forensic PR Review History
+A formal `REQUEST_CHANGES` review was submitted and PR #67 was closed unmerged. No code from PR #67 entered `main`.
 
-PR #58 through PR #65 were all rejected/closed unmerged. No code from these forensic attempts entered `main`.
+A stricter repo-agent retry is running as workflow `31822658884` from main commit `163dfee70efadbc79b16c356b6ed456698695f86`. It must trace the actual functions that emitted the two canonical TEM exit execution IDs, prove the duplicate-dispatch/close-ownership mechanism, and only then propose the smallest prospective execution-boundary fix with an exact production-shaped regression. It must not touch ML shadow matching as a substitute for execution-path evidence.
 
-PR #65 was produced by repo-agent workflow `31795511783` from unchanged main commit `03352a57d4a9ffde913ffd62f80f505a28e88793`. Its scope was reporting-only, but the exact diff contained a fatal correctness defect: inside the trade scan it evaluated `any(token in ... for k in (...))` even though `token` was undefined. An ordinary `entry` row would therefore execute that branch and raise `NameError` before the production-shaped sequence could be analyzed. Both authoritative workflows on PR #65 completed `action_required`. A formal `REQUEST_CHANGES` review was submitted and PR #65 was closed unmerged.
+## Remaining Separate Forensic Blocker — UCTT Contaminated Peak Provenance
 
-Do not continue generating forensic PRs merely to satisfy synthetic tests. Any future forensic helper must first be justified as necessary for the source-level repair workflow and must pass exact diff review plus both authoritative workflows.
+Historical sequence:
+1. UCTT `entry`, long, `$93.22`;
+2. UCTT `partial_exit`, long, `$337.54`;
+3. UCTT final `exit`, long, `$94.025`.
+
+The `$337.54` partial is implausible and may have contaminated stored intraday peak state. Current policy remains conservative: do not use stored `risk_controls.day_peak_equity` or stored `intraday_drawdown_pct` as independent evidence for a corrected peak. If independent evidence is insufficient, report `insufficient_evidence` rather than alter state.
+
+Do not clear the current halt or alter account state.
 
 ## Risk Boundaries — Preserve
 
@@ -90,7 +96,7 @@ No risk threshold is to be weakened to create trades or release the halt.
 ## Non-Negotiable Boundaries
 
 - Paper-only until explicit live-readiness approval.
-- No fabricated historical ledger rows.
+- No fabricated, deleted, or rewritten historical ledger rows.
 - Rules remain sole execution authority.
 - ML remains shadow-only for execution.
 - Do not alter account state to make an audit pass.
@@ -126,4 +132,4 @@ Use the direct @GitHub connector and continue the Trading-bot project from sterl
 
 ## Exact Next Action
 
-Treat PR #56 as the accepted source-level containment and do not modify it unless new deployed evidence proves a source-level defect remains. Do not spawn another forensic helper PR automatically. On the next meaningful runtime validation, inspect the canonical `/paper/daily-audit` and `/paper/exit-price-integrity-status`. Only if those show a new source-level quote-plausibility failure should a narrow source fix be considered. The persisted UCTT/risk-halt provenance remains a separate forensic/account-state decision and must not be resolved by changing state or weakening guards without independent evidence and explicit review.
+Wait for repo-agent workflow `31822658884`. If it opens a PR, inspect the exact diff before considering advancement. Accept only a narrow prospective fix at the actual canonical paper execution/close boundary that prevents a second full close after the first has consumed the position, preserves all historical rows/state, includes the exact TEM production-shaped regression, and passes both authoritative workflows. Reject any ML-shadow-only explanation, broad rewrite, account-state repair, risk change, or quote-guard change. Do not merge automatically.
