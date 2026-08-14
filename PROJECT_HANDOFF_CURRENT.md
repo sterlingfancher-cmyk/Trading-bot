@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-13 after PR #56 source-quote review  
+Last updated: 2026-08-14 after merged PR #56 and post-deploy quote/risk forensics  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Branch: `main`  
 Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
@@ -9,7 +9,7 @@ This file is the authoritative continuation point. Older `PROJECT_HANDOFF_*` fil
 
 ## Executive Status
 
-The project is in **Stable Core repair/validation + Performance Lab shadow** mode.
+The project remains in **Stable Core repair/validation + Performance Lab shadow** mode.
 
 Runtime remains **paper-only**. Rules remain the sole execution authority. Live authority is disabled. ML/AI, MAE/MFE optimization, crypto/multi-asset ranking, LONA, adaptive policies, and other research systems remain shadow/research-only unless an explicit later promotion decision is made.
 
@@ -17,35 +17,22 @@ The correct architectural direction remains: preserve the performance engine, si
 
 ## Canonical Service / State
 
-Use only this Railway service for the Stable Paper runtime:
+Use only this Railway service for Stable Paper validation:
 
 `https://web-production-e1796.up.railway.app`
 
-Do **not** use `trading-bot-clean.up.railway.app` for validation. It was proven to be attached to a different stale/legacy persistent state lineage (`/data/state.json`) and produced invalid accounting/risk state.
+Do **not** use `trading-bot-clean.up.railway.app`; it is attached to a stale/legacy persistent-state lineage.
 
-The canonical service uses `/app/data/state.json` and carries the verified Stable Paper v2 state.
+Canonical persistent state remains `/app/data/state.json`.
 
 ## Current Accounting Epoch — Authoritative
 
-Current epoch:
+Current epoch: `stable-paper-v2-20260812-verified01`  
+Prior epoch: `stable-paper-v1-20260810-clean01`  
+Baseline type: `verified_snapshot_with_open_position`  
+Historical recovery decision: `verified_snapshot_rollforward`
 
-`stable-paper-v2-20260812-verified01`
-
-Prior epoch:
-
-`stable-paper-v1-20260810-clean01`
-
-Current baseline type:
-
-`verified_snapshot_with_open_position`
-
-Historical recovery decision:
-
-`verified_snapshot_rollforward`
-
-Why v2 exists: independent evidence proved the catastrophic LRCX paper exit near `$36.26` was a bad tick. The legitimate remaining LRCX lot therefore could not honestly be discarded as if the account had a zero-position clean baseline.
-
-Verified v2 starting state:
+Verified v2 starting state remains:
 
 - starting cash: approximately `$10,768.497731`
 - starting equity: approximately `$11,885.824057`
@@ -63,21 +50,21 @@ Required invariants:
 
 - `chain_valid: true`
 - `authoritative_for_new_executions: true`
-- ledger epoch must equal `stable-paper-v2-20260812-verified01`
-- every new state execution must map to a canonical `execution_id`
+- ledger epoch equals `stable-paper-v2-20260812-verified01`
+- every new state execution maps to a canonical `execution_id`
 - no fabricated rows
 
 ## Routine Operator Test
 
-Use this one routine test:
+Routine:
 
 `https://web-production-e1796.up.railway.app/paper/daily-audit`
 
-For targeted forensic detail only when the routine audit identifies a blocker:
+Full forensic detail only when needed:
 
 `https://web-production-e1796.up.railway.app/paper/daily-audit?full=1`
 
-Useful targeted diagnostics currently include:
+Targeted diagnostics:
 
 - `/paper/runtime-errors`
 - `/paper/exit-price-integrity-status`
@@ -86,110 +73,96 @@ Useful targeted diagnostics currently include:
 
 Do not manually run `/paper/run` unless a future explicit validation plan requires it.
 
-## PR #54 — Verified-Snapshot Accounting Concurrency Fix
+## PR #56 — Source-Level LRCX Quote Plausibility Fix — MERGED
 
-Production traceback proved an automatic cycle could fail with:
+PR #56, `Reject catastrophic terminal quotes before latest-price cache`, is merged into `main` at merge commit:
 
-`RuntimeError: dictionary changed size during iteration`
+`03352a57d4a9ffde913ffd62f80f505a28e88793`
 
-Exact boundary:
+Accepted head before merge:
 
-`verified_snapshot_accounting_baseline.py` called `copy.deepcopy(pf)` while unrelated live telemetry dictionaries were being mutated by another runtime thread.
+`51007a9e1b9951e70570be40b2a1860af87e4625`
 
-The accepted fix was surgical: preserve the original verified-snapshot accounting adapter and replace only the whole-portfolio deepcopy with a detached accounting-only working view containing the fields required by the bidirectional accounting analyzer.
+The merged change is the accepted narrow source-level containment for the proven LRCX bad quote path:
 
-Final runtime-file diff on PR #54 was only 9 additions / 2 deletions, plus focused regression coverage. Both authoritative CI workflows passed.
+- preserves the existing paper exit-integrity guard as an independent second fail-closed layer;
+- preserves the normal 60-second valid-price cache behavior;
+- compares a fresh 1-day/5-minute terminal close with recent same-symbol prior closes;
+- rejects catastrophic terminal outliers before cache/return;
+- dynamically resolves the current `core.download_prices` owner at each fresh fetch so later market-data resilience wrapping cannot be bypassed by startup order;
+- does not alter strategy, sizing, thresholds, normal stops, account state, order authority, live authority, or ML authority.
 
-Post-deploy evidence on 2026-08-13 showed:
+Both authoritative repository CI workflows passed on the corrected PR head before merge.
 
-- runner `active_error: false`
-- automatic cycles completing successfully
-- accounting coverage complete
-- zero accounting/economic issues
-- canonical v2 epoch aligned
+## Post-Deploy Source-Guard Evidence
 
-`last_error` may still display the historical dictionary error as telemetry, but it is not active when `active_error: false` and a later successful run exists.
+Canonical `/paper/exit-price-integrity-status` after deployment reported:
 
-## Current 2026-08-13 Post-Deploy Account Evidence
+- `status: ok`
+- `overall: pass`
+- version `paper-exit-price-integrity-2026-08-13-v2-source-plausibility`
+- `source_plausibility.installed: true`
+- recent-prior-bars: `24`
+- minimum-prior-bars: `6`
+- minimum price ratio: `0.4`
+- maximum price ratio: `2.5`
 
-Latest compact audit supplied after PR #54 deployment:
+The endpoint still preserves the historical active LRCX block evidence:
 
-- cash: approximately `$7,836.229902`
-- equity: approximately `$15,091.64`
-- positions: `LRCX`, `QQQ`, `UCTT`, `TEM`
-- realized today: approximately `$1,403.75`
-- unrealized P&L: approximately `$1,847.75`
-- accounting coverage complete: `true`
-- coverage issues: `0`
-- economic issues: `0`
-- parsed post-v2 trade rows: `4`
-- reconstructed positions match runtime positions
-- canonical ledger chain valid
-- canonical current epoch rows: `8`
-
-Forward evidence has now produced at least one valid post-recovery exact lifecycle row. `promotion_evidence_eligible: true` does **not** grant ML execution authority; ML remains shadow-only.
-
-## Active Blocker — Paper Exit Quote Integrity Halt
-
-The current runtime blocker is **not** the prior dictionary concurrency failure.
-
-Active risk state:
-
-- `halted: true`
-- `self_defense_active: true`
-- halt reason: `paper exit quote integrity halt`
-
-The quote-integrity guard captured this exact blocked exit attempt:
-
-- symbol: `LRCX`
 - boundary: `exit_position`
+- symbol: `LRCX`
 - verified entry: `$312.90`
-- attempted exit price: `$18.401199340820312`
+- attempted exit: `$18.401199340820312`
 - price/entry ratio: approximately `0.05881`
 - reason: `catastrophic_long_exit_price_outlier`
 
-The guard is fail-closed and behaved correctly. It must **not** be weakened or bypassed merely to resume trading.
+This confirms the source-level protection is installed without weakening the existing fail-closed exit guard.
 
-Root tracing established that `app.latest_price()` trusts the terminal yfinance 5-minute `Close`, caches it for 60 seconds, and position management then writes that price into the open position before exit evaluation. The existing market-data resilience layer sanitizes requests, disables threaded yfinance downloads, and handles timeout/backoff/provider-circuit behavior, but it does not validate a successful terminal bar for price plausibility.
+## Current Runtime Blocker — Contaminated Intraday Peak Provenance
 
-Do not clear the current quote-integrity halt until the source is contained and post-deploy evidence confirms containment.
+The source-level LRCX defect is contained, but the canonical full daily audit still reports a risk halt:
 
-## PR #56 — Source Quote Plausibility Containment — HOLD
+- current equity: approximately `$13,321.43`
+- net daily loss: `0.0%`
+- hard intraday drawdown threshold: `2.5%`
+- reported intraday drawdown: approximately `11.73%`
+- halt reason: `performance risk hard intraday drawdown halt (2.50%)`
+- self-defense active: `true`
 
-PR #56: `Reject catastrophic terminal quotes before latest-price cache`
+Current-epoch execution evidence includes:
 
-Branch:
+- UCTT entry at `$93.22`
+- UCTT partial exit at `$337.54`
+- UCTT final exit at `$94.025`
 
-`fix-source-quote-plausibility-20260813`
+The `$337.54` partial exit is economically implausible relative to the surrounding UCTT prices and occurred before PR #56 was deployed. Current evidence therefore points to contaminated `day_peak_equity` provenance from the earlier bad quote rather than a current economic loss.
 
-Current reviewed head before required correction:
+The risk calibration currently computes intraday drawdown from the stored `risk_controls.day_peak_equity`, so an inflated persisted peak can legitimately keep the 2.5% hard halt active until provenance is proven and any repair is separately authorized.
 
-`890227d40db5fcb317ec4e563089e2e34d60faaa`
+**Do not clear or weaken the halt. Do not alter account state.**
 
-Scope is intentionally narrow: extend `paper_exit_price_integrity_guard.py` with a paper-only source-level `latest_price` plausibility boundary and focused regression coverage. It does not rewrite `market_data_resilience.py`, alter account state, clear the persisted halt, change strategy/risk/sizing, or grant live/ML authority.
+## Rejected Forensic Attempt — PR #58
 
-Both authoritative GitHub CI workflows passed on that head:
+PR #58, `Fix forensic_intraday_peak_diagnostic indentation and add focused reporting + tests`, was reviewed and **closed unmerged**.
 
-- `Repository Safety and Performance Audit Validation`: success
-- `Refactor, Ownership, Configuration, State, Decision, Runtime, Startup, and Research Audit`: success
+Reasons it was not safe to advance:
 
-**Do not merge PR #56 yet despite green CI.** Manual review found a startup-order ownership hazard not covered by the current tests:
+- candidate corrected peak reused the suspect stored peak, so contaminated evidence could not be excluded;
+- the diagnostic modeled risk fields at the wrong state level instead of canonical `portfolio["risk_controls"]` structure;
+- both authoritative workflows were `action_required`;
+- it was therefore not decision-grade evidence for a state-repair decision.
 
-- `_wrap_latest_price` captures `core.download_prices` once at guard installation time.
-- `market_data_resilience` is installed/reinstalled through `usercustomize` and its watchdog.
-- `paper_exit_price_integrity_guard` is applied through `data_integrity_startup_bridge` on a separate startup path.
-- Depending on registration timing, the captured function can be the pre-resilience `download_prices` implementation, so later fresh-price requests could bypass provider timeout/backoff/hygiene protections even though `core.download_prices` is subsequently wrapped correctly.
+No runtime or account-state change from PR #58 was accepted.
 
-Required surgical correction before merge:
+## Follow-Up Repo-Agent Outcomes
 
-1. Do not capture `download_prices` outside the `latest_price` wrapper.
-2. At each fresh fetch, resolve the current `download = getattr(core, "download_prices", None)` and require it to be callable.
-3. Call that current owner so market-data resilience remains authoritative regardless of startup order.
-4. Add/adjust a focused regression test proving that if `core.download_prices` is replaced after quote-guard installation, `latest_price()` uses the replacement/current callable rather than the earlier one.
-5. Preserve the existing 60-second cache, source-plausibility thresholds, exit guard, account state, paper-only boundary, strategy/risk/sizing behavior, and live/ML authority.
-6. Rerun both authoritative CI workflows after the correction.
+Follow-up repo-agent workflow `31766243285` failed before producing an acceptable replacement PR. Its proposal was invalid JSON and attempted to broaden into `performance_risk_calibration.py`, outside the permitted reporting-only forensic scope. No code from that run was accepted.
 
-A PR conversation hold comment documents this exact requirement. The connected GitHub safety layer blocked a direct runtime-code edit during the automated review, so no unsafe bypass was attempted and no merge occurred.
+A later documentation-only repo-agent run `31769443049` also failed safely because `scripts/repo_agent.py` intentionally protects `PROJECT_HANDOFF_CURRENT.md` from agent modification. The failure was:
+
+`RuntimeError: Agent attempted to modify protected path: PROJECT_HANDOFF_CURRENT.md`
+
+That is a guardrail behavior, not a runtime-bot failure. This handoff is therefore being maintained through the connected GitHub workflow instead of bypassing the repo-agent path restriction.
 
 ## Risk Boundaries — Preserve
 
@@ -201,7 +174,7 @@ A PR conversation hold comment documents this exact requirement. The connected G
 
 Do not weaken risk controls to create trades or accelerate validation.
 
-The paper exit quote-integrity guard currently blocks long exit prices at or below 40% of entry and short exit prices at or above 2.5x entry. Treat it as a safety boundary unless later evidence proves the guard itself is incorrect.
+The paper exit quote-integrity guard blocks long exit prices at or below 40% of entry and short exit prices at or above 2.5x entry. Preserve it unless later evidence proves the guard itself is incorrect.
 
 ## Architecture Direction
 
@@ -272,4 +245,17 @@ Use the direct @GitHub connector and continue the Trading-bot project from sterl
 
 ## Exact Next Action
 
-Keep PR #56 unmerged. Correct the startup-order ownership hazard so source-level `latest_price` plausibility validation dynamically calls the current `core.download_prices` owner rather than a captured pre-resilience reference. Add the focused replacement-owner regression test, rerun both authoritative CI workflows, then review the exact diff again. Only after that correction is green may PR #56 be merged/deployed. After deploy, verify the canonical `/paper/daily-audit` and `/paper/exit-price-integrity-status` confirm source plausibility is installed and the bad LRCX quote cannot reach the exit boundary before considering any halt release.
+Do **not** mutate persistent state or clear the active halt.
+
+Obtain a narrow, paper-only, **read-only forensic diagnostic** that uses the canonical nested `portfolio["risk_controls"]` state and actual current-epoch execution rows. It must:
+
+1. report stored day-start equity, stored day-peak equity, current equity, and the resulting current intraday drawdown;
+2. identify and quarantine the UCTT `$337.54` partial exit as unsupported peak evidence rather than reusing the suspect stored peak;
+3. reconstruct a candidate supportable intraday peak only from verified current-epoch equity/execution evidence that is independent of the contaminated quote;
+4. report whether the existing 2.5% hard intraday-drawdown halt would still be warranted under that candidate;
+5. remain reporting-only: no cash, position, trade, ledger, P&L, risk-control, threshold, halt, live-authority, or ML-authority mutation;
+6. add focused tests reproducing the production nested state shape and proving no mutation;
+7. run both authoritative repository CI workflows;
+8. review the exact diff before any merge.
+
+Only after that evidence is green and decision-grade should a separate explicit state-repair decision be considered.
