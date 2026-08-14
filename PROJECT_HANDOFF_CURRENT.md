@@ -1,12 +1,12 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-14 after PR #64 rejection  
+Last updated: 2026-08-14 after PR #65 rejection  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
 
 ## Executive Status
 
-Stable Core remains in repair/validation with Performance Lab shadow-only. Runtime is paper-only. Rules remain the sole execution authority. Live authority is disabled. ML/AI remains shadow-only.
+Stable Core remains in repair/validation with Performance Lab shadow-only. Runtime remains paper-only. Rules remain the sole execution authority. Live authority is disabled. ML/AI remains shadow-only.
 
 Do not change strategy, sizing, thresholds, risk controls, account state, halt state, paper/live authority, or ML authority merely to resume trading.
 
@@ -46,46 +46,29 @@ Both authoritative repository workflows passed before PR #56 was merged. Post-de
 
 The existing exit quote-integrity guard must not be weakened or cleared.
 
-## Current Blocker — UCTT Contaminated Peak Provenance
+## Historical Workflow Check
 
-The source-level LRCX defect is contained. The remaining risk-halt investigation concerns a separate pre-fix UCTT quote anomaly in the current epoch:
+Repo-agent workflow `31737484525` completed successfully on 2026-08-13 from historical main commit `106a217ef60a6bc659ab2545ebf65e5cdc1e372e`. It is superseded by the later merged PR #56 state and requires no further action.
+
+## Remaining Blocker — UCTT Contaminated Peak Provenance
+
+The LRCX source defect is contained. A separate pre-fix UCTT quote anomaly remains relevant to the persisted intraday-peak risk halt:
 
 1. `entry` UCTT, `side=long`, `price=93.22`;
 2. `partial_exit` UCTT, `side=long`, `price=337.54`, with no `entry_price` on that row;
 3. final `exit` UCTT, `side=long`, `price=94.025`.
 
-The `$337.54` partial is about `3.62x` the entry and is implausible relative to surrounding execution prices. For this favorable spike on a long position, the applicable provenance is the already-merged symmetric source-level terminal-price plausibility rule (`>=2.50x` high-side), not the adverse-only long exit-integrity condition.
-
-Current audit evidence previously showed current equity around `$13,321.43`, net daily loss `0.0%`, hard intraday threshold `2.5%`, and reported intraday drawdown around `11.73%`. Risk calibration trusts stored `risk_controls.day_peak_equity`, so a poisoned peak can keep the hard halt active.
+The `$337.54` partial is approximately `3.62x` the entry and is implausible relative to surrounding execution prices. Current forensic policy is conservative: do not use stored `risk_controls.day_peak_equity` or stored `intraday_drawdown_pct` as independent support for any candidate corrected peak. If independent evidence is insufficient, report `insufficient_evidence` rather than alter state.
 
 **Do not clear the halt. Do not alter account state.**
 
 ## Forensic PR Review History
 
-PR #58–#63 were all rejected/closed unmerged for production-shape, provenance, or threshold correctness defects. No code from them entered `main`.
+PR #58 through PR #65 were all rejected/closed unmerged. No code from these forensic attempts entered `main`.
 
-PR #64, `forensic: reporting-only quarantine of UCTT high-spike partial (regression)`, was reviewed on 2026-08-14 and **closed unmerged**. It claimed to reproduce the exact production sequence, but its regression changed the real middle action from `partial_exit` to `exit` and explicitly asserted `exit`. Therefore it still did not prove the forensic logic handles the persisted production row shape. Both authoritative workflows on PR #64 were also `action_required`. A formal `REQUEST_CHANGES` review was submitted before closure.
+PR #65 was produced by repo-agent workflow `31795511783` from unchanged main commit `03352a57d4a9ffde913ffd62f80f505a28e88793`. Its scope was reporting-only, but the exact diff contained a fatal correctness defect: inside the trade scan it evaluated `any(token in ... for k in (...))` even though `token` was undefined. An ordinary `entry` row would therefore execute that branch and raise `NameError` before the production-shaped sequence could be analyzed. Both authoritative workflows on PR #65 completed `action_required`. A formal `REQUEST_CHANGES` review was submitted and PR #65 was closed unmerged.
 
-No runtime, account, halt, ledger, persistence, strategy, sizing, risk, live-authority, ML-authority, or quote-guard state was changed by PR #64.
-
-## Active Replacement Work
-
-A new repo-agent correction was triggered from unchanged main commit `03352a57d4a9ffde913ffd62f80f505a28e88793` after PR #64 closure. Repo-agent workflow `31795511783` is the active replacement run.
-
-Required exact fixture and semantics:
-
-1. preserve `entry UCTT side=long price=93.22`;
-2. preserve `partial_exit UCTT side=long price=337.54` exactly — do not normalize it to `exit`;
-3. preserve final `exit UCTT side=long price=94.025`;
-4. explicitly recognize `partial_exit` as an exit-like row for forensic correlation;
-5. correlate the partial to the most recent prior same-symbol, same-side entry;
-6. quarantine only the `$337.54` partial;
-7. preserve source plausibility factors `0.40 / 2.50` and hard intraday threshold `0.025` exactly;
-8. do not use stored `day_peak_equity` or `intraday_drawdown_pct` as candidate-peak support;
-9. if independent peak evidence is absent, return `conclusion=insufficient_evidence` and `candidate_peak_equity=None`;
-10. reporting-only and input-immutable; no runtime, persistence, risk, halt, account, ledger, live, ML, or quote-guard mutation.
-
-Review the exact resulting PR diff and both authoritative workflows before advancement. Do not merge merely because a synthetic unit test passes.
+Do not continue generating forensic PRs merely to satisfy synthetic tests. Any future forensic helper must first be justified as necessary for the source-level repair workflow and must pass exact diff review plus both authoritative workflows.
 
 ## Risk Boundaries — Preserve
 
@@ -137,4 +120,4 @@ Use the direct @GitHub connector and continue the Trading-bot project from sterl
 
 ## Exact Next Action
 
-Wait for repo-agent workflow `31795511783` to produce its replacement PR. Inspect the exact diff for the literal `partial_exit` production row, most-recent prior same-symbol/same-side entry correlation, single-row quarantine, fixed thresholds, no stored-peak support, and reporting-only behavior. Then inspect both authoritative CI workflows. Reject any patch that again normalizes the production row, broadens runtime scope, changes guards/thresholds/state/authority, or is not green. Only after a decision-grade read-only diagnostic is green should any separate persistent-state repair decision be considered.
+Treat PR #56 as the accepted source-level containment and do not modify it unless new deployed evidence proves a source-level defect remains. Do not spawn another forensic helper PR automatically. On the next meaningful runtime validation, inspect the canonical `/paper/daily-audit` and `/paper/exit-price-integrity-status`. Only if those show a new source-level quote-plausibility failure should a narrow source fix be considered. The persisted UCTT/risk-halt provenance remains a separate forensic/account-state decision and must not be resolved by changing state or weakening guards without independent evidence and explicit review.
