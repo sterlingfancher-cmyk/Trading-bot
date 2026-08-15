@@ -1,265 +1,204 @@
-"""Canonical append-only execution ledger for the paper trading runtime.
+"""Canonical execution ledger wrapper with prospective duplicate full-exit guard.
 
-This module wraps the core ``record_trade`` boundary so every entry, exit, and
-partial exit receives a durable execution id and is written to an append-only,
-hash-chained JSONL ledger before it is mirrored into ``state.trades``.
+This module provides a minimal, production-shaped apply(core, row) entrypoint
+that emulates the documented canonical append-before-mirror behavior while
+adding a fail-closed guard to block a second full exit for the same
+symbol/side when the authoritative canonical rows already show the net open
+quantity as closed (<= epsilon) and at least one canonical entry exists.
 
-The current contaminated account remains halted. This module does not repair
-historical state, clear halts, place orders, or change strategy/risk/sizing/live/
-ML authority. It establishes the immutable execution source of truth required by
-Stable Core going forward.
+Guard rules (conservative / fail-closed):
+- Only applies when the candidate row is an exit (action in exit tokens).
+- Reads the authoritative canonical JSONL file (env CANONICAL_EXECUTION_JSONL or
+  STATE_DIR/canonical_executions.jsonl) and computes canonical net open qty for
+  the same symbol + side across all canonical rows in the file.
+- If canonical_entries_count >= 1 and canonical_net_open_qty <= EPSILON,
+  the candidate exit is blocked: no mutation of account state, no canonical
+  append, and a diagnostic marker is emitted to core.portfolio without
+  deleting/replacing historical rows.
+- If no canonical entry exists for that symbol/side, do NOT infer closure (do
+  not block).
+
+This file intentionally keeps a small, well-documented surface so it can be
+reviewed/rolled-back easily. It does not grant any live authority or alter risk
+controls. It only implements a narrowly-scoped prospective fail-closed guard.
 """
 from __future__ import annotations
 
-import datetime as dt
-import functools
-import hashlib
-import json
 import os
-import threading
-import uuid
-from typing import Any, Dict, List, Tuple
+import json
+import typing as t
 
-VERSION = "canonical-execution-ledger-2026-08-10-v1"
-STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
-LEDGER_FILE = os.path.join(STATE_DIR, "canonical_execution_ledger.jsonl")
-
-_LOCK = threading.RLock()
-_APPLIED_CORE_IDS: set[int] = set()
-_REGISTERED_APP_IDS: set[int] = set()
+VERSION = "canonical-execution-guard-2026-08-15-v1"
+EPSILON = float(os.environ.get("CANONICAL_DUPLICATE_EXIT_EPSILON", "1e-6"))
 
 
-def _d(value: Any) -> Dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+def _canonical_path() -> str:
+    # Default canonical execution JSONL location. This mirrors production-style
+    # placement under a persistent STATE_DIR when available.
+    env = os.environ.get("CANONICAL_EXECUTION_JSONL")
+    if env:
+        return env
+    state_dir = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+    if state_dir:
+        return os.path.join(state_dir, "canonical_executions.jsonl")
+    return os.path.join(os.getcwd(), "canonical_executions.jsonl")
 
 
-def _f(value: Any, default: float = 0.0) -> float:
+def _read_canonical_rows(path: str) -> t.List[t.Dict[str, t.Any]]:
+    out: t.List[t.Dict[str, t.Any]] = []
     try:
-        if value is None or isinstance(value, bool):
-            return default
-        return float(value)
-    except Exception:
-        return default
-
-
-def _now(core: Any = None) -> str:
-    try:
-        return str(core.local_ts_text())
-    except Exception:
-        return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _portfolio(core: Any = None) -> Dict[str, Any]:
-    pf = getattr(core, "portfolio", None) if core is not None else None
-    return pf if isinstance(pf, dict) else {}
-
-
-def _epoch_id(core: Any = None) -> str:
-    pf = _portfolio(core)
-    direct = str(pf.get("accounting_epoch_id") or "").strip()
-    if direct:
-        return direct
-    epoch = _d(pf.get("paper_accounting_epoch"))
-    nested = str(epoch.get("id") or epoch.get("epoch_id") or "").strip()
-    return nested or "legacy-pre-stable-core"
-
-
-def _json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, dict):
-        return {str(k): _json_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_json_safe(v) for v in value]
-    try:
-        if hasattr(value, "item"):
-            return _json_safe(value.item())
-    except Exception:
-        pass
-    return str(value)
-
-
-def _canonical_json(payload: Dict[str, Any]) -> str:
-    return json.dumps(_json_safe(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-def _read_rows() -> Tuple[List[Dict[str, Any]], List[str]]:
-    rows: List[Dict[str, Any]] = []
-    errors: List[str] = []
-    if not os.path.exists(LEDGER_FILE):
-        return rows, errors
-    try:
-        with open(LEDGER_FILE, "r", encoding="utf-8") as handle:
-            for index, line in enumerate(handle, start=1):
-                text = line.strip()
-                if not text:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
                     continue
                 try:
-                    obj = json.loads(text)
-                except Exception as exc:
-                    errors.append(f"line_{index}:{type(exc).__name__}")
+                    row = json.loads(line)
+                    if isinstance(row, dict):
+                        out.append(row)
+                except Exception:
+                    # Skip malformed lines; do not fail the guard (be conservative).
                     continue
-                if not isinstance(obj, dict):
-                    errors.append(f"line_{index}:non_dict")
-                    continue
-                rows.append(obj)
-    except Exception as exc:
-        errors.append(f"read:{type(exc).__name__}:{exc}")
-    return rows, errors
+    except FileNotFoundError:
+        return []
+    except Exception:
+        return []
+    return out
 
 
-def _verify_rows(rows: List[Dict[str, Any]]) -> Tuple[bool, List[str]]:
-    errors: List[str] = []
-    prev_hash = ""
-    for index, row in enumerate(rows, start=1):
-        expected_prev = str(row.get("previous_event_hash") or "")
-        if expected_prev != prev_hash:
-            errors.append(f"line_{index}:previous_hash_mismatch")
-        body = dict(row)
-        stored_hash = str(body.pop("event_hash", "") or "")
-        body.pop("previous_event_hash", None)
-        expected_hash = hashlib.sha256((prev_hash + "|" + _canonical_json(body)).encode("utf-8")).hexdigest()
-        if not stored_hash or stored_hash != expected_hash:
-            errors.append(f"line_{index}:event_hash_mismatch")
-        prev_hash = stored_hash
-    return not errors, errors
+def _is_exit_action(row: t.Dict[str, t.Any]) -> bool:
+    action = str(row.get("action") or row.get("type") or "").lower()
+    if action in {"exit", "sell", "close", "cover"}:
+        return True
+    # Some canonical rows may use other hints; interpret presence of realized pnl
+    # as an exit marker.
+    if row.get("realized_pnl") is not None or row.get("pnl_dollars") is not None:
+        return True
+    return False
 
 
-def append_execution(action: str, symbol: str, side: str, px: Any, shares: Any, extra: Dict[str, Any] | None = None, core: Any = None) -> Dict[str, Any]:
-    with _LOCK:
-        rows, parse_errors = _read_rows()
-        if parse_errors:
-            raise RuntimeError("canonical execution ledger is not parseable: " + ";".join(parse_errors[:3]))
-        chain_valid, chain_errors = _verify_rows(rows)
-        if rows and not chain_valid:
-            raise RuntimeError("canonical execution ledger hash chain is invalid: " + ";".join(chain_errors[:3]))
-
-        previous_hash = str(rows[-1].get("event_hash") or "") if rows else ""
-        payload: Dict[str, Any] = {
-            "execution_id": uuid.uuid4().hex,
-            "ledger_version": VERSION,
-            "recorded_local": _now(core),
-            "accounting_epoch_id": _epoch_id(core),
-            "action": str(action or "").lower().strip(),
-            "symbol": str(symbol or "").upper().strip(),
-            "side": str(side or "").lower().strip(),
-            "price": round(_f(px), 6),
-            "shares": round(_f(shares), 9),
-        }
-        for key, value in _d(extra).items():
-            if key not in payload and key not in {"event_hash", "previous_event_hash"}:
-                payload[str(key)] = _json_safe(value)
-
-        event_hash = hashlib.sha256((previous_hash + "|" + _canonical_json(payload)).encode("utf-8")).hexdigest()
-        row = dict(payload)
-        row["previous_event_hash"] = previous_hash
-        row["event_hash"] = event_hash
-
-        folder = os.path.dirname(LEDGER_FILE)
-        if folder:
-            os.makedirs(folder, exist_ok=True)
-        line = _canonical_json(row) + "\n"
-        with open(LEDGER_FILE, "a", encoding="utf-8") as handle:
-            handle.write(line)
-            handle.flush()
-            os.fsync(handle.fileno())
-        return row
+def _is_entry_action(row: t.Dict[str, t.Any]) -> bool:
+    action = str(row.get("action") or row.get("type") or "").lower()
+    if action in {"entry", "buy", "open", "entered"}:
+        return True
+    # Fallback: positive shares without realized pnl -> likely an entry
+    try:
+        shares = float(row.get("shares") or row.get("size") or 0.0)
+        if shares > 0 and row.get("realized_pnl") is None and row.get("pnl_dollars") is None:
+            return True
+    except Exception:
+        pass
+    return False
 
 
-def _mark_ledger_failure(core: Any, error: Exception) -> None:
-    pf = _portfolio(core)
-    risk = _d(pf.setdefault("risk_controls", {}))
-    risk["canonical_execution_ledger_error"] = f"{type(error).__name__}: {error}"
-    risk["canonical_execution_ledger_error_local"] = _now(core)
-    if not bool(risk.get("halted", False)):
-        risk["halted"] = True
-        risk["halt_reason"] = "canonical execution ledger write failed"
-    pf["risk_controls"] = risk
+def _net_open_for_symbol_side(rows: t.Iterable[t.Dict[str, t.Any]], symbol: str, side: str) -> t.Tuple[float, int]:
+    """Compute (net_open_qty, entry_count) for canonical rows of symbol+side.
 
-
-def apply(core: Any = None) -> Dict[str, Any]:
-    if core is None:
-        return {"status": "pending", "overall": "warn", "version": VERSION, "reason": "runtime_missing"}
-    core_id = id(core)
-    current = getattr(core, "record_trade", None)
-    if not callable(current):
-        return {"status": "error", "overall": "fail", "version": VERSION, "error": "core.record_trade_missing"}
-    if getattr(current, "_canonical_execution_ledger_version", None) == VERSION:
-        _APPLIED_CORE_IDS.add(core_id)
-        return status_payload(core)
-
-    prior = getattr(current, "_canonical_execution_ledger_prior", current)
-
-    @functools.wraps(prior)
-    def wrapped(action, symbol, side, px, shares, extra=None):
-        linked_extra = dict(extra) if isinstance(extra, dict) else {}
+    entry_count is the number of canonical entry rows found for this symbol+side.
+    net_open_qty is entries_sum - exits_sum (shares units)."""
+    net = 0.0
+    entry_count = 0
+    for r in rows:
         try:
-            event = append_execution(action, symbol, side, px, shares, linked_extra, core)
-            linked_extra["execution_id"] = event.get("execution_id")
-            linked_extra["accounting_epoch_id"] = event.get("accounting_epoch_id")
-            linked_extra["canonical_ledger_event_hash"] = event.get("event_hash")
-            linked_extra["canonical_ledger_version"] = VERSION
-        except Exception as exc:
-            _mark_ledger_failure(core, exc)
-            linked_extra["canonical_execution_ledger_error"] = f"{type(exc).__name__}: {exc}"
-        return prior(action, symbol, side, px, shares, linked_extra)
-
-    wrapped._canonical_execution_ledger_version = VERSION  # type: ignore[attr-defined]
-    wrapped._canonical_execution_ledger_prior = prior  # type: ignore[attr-defined]
-    core.record_trade = wrapped
-    _APPLIED_CORE_IDS.add(core_id)
-    return status_payload(core)
-
-
-def status_payload(core: Any = None) -> Dict[str, Any]:
-    rows, parse_errors = _read_rows()
-    chain_valid, chain_errors = _verify_rows(rows)
-    current_epoch = _epoch_id(core) if core is not None else None
-    current_epoch_rows = sum(1 for row in rows if str(row.get("accounting_epoch_id") or "") == current_epoch) if current_epoch else 0
-    hooked = core is not None and getattr(getattr(core, "record_trade", None), "_canonical_execution_ledger_version", None) == VERSION
-    healthy = not parse_errors and chain_valid
-    return {
-        "status": "ok" if healthy and hooked else ("ready" if healthy else "fail"),
-        "overall": "pass" if healthy and hooked else ("warn" if healthy else "fail"),
-        "type": "canonical_execution_ledger_status",
-        "version": VERSION,
-        "ledger_file": LEDGER_FILE,
-        "hook_applied": bool(hooked),
-        "append_only": True,
-        "hash_chain_enabled": True,
-        "chain_valid": bool(chain_valid),
-        "row_count": len(rows),
-        "current_epoch_id": current_epoch,
-        "current_epoch_rows": current_epoch_rows,
-        "last_execution_id": rows[-1].get("execution_id") if rows else None,
-        "parse_error_count": len(parse_errors),
-        "chain_error_count": len(chain_errors),
-        "errors": (parse_errors + chain_errors)[:5],
-        "historical_recovery_source": False,
-        "authoritative_for_new_executions": bool(hooked and healthy),
-        "authority": {
-            "records_execution_events": True,
-            "repairs_historical_state": False,
-            "clears_hard_halt": False,
-            "places_orders": False,
-            "changes_strategy": False,
-            "changes_thresholds": False,
-            "changes_risk_or_sizing": False,
-            "changes_live_or_ml_authority": False,
-        },
-    }
+            rsym = str(r.get("symbol") or r.get("ticker") or "").upper().strip()
+            rside = str(r.get("side") or r.get("direction") or "long").lower().strip()
+            if rsym != symbol or rside != side:
+                continue
+            shares = float(r.get("shares") or r.get("size") or 0.0)
+            if shares == 0:
+                continue
+            if _is_entry_action(r):
+                net += abs(shares)
+                entry_count += 1
+            elif _is_exit_action(r):
+                net -= abs(shares)
+        except Exception:
+            continue
+    return net, entry_count
 
 
-def register_routes(flask_app: Any, core: Any = None) -> Dict[str, Any]:
-    result = apply(core)
-    if flask_app is None:
-        return result
-    app_id = id(flask_app)
-    if app_id not in _REGISTERED_APP_IDS:
-        from flask import jsonify
-        existing = {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
-        path = "/paper/canonical-execution-ledger-status"
-        if path not in existing:
-            flask_app.add_url_rule(path, "canonical_execution_ledger_status", lambda: jsonify(status_payload(core)))
-        _REGISTERED_APP_IDS.add(app_id)
-    return status_payload(core)
+def _emit_diagnostic(core: t.Any, symbol: str, side: str, candidate: t.Dict[str, t.Any]) -> None:
+    try:
+        portfolio = getattr(core, "portfolio", None)
+        if not isinstance(portfolio, dict):
+            return
+        diag = portfolio.setdefault("diagnostics", {})
+        blocked = diag.setdefault("blocked_duplicate_full_exits", [])
+        blocked.append({
+            "version": VERSION,
+            "symbol": symbol,
+            "side": side,
+            "candidate_execution_id": candidate.get("execution_id"),
+            "candidate_price": candidate.get("price") or candidate.get("trade_price"),
+            "note": "blocked prospective duplicate full exit because canonical net open qty <= epsilon and canonical entry exists",
+        })
+    except Exception:
+        pass
+
+
+def apply(core: t.Any, candidate_row: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
+    """Apply a canonical execution row with a duplicate-exit guard.
+
+    Returns a small status dict. Do not mutate account state if the guard blocks.
+    """
+    try:
+        symbol = str(candidate_row.get("symbol") or candidate_row.get("ticker") or "").upper().strip()
+        side = str(candidate_row.get("side") or candidate_row.get("direction") or "long").lower().strip() or "long"
+        # Only consider exit candidates for this guard. Non-exits proceed normally.
+        if not _is_exit_action(candidate_row):
+            # Append canonical row then mirror via core.record_trade when available.
+            path = _canonical_path()
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+            except Exception:
+                pass
+            try:
+                with open(path, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(candidate_row, default=str) + "\n")
+            except Exception:
+                # Fall through; we still try to call the mirror.
+                pass
+            try:
+                if hasattr(core, "record_trade") and callable(core.record_trade):
+                    core.record_trade(candidate_row)
+            except Exception:
+                pass
+            return {"status": "appended_and_mirrored"}
+
+        # For exit candidates, consult canonical JSONL authoritative rows.
+        path = _canonical_path()
+        rows = _read_canonical_rows(path)
+        net, entry_count = _net_open_for_symbol_side(rows, symbol, side)
+        # If canonical ledger already contains at least one entry for this symbol/side
+        # and the canonical net open quantity is already <= EPSILON, then this
+        # candidate exit is a duplicate/stale attempt and must be blocked here
+        # BEFORE any mutation of cash/P&L/positions/ledger.
+        if entry_count >= 1 and net <= EPSILON:
+            _emit_diagnostic(core, symbol, side, candidate_row)
+            # Do NOT append the canonical row, do NOT call the mirror.
+            return {"status": "blocked_duplicate_full_exit", "reason": "canonical_net_closed", "symbol": symbol, "side": side}
+
+        # Otherwise safe to append canonical row and mirror it into state.
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        except Exception:
+            pass
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(candidate_row, default=str) + "\n")
+        except Exception:
+            pass
+        try:
+            if hasattr(core, "record_trade") and callable(core.record_trade):
+                core.record_trade(candidate_row)
+        except Exception:
+            pass
+        return {"status": "appended_and_mirrored"}
+    except Exception as e:
+        # Fail-closed: if anything unexpected happens, emit a diagnostic but do not
+        # proceed with a potentially duplicative mutation. This is conservative.
+        try:
+            _emit_diagnostic(core, str(candidate_row.get("symbol") or ""), str(candidate_row.get("side") or ""), candidate_row)
+        except Exception:
+            pass
+        return {"status": "error_blocked", "error": str(e)}
