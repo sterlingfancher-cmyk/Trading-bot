@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-14 after rejection of PR #75  
+Last updated: 2026-08-15 after workflow 31878943252 safe no-change result  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
 
@@ -75,9 +75,8 @@ Issue #66 tracks this defect.
 - PR #72: did not force the real mounted-persistence branch and used non-production state shape; closed unmerged.
 - PR #73: test-only restart/persistence evidence did not prove the causal second-exit path; both authoritative workflows were `action_required`; closed unmerged.
 - PR #74 from workflow `31855867000`: rejected and closed unmerged. It replaced most of `canonical_execution_ledger.py`, changed the established `apply(core)` contract, changed the canonical ledger filename, and removed existing hash-chain/wrapper behavior. Both authoritative workflows were `action_required`.
-- PR #75, `Add small duplicate-full-exit guard (canonical exit guard) with tests`: **rejected and closed unmerged**. It added an unwired `canonical_exit_guard.py` helper rather than installing protection at the proven `app.exit_position()` runtime boundary. More importantly, its canonical ledger reader silently skipped malformed JSON/unreadable ledger failures and the wrapper allowed the original exit to proceed on canonical-read errors. That is not fail-closed when canonical truth is ambiguous. Both authoritative workflows on head `7bb44eac2b206e6435d5f61dfd37fb7eb8e2eaa1` completed `action_required`. A formal `REQUEST_CHANGES` review was submitted before closure.
-
-No code from PR #75 entered `main`.
+- PR #75, `Add small duplicate-full-exit guard (canonical exit guard) with tests`: rejected and closed unmerged. It added an unwired helper rather than installing protection at the proven `app.exit_position()` runtime boundary and permitted exits when canonical ledger truth was unreadable/malformed. Both authoritative workflows completed `action_required`. No code from PR #75 entered `main`.
+- Workflow `31878943252`: failed safely on 2026-08-15 with `RuntimeError: Agent proposed no files.` The constrained agent made no branch, PR, or runtime change rather than violating the required surgical/fail-closed scope. Do not treat this failure as evidence that the TEM defect is fixed; it means the automated proposal path could not satisfy the acceptance criteria safely.
 
 ## Current Repair Direction
 
@@ -90,6 +89,8 @@ Any such guard must use the existing canonical ledger's own parsing/hash-chain s
 Prefer a surgical integration immediately at the proven `app.exit_position()` pre-mutation boundary while preserving all existing canonical-ledger behavior. Do not change the existing `apply(core)` signature. Do not change `LEDGER_FILE = .../canonical_execution_ledger.jsonl`. Do not weaken chain verification or canonical append ordering.
 
 Regression must use the literal TEM sequence: entry `d647...` 29.640567 @ 54.885, first exit `7b13...` 29.640567 @ 53.105, then a stale/resurrected second exit attempt @ 52.905 which must create no cash/P&L/canonical mutation.
+
+Do not launch another speculative repo-agent retry unless there is new runtime evidence or a concretely reviewable surgical implementation path. Workflow `31878943252` already demonstrated that the current automated proposal route could not safely satisfy the constraints.
 
 ## Remaining Separate Forensic Blocker — UCTT Contaminated Peak Provenance
 
@@ -148,4 +149,4 @@ Use the direct @GitHub connector and continue the Trading-bot project from sterl
 
 For LRCX, do not modify merged PR #56 unless new deployed evidence proves a new source-level quote plausibility defect. Historical repo-agent workflow `31737484525` is complete, has no attached PR, and is superseded by PR #56.
 
-For TEM, do not create another broad canonical-ledger rewrite or unwired helper. A replacement may advance only if it is surgically installed at the proven `app.exit_position()` pre-mutation boundary, uses authoritative current-epoch `canonical_execution_ledger.jsonl` with existing hash-chain validity, exempts verified-snapshot positions with no canonical entry, fails closed when canonical truth required by the guard is unreadable/malformed/hash-invalid, blocks the stale second TEM full exit before any cash/P&L/position/canonical mutation, preserves all existing LRCX source/exit quote guards and all risk/authority boundaries, and passes both authoritative workflows. Reject helper-only, broad rewrite, historical account repair, risk change, quote-guard change, or schema/filename inventions. Do not merge automatically.
+For TEM, no new PR currently qualifies for advancement. Workflow `31878943252` produced no files and no PR under the strict safety constraints. Do not create another broad canonical-ledger rewrite, unwired helper, or speculative agent retry. The next runtime change may proceed only when there is a concretely reviewable surgical implementation at the actual `app.exit_position()` pre-mutation boundary that uses the existing authoritative canonical JSONL/hash-chain semantics, exempts verified-snapshot positions with no canonical entry, fails closed when required canonical truth is unreadable/malformed/hash-invalid, blocks the stale second TEM full exit before any cash/P&L/position/canonical mutation, preserves all existing LRCX source/exit quote guards and all risk/authority boundaries, and passes both authoritative workflows. Until then, preserve state and wait for new runtime evidence or a narrowly proven implementation path. Do not merge automatically.
