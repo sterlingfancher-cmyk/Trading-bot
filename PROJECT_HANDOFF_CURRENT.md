@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-14 after rejection of PR #71  
+Last updated: 2026-08-14 after rejection of PR #72  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
 
@@ -50,8 +50,8 @@ Repo-agent workflow `31737484525` completed successfully on 2026-08-13 from hist
 ## Current Highest-Priority Runtime Blocker — Duplicate TEM Full Exit
 
 Production evidence in epoch `stable-paper-v2-20260812-verified01`:
-1. TEM `entry`, long `29.640567` @ `$54.885`, execution `d647d8a0580b44edbab0224e6c339bfd`;
-2. TEM full `exit`, long `29.640567` @ `$53.105`, execution `7b13d9194a23407f926667b2f48d4057`;
+1. TEM `entry`, long `29.640567` @ `$54.885`, execution `d647d8a0580b44edbab0224e6c339bfd`, time `1786647398`;
+2. TEM full `exit`, long `29.640567` @ `$53.105`, execution `7b13d9194a23407f926667b2f48d4057`, time `1786714863`;
 3. second TEM full `exit`, long `29.640567` @ `$52.905`, execution `3530dbf965db4894ba93b7098cec3696`.
 
 The second exit has no reconstructed position left to close. Audit reports `exit_exceeds_reconstructed_position`, accounting coverage incomplete, economic issue count 1, and journal recovery not trusted.
@@ -60,10 +60,10 @@ Static trace establishes the relevant boundaries:
 - `app.exit_position()` mutates cash, deletes the position, updates realized P/L and cooldown, then calls `record_trade("exit", ...)`;
 - `canonical_execution_ledger.apply()` wraps `record_trade` and durably appends the canonical JSONL execution before the underlying state trade mirror;
 - `run_cycle` persists `portfolio` later through `save_state(portfolio)`;
-- `state_persistence_contract.apply()` may replace live in-memory portfolio state with a materially richer persisted snapshot on startup;
+- `state_persistence_contract.apply()` may replace live in-memory portfolio state with a materially richer persisted snapshot on startup, but only when `_is_distinct_mount(configured_dir)` reports a persistent mount;
 - the real replacement helper signature is `state_persistence_contract._replace_portfolio(core, loaded)`.
 
-Therefore stale persisted-state resurrection after a durable canonical close remains a credible mechanism, but no runtime repair is accepted until the exact `state_persistence_contract.apply()` reload path is reproduced using the real helper signature and a pre-second-exit canonical lifecycle.
+Therefore stale persisted-state resurrection after a durable canonical close remains a credible mechanism, but no runtime repair is accepted until the exact `state_persistence_contract.apply(core)` reload path is reproduced with the real mounted-state branch and production-shaped state.
 
 Issue #66 tracks this defect.
 
@@ -73,10 +73,13 @@ Issue #66 tracks this defect.
 - PR #68: unwired helper with non-production `entry_execution_id` and `size/qty` assumptions; closed unmerged.
 - PR #69: evidence-only test, no production fix; closed unmerged.
 - Workflow `31838934941`: failed validation with `IndentationError`; no PR accepted.
-- PR #70 from workflow `31841199828`: rejected and closed unmerged. It replaced most of `state_persistence_contract.py`, removed existing behavior, used `canonical_execution_ledger.json` instead of the real `.jsonl` file, assumed entry-ID links absent from production, and both authoritative workflows were `action_required`.
-- PR #71 from workflow `31845976435`: **rejected and closed unmerged**. It changed only `tests/test_tem_resurrection.py` and did not exercise the real persistence path correctly. The test tried invented `_replace_portfolio` signatures instead of the actual `(core, loaded)` signature, included the already-erroneous second TEM exit in its canonical fixture even though the causal hypothesis is restart/resurrection after the first exit and before the second, and did not route the canonical rows through `state_persistence_contract.apply()`. A failure would therefore not prove the required restart/resurrection mechanism. Both authoritative workflows on head `b78443ea04ee30c27f71d7a04e640585719b000e` completed `action_required`.
+- PR #70 from workflow `31841199828`: broad persistence rewrite, wrong ledger filename/schema assumptions; closed unmerged.
+- PR #71 from workflow `31845976435`: guessed `_replace_portfolio` signatures and included the already-erroneous second TEM exit in the causal fixture; both authoritative workflows `action_required`; closed unmerged.
+- PR #72 from workflow `31849662702`: **rejected and closed unmerged**. Although test-only, it still did not prove the real startup path. It used an ordinary `tmp_path` without forcing `state_persistence_contract._is_distinct_mount()` true, so `apply(core)` could skip the persistent reload branch for an irrelevant test-environment reason. Its persisted fixture also used a non-production top-level `portfolio` wrapper and `size/qty` fields instead of root-level portfolio state with `shares`, and it used synthetic timestamp/schema fields. Both authoritative workflows on head `a4265ba8c52257e47affb08347c66eae3dcf4c8b` completed `action_required`. A formal `REQUEST_CHANGES` review was submitted and PR #72 was closed unmerged.
 
-No code from PR #71 entered `main`.
+No code from PR #72 entered `main`.
+
+A corrected repo-agent evidence run is active as workflow `31852824445` from main `aef583eaa3b05f5b0d3d2830e19239a64fab4630`. It is test-only and must stop without runtime changes after proving or disproving resurrection.
 
 ## Remaining Separate Forensic Blocker — UCTT Contaminated Peak Provenance
 
@@ -138,4 +141,4 @@ Use the direct @GitHub connector and continue the Trading-bot project from sterl
 
 Do not modify merged PR #56 unless new deployed evidence proves a new source-level quote plausibility defect.
 
-For TEM, do not generate another broad persistence rewrite, generic provenance helper, or test that guesses internal signatures. The next evidence step must execute the actual `state_persistence_contract.apply(core)` startup path with a realistic core object and mounted-state fixture. The canonical JSONL fixture must contain the TEM entry `d647d8a0580b44edbab0224e6c339bfd` and only the first full exit `7b13d9194a23407f926667b2f48d4057`; the stale persisted snapshot must still contain the TEM position. The erroneous second exit `3530dbf965db4894ba93b7098cec3696` must NOT be present in the canonical fixture because the test is proving whether resurrection can occur before that second exit exists. Verify whether `apply()` reaches `_replace_portfolio(core, loaded)` and reintroduces TEM. Only if that exact path is proven may a tiny fail-closed reload guard be proposed before replacement. Any runtime patch must preserve every existing persistence/status behavior, append-only history, account state, halt, 0.025 risk threshold, strategy, sizing, PR #56 source/exit guards, paper-only authority, live authority, and ML shadow authority. Both authoritative workflows must pass. Do not merge automatically.
+For TEM, wait for repo-agent workflow `31852824445` and inspect any resulting PR before advancing anything. The corrected evidence test must call the real `state_persistence_contract.apply(core)`, explicitly monkeypatch the actual `_is_distinct_mount()` to return true for the temporary mounted-state directory, use root-level persisted portfolio state with production `shares` fields, and use canonical JSONL containing only the exact TEM entry `d647d8a0580b44edbab0224e6c339bfd` and first full exit `7b13d9194a23407f926667b2f48d4057` with production times/prices/shares. The erroneous second exit must not be present in the causal fixture. The observer may wrap only `_replace_portfolio(core, loaded)` and must not swallow exceptions or guess alternate `apply` signatures. If `apply(core)` reaches replacement and reloads TEM, treat that as proof of stale-state resurrection and stop before runtime changes. If it does not, report insufficient evidence and do not patch runtime. Any later runtime fix must be tiny, fail-closed, prospective only, preserve all existing persistence/status behavior and historical rows, and leave account state, halt, 0.025 risk threshold, strategy, sizing, PR #56 source/exit guards, paper-only authority, live authority, and ML shadow authority unchanged. Both authoritative workflows must pass. Do not merge automatically.
