@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-15 after workflow 31878943252 safe no-change result  
+Last updated: 2026-08-17 after morning runtime audit  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
 
@@ -8,7 +8,9 @@ Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
 
 Stable Core remains in repair/validation with Performance Lab shadow-only. Runtime remains paper-only. Rules remain the sole execution authority. Live authority is disabled. ML/AI remains shadow-only.
 
-Do not change strategy, sizing, thresholds, risk controls, account state, halt state, paper/live authority, or ML authority merely to resume trading.
+Morning audit generated `2026-08-17 11:22:11 CDT` shows the runtime is operationally healthier: runner pass, market-data pass, canonical execution ledger chain valid, risk controls currently pass with `halted=false`, and no new accounting-error category appeared. Current positions are QQQ, MCHP, and AG. The overall audit remains `fail` solely because the historical TEM duplicate full-exit remains unreconciled (`coverage_complete=false`, one coverage/economic issue). Validation hold remains blocked and the journal recovery candidate remains untrusted.
+
+Do not change strategy, sizing, thresholds, risk controls, account state, paper/live authority, or ML authority merely to make the audit pass.
 
 ## Canonical Accounting State
 
@@ -16,6 +18,8 @@ Current epoch: `stable-paper-v2-20260812-verified01`
 Baseline: `verified_snapshot_with_open_position`  
 Starting cash: approximately `$10,768.497731`  
 Starting equity: approximately `$11,885.824057`
+
+Latest audit account snapshot (`2026-08-17 11:22:11 CDT`): cash approximately `$9,347.15`, equity approximately `$13,298.86`, open positions QQQ/MCHP/AG, realized today approximately `-$6.11`, unrealized approximately `+$35.20`.
 
 The append-only canonical execution ledger remains authoritative. Do not fabricate, rewrite, delete, or manually repair historical execution rows.
 
@@ -54,7 +58,7 @@ Production evidence in epoch `stable-paper-v2-20260812-verified01`:
 2. TEM full `exit`, long `29.640567` @ `$53.105`, execution `7b13d9194a23407f926667b2f48d4057`, time `1786714863`;
 3. second TEM full `exit`, long `29.640567` @ `$52.905`, execution `3530dbf965db4894ba93b7098cec3696`.
 
-The second exit has no reconstructed position left to close. Audit reports `exit_exceeds_reconstructed_position`, accounting coverage incomplete, economic issue count 1, and journal recovery not trusted.
+The second exit has no reconstructed position left to close. The 2026-08-17 audit still reports exactly this one historical issue: `exit_exceeds_reconstructed_position`, `coverage_complete=false`, `coverage_issue_count=1`, `economic_issue_count=1`. No additional unmatched exit/accounting issue appeared despite subsequent canonical activity. The journal recovery candidate remains untrusted because this historical defect is still present.
 
 Static trace establishes:
 - `app.exit_position()` mutates cash, removes the position, updates realized P/L and cooldown, then calls `record_trade("exit", ...)`;
@@ -90,15 +94,13 @@ Prefer a surgical integration immediately at the proven `app.exit_position()` pr
 
 Regression must use the literal TEM sequence: entry `d647...` 29.640567 @ 54.885, first exit `7b13...` 29.640567 @ 53.105, then a stale/resurrected second exit attempt @ 52.905 which must create no cash/P&L/canonical mutation.
 
-Do not launch another speculative repo-agent retry unless there is new runtime evidence or a concretely reviewable surgical implementation path. Workflow `31878943252` already demonstrated that the current automated proposal route could not safely satisfy the constraints.
+Do not launch another speculative repo-agent retry merely because the audit still carries the historical TEM row. The 2026-08-17 audit is valuable new evidence that no second accounting-error category has appeared across subsequent executions, but it does not prove the prospective duplicate-close race is impossible. A future runtime code change still requires a concretely reviewable surgical implementation at the proven boundary.
 
-## Remaining Separate Forensic Blocker — UCTT Contaminated Peak Provenance
+## Remaining Separate Forensic History — UCTT Contaminated Peak Provenance
 
 Historical sequence: UCTT entry long `$93.22`, partial exit `$337.54`, final exit `$94.025`.
 
-The `$337.54` partial is implausible and may have contaminated stored intraday peak state. Do not use stored `risk_controls.day_peak_equity` or stored `intraday_drawdown_pct` as independent evidence for a corrected peak. If independent evidence is insufficient, report `insufficient_evidence` rather than alter state.
-
-Do not clear the current halt or alter account state.
+The `$337.54` partial is implausible and likely contaminated historical intraday peak state. The 2026-08-17 daily risk state has reset cleanly: `halted=false`, intraday drawdown approximately `0.218%`, net daily loss `0.0%`, self-defense inactive. Do not retroactively rewrite UCTT or risk history; the historical anomaly remains forensic evidence rather than a current active halt.
 
 ## Risk Boundaries — Preserve
 
@@ -109,7 +111,7 @@ Do not clear the current halt or alter account state.
 - maximum configured account risk per trade at stop: `2.0%`
 - source terminal-price plausibility: `0.40x` minimum / `2.50x` maximum
 
-No risk threshold is to be weakened to create trades or release the halt.
+No risk threshold is to be weakened to create trades or make an audit pass.
 
 ## Non-Negotiable Boundaries
 
@@ -118,7 +120,6 @@ No risk threshold is to be weakened to create trades or release the halt.
 - Rules remain sole execution authority.
 - ML remains shadow-only for execution.
 - Do not alter account state to make an audit pass.
-- Do not clear a genuine safety halt without diagnosing its cause.
 - Preserve forensic evidence before deleting or migrating state.
 - Prefer targeted correctness fixes over broad rewrites.
 - Both authoritative GitHub CI workflows must pass before runtime changes are merged/deployed.
@@ -149,4 +150,4 @@ Use the direct @GitHub connector and continue the Trading-bot project from sterl
 
 For LRCX, do not modify merged PR #56 unless new deployed evidence proves a new source-level quote plausibility defect. Historical repo-agent workflow `31737484525` is complete, has no attached PR, and is superseded by PR #56.
 
-For TEM, no new PR currently qualifies for advancement. Workflow `31878943252` produced no files and no PR under the strict safety constraints. Do not create another broad canonical-ledger rewrite, unwired helper, or speculative agent retry. The next runtime change may proceed only when there is a concretely reviewable surgical implementation at the actual `app.exit_position()` pre-mutation boundary that uses the existing authoritative canonical JSONL/hash-chain semantics, exempts verified-snapshot positions with no canonical entry, fails closed when required canonical truth is unreadable/malformed/hash-invalid, blocks the stale second TEM full exit before any cash/P&L/position/canonical mutation, preserves all existing LRCX source/exit quote guards and all risk/authority boundaries, and passes both authoritative workflows. Until then, preserve state and wait for new runtime evidence or a narrowly proven implementation path. Do not merge automatically.
+For TEM, the 2026-08-17 runtime audit shows the same single historical duplicate-exit accounting defect and no new accounting error category across later canonical activity. No new PR currently qualifies for advancement. Do not create another broad canonical-ledger rewrite, unwired helper, or speculative agent retry. Continue routine automatic paper operation and observational audits. A runtime change may proceed only when there is a concretely reviewable surgical implementation at the actual `app.exit_position()` pre-mutation boundary that uses the existing authoritative canonical JSONL/hash-chain semantics, exempts verified-snapshot positions with no canonical entry, fails closed when required canonical truth is unreadable/malformed/hash-invalid, blocks a stale second full exit before any cash/P&L/position/canonical mutation, preserves all existing LRCX source/exit quote guards and all risk/authority boundaries, and passes both authoritative workflows. Do not merge automatically.
