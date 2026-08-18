@@ -63,6 +63,21 @@ class CanonicalFullExitRuntimeGuardTests(unittest.TestCase):
         self.ledger_patch.stop()
         self.tempdir.cleanup()
 
+    @staticmethod
+    def _verified_lrcx_core():
+        core = FakeCore(symbol="LRCX", shares=3.42486, entry=312.90)
+        core.portfolio["paper_accounting_epoch"]["verified_snapshot_baseline"] = {
+            "verified": True,
+            "positions": {
+                "LRCX": {
+                    "side": "long",
+                    "qty": 3.42486,
+                    "entry_price": 312.90,
+                }
+            },
+        }
+        return core
+
     def test_literal_tem_second_full_exit_is_blocked_before_any_state_mutation(self):
         core = FakeCore()
         ids = iter([
@@ -104,19 +119,9 @@ class CanonicalFullExitRuntimeGuardTests(unittest.TestCase):
         self.assertEqual(block["reason"], "canonical_position_already_closed")
         self.assertEqual(block["canonical_remaining_qty"], 0.0)
 
-    def test_verified_snapshot_baseline_position_without_canonical_entry_remains_manageable(self):
+    def test_verified_snapshot_baseline_position_without_canonical_exit_remains_manageable(self):
         self.path.write_text("")
-        core = FakeCore(symbol="LRCX", shares=3.42486, entry=312.90)
-        core.portfolio["paper_accounting_epoch"]["verified_snapshot_baseline"] = {
-            "verified": True,
-            "positions": {
-                "LRCX": {
-                    "side": "long",
-                    "qty": 3.42486,
-                    "entry_price": 312.90,
-                }
-            },
-        }
+        core = self._verified_lrcx_core()
 
         guard.apply(core)
         result = core.exit_position("LRCX", 333.12, "target")
@@ -125,6 +130,31 @@ class CanonicalFullExitRuntimeGuardTests(unittest.TestCase):
         self.assertEqual(core.exit_calls, 1)
         self.assertNotIn("LRCX", core.portfolio["positions"])
         self.assertIsNone(core.portfolio["risk_controls"].get("canonical_full_exit_preflight_block"))
+
+    def test_verified_snapshot_baseline_cannot_be_closed_twice_after_canonical_exit(self):
+        core = self._verified_lrcx_core()
+        with mock.patch.object(
+            ledger.uuid,
+            "uuid4",
+            return_value=types.SimpleNamespace(hex="5d89575302e74a0087af342a6b82d851"),
+        ):
+            ledger.append_execution("exit", "LRCX", "long", 333.12, 3.42486, {}, core)
+
+        rows_before = [json.loads(line) for line in self.path.read_text().splitlines()]
+        cash_before = core.portfolio["cash"]
+        guard.apply(core)
+        result = core.exit_position("LRCX", 332.50, "stale_restart_retry")
+
+        self.assertIsNone(result)
+        self.assertEqual(core.exit_calls, 0)
+        self.assertEqual(core.portfolio["cash"], cash_before)
+        self.assertIn("LRCX", core.portfolio["positions"])
+        self.assertEqual([json.loads(line) for line in self.path.read_text().splitlines()], rows_before)
+        block = core.portfolio["risk_controls"]["canonical_full_exit_preflight_block"]
+        self.assertEqual(block["reason"], "canonical_position_already_closed")
+        self.assertEqual(block["verified_snapshot_baseline_qty"], 3.42486)
+        self.assertEqual(block["canonical_exit_qty"], 3.42486)
+        self.assertEqual(block["canonical_remaining_qty"], 0.0)
 
     def test_malformed_canonical_ledger_fails_closed_before_full_exit(self):
         self.path.write_text("{not-json}\n")
