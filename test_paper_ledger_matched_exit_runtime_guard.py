@@ -1,5 +1,9 @@
 import json
+import tempfile
 import types
+import unittest
+from pathlib import Path
+from unittest import mock
 
 import canonical_execution_ledger as ledger
 import paper_ledger_matched_exit_guard as guard
@@ -48,102 +52,107 @@ class FakeCore:
         return {"symbol": symbol, "price": px, "shares": shares, "reason": reason}
 
 
-def _set_ledger(tmp_path, monkeypatch):
-    path = tmp_path / "canonical_execution_ledger.jsonl"
-    monkeypatch.setattr(ledger, "LEDGER_FILE", str(path))
-    return path
+class CanonicalFullExitRuntimeGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.path = Path(self.tempdir.name) / "canonical_execution_ledger.jsonl"
+        self.ledger_patch = mock.patch.object(ledger, "LEDGER_FILE", str(self.path))
+        self.ledger_patch.start()
+
+    def tearDown(self):
+        self.ledger_patch.stop()
+        self.tempdir.cleanup()
+
+    def test_literal_tem_second_full_exit_is_blocked_before_any_state_mutation(self):
+        core = FakeCore()
+        ids = iter([
+            "d647d8a0580b44edbab0224e6c339bfd",
+            "7b13d9194a23407f926667b2f48d4057",
+        ])
+        with mock.patch.object(ledger.uuid, "uuid4", side_effect=lambda: types.SimpleNamespace(hex=next(ids))):
+            ledger.append_execution("entry", "TEM", "long", 54.885, 29.640567, {}, core)
+            ledger.append_execution("exit", "TEM", "long", 53.105, 29.640567, {}, core)
+
+        rows_before = [json.loads(line) for line in self.path.read_text().splitlines()]
+        self.assertEqual(
+            [row["execution_id"] for row in rows_before],
+            [
+                "d647d8a0580b44edbab0224e6c339bfd",
+                "7b13d9194a23407f926667b2f48d4057",
+            ],
+        )
+
+        cash_before = core.portfolio["cash"]
+        applied = guard.apply(core)
+        self.assertTrue(applied["runtime_full_exit_guard_installed"])
+        result = core.exit_position("TEM", 52.905, "stop_loss")
+
+        self.assertIsNone(result)
+        self.assertEqual(core.exit_calls, 0)
+        self.assertEqual(core.portfolio["cash"], cash_before)
+        self.assertEqual(core.portfolio["positions"]["TEM"]["shares"], 29.640567)
+        self.assertEqual(core.save_calls, 1)
+
+        rows_after = [json.loads(line) for line in self.path.read_text().splitlines()]
+        self.assertEqual(rows_after, rows_before)
+
+        risk = core.portfolio["risk_controls"]
+        self.assertTrue(risk["halted"])
+        block = risk["canonical_full_exit_preflight_block"]
+        self.assertEqual(block["boundary"], "exit_position_pre_mutation")
+        self.assertEqual(block["symbol"], "TEM")
+        self.assertEqual(block["reason"], "canonical_position_already_closed")
+        self.assertEqual(block["canonical_remaining_qty"], 0.0)
+
+    def test_verified_snapshot_baseline_position_without_canonical_entry_remains_manageable(self):
+        self.path.write_text("")
+        core = FakeCore(symbol="LRCX", shares=3.42486, entry=312.90)
+        core.portfolio["paper_accounting_epoch"]["verified_snapshot_baseline"] = {
+            "verified": True,
+            "positions": {
+                "LRCX": {
+                    "side": "long",
+                    "qty": 3.42486,
+                    "entry_price": 312.90,
+                }
+            },
+        }
+
+        guard.apply(core)
+        result = core.exit_position("LRCX", 333.12, "target")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(core.exit_calls, 1)
+        self.assertNotIn("LRCX", core.portfolio["positions"])
+        self.assertIsNone(core.portfolio["risk_controls"].get("canonical_full_exit_preflight_block"))
+
+    def test_malformed_canonical_ledger_fails_closed_before_full_exit(self):
+        self.path.write_text("{not-json}\n")
+        core = FakeCore(symbol="QQQ", shares=2.218803, entry=730.92)
+        cash_before = core.portfolio["cash"]
+
+        guard.apply(core)
+        result = core.exit_position("QQQ", 718.0, "stop_loss")
+
+        self.assertIsNone(result)
+        self.assertEqual(core.exit_calls, 0)
+        self.assertEqual(core.portfolio["cash"], cash_before)
+        self.assertIn("QQQ", core.portfolio["positions"])
+        block = core.portfolio["risk_controls"]["canonical_full_exit_preflight_block"]
+        self.assertEqual(block["reason"], "canonical_execution_ledger_unreadable_for_full_exit")
+
+    def test_runtime_position_without_canonical_entry_or_verified_baseline_fails_closed(self):
+        self.path.write_text("")
+        core = FakeCore(symbol="QQQ", shares=2.218803, entry=730.92)
+
+        guard.apply(core)
+        result = core.exit_position("QQQ", 718.0, "stop_loss")
+
+        self.assertIsNone(result)
+        self.assertEqual(core.exit_calls, 0)
+        block = core.portfolio["risk_controls"]["canonical_full_exit_preflight_block"]
+        self.assertEqual(block["reason"], "canonical_entry_missing_for_runtime_position")
 
 
-def test_literal_tem_second_full_exit_is_blocked_before_any_state_mutation(tmp_path, monkeypatch):
-    path = _set_ledger(tmp_path, monkeypatch)
-    core = FakeCore()
-    ids = iter([
-        "d647d8a0580b44edbab0224e6c339bfd",
-        "7b13d9194a23407f926667b2f48d4057",
-    ])
-    monkeypatch.setattr(ledger.uuid, "uuid4", lambda: types.SimpleNamespace(hex=next(ids)))
-
-    ledger.append_execution("entry", "TEM", "long", 54.885, 29.640567, {}, core)
-    ledger.append_execution("exit", "TEM", "long", 53.105, 29.640567, {}, core)
-
-    rows_before = [json.loads(line) for line in path.read_text().splitlines()]
-    assert [row["execution_id"] for row in rows_before] == [
-        "d647d8a0580b44edbab0224e6c339bfd",
-        "7b13d9194a23407f926667b2f48d4057",
-    ]
-
-    cash_before = core.portfolio["cash"]
-    guard.apply(core)
-    result = core.exit_position("TEM", 52.905, "stop_loss")
-
-    assert result is None
-    assert core.exit_calls == 0
-    assert core.portfolio["cash"] == cash_before
-    assert core.portfolio["positions"]["TEM"]["shares"] == 29.640567
-    assert core.save_calls == 1
-
-    rows_after = [json.loads(line) for line in path.read_text().splitlines()]
-    assert rows_after == rows_before
-
-    risk = core.portfolio["risk_controls"]
-    assert risk["halted"] is True
-    block = risk["canonical_full_exit_preflight_block"]
-    assert block["boundary"] == "exit_position_pre_mutation"
-    assert block["symbol"] == "TEM"
-    assert block["reason"] == "canonical_position_already_closed"
-    assert block["canonical_remaining_qty"] == 0.0
-
-
-def test_verified_snapshot_baseline_position_without_canonical_entry_remains_manageable(tmp_path, monkeypatch):
-    path = _set_ledger(tmp_path, monkeypatch)
-    path.write_text("")
-    core = FakeCore(symbol="LRCX", shares=3.42486, entry=312.90)
-    core.portfolio["paper_accounting_epoch"]["verified_snapshot_baseline"] = {
-        "verified": True,
-        "positions": {
-            "LRCX": {
-                "side": "long",
-                "qty": 3.42486,
-                "entry_price": 312.90,
-            }
-        },
-    }
-
-    guard.apply(core)
-    result = core.exit_position("LRCX", 333.12, "target")
-
-    assert result is not None
-    assert core.exit_calls == 1
-    assert "LRCX" not in core.portfolio["positions"]
-    assert core.portfolio["risk_controls"].get("canonical_full_exit_preflight_block") is None
-
-
-def test_malformed_canonical_ledger_fails_closed_before_full_exit(tmp_path, monkeypatch):
-    path = _set_ledger(tmp_path, monkeypatch)
-    path.write_text("{not-json}\n")
-    core = FakeCore(symbol="QQQ", shares=2.218803, entry=730.92)
-    cash_before = core.portfolio["cash"]
-
-    guard.apply(core)
-    result = core.exit_position("QQQ", 718.0, "stop_loss")
-
-    assert result is None
-    assert core.exit_calls == 0
-    assert core.portfolio["cash"] == cash_before
-    assert "QQQ" in core.portfolio["positions"]
-    block = core.portfolio["risk_controls"]["canonical_full_exit_preflight_block"]
-    assert block["reason"] == "canonical_execution_ledger_unreadable_for_full_exit"
-
-
-def test_runtime_position_without_canonical_entry_or_verified_baseline_fails_closed(tmp_path, monkeypatch):
-    path = _set_ledger(tmp_path, monkeypatch)
-    path.write_text("")
-    core = FakeCore(symbol="QQQ", shares=2.218803, entry=730.92)
-
-    guard.apply(core)
-    result = core.exit_position("QQQ", 718.0, "stop_loss")
-
-    assert result is None
-    assert core.exit_calls == 0
-    block = core.portfolio["risk_controls"]["canonical_full_exit_preflight_block"]
-    assert block["reason"] == "canonical_entry_missing_for_runtime_position"
+if __name__ == "__main__":
+    unittest.main()
