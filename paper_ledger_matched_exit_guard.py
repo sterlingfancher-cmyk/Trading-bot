@@ -9,8 +9,8 @@ The runtime preflight is deliberately narrow:
 - it runs before the existing ``exit_position`` owner can mutate cash/P&L/state;
 - it uses the existing canonical JSONL reader and hash-chain verifier;
 - it fails closed on missing/unreadable/invalid canonical evidence;
-- it still permits a verified-snapshot baseline position when the canonical
-  ledger is healthy and contains no current-epoch entry for that inherited lot;
+- it includes an explicitly verified snapshot opening lot in canonical remaining
+  quantity so that inherited positions remain manageable but cannot be re-closed;
 - it does not alter partial exits, strategy, sizing, thresholds, live authority,
   or ML authority.
 
@@ -301,19 +301,21 @@ def analyze_ledger(pf: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
     }
 
 
-def _verified_snapshot_baseline_position(pf: Dict[str, Any], symbol: str, side: str) -> bool:
+def _verified_snapshot_baseline_qty(pf: Dict[str, Any], symbol: str, side: str) -> float:
     epoch = _d(pf.get("paper_accounting_epoch"))
     if str(epoch.get("baseline_type") or "") != "verified_snapshot_with_open_position":
-        return False
+        return 0.0
     snapshot = _d(epoch.get("verified_snapshot_baseline"))
     if not bool(snapshot.get("verified", False)):
-        return False
+        return 0.0
     raw = _d(_d(snapshot.get("positions")).get(str(symbol or "").upper().strip()))
     if not raw:
-        return False
+        return 0.0
     snapshot_side = str(raw.get("side") or "long").lower().strip()
+    if snapshot_side != str(side or "long").lower().strip():
+        return 0.0
     snapshot_qty = _f(raw.get("qty", raw.get("shares")), 0.0)
-    return bool(snapshot_side == str(side or "long").lower().strip() and snapshot_qty > FULL_EXIT_EPSILON)
+    return snapshot_qty if snapshot_qty > FULL_EXIT_EPSILON else 0.0
 
 
 def _canonical_full_exit_preflight(core: Any, symbol: str, side: str, requested_qty: float) -> Dict[str, Any]:
@@ -381,25 +383,16 @@ def _canonical_full_exit_preflight(core: Any, symbol: str, side: str, requested_
         and str(row.get("symbol") or "").upper().strip() == sym
         and str(row.get("side") or "long").lower().strip() == side_key
     ]
+    baseline_qty = _verified_snapshot_baseline_qty(_portfolio(core), sym, side_key)
     entry_qty = sum(_f(row.get("shares"), 0.0) for row in relevant if str(row.get("action") or "").lower().strip() == "entry")
     exit_qty = sum(
         _f(row.get("shares"), 0.0)
         for row in relevant
         if str(row.get("action") or "").lower().strip() in {"partial_exit", "exit"}
     )
+    opening_qty = baseline_qty + entry_qty
 
-    if entry_qty <= FULL_EXIT_EPSILON:
-        if _verified_snapshot_baseline_position(_portfolio(core), sym, side_key):
-            return {
-                "allow": True,
-                "reason": "verified_snapshot_baseline_position_without_canonical_entry",
-                "symbol": sym,
-                "side": side_key,
-                "requested_qty": qty,
-                "accounting_epoch_id": epoch_id,
-                "canonical_entry_qty": 0.0,
-                "canonical_exit_qty": round(exit_qty, 9),
-            }
+    if opening_qty <= FULL_EXIT_EPSILON:
         return {
             "allow": False,
             "reason": "canonical_entry_missing_for_runtime_position",
@@ -407,12 +400,13 @@ def _canonical_full_exit_preflight(core: Any, symbol: str, side: str, requested_
             "side": side_key,
             "requested_qty": qty,
             "accounting_epoch_id": epoch_id,
+            "verified_snapshot_baseline_qty": round(baseline_qty, 9),
             "canonical_entry_qty": round(entry_qty, 9),
             "canonical_exit_qty": round(exit_qty, 9),
         }
 
-    remaining = entry_qty - exit_qty
-    tolerance = max(FULL_EXIT_EPSILON, abs(entry_qty) * 1e-9)
+    remaining = opening_qty - exit_qty
+    tolerance = max(FULL_EXIT_EPSILON, abs(opening_qty) * 1e-9)
     if remaining <= tolerance:
         return {
             "allow": False,
@@ -421,6 +415,7 @@ def _canonical_full_exit_preflight(core: Any, symbol: str, side: str, requested_
             "side": side_key,
             "requested_qty": qty,
             "accounting_epoch_id": epoch_id,
+            "verified_snapshot_baseline_qty": round(baseline_qty, 9),
             "canonical_entry_qty": round(entry_qty, 9),
             "canonical_exit_qty": round(exit_qty, 9),
             "canonical_remaining_qty": round(remaining, 9),
@@ -433,6 +428,7 @@ def _canonical_full_exit_preflight(core: Any, symbol: str, side: str, requested_
             "side": side_key,
             "requested_qty": round(qty, 9),
             "accounting_epoch_id": epoch_id,
+            "verified_snapshot_baseline_qty": round(baseline_qty, 9),
             "canonical_entry_qty": round(entry_qty, 9),
             "canonical_exit_qty": round(exit_qty, 9),
             "canonical_remaining_qty": round(remaining, 9),
@@ -444,6 +440,7 @@ def _canonical_full_exit_preflight(core: Any, symbol: str, side: str, requested_
         "side": side_key,
         "requested_qty": round(qty, 9),
         "accounting_epoch_id": epoch_id,
+        "verified_snapshot_baseline_qty": round(baseline_qty, 9),
         "canonical_entry_qty": round(entry_qty, 9),
         "canonical_exit_qty": round(exit_qty, 9),
         "canonical_remaining_qty": round(remaining, 9),
