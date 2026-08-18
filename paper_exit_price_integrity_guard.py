@@ -127,6 +127,38 @@ def _source_issue(prices: Any) -> Dict[str, Any] | None:
     return None
 
 
+def _cached_source_issue(cached_price: float, prices: Any) -> Dict[str, Any] | None:
+    try:
+        values = [float(value) for value in list(prices)]
+    except Exception:
+        values = []
+    values = [value for value in values if math.isfinite(value) and value > 0.0]
+    prior = values[-SOURCE_RECENT_PRIOR_BARS:]
+    if len(prior) < SOURCE_MIN_PRIOR_BARS:
+        return {
+            "reason": "cached_price_plausibility_unverified",
+            "price": cached_price,
+            "prior_bars_used": len(prior),
+        }
+    anchor = float(statistics.median(prior))
+    if not math.isfinite(anchor) or anchor <= 0.0:
+        return {
+            "reason": "cached_price_plausibility_unverified",
+            "price": cached_price,
+            "prior_bars_used": len(prior),
+        }
+    ratio = cached_price / anchor
+    if ratio <= SOURCE_MIN_PRICE_RATIO or ratio >= SOURCE_MAX_PRICE_RATIO:
+        return {
+            "reason": "catastrophic_cached_price_outlier",
+            "price": cached_price,
+            "recent_median_anchor": anchor,
+            "price_to_recent_median_ratio": ratio,
+            "prior_bars_used": len(prior),
+        }
+    return None
+
+
 def _mark_source_block(symbol: str, issue: Dict[str, Any]) -> None:
     global _LAST_SOURCE_BLOCK
     _LAST_SOURCE_BLOCK = {
@@ -161,6 +193,27 @@ def _wrap_latest_price(core: Any) -> bool:
         if isinstance(cached, dict) and now - _f(cached.get("ts"), 0.0) < SOURCE_CACHE_TTL_SECONDS:
             cached_price = _f(cached.get("price"), 0.0)
             if cached_price > 0.0:
+                validated_version = str(cached.get("source_plausibility_validated_version") or "")
+                validated_price = _f(cached.get("source_plausibility_validated_price"), 0.0)
+                if validated_version == VERSION and validated_price == cached_price:
+                    return cached_price
+                try:
+                    download = getattr(core, "download_prices", None)
+                    if not callable(download):
+                        issue = {"reason": "cached_price_plausibility_unverified", "price": cached_price, "prior_bars_used": 0}
+                    else:
+                        frame = download(key, period="1d", interval="5m")
+                        prices = price_series(frame, "Close")
+                        issue = _cached_source_issue(cached_price, prices)
+                except Exception:
+                    issue = {"reason": "cached_price_plausibility_unverified", "price": cached_price, "prior_bars_used": 0}
+                if issue is not None:
+                    _mark_source_block(key, issue)
+                    data.pop(key, None)
+                    return None
+                cached["source_plausibility_validated_version"] = VERSION
+                cached["source_plausibility_validated_price"] = cached_price
+                cached["source_plausibility_validated_at"] = now
                 return cached_price
 
         try:
@@ -178,7 +231,13 @@ def _wrap_latest_price(core: Any) -> bool:
             px = _f(prices[-1], 0.0)
             if px <= 0.0:
                 return None
-            data[key] = {"ts": now, "price": px}
+            data[key] = {
+                "ts": now,
+                "price": px,
+                "source_plausibility_validated_version": VERSION,
+                "source_plausibility_validated_price": px,
+                "source_plausibility_validated_at": now,
+            }
             return px
         except Exception:
             return None
