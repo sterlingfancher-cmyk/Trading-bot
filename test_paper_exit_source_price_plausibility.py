@@ -1,3 +1,5 @@
+import time
+
 import paper_exit_price_integrity_guard as guard
 
 
@@ -46,9 +48,51 @@ def test_plausible_terminal_price_is_returned_and_cached():
     guard.apply(core)
 
     assert core.latest_price("LRCX") == 313.25
-    assert core._price_cache["data"]["LRCX"]["price"] == 313.25
+    cached = core._price_cache["data"]["LRCX"]
+    assert cached["price"] == 313.25
+    assert cached["source_plausibility_validated_version"] == guard.VERSION
+    assert cached["source_plausibility_validated_price"] == 313.25
     assert core.download_calls == 1
 
     core._prices = [1.0]
     assert core.latest_price("LRCX") == 313.25
+    assert core.download_calls == 1
+
+
+def test_poisoned_fresh_cached_qqq_price_is_blocked_before_return():
+    core = FakeCore([728.9, 729.4, 730.1, 730.5, 731.0, 730.7, 729.9, 730.2])
+    core._price_cache["data"]["QQQ"] = {
+        "ts": time.time(),
+        "price": 236.49000549316406,
+    }
+    guard.apply(core)
+
+    assert core.latest_price("QQQ") is None
+    assert "QQQ" not in core._price_cache["data"]
+    assert core.download_calls == 1
+
+    source = guard.status_payload(core)["source_plausibility"]
+    assert source["last_block"]["symbol"] == "QQQ"
+    assert source["last_block"]["boundary"] == "latest_price"
+    assert source["last_block"]["reason"] == "catastrophic_cached_price_outlier"
+    assert source["last_block"]["price"] == 236.49000549316406
+    assert source["last_block"]["price_to_recent_median_ratio"] < guard.SOURCE_MIN_PRICE_RATIO
+
+
+def test_valid_unvalidated_cache_is_checked_once_then_keeps_60_second_cache_behavior():
+    core = FakeCore([728.9, 729.4, 730.1, 730.5, 731.0, 730.7, 729.9, 730.2])
+    core._price_cache["data"]["QQQ"] = {
+        "ts": time.time(),
+        "price": 730.0,
+    }
+    guard.apply(core)
+
+    assert core.latest_price("QQQ") == 730.0
+    assert core.download_calls == 1
+    cached = core._price_cache["data"]["QQQ"]
+    assert cached["source_plausibility_validated_version"] == guard.VERSION
+    assert cached["source_plausibility_validated_price"] == 730.0
+
+    core._prices = [1.0]
+    assert core.latest_price("QQQ") == 730.0
     assert core.download_calls == 1
