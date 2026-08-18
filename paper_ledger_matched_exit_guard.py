@@ -1,8 +1,18 @@
-"""Matched-exit accounting guard for paper-ledger recovery.
+"""Matched-exit accounting guard for paper-ledger recovery and execution safety.
 
 Prevents unmatched/duplicate exits from creating synthetic cash during ledger
-reconstruction. This module is paper-only and changes accounting reconstruction
-and reporting only; it does not place orders or change strategy/risk authority.
+reconstruction and, at the live paper full-exit boundary, prevents stale runtime
+state from closing more quantity than the authoritative canonical execution
+ledger says remains open.
+
+The runtime preflight is deliberately narrow:
+- it runs before the existing ``exit_position`` owner can mutate cash/P&L/state;
+- it uses the existing canonical JSONL reader and hash-chain verifier;
+- it fails closed on missing/unreadable/invalid canonical evidence;
+- it includes an explicitly verified snapshot opening lot in canonical remaining
+  quantity so that inherited positions remain manageable but cannot be re-closed;
+- it does not alter partial exits, strategy, sizing, thresholds, live authority,
+  or ML authority.
 
 A deliberately created clean accounting epoch is also a valid zero-trade ledger
 baseline when cash/equity/P&L and the canonical execution ledger all agree.
@@ -10,11 +20,15 @@ baseline when cash/equity/P&L and the canonical execution ledger all agree.
 from __future__ import annotations
 
 import datetime as dt
+import functools
+import os
 from typing import Any, Dict, List
 
-VERSION = "paper-ledger-matched-exit-guard-2026-08-10-v2-clean-epoch"
+VERSION = "paper-ledger-matched-exit-guard-2026-08-18-v3-runtime-preflight"
+FULL_EXIT_EPSILON = 1e-6
 _APPLIED = False
 _REGISTERED_APP_IDS: set[int] = set()
+_RUNTIME_GUARD_CORE_IDS: set[int] = set()
 
 
 def _d(value: Any) -> Dict[str, Any]:
@@ -287,6 +301,208 @@ def analyze_ledger(pf: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
     }
 
 
+def _verified_snapshot_baseline_qty(pf: Dict[str, Any], symbol: str, side: str) -> float:
+    epoch = _d(pf.get("paper_accounting_epoch"))
+    if str(epoch.get("baseline_type") or "") != "verified_snapshot_with_open_position":
+        return 0.0
+    snapshot = _d(epoch.get("verified_snapshot_baseline"))
+    if not bool(snapshot.get("verified", False)):
+        return 0.0
+    raw = _d(_d(snapshot.get("positions")).get(str(symbol or "").upper().strip()))
+    if not raw:
+        return 0.0
+    snapshot_side = str(raw.get("side") or "long").lower().strip()
+    if snapshot_side != str(side or "long").lower().strip():
+        return 0.0
+    snapshot_qty = _f(raw.get("qty", raw.get("shares")), 0.0)
+    return snapshot_qty if snapshot_qty > FULL_EXIT_EPSILON else 0.0
+
+
+def _canonical_full_exit_preflight(core: Any, symbol: str, side: str, requested_qty: float) -> Dict[str, Any]:
+    """Return a fail-closed canonical lifecycle decision for one paper full exit."""
+    sym = str(symbol or "").upper().strip()
+    side_key = str(side or "long").lower().strip()
+    qty = _f(requested_qty, 0.0)
+    if not sym or side_key not in {"long", "short"} or qty <= FULL_EXIT_EPSILON:
+        return {
+            "allow": False,
+            "reason": "canonical_full_exit_request_invalid",
+            "symbol": sym,
+            "side": side_key,
+            "requested_qty": qty,
+        }
+
+    try:
+        import canonical_execution_ledger as ledger
+        with ledger._LOCK:
+            file_exists = os.path.exists(ledger.LEDGER_FILE)
+            rows, parse_errors = ledger._read_rows()
+            if parse_errors:
+                return {
+                    "allow": False,
+                    "reason": "canonical_execution_ledger_unreadable_for_full_exit",
+                    "symbol": sym,
+                    "side": side_key,
+                    "requested_qty": qty,
+                    "errors": parse_errors[:3],
+                }
+            chain_valid, chain_errors = ledger._verify_rows(rows)
+            if rows and not chain_valid:
+                return {
+                    "allow": False,
+                    "reason": "canonical_execution_ledger_chain_invalid_for_full_exit",
+                    "symbol": sym,
+                    "side": side_key,
+                    "requested_qty": qty,
+                    "errors": chain_errors[:3],
+                }
+            epoch_id = str(ledger._epoch_id(core) or "")
+    except Exception as exc:
+        return {
+            "allow": False,
+            "reason": "canonical_execution_ledger_preflight_error",
+            "symbol": sym,
+            "side": side_key,
+            "requested_qty": qty,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    if not file_exists:
+        return {
+            "allow": False,
+            "reason": "canonical_execution_ledger_missing_for_full_exit",
+            "symbol": sym,
+            "side": side_key,
+            "requested_qty": qty,
+            "accounting_epoch_id": epoch_id,
+        }
+
+    relevant = [
+        row for row in rows
+        if str(row.get("accounting_epoch_id") or "") == epoch_id
+        and str(row.get("symbol") or "").upper().strip() == sym
+        and str(row.get("side") or "long").lower().strip() == side_key
+    ]
+    baseline_qty = _verified_snapshot_baseline_qty(_portfolio(core), sym, side_key)
+    entry_qty = sum(_f(row.get("shares"), 0.0) for row in relevant if str(row.get("action") or "").lower().strip() == "entry")
+    exit_qty = sum(
+        _f(row.get("shares"), 0.0)
+        for row in relevant
+        if str(row.get("action") or "").lower().strip() in {"partial_exit", "exit"}
+    )
+    opening_qty = baseline_qty + entry_qty
+
+    if opening_qty <= FULL_EXIT_EPSILON:
+        return {
+            "allow": False,
+            "reason": "canonical_entry_missing_for_runtime_position",
+            "symbol": sym,
+            "side": side_key,
+            "requested_qty": qty,
+            "accounting_epoch_id": epoch_id,
+            "verified_snapshot_baseline_qty": round(baseline_qty, 9),
+            "canonical_entry_qty": round(entry_qty, 9),
+            "canonical_exit_qty": round(exit_qty, 9),
+        }
+
+    remaining = opening_qty - exit_qty
+    tolerance = max(FULL_EXIT_EPSILON, abs(opening_qty) * 1e-9)
+    if remaining <= tolerance:
+        return {
+            "allow": False,
+            "reason": "canonical_position_already_closed",
+            "symbol": sym,
+            "side": side_key,
+            "requested_qty": qty,
+            "accounting_epoch_id": epoch_id,
+            "verified_snapshot_baseline_qty": round(baseline_qty, 9),
+            "canonical_entry_qty": round(entry_qty, 9),
+            "canonical_exit_qty": round(exit_qty, 9),
+            "canonical_remaining_qty": round(remaining, 9),
+        }
+    if qty > remaining + tolerance:
+        return {
+            "allow": False,
+            "reason": "requested_full_exit_exceeds_canonical_remaining_quantity",
+            "symbol": sym,
+            "side": side_key,
+            "requested_qty": round(qty, 9),
+            "accounting_epoch_id": epoch_id,
+            "verified_snapshot_baseline_qty": round(baseline_qty, 9),
+            "canonical_entry_qty": round(entry_qty, 9),
+            "canonical_exit_qty": round(exit_qty, 9),
+            "canonical_remaining_qty": round(remaining, 9),
+        }
+    return {
+        "allow": True,
+        "reason": "canonical_remaining_quantity_allows_full_exit",
+        "symbol": sym,
+        "side": side_key,
+        "requested_qty": round(qty, 9),
+        "accounting_epoch_id": epoch_id,
+        "verified_snapshot_baseline_qty": round(baseline_qty, 9),
+        "canonical_entry_qty": round(entry_qty, 9),
+        "canonical_exit_qty": round(exit_qty, 9),
+        "canonical_remaining_qty": round(remaining, 9),
+    }
+
+
+def _mark_runtime_full_exit_block(core: Any, decision: Dict[str, Any]) -> None:
+    pf = _portfolio(core)
+    risk = _d(pf.setdefault("risk_controls", {}))
+    diagnostic = {
+        **decision,
+        "boundary": "exit_position_pre_mutation",
+        "version": VERSION,
+        "blocked_local": _now(core),
+    }
+    risk["canonical_full_exit_preflight_block"] = diagnostic
+    risk["canonical_full_exit_preflight_active"] = True
+    if not bool(risk.get("halted", False)):
+        risk["halted"] = True
+        risk["halt_reason"] = "canonical execution lifecycle integrity halt"
+    pf["risk_controls"] = risk
+    save = getattr(core, "save_state", None)
+    if callable(save):
+        try:
+            save(pf)
+        except TypeError:
+            save()
+        except Exception:
+            pass
+
+
+def _install_runtime_full_exit_guard(core: Any) -> bool:
+    current = getattr(core, "exit_position", None)
+    if not callable(current):
+        return False
+    marker = "_canonical_full_exit_preflight_version"
+    if getattr(current, marker, None) == VERSION:
+        _RUNTIME_GUARD_CORE_IDS.add(id(core))
+        return True
+    prior = getattr(current, "_canonical_full_exit_preflight_prior", current)
+
+    @functools.wraps(prior)
+    def guarded(symbol, px, *args, **kwargs):
+        pf = _portfolio(core)
+        pos = _d(_d(pf.get("positions")).get(str(symbol or "").upper().strip()))
+        if not pos:
+            return prior(symbol, px, *args, **kwargs)
+        side = str(pos.get("side") or "long").lower().strip()
+        shares = _f(pos.get("shares", pos.get("qty")), 0.0)
+        decision = _canonical_full_exit_preflight(core, symbol, side, shares)
+        if not bool(decision.get("allow")):
+            _mark_runtime_full_exit_block(core, decision)
+            return None
+        return prior(symbol, px, *args, **kwargs)
+
+    setattr(guarded, marker, VERSION)
+    setattr(guarded, "_canonical_full_exit_preflight_prior", prior)
+    setattr(core, "exit_position", guarded)
+    _RUNTIME_GUARD_CORE_IDS.add(id(core))
+    return True
+
+
 def _economic_status(core: Any = None) -> Dict[str, Any]:
     pf = _portfolio(core)
     rebuilt = analyze_ledger(pf, core)
@@ -328,6 +544,8 @@ def apply(core: Any = None) -> Dict[str, Any]:
         accounting.reconstruct_from_ledger = analyze_ledger
         economics.status_payload = _economic_status
         economics.apply = _economic_status
+        if core is not None and not _install_runtime_full_exit_guard(core):
+            raise RuntimeError("core.exit_position_missing_for_canonical_full_exit_preflight")
         _APPLIED = True
     except Exception as exc:
         return {"status": "error", "overall": "fail", "version": VERSION, "error": f"{type(exc).__name__}: {exc}"}
@@ -336,12 +554,18 @@ def apply(core: Any = None) -> Dict[str, Any]:
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
     rebuilt = analyze_ledger(_portfolio(core), core) if core is not None else {}
+    risk = _d(_portfolio(core).get("risk_controls")) if core is not None else {}
+    runtime_installed = bool(core is not None and id(core) in _RUNTIME_GUARD_CORE_IDS)
     return {
-        "status": "ok" if _APPLIED else "pending",
-        "overall": "pass" if _APPLIED else "warn",
+        "status": "ok" if _APPLIED and (core is None or runtime_installed) else "pending",
+        "overall": "pass" if _APPLIED and (core is None or runtime_installed) else "warn",
         "type": "paper_ledger_matched_exit_guard_status",
         "version": VERSION,
         "applied": _APPLIED,
+        "runtime_full_exit_guard_installed": runtime_installed,
+        "runtime_full_exit_guard_boundary": "exit_position_pre_mutation",
+        "runtime_full_exit_guard_fail_closed": True,
+        "runtime_full_exit_guard_block": risk.get("canonical_full_exit_preflight_block"),
         "coverage_complete": bool(rebuilt.get("coverage_complete")),
         "baseline_type": rebuilt.get("baseline_type"),
         "parsed_trade_rows": int(rebuilt.get("parsed_trade_rows") or 0),
@@ -350,7 +574,10 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "coverage_issues": _l(rebuilt.get("coverage_issues"))[:20],
         "reconstructed_cash": rebuilt.get("cash"),
         "authority": {
-            "paper_accounting_reconstruction_only": True,
+            "paper_accounting_reconstruction": True,
+            "blocks_duplicate_or_unmatched_full_exit_before_mutation": True,
+            "verified_snapshot_baseline_positions_remain_manageable": True,
+            "repairs_historical_state": False,
             "places_orders": False,
             "changes_strategy": False,
             "changes_thresholds": False,

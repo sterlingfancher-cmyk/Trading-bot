@@ -1,0 +1,22 @@
+name: TEM Duplicate Exit Runtime Guard Validation
+
+on:
+  pull_request:
+    paths:
+      - "paper_ledger_matched_exit_guard.py"
+      - "test_paper_ledger_matched_exit_runtime_guard.py"
+      - ".github/workflows/tem-duplicate-exit-runtime-guard-validation.yml"
+  workflow_dispatch:
+
+jobs:
+  tem-duplicate-exit-runtime-guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run exact canonical full-exit preflight regressions
+        run: python -m unittest -v test_paper_ledger_matched_exit_runtime_guard.py
