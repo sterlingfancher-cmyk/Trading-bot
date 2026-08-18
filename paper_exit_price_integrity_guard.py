@@ -1,14 +1,16 @@
-"""Fail-closed quote-integrity guard for paper exits.
+"""Fail-closed quote-integrity guard for paper valuation and exits.
 
 A paper position should never jump from the normal stop regime to a catastrophic
-single-tick exit without quote-integrity review. This module protects two
-independent boundaries:
+single-tick valuation or exit without quote-integrity review. This module
+protects three independent boundaries:
 
 1. ``latest_price`` rejects a catastrophically implausible terminal 5-minute
    close relative to recent same-symbol bars before that value is cached or
    returned to position management.
-2. Full and partial paper exits retain the existing entry-anchored fail-closed
-   guard as a second independent safety layer.
+2. ``calculate_equity`` refuses to reuse a catastrophically implausible stored
+   ``last_price`` when no independently trusted fresh quote can be obtained.
+3. Full and partial paper exits retain the existing entry-anchored fail-closed
+   guard as a separate safety layer.
 
 Paper-only safety control. It does not change signals, sizing, normal stops,
 profit taking, live authority, or ML authority.
@@ -278,6 +280,66 @@ def _mark(core: Any, symbol: str, row: Dict[str, Any], boundary: str) -> None:
             pass
 
 
+def _wrap_calculate_equity(core: Any) -> bool:
+    current = getattr(core, "calculate_equity", None)
+    if not callable(current):
+        return False
+
+    marker = "_calculate_equity_paper_exit_price_integrity_version"
+    if getattr(current, marker, None) == VERSION:
+        return True
+    prior = getattr(current, "_calculate_equity_paper_exit_price_integrity_prior", current)
+
+    @functools.wraps(prior)
+    def wrapped(*args, **kwargs):
+        refresh_prices = kwargs.get("refresh_prices", args[0] if args else True)
+        pf = _portfolio(core)
+        positions = _d(pf.get("positions"))
+        for symbol, pos in list(positions.items()):
+            if not isinstance(pos, dict):
+                continue
+            stored_price = _f(pos.get("last_price", pos.get("entry", 0.0)), 0.0)
+            stored_issue = anomaly(pos, stored_price)
+            if stored_issue is None:
+                continue
+
+            if bool(refresh_prices):
+                trusted_price = None
+                latest = getattr(core, "latest_price", None)
+                if callable(latest):
+                    try:
+                        trusted_price = latest(symbol)
+                    except Exception:
+                        trusted_price = None
+                if trusted_price is not None and anomaly(pos, trusted_price) is None:
+                    # The original calculate_equity will immediately call the same
+                    # protected latest_price path again. The validated 60-second
+                    # cache makes that second call provider-free and lets the normal
+                    # owner update last_price/equity without this guard fabricating a
+                    # replacement mark.
+                    continue
+
+            issue = {
+                **stored_issue,
+                "stored_mark_reason": stored_issue.get("reason"),
+                "reason": "catastrophic_stored_mark_fallback_blocked",
+                "stored_price": stored_price,
+                "refresh_prices": bool(refresh_prices),
+            }
+            _mark(core, symbol, issue, "calculate_equity_fallback")
+            # Fail closed without invoking the original valuation path. This
+            # preserves the prior account snapshot until a trusted fresh quote is
+            # available rather than reusing or inventing a catastrophic mark.
+            return _f(pf.get("equity"), _f(pf.get("cash"), 0.0))
+
+        return prior(*args, **kwargs)
+
+    setattr(wrapped, marker, VERSION)
+    setattr(wrapped, "_calculate_equity_paper_exit_price_integrity_prior", prior)
+    setattr(core, "calculate_equity", wrapped)
+    return True
+
+
 def _wrap_boundary(core: Any, name: str) -> bool:
     current = getattr(core, name, None)
     if not callable(current):
@@ -309,9 +371,10 @@ def apply(core: Any = None) -> Dict[str, Any]:
         return {"status": "skipped", "overall": "pass", "version": VERSION, "reason": "paper_only"}
 
     source = _wrap_latest_price(core)
+    valuation = _wrap_calculate_equity(core)
     full = _wrap_boundary(core, "exit_position")
     partial = _wrap_boundary(core, "reduce_position")
-    if source or full or partial:
+    if source or valuation or full or partial:
         _APPLIED_CORE_IDS.add(id(core))
     return status_payload(core)
 
@@ -320,7 +383,9 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
     pf = _portfolio(core) if core is not None else {}
     risk = _d(pf.get("risk_controls"))
     current_latest = getattr(core, "latest_price", None) if core is not None else None
+    current_equity = getattr(core, "calculate_equity", None) if core is not None else None
     source_installed = bool(getattr(current_latest, "_latest_price_paper_exit_price_integrity_version", None) == VERSION)
+    valuation_installed = bool(getattr(current_equity, "_calculate_equity_paper_exit_price_integrity_version", None) == VERSION)
     return {
         "status": "ok" if core is not None and id(core) in _APPLIED_CORE_IDS else "pending",
         "overall": "pass" if core is not None and id(core) in _APPLIED_CORE_IDS else "warn",
@@ -336,6 +401,10 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "min_price_ratio": SOURCE_MIN_PRICE_RATIO,
             "max_price_ratio": SOURCE_MAX_PRICE_RATIO,
             "last_block": dict(_LAST_SOURCE_BLOCK) if _LAST_SOURCE_BLOCK else None,
+        },
+        "valuation_fallback": {
+            "installed": valuation_installed,
+            "fail_closed_on_catastrophic_stored_mark": True,
         },
         "active_block": risk.get("paper_exit_price_integrity_block"),
         "authority": {
