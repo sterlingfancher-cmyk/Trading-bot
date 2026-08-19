@@ -1,0 +1,42 @@
+{
+  "version": "stable-paper-core-v3-stage-a-2026-08-19-v1",
+  "issue": 84,
+  "stage": "A",
+  "policy": {
+    "shadow_only": true,
+    "authoritative_runtime_source": false,
+    "places_orders": false,
+    "reads_market_data": false,
+    "reads_state_file": false,
+    "writes_state_file": false,
+    "changes_strategy": false,
+    "changes_thresholds": false,
+    "changes_risk_or_sizing": false,
+    "changes_live_or_ml_authority": false,
+    "historical_accounting_rewrite": false,
+    "requires_parity_before_authoritative_cutover": true
+  },
+  "target_owners": {
+    "portfolio_state": "trading.state.PortfolioSnapshot",
+    "risk_state": "trading.state.RiskStateSnapshot",
+    "persistence": "trading.state.StateStore",
+    "execution_ledger": "canonical_execution_ledger.py",
+    "valuation": "future_stage_b",
+    "accounting_projection": "future_stage_e"
+  },
+  "invariants": [
+    "canonical protected equity is finite and positive",
+    "risk day_start_equity and day_peak_equity are finite and positive",
+    "risk day_peak_equity cannot be below day_start_equity at validated snapshot boundary",
+    "position symbols are unique",
+    "position quantities and prices are positive",
+    "execution ledger row count is non-negative",
+    "Stage A StateStore has no file I/O or write authority"
+  ],
+  "cutover_blocked_until": [
+    "Issue #82 fresh-day acceptance passes prospectively",
+    "Stage B deterministic valuation parity passes",
+    "Stage C risk-engine parity passes",
+    "Stage D persistence transaction parity passes"
+  ]
+}
