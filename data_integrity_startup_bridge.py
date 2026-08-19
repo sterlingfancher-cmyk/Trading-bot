@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-12-v26-clean-epoch-successor-compatibility"
+VERSION = "data-integrity-startup-bridge-2026-08-19-v27-fresh-risk-day-baseline"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -43,6 +43,10 @@ MODULES = (
     # Final accounting adapter so the new epoch can begin from verified cash plus
     # the restored open LRCX lot and all future executions remain canonical.
     "verified_snapshot_accounting_baseline",
+    # Issue #82 fresh-day gate: never initialize a new risk day from a
+    # non-finite/non-positive persisted valuation.  This guard is prospective and
+    # never rewrites an already-initialized current day.
+    "fresh_risk_day_baseline_guard",
     "absolute_daily_halt_lifecycle_guard",
     "administrative_halt_classification_guard",
     "clean_epoch_validation_release",
