@@ -1,0 +1,46 @@
+{
+  "version": "stable-paper-core-v3-stage-d-state-store-2026-08-20-v1",
+  "stage": "D",
+  "authority": "shadow_only",
+  "target_interface": "trading.state_store.CanonicalStateStore",
+  "production_write_enabled": false,
+  "runtime_registered": false,
+  "constraints": {
+    "explicit_path_only": true,
+    "reads_environment": false,
+    "production_state_file_access": false,
+    "sandbox_io_requires_explicit_opt_in": true,
+    "canonical_payload_digest_required": true,
+    "monotonic_revision_required": true,
+    "atomic_same_directory_replace_required": true,
+    "file_fsync_required": true,
+    "directory_fsync_attempt_required": true,
+    "prewrite_backup_required_after_first_revision": true,
+    "post_commit_readback_required": true,
+    "restart_round_trip_parity_required": true,
+    "accounting_epoch_preserved": true,
+    "execution_ledger_rows_preserved": true,
+    "execution_chain_validity_preserved": true
+  },
+  "promotion_blockers": [
+    "issue_82_prospective_fresh_day_acceptance",
+    "normal_forward_paper_session",
+    "clean_active_accounting_audit",
+    "ledger_accounting_projection_stage_complete",
+    "single_production_write_owner_cutover_review"
+  ],
+  "forbidden_authority": [
+    "runtime_registration",
+    "production_state_path_resolution",
+    "legacy_save_state_replacement",
+    "legacy_load_state_replacement",
+    "risk_mutation",
+    "order_placement",
+    "strategy_change",
+    "sizing_change",
+    "threshold_change",
+    "live_authority_change",
+    "ml_execution_authority_change",
+    "historical_ledger_rewrite"
+  ]
+}
