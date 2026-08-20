@@ -26,7 +26,7 @@ import functools
 import math
 from typing import Any, Dict
 
-VERSION = "fresh-risk-day-baseline-guard-2026-08-19-v1"
+VERSION = "fresh-risk-day-baseline-guard-2026-08-20-v2-compact-check"
 MIN_SANE_EQUITY = 1.0
 _APPLIED_CORE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
@@ -187,6 +187,40 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
     }
 
 
+def fresh_day_check_payload(core: Any = None) -> Dict[str, Any]:
+    """Return only the Issue #82 fresh-day fields needed for operator review.
+
+    This is observational only.  It deliberately reads the existing risk-control
+    dictionary directly instead of calling ``get_risk_controls`` so opening the
+    endpoint cannot itself trigger or repair a daily reset.
+    """
+    portfolio = _d(getattr(core, "portfolio", {})) if core is not None else {}
+    rc = _d(portfolio.get("risk_controls"))
+    today = _today(core) if core is not None else ""
+    risk_date = str(rc.get("date") or "")
+    start = _f(rc.get("day_start_equity"), 0.0)
+    peak = _f(rc.get("day_peak_equity"), 0.0)
+    pending = bool(rc.get("fresh_day_reset_pending", False))
+
+    if not today or risk_date != today or pending:
+        baseline_status = "pending"
+    elif _sane_equity(start) and _sane_equity(peak) and peak >= start:
+        baseline_status = "pass"
+    else:
+        baseline_status = "fail"
+
+    return {
+        "baseline_status": baseline_status,
+        "date": risk_date,
+        "day_start_equity": start,
+        "day_peak_equity": peak,
+        "halted": bool(rc.get("halted", False)),
+        "halt_reason": str(rc.get("halt_reason") or ""),
+        "intraday_drawdown_pct": _f(rc.get("intraday_drawdown_pct"), 0.0),
+        "fresh_day_reset_pending": pending,
+    }
+
+
 def register_routes(flask_app: Any, core: Any = None) -> Dict[str, Any]:
     result = apply(core)
     if flask_app is None:
@@ -196,12 +230,19 @@ def register_routes(flask_app: Any, core: Any = None) -> Dict[str, Any]:
         from flask import jsonify
 
         existing = {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
-        path = "/paper/fresh-risk-day-baseline-guard-status"
-        if path not in existing:
+        status_path = "/paper/fresh-risk-day-baseline-guard-status"
+        if status_path not in existing:
             flask_app.add_url_rule(
-                path,
+                status_path,
                 "fresh_risk_day_baseline_guard_status",
                 lambda: jsonify(status_payload(core)),
+            )
+        compact_path = "/paper/fresh-day-check"
+        if compact_path not in existing:
+            flask_app.add_url_rule(
+                compact_path,
+                "fresh_day_check",
+                lambda: jsonify(fresh_day_check_payload(core)),
             )
         _REGISTERED_APP_IDS.add(app_id)
     return status_payload(core)
