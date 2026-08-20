@@ -1,0 +1,43 @@
+{
+  "version": "stable-paper-core-v3-stage-b-contract-2026-08-20-v1",
+  "stage": "B",
+  "authority": "shadow_only",
+  "target_interface": "trading.valuation.DeterministicValuationService",
+  "accounting_model": "bidirectional_margin_v1",
+  "inputs": {
+    "cash": "finite numeric current cash after execution reservation/release semantics",
+    "positions": "immutable PositionSnapshot basis/side/quantity records",
+    "marks": "exact symbol coverage with ProtectedMarkSnapshot rows already proven fresh and plausible upstream"
+  },
+  "invariants": [
+    "all protected marks are finite and positive",
+    "all protected marks are fresh",
+    "all protected marks are plausible",
+    "protected mark symbols exactly match open position symbols",
+    "long position value equals quantity times protected mark",
+    "short position value equals reserved entry basis plus unrealized P&L",
+    "total position value equals total cost basis plus total unrealized P&L",
+    "equity equals cash plus total deterministic position value",
+    "protected equity must be finite and positive before it is risk-baseline eligible"
+  ],
+  "prohibited_authority": {
+    "market_data_fetches": true,
+    "state_file_reads": true,
+    "state_file_writes": true,
+    "risk_mutation": true,
+    "order_placement": true,
+    "runtime_registration": true,
+    "strategy_changes": true,
+    "threshold_changes": true,
+    "sizing_changes": true,
+    "live_authority_changes": true,
+    "ml_execution_authority_changes": true
+  },
+  "promotion": {
+    "automatic": false,
+    "requires_issue_82_acceptance_before_authoritative_cutover": true,
+    "requires_shadow_parity": true,
+    "requires_restart_reload_parity": true,
+    "requires_exact_gunicorn_startup_smoke": true
+  }
+}
