@@ -1,0 +1,75 @@
+name: Architecture Debt Regression Gate
+
+on:
+  pull_request:
+    paths:
+      - "*.py"
+      - "**/*.py"
+      - ".github/workflows/*.yml"
+      - "architecture_ownership_registry.json"
+      - "typed_configuration_contract.json"
+      - "state_store_contract.json"
+      - "MASTER_SYSTEM_AUDIT_2026-08-20.md"
+  push:
+    branches: [main]
+    paths:
+      - "*.py"
+      - "**/*.py"
+      - ".github/workflows/*.yml"
+      - "architecture_ownership_registry.json"
+      - "typed_configuration_contract.json"
+      - "state_store_contract.json"
+      - "MASTER_SYSTEM_AUDIT_2026-08-20.md"
+  workflow_dispatch:
+
+jobs:
+  architecture-debt-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run gate unit tests
+        run: python -m unittest -v test_architecture_debt_regression_gate.py
+
+      - name: Build full-repository structural comparison
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            python refactor_audit_cli.py \
+              --json refactor_audit_report.json \
+              --markdown refactor_audit_report.md
+          else
+            python refactor_audit_cli.py \
+              --base "$BASE_SHA" \
+              --json refactor_audit_report.json \
+              --markdown refactor_audit_report.md \
+              --fail-on-new-critical
+          fi
+
+      - name: Block structural debt growth
+        run: |
+          python architecture_debt_regression_gate.py \
+            --audit refactor_audit_report.json \
+            --json architecture_debt_regression_report.json
+
+      - name: Upload architecture evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-debt-regression
+          path: |
+            refactor_audit_report.json
+            refactor_audit_report.md
+            architecture_debt_regression_report.json
+          if-no-files-found: warn
+          retention-days: 30
