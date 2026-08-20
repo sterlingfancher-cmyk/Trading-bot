@@ -15,7 +15,7 @@ import time
 import traceback
 from typing import Any, Callable, Iterable
 
-VERSION = "deferred-wsgi-bootstrap-2026-08-06-v6-registration-heartbeat"
+VERSION = "deferred-wsgi-bootstrap-2026-08-20-v7-pre-wsgi-fresh-risk-guard"
 _START_MONOTONIC = time.monotonic()
 _LOCK = threading.RLock()
 _DELEGATE: Callable[..., Any] | None = None
@@ -114,16 +114,41 @@ def _load_application() -> None:
     registration_heartbeat_stop: threading.Event | None = None
     registration_started_monotonic: float | None = None
     try:
-        _set_state(status="loading", phase="legacy_wsgi_import")
+        # Issue #82 startup-order fix: import the legacy core first, then install
+        # the fresh-day risk baseline guard before importing wsgi.py.  wsgi.py
+        # composes many auxiliary modules at import time and some of those may
+        # consult get_risk_controls().  Installing the guard only after the full
+        # legacy WSGI import was therefore too late to protect the first daily
+        # reset of a new process.
+        _set_state(status="loading", phase="legacy_core_import")
+        import app as core
+
+        _set_state(status="loading", phase="pre_wsgi_fresh_day_guard")
+        import fresh_risk_day_baseline_guard
+
+        pre_wsgi_fresh_day_guard = fresh_risk_day_baseline_guard.apply(core)
+        if not isinstance(pre_wsgi_fresh_day_guard, dict) or pre_wsgi_fresh_day_guard.get("status") == "error":
+            raise RuntimeError(
+                "pre-wsgi fresh-day guard installation failed: "
+                + json.dumps(pre_wsgi_fresh_day_guard, sort_keys=True, default=str)[:2000]
+            )
+
+        _set_state(
+            status="loading",
+            phase="legacy_wsgi_import",
+            pre_wsgi_fresh_day_guard=pre_wsgi_fresh_day_guard,
+        )
         import wsgi as legacy_wsgi
 
         delegate = getattr(legacy_wsgi, "app", None)
         if delegate is None or not callable(delegate):
             raise RuntimeError("legacy wsgi app missing or not callable")
 
-        core = sys.modules.get("app")
-        if core is None:
+        loaded_core = sys.modules.get("app")
+        if loaded_core is None:
             raise RuntimeError("app module missing after legacy WSGI import")
+        if loaded_core is not core:
+            raise RuntimeError("app module identity changed during legacy WSGI import")
 
         _set_state(status="loading", phase="data_integrity_registration")
         import data_integrity_startup_bridge
@@ -194,6 +219,7 @@ def _load_application() -> None:
             phase="delegating",
             registration=registration,
             registration_duration_seconds=registration_duration,
+            pre_wsgi_fresh_day_guard=pre_wsgi_fresh_day_guard,
             data_integrity_registration={
                 "apply": integrity_apply,
                 "routes": integrity_routes,
