@@ -1,0 +1,22 @@
+name: Fresh Day Compact Check Validation
+
+on:
+  pull_request:
+    paths:
+      - "fresh_risk_day_baseline_guard.py"
+      - "test_fresh_day_compact_check.py"
+      - ".github/workflows/fresh-day-compact-check-validation.yml"
+  workflow_dispatch:
+
+jobs:
+  fresh-day-compact-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run compact fresh-day endpoint regressions
+        run: python -m unittest -v test_fresh_day_compact_check.py
