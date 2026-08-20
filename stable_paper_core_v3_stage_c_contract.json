@@ -1,0 +1,45 @@
+{
+  "version": "stable-paper-core-v3-stage-c-contract-2026-08-20-v1",
+  "stage": "C",
+  "authority": "shadow_only",
+  "purpose": "Deterministic daily-risk lifecycle parity against the legacy runtime without mutating runtime state.",
+  "depends_on": [
+    "trading.state.RiskStateSnapshot",
+    "trading.valuation.ValuationSnapshot"
+  ],
+  "target_interface": "trading.risk.ShadowRiskEngine",
+  "configuration_policy": {
+    "reads_environment": false,
+    "thresholds_supplied_explicitly": true,
+    "canonical_units": "fraction",
+    "new_configuration_owner": false
+  },
+  "invariants": [
+    "fresh-day baseline requires a positive Stage B protected valuation",
+    "fresh day initializes day_start_equity and day_peak_equity from the same protected valuation",
+    "prior-day halt state does not carry into a new day",
+    "same-day hard halt remains latched unless a future authoritative lifecycle explicitly changes policy",
+    "daily loss is measured from day_start_equity",
+    "intraday drawdown is measured from the monotonic same-day peak",
+    "realized hard loss is measured from day_start_equity",
+    "hard-risk trigger precedence mirrors the current app owner: daily loss, intraday drawdown, realized hard loss",
+    "legacy percentage-point telemetry is converted to fractions only inside the parity comparator"
+  ],
+  "forbidden_authority": [
+    "state_file_read",
+    "state_file_write",
+    "environment_read",
+    "market_data_fetch",
+    "legacy_risk_mutation",
+    "runtime_registration",
+    "order_placement",
+    "halt_clear",
+    "historical_state_repair"
+  ],
+  "promotion_constraints": [
+    "Issue #82 prospective fresh-day acceptance must pass before authoritative cutover",
+    "shadow parity must be demonstrated across normal, daily-loss, intraday-drawdown, realized-loss, halt-latch, restart, and fresh-day cases",
+    "hard risk limits must remain unchanged unless separately approved and validated",
+    "authoritative cutover must use the canonical Stage B protected valuation and future StateStore transaction boundary"
+  ]
+}
