@@ -1,0 +1,33 @@
+name: Stable Paper Core v3 Stage D StateStore Validation
+
+on:
+  pull_request:
+    paths:
+      - "trading/state_store.py"
+      - "trading/state.py"
+      - "stable_paper_core_v3_stage_d_contract.json"
+      - "test_architecture_stage_d_state_store.py"
+      - ".github/workflows/stable-paper-core-stage-d.yml"
+  push:
+    branches: [main]
+    paths:
+      - "trading/state_store.py"
+      - "trading/state.py"
+      - "stable_paper_core_v3_stage_d_contract.json"
+      - "test_architecture_stage_d_state_store.py"
+      - ".github/workflows/stable-paper-core-stage-d.yml"
+  workflow_dispatch:
+
+jobs:
+  stage-d-state-store:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run Stage D StateStore regressions
+        run: python -m unittest -v test_architecture_stage_d_state_store.py
