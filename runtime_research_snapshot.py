@@ -3,7 +3,8 @@
 
 The collector performs concurrent GET requests only. It never calls authenticated
 cycle routes, initiates research, changes policy, mutates paper state, or places
-orders.
+orders. The authoritative verified-v2 recovery gate is captured automatically so
+manual per-event forensic requests are not required after each deployment.
 """
 from __future__ import annotations
 
@@ -15,14 +16,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-DEFAULT_BASE_URL = "https://trading-bot-clean.up.railway.app"
-VERSION = "runtime-research-snapshot-2026-08-03-v3-bootstrap-aware"
+DEFAULT_BASE_URL = "https://web-production-e1796.up.railway.app"
+VERSION = "runtime-research-snapshot-2026-08-21-v4-recovery-gate"
 
 ENDPOINTS = {
     "bootstrap_status": "/bootstrap-status",
     "root": "/",
     "paper_status": "/paper/status",
     "self_check": "/paper/self-check",
+    "verified_v2_recovery_gate": "/paper/verified-v2-successor-replay-status",
     "v1_status": "/paper/performance-audit-status",
     "v2_status": "/paper/performance-audit-v2-status",
     "v2_ablation": "/paper/performance-ablation-v2",
@@ -47,7 +49,7 @@ def _fetch_json(url: str, retries: int, timeout: float) -> dict[str, Any]:
                 url,
                 headers={
                     "Accept": "application/json",
-                    "User-Agent": "Trading-bot-read-only-research-snapshot/3.0",
+                    "User-Agent": "Trading-bot-read-only-research-snapshot/4.0",
                 },
                 method="GET",
             )
@@ -104,11 +106,40 @@ def _profile_summary(payload: dict[str, Any]) -> dict[str, Any]:
     return output
 
 
+def _recovery_gate_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    readiness = _dict(payload.get("recovery_readiness"))
+    ledger = _dict(payload.get("ledger"))
+    comparison = _dict(payload.get("state_comparison"))
+    projection = _dict(payload.get("projection"))
+    return {
+        "overall": payload.get("overall"),
+        "version": payload.get("version"),
+        "diagnosis": payload.get("diagnosis"),
+        "generated_local": payload.get("generated_local"),
+        "ledger_row_count": ledger.get("row_count"),
+        "chain_valid": ledger.get("chain_valid"),
+        "known_invalid_execution_count": payload.get("known_invalid_execution_count"),
+        "all_known_invalid_signatures_exact": payload.get("all_known_invalid_signatures_exact"),
+        "latest_invalid_is_last_canonical_execution": payload.get("latest_invalid_is_last_canonical_execution"),
+        "projection_complete": projection.get("projection_complete"),
+        "candidate_cash": projection.get("candidate_cash"),
+        "candidate_equity_using_current_stored_marks": comparison.get("candidate_equity_using_current_stored_marks"),
+        "unexplained_position_mismatches": comparison.get("unexplained_position_mismatches"),
+        "mechanically_complete_for_successor_migration_design": readiness.get("mechanically_complete_for_successor_migration_design"),
+        "manual_per_event_probe_required": readiness.get("manual_per_event_probe_required"),
+        "state_write_authorized_by_probe": readiness.get("state_write_authorized_by_this_probe"),
+        "halt_clear_authorized_by_probe": readiness.get("halt_clear_authorized_by_this_probe"),
+        "risk_peak_repair_authorized_by_probe": readiness.get("risk_peak_repair_authorized_by_this_probe"),
+    }
+
+
 def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
     bootstrap_payload = _dict(_dict(raw.get("bootstrap_status")).get("payload"))
     root_payload = _dict(_dict(raw.get("root")).get("payload"))
     paper_payload = _dict(_dict(raw.get("paper_status")).get("payload"))
     self_payload = _dict(_dict(raw.get("self_check")).get("payload"))
+    recovery_payload = _dict(_dict(raw.get("verified_v2_recovery_gate")).get("payload"))
+    recovery_gate = _recovery_gate_summary(recovery_payload)
     v1_payload = _dict(_dict(raw.get("v1_status")).get("payload"))
     v2_payload = _dict(_dict(raw.get("v2_status")).get("payload"))
     latest = _dict(v2_payload.get("latest"))
@@ -134,6 +165,7 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
     )
     application_ready = bool(delegate_ready and ("paper_status" in reachable or "self_check" in reachable))
     self_overall = self_payload.get("overall")
+    recovery_overall = recovery_payload.get("overall")
     v2_run_status = v2_payload.get("run_status") or latest.get("status") or "unknown"
 
     if not listener_reachable:
@@ -141,6 +173,8 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
     elif not application_ready:
         overall = "warn"
     elif self_overall not in {None, "pass"}:
+        overall = "warn"
+    elif recovery_overall not in {None, "pass"}:
         overall = "warn"
     elif str(v2_run_status).lower() == "error" or failures:
         overall = "warn"
@@ -178,6 +212,7 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "last_success": _dict(self_payload.get("auto_runner")).get("last_success"),
             "runtime_shadow_capture": _dict(_dict(self_payload.get("component_checks")).get("runtime_shadow_capture")),
         },
+        "recovery_gate": recovery_gate,
         "v1": {
             "version": v1_payload.get("version"),
             "enabled": v1_payload.get("enabled"),
@@ -219,6 +254,7 @@ def _markdown(report: dict[str, Any]) -> str:
     summary = _dict(report.get("summary"))
     connectivity = _dict(summary.get("connectivity"))
     self_check = _dict(summary.get("self_check"))
+    recovery_gate = _dict(summary.get("recovery_gate"))
     v1 = _dict(summary.get("v1"))
     v2 = _dict(summary.get("v2"))
     ablation = _dict(summary.get("ablation"))
@@ -244,6 +280,20 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- Equity: `{self_check.get('equity')}`",
         f"- Failing components: `{self_check.get('failing_components')}`",
         f"- Runtime shadow capture: `{self_check.get('runtime_shadow_capture')}`",
+        "",
+        "## Verified-v2 Recovery Gate",
+        "",
+        f"- Overall: `{recovery_gate.get('overall')}`",
+        f"- Diagnosis: `{recovery_gate.get('diagnosis')}`",
+        f"- Version: `{recovery_gate.get('version')}`",
+        f"- Ledger rows / chain: `{recovery_gate.get('ledger_row_count')}` / `{recovery_gate.get('chain_valid')}`",
+        f"- Invalid signatures exact: `{recovery_gate.get('all_known_invalid_signatures_exact')}`",
+        f"- Projection complete: `{recovery_gate.get('projection_complete')}`",
+        f"- Mechanically complete: `{recovery_gate.get('mechanically_complete_for_successor_migration_design')}`",
+        f"- Manual per-event probe required: `{recovery_gate.get('manual_per_event_probe_required')}`",
+        f"- Candidate cash: `{recovery_gate.get('candidate_cash')}`",
+        f"- Candidate equity from stored marks: `{recovery_gate.get('candidate_equity_using_current_stored_marks')}`",
+        f"- Unexplained position mismatches: `{recovery_gate.get('unexplained_position_mismatches')}`",
         "",
         "## Research V1",
         "",
