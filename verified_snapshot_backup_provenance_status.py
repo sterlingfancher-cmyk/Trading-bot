@@ -22,7 +22,7 @@ import os
 import re
 from typing import Any, Dict, List
 
-VERSION = "verified-snapshot-backup-provenance-status-2026-08-21-v1"
+VERSION = "verified-snapshot-backup-provenance-status-2026-08-21-v2-object-bounded"
 
 CLEAN_DECISION_ID = "journal-recovery-incomplete-2026-08-10"
 CLEAN_EPOCH_ID = "stable-paper-v1-20260810-clean01"
@@ -128,15 +128,52 @@ def _load_small_json(path: str) -> tuple[Dict[str, Any], str | None]:
         return {}, f"{type(exc).__name__}: {exc}"
 
 
+def _bounded_json_object(raw: bytes) -> tuple[bytes, str | None]:
+    """Return the first complete JSON object in raw without parsing whole state."""
+    start = raw.find(b"{")
+    if start < 0:
+        return b"", "epoch_object_start_not_found"
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(raw)):
+        value = raw[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif value == 0x5C:
+                escaped = True
+            elif value == 0x22:
+                in_string = False
+            continue
+        if value == 0x22:
+            in_string = True
+        elif value == 0x7B:
+            depth += 1
+        elif value == 0x7D:
+            depth -= 1
+            if depth == 0:
+                return raw[start : index + 1], None
+    return b"", "epoch_object_exceeds_bounded_read"
+
+
 def _extract_epoch_block(path: str, offset: int) -> Dict[str, Any]:
     try:
         with open(path, "rb") as handle:
             handle.seek(max(0, offset))
-            block = handle.read(EPOCH_BLOCK_BYTES)
+            raw = handle.read(EPOCH_BLOCK_BYTES)
     except Exception as exc:
         return {"read_error": f"{type(exc).__name__}: {exc}"}
 
-    values: Dict[str, Any] = {}
+    block, object_error = _bounded_json_object(raw)
+    if object_error:
+        return {
+            "read_error": object_error,
+            "verified_signature": False,
+            "clean_signature": False,
+        }
+
+    values: Dict[str, Any] = {"read_error": None}
     for name, pattern in _FIELD_PATTERNS.items():
         match = pattern.search(block)
         values[name] = _decode(match.group(1)) if match and match.group(1) else None
@@ -145,6 +182,7 @@ def _extract_epoch_block(path: str, offset: int) -> Dict[str, Any]:
         _bool_token(archived_match.group(1)) if archived_match else None
     )
     values["bad_execution_id_found_in_epoch_block"] = BAD_EXECUTION_ID.encode() in block
+    values["epoch_object_bytes"] = len(block)
 
     values["verified_signature"] = bool(
         values.get("id") == VERIFIED_EPOCH_ID
@@ -283,14 +321,11 @@ def _snapshot_candidates(manifest: Dict[str, Any]) -> List[str]:
             continue
         path = str(row.get("path") or "")
         created = str(row.get("created_local") or "")
+        raw_trades = row.get("trades_count")
         try:
-            trades = int(row.get("trades_count") or 0)
+            trades = int(raw_trades) if raw_trades is not None else 999999
         except Exception:
             trades = 999999
-        # Both the Aug. 10 clean cutover and Aug. 12 verified cutover created a
-        # zero-trade baseline.  Also accept tiny pre-cutover counts or a manifest
-        # timestamp explicitly from Aug. 12, but never scan arbitrary retained
-        # snapshots merely because they exist.
         likely_recovery_snapshot = bool(
             trades <= 11 or created.startswith("2026-08-12")
         )
@@ -382,9 +417,6 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
 
 
 def apply(core: Any = None) -> Dict[str, Any]:
-    # Important: data_integrity_startup_bridge calls apply() during startup.  Do
-    # not scan 25-40 MB backups at startup; scanning occurs only on explicit HTTP
-    # status request.
     return {
         "status": "ok",
         "overall": "pass",
