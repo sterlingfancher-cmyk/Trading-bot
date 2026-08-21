@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from change_safety_audit import classify_paths, evaluate_gate
+from change_safety_audit import classify_paths, evaluate_gate, planned_regressions
 
 
 class ChangeSafetyAuditTests(unittest.TestCase):
@@ -67,6 +67,24 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         self.assertIn("runtime_composition", categories)
         for boundary in ("startup_runtime", "state", "valuation", "accounting", "risk"):
             self.assertIn(boundary, boundaries)
+
+    def test_verified_snapshot_provenance_change_selects_focused_regression(self) -> None:
+        paths = ("verified_snapshot_provenance_status.py",)
+        categories, boundaries = classify_paths(paths)
+        tests = planned_regressions(paths)
+
+        self.assertIn("state_persistence", categories)
+        self.assertIn("state", boundaries)
+        self.assertIn("accounting", boundaries)
+        self.assertIn("test_verified_snapshot_provenance_status.py", tests)
+        for core_test in (
+            "test_architecture_stage_b.py",
+            "test_architecture_stage_c.py",
+            "test_architecture_stage_d_state_store.py",
+            "test_architecture_stage_e_accounting.py",
+            "test_architecture_stage_f_canary.py",
+        ):
+            self.assertIn(core_test, tests)
 
 
 if __name__ == "__main__":
