@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-21-v31-day-peak-provenance"
+VERSION = "data-integrity-startup-bridge-2026-08-21-v32-sls-recovery-proof"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -44,6 +44,9 @@ MODULES = (
     # Current-day risk-peak provenance probe. Its apply() is constant-time and
     # reads in-process history/reports only when its explicit route is requested.
     "day_peak_provenance_status",
+    # Exact SLS bad-execution counterfactual. Startup apply() is constant-time;
+    # the canonical ledger is read only when the explicit proof route is called.
+    "sls_bad_execution_recovery_proof",
     # Patch the exact one-shot recovery's journal rotation before the recovery
     # runs. The migration already owns the journal lock, so it must not call the
     # journal mirror recursively from inside that critical section.
