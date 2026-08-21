@@ -1,179 +1,237 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-17 after evening runtime audit  
+Last updated: 2026-08-21 10:05 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
-Canonical Railway paper service: `https://web-production-e1796.up.railway.app`
+Current `main`: `c6ef7958a247ae88ba9a5c3670ed756ac0d06426` (`Prevent diagnostic X-Ray from replacing fresh paper state (#98)`)  
+Canonical Railway paper service: `https://trading-bot-clean.up.railway.app`
+
+## Communication / Continuity Rule
+
+Keep Trading-bot progress updates in the active ChatGPT project conversation only. Do not surface project-status updates through separate ChatGPT monitoring conversations. On 2026-08-21 the project-specific `Trading System Completion` and `QQQ Repair Watch` monitoring tasks were disabled; `Trading Architecture Builder` was already disabled. Repository handoff maintenance remains required so a future conversation can recover exact state if continuity becomes necessary.
 
 ## Executive Status
 
-Stable Core remains in repair/validation with Performance Lab shadow-only. Runtime remains paper-only. Rules remain the sole execution authority. Live authority is disabled. ML/AI remains shadow-only.
+Operational stabilization is still blocked by GitHub Issue #82. Runtime remains paper-only. Rules remain the sole execution authority. Live authority is disabled. ML/AI remains shadow-only for execution.
 
-Morning audit generated `2026-08-17 11:22:11 CDT` showed runner pass, market-data pass, canonical execution ledger chain valid, risk controls pass with `halted=false`, and only the historical TEM duplicate-exit accounting defect remaining.
+The fresh-day protection itself is now behaving fail-closed, but the active authoritative paper account snapshot is corrupted and cannot seed a new risk day. The current live/on-disk snapshot reports approximately `cash=-26064.308325`, `equity=-26064.31`, no open positions, and `realized_total=-94929.16`. The current risk state remains the stale 2026-08-20 state with `day_start_equity=-26064.31`, `day_peak_equity=0.01`, `halted=true`, `halt_reason='daily loss limit hit (3.0%)'`, and `fresh_day_reset_pending=true`.
 
-A later audit generated `2026-08-17 17:10:44 CDT` shows a new material risk-state event: account equity is approximately `$13,274.84` with QQQ/MCHP/AG open, realized today approximately `-$6.11`, unrealized approximately `+$11.18`, `net_daily_loss_pct=0.0`, but `intraday_drawdown_pct=21.259%` and the unchanged hard `2.5%` intraday drawdown halt is active. Runner and market-data status still pass, the canonical ledger chain remains valid, and no new accounting-error category appeared. This pattern strongly indicates a contaminated/transient intraday equity peak rather than a genuine 21.259% economic loss. Do not clear or weaken the halt until the peak source is identified.
+Do not clear the halt, rewrite the risk peak, force a fresh-day baseline, or overwrite the account from a reconstructed balance merely to make the audit pass.
 
-Do not change strategy, sizing, thresholds, risk controls, account state, paper/live authority, or ML authority merely to make the audit pass.
+## 2026-08-21 Settled Runtime Evidence After PR #98
 
-## Canonical Accounting State
+### Fresh-day guard
 
-Current epoch: `stable-paper-v2-20260812-verified01`  
-Baseline: `verified_snapshot_with_open_position`  
-Starting cash: approximately `$10,768.497731`  
-Starting equity: approximately `$11,885.824057`
+`/paper/fresh-day-check`:
+- `baseline_status=pending`
+- risk date remains `2026-08-20`
+- `day_start_equity=-26064.31`
+- `day_peak_equity=0.01`
+- `fresh_day_reset_pending=true`
+- `halted=true`
+- `intraday_drawdown_pct=0.0`
 
-Latest audit account snapshot (`2026-08-17 17:10:44 CDT`): cash approximately `$9,347.15`, equity approximately `$13,274.84`, open positions QQQ/MCHP/AG, realized today approximately `-$6.11`, unrealized approximately `+$11.18`.
+`/paper/fresh-risk-day-baseline-guard-status`:
+- guard installed / overall pass
+- `current_equity_sane=false`
+- `day_start_equity_sane=false`
+- `day_peak_equity_sane=false`
+- `fresh_day_reset_pending=true`
+- prospective only; no current-day rewrite, halt clear, peak rewrite, historical-accounting edit, order placement, strategy/sizing/threshold/live/ML authority change
 
-The append-only canonical execution ledger remains authoritative. Do not fabricate, rewrite, delete, or manually repair historical execution rows.
+Interpretation: the guard is doing its job. It is refusing to manufacture a new 2026-08-21 risk baseline from invalid active equity.
 
-## Routine Validation
+### Compact self-check
 
-Routine audit: `https://web-production-e1796.up.railway.app/paper/daily-audit`  
-Full forensic audit: `https://web-production-e1796.up.railway.app/paper/daily-audit?full=1`  
-Source/exit guard status: `https://web-production-e1796.up.railway.app/paper/exit-price-integrity-status`
+`/paper/self-check` at `2026-08-21 09:51:12 CDT`:
+- overall `warn`, HTTP/status contract `ok`
+- account: cash `-26064.308324919723`, equity `-26064.31`, positions `[]`, realized today `0.0`, realized total `-94929.16`, unrealized `0.0`
+- auto runner enabled and observed active; no active runner error
+- all 9 bounded runtime component checks pass
+- scanner/entry composition ownership checks pass
+- runtime shadow capture parity passes
+- risk remains halted/self-defense-active only because of the stale daily-loss halt state
 
-Do not manually run `/paper/run` unless an explicit future validation plan requires it.
+### Full daily audit
 
-## LRCX Bad-Quote Source Fix — Accepted and Merged
+`/paper/daily-audit?full=1` at `2026-08-21 09:52:32 CDT`:
+- overall `fail` because risk remains halted and accounting integrity is not reconciled
+- runner liveness passes; no active recursion/runtime error
+- market-data/provider accounting is complete and clean at snapshot
+- persistent volume is healthy; `/data/state.json` exists; in-memory/on-disk richness match; no recovery failure or detected state-file corruption
+- therefore PR #98 appears to have stopped the diagnostic X-Ray overwrite path, but the state being faithfully persisted is already the contaminated state
+- paper accounting reconstruction reports approximately `cash/equity=10724.779592`, `realized_total=724.779592`, zero positions, but coverage is incomplete with 193 ignored/unmatched exit rows, mostly legacy rows beginning on 2026-08-07
+- because coverage is incomplete, **do not promote or write `$10,724.779592` into authoritative state**
+- separate paper-ledger economic integrity also fails; the reconstructed number is evidence, not yet trusted recovery authority
 
-PR #56, `Reject catastrophic terminal quotes before latest-price cache`, is merged into `main` at commit `03352a57d4a9ffde913ffd62f80f505a28e88793`.
+### Canonical execution ledger
 
-Accepted behavior:
-- preserves the existing entry-anchored paper exit quote-integrity guard as an independent fail-closed layer;
-- preserves normal valid-price caching;
-- validates fresh terminal prices against recent same-symbol prior closes;
-- rejects catastrophic source prices at or below `0.40x` or at or above `2.50x` the recent median before cache/return;
-- dynamically resolves the current `core.download_prices` owner;
-- changes no strategy, sizing, normal stops, risk thresholds, account state, live authority, or ML authority.
+`/paper/canonical-execution-ledger-status` after PR #98:
+- `status=ok`, `overall=pass`
+- `append_only=true`
+- `hook_applied=true`
+- `authoritative_for_new_executions=true`
+- `chain_valid=true`
+- `parse_error_count=0`, `chain_error_count=0`, `errors=[]`
+- `row_count=55`
+- `current_epoch_id=legacy-pre-stable-core`
+- `current_epoch_rows=55`
+- last execution id `e746b3e674654f9199402c8904df1f43`
 
-Post-deploy evidence confirmed the source guard is active. A later legitimate LRCX exit recorded near `$333.12`, while the historical bad attempt was approximately `$18.40` versus verified entry approximately `$312.90`.
+This is the current decisive provenance finding: the active portfolio no longer exposes the verified `stable-paper-v2-20260812-verified01` accounting epoch, and all 55 surviving canonical rows are presently counted under `legacy-pre-stable-core`. The append-only chain itself is healthy. Do not relabel or rewrite these rows. Next recovery work must establish how the verified-snapshot epoch identity was lost/resurrected and use preserved recovery/forensic evidence rather than guessing.
 
-The existing source and exit quote-integrity guards must not be weakened or cleared.
+## Issue #82 — Stabilization Exit Gate
 
-## Historical Workflow Check
+Issue #82 remains open and authoritative.
 
-Repo-agent workflow `31737484525` completed successfully on 2026-08-13 from historical main commit `106a217ef60a6bc659ab2545ebf65e5cdc1e372e`. GitHub reports no pull request attached to that workflow run. It is superseded by merged PR #56. No further action is required on that historical run.
+Already protected prospectively:
+- PR #56 source terminal-price plausibility guard
+- PR #79 fresh cached-price provenance/plausibility validation
+- PR #80 catastrophic persisted `last_price` valuation fallback guard
+- PR #81 canonical pre-mutation duplicate-full-exit guard
+- PR #83 fresh-day baseline sanity guard
+- PR #87 pre-WSGI fresh-day guard installation order
+- PR #98 removal of diagnostic X-Ray independent authoritative state I/O
 
-## Current Highest-Priority Runtime Blocker — New Aug 17 Contaminated Intraday Peak / Risk Halt
+Remaining acceptance:
+1. sane fresh-day risk initialization from a protected authoritative valuation;
+2. one normal forward paper market session after that clean reset;
+3. evidence-based historical-accounting disposition without rewriting immutable execution history;
+4. clean active audit: sane valuation, healthy runner/market data, valid canonical chain, no new active coverage/economic issue, and risk reflecting real economics.
 
-The `2026-08-17 17:10:44 CDT` routine audit reports:
-- equity approximately `$13,274.84`;
-- realized today approximately `-$6.11`;
-- unrealized approximately `+$11.18`;
-- `net_daily_loss_pct=0.0`;
-- `intraday_drawdown_pct=21.259%`;
-- risk `halted=true` with unchanged reason `performance risk hard intraday drawdown halt (2.50%)`;
-- runner pass and market-data pass;
-- no new canonical accounting coverage issue beyond the historical TEM duplicate exit.
+The current fresh-day result is `pending`, not accepted. That is the correct fail-closed state while active equity remains invalid.
 
-The morning audit from the same date had approximately `$13,298.86` equity and only `0.218%` intraday drawdown. The later 21.259% drawdown with essentially flat account economics implies the stored `day_peak_equity` was likely inflated by a transient valuation/quote event during the session. Candidate symbols active during the period include QQQ, MCHP, AG, plus entries/exits recorded for CLSK/BTDR as applicable in full history. Do not assume which symbol caused it until full runtime evidence identifies the offending quote/equity snapshot.
+## This Week's Reliability / Safety Changes
 
-Required next evidence:
-1. `/paper/exit-price-integrity-status` to confirm the merged source/exit guard remains installed and whether it recorded a block;
-2. `/paper/daily-audit?full=1` to inspect position-level last prices, risk `day_peak_equity`, report/history evidence, and any source/plausibility diagnostics that can identify the transient peak;
-3. do not clear the risk halt or rewrite peak/account state from inference alone.
+### 2026-08-18
 
-A future fix, if needed, must address the actual source of peak contamination prospectively. Do not weaken the 2.5% risk threshold.
+- PR #79 merged: validate fresh cached quotes before `latest_price` return. Exact QQQ poisoned-cache regression; no strategy/risk/sizing authority change.
+- PR #80 merged: fail closed on catastrophic persisted equity marks so a poisoned stored `last_price` cannot bypass protected quote retrieval.
+- PR #81 merged: block duplicate full exits at the canonical pre-mutation boundary using the existing append-only ledger semantics; historical TEM evidence remains immutable.
 
-## Separate Historical Blocker — Duplicate TEM Full Exit
+### 2026-08-19
 
-Production evidence in epoch `stable-paper-v2-20260812-verified01`:
-1. TEM `entry`, long `29.640567` @ `$54.885`, execution `d647d8a0580b44edbab0224e6c339bfd`, time `1786647398`;
-2. TEM full `exit`, long `29.640567` @ `$53.105`, execution `7b13d9194a23407f926667b2f48d4057`, time `1786714863`;
-3. second TEM full `exit`, long `29.640567` @ `$52.905`, execution `3530dbf965db4894ba93b7098cec3696`.
+- PR #83 merged: prospective fresh-risk-day baseline guard. Invalid/non-positive equity defers reset instead of becoming the new day's baseline.
+- Issue #84 opened: Stable Paper Core v3 architectural consolidation.
+- PR #85 merged: Stage A immutable canonical shadow state models and ownership contract.
 
-The second exit has no reconstructed position left to close. The 2026-08-17 evening audit still reports exactly this one historical issue: `exit_exceeds_reconstructed_position`, `coverage_complete=false`, `coverage_issue_count=1`, `economic_issue_count=1`. No additional unmatched exit/accounting issue appeared despite subsequent canonical activity. The journal recovery candidate remains untrusted because this historical defect is still present.
+### 2026-08-20
 
-Static trace establishes:
-- `app.exit_position()` mutates cash, removes the position, updates realized P/L and cooldown, then calls `record_trade("exit", ...)`;
-- `canonical_execution_ledger.apply()` wraps `record_trade` and durably appends the canonical JSONL execution before the underlying state trade mirror;
-- `run_cycle` persists `portfolio` later through `save_state(portfolio)`;
-- persisted state and canonical execution durability are therefore not one atomic transaction.
+- PR #86 merged: compact observational `/paper/fresh-day-check` endpoint.
+- PR #87 merged: install fresh-day guard immediately after core `app` import and before full WSGI runtime composition; exact Gunicorn startup validation passed.
+- PR #88 merged: `MASTER_SYSTEM_AUDIT_2026-08-20.md` plus architecture-debt regression gate.
+  - latest audited source scale at creation: 250 Python files / 90,409 lines
+  - 34 runtime mutation overlaps
+  - 5 environment conflicts
+  - 5 route overlaps
+  - 80 duplicate-function groups
+  - 540 broad exception-pass sites
+  - 8 watchdog loops
+  - 32 critical findings
+  - fragmented ownership included `save_state` 17 owners, `scan_signals` 14, `try_entries_and_rotations` 13, `entry_quality_check` 10, `enter_position` 9
+- PR #89 merged: Stage B deterministic shadow valuation service.
+- PR #90 merged: Stage C deterministic shadow risk engine.
+- PR #91 merged: Stage D shadow canonical StateStore with integrity hashing, atomic writes, backup/readback/restart invariants; production I/O still disabled.
+- PR #92 merged: Stage E shadow ledger-derived bidirectional accounting projection.
 
-Issue #66 tracks this defect.
+### 2026-08-21
 
-### Rejected TEM PRs / Runs
+- PR #93 merged: Stage F shadow canary readiness planner. Authoritative canary activation remains blocked by Issue #82.
+- Issue #94 created for mandatory per-change regression/impact auditing.
+- PR #95 merged: exact-head `Change Safety Audit` workflow and policy. It classifies change surface, selects impact-aware regressions, always retains core canonical invariants, runs architecture/config/ownership/debt/startup checks, and fails closed on stale/missing/failing evidence. Issue #94 remains open until final post-rebuild enforcement/branch-protection acceptance is complete.
+- Issue #96 created for a self-diagnosing incident triage/recommendation engine.
+- PR #97 merged: shadow-only `system_sentinel` with deterministic incident classification and impact-aware test selection. It has no production state authority and no self-healing enabled. Issue #96 remains open until production advisory activation after stabilization/rebuild acceptance.
+- PR #98 merged to current main `c6ef7958a247ae88ba9a5c3670ed756ac0d06426`: diagnostic `entry_pipeline_xray` no longer loads/saves authoritative state or reassigns `core.portfolio`. Regression reproduces stale-file/live-memory split and proves no X-Ray state replacement.
+- PR #98 head passed Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit including exact Gunicorn startup smoke, and Change Safety Audit. Railway deployment status on the merged main commit reported success.
 
-- PR #67: ML-shadow matcher change, wrong execution boundary and broad deletion; closed unmerged.
-- PR #68: unwired helper with non-production schema assumptions; closed unmerged.
-- PR #69: evidence-only test with no production boundary fix; closed unmerged.
-- Workflow `31838934941`: failed validation with `IndentationError`; no PR accepted.
-- PR #70: broad persistence rewrite with wrong ledger/schema assumptions; closed unmerged.
-- PR #71: guessed helper signatures and included the already-erroneous second exit in the causal fixture; closed unmerged.
-- PR #72: did not force the real mounted-persistence branch and used non-production state shape; closed unmerged.
-- PR #73: test-only restart/persistence evidence did not prove the causal second-exit path; both authoritative workflows were `action_required`; closed unmerged.
-- PR #74 from workflow `31855867000`: rejected and closed unmerged. It replaced most of `canonical_execution_ledger.py`, changed the established `apply(core)` contract, changed the canonical ledger filename, and removed existing hash-chain/wrapper behavior. Both authoritative workflows were `action_required`.
-- PR #75, `Add small duplicate-full-exit guard (canonical exit guard) with tests`: rejected and closed unmerged. It added an unwired helper rather than installing protection at the proven `app.exit_position()` runtime boundary and permitted exits when canonical ledger truth was unreadable/malformed. Both authoritative workflows completed `action_required`. No code from PR #75 entered `main`.
-- Workflow `31878943252`: failed safely on 2026-08-15 with `RuntimeError: Agent proposed no files.` The constrained agent made no branch, PR, or runtime change rather than violating the required surgical/fail-closed scope.
+## Stable Paper Core v3 / Issue #84
 
-## Current TEM Repair Direction
+Issue #84 remains open. Shadow/parity implementation status:
+- Stage A — merged (#85): immutable canonical state models
+- Stage B — merged (#89): deterministic valuation
+- Stage C — merged (#90): deterministic risk lifecycle
+- Stage D — merged (#91): shadow StateStore
+- Stage E — merged (#92): ledger/accounting projection
+- Stage F — merged (#93): canary readiness only; no authoritative activation
+- Stage G — not started/accepted; legacy mutation wrappers cannot be removed until authoritative cutover and parity evidence are clean
 
-Do not replace or redesign `canonical_execution_ledger.py`. Its existing API, append-only JSONL filename, hash-chain verification, `record_trade` wrapping, status route behavior, and startup composition must remain intact.
+Authoritative cutover remains blocked by Issue #82. Do not promote the shadow core merely to bypass the current corrupted state.
 
-A permissible prospective TEM fix, only if supported by code evidence, is a tiny fail-closed guard before full-exit mutation: for a candidate full exit, inspect authoritative current-epoch canonical rows for the same symbol/side. If at least one canonical entry exists and canonical net open quantity is already `<= epsilon`, block the second exit before cash/P&L/position/ledger mutation and emit a diagnostic/halt marker. This must not infer closure for verified-snapshot baseline positions that have no canonical entry.
+## Mandatory Future Change Safety / Issue #94
 
-Any such guard must use the existing canonical ledger's own parsing/hash-chain semantics. Missing, unreadable, malformed, or hash-invalid canonical evidence must not silently become permission for a full exit under a duplicate-exit guard. Do not add an unwired helper and call it complete.
+PR #95 has implemented the in-repository mandatory exact-head audit. Every relevant future PR must be reviewed against the exact PR head and must pass the Change Safety Audit plus required overlapping regressions/core invariants. A local unit test is never sufficient by itself. Missing, stale, incomplete, or failing audit evidence is a merge blocker.
 
-Prefer a surgical integration immediately at the proven `app.exit_position()` pre-mutation boundary while preserving all existing canonical-ledger behavior. Do not change the existing `apply(core)` signature. Do not change `LEDGER_FILE = .../canonical_execution_ledger.jsonl`. Do not weaken chain verification or canonical append ordering.
+Final post-rebuild completion still includes repository-rule/branch-protection enforcement where permissions support it and final acceptance/closure of Issue #94.
 
-Regression must use the literal TEM sequence: entry `d647...` 29.640567 @ 54.885, first exit `7b13...` 29.640567 @ 53.105, then a stale/resurrected second exit attempt @ 52.905 which must create no cash/P&L/canonical mutation.
+## Self-Diagnosing Sentinel / Issue #96
 
-Do not launch another speculative repo-agent retry merely because the audit still carries the historical TEM row. A future runtime code change still requires a concretely reviewable surgical implementation at the proven boundary.
+PR #97 provides the shadow diagnostic foundation. It can classify supplied evidence across valuation, accounting, execution ledger, risk, startup, configuration, architecture ownership, runner, and market-data boundaries and select deterministic affected tests while retaining mandatory core tests.
 
-## Remaining Separate Forensic History — UCTT Contaminated Peak Provenance
+It must not automatically rewrite portfolio/accounting/risk state, clear halts, alter execution history, change strategy/sizing/hard-risk/live/ML authority, or auto-merge authoritative fixes. Production advisory activation waits for stable canonical ownership.
 
-Historical sequence: UCTT entry long `$93.22`, partial exit `$337.54`, final exit `$94.025`.
+## Prior Verified Accounting Recovery — Preserve as Forensic Evidence
 
-The `$337.54` partial is implausible and likely contaminated historical intraday peak state. The morning 2026-08-17 daily risk state had reset cleanly, but the evening session developed a new independent contaminated-peak pattern. Do not assume the evening event is the same UCTT history; UCTT is no longer open and the new event must be traced from current-session evidence.
+The previously established recovery architecture created `stable-paper-v2-20260812-verified01` from a verified snapshot with an open LRCX lot and archived the prior contaminated epoch. Recovery code/forensic markers must be treated as evidence sources, not re-run blindly.
 
-## Risk Boundaries — Preserve
+The active 2026-08-21 runtime no longer exposes that verified epoch and the canonical ledger reports `legacy-pre-stable-core`. This discrepancy is now the next provenance investigation. Do not assume the verified epoch can simply be restored from the reconstructed `$10,724.779592` value, and do not rewrite current canonical rows to a different epoch id.
+
+## Historical TEM Duplicate Exit
+
+Historical TEM sequence remains immutable evidence:
+1. entry long `29.640567 @ 54.885`, execution `d647d8a0580b44edbab0224e6c339bfd`;
+2. first full exit `29.640567 @ 53.105`, execution `7b13d9194a23407f926667b2f48d4057`;
+3. duplicate full exit `@ 52.905`, execution `3530dbf965db4894ba93b7098cec3696`.
+
+PR #81 prospectively blocks a future duplicate full exit before cash/P&L/position/ledger mutation. Never delete, rewrite, fabricate, or relabel the historical TEM row to make accounting pass.
+
+## Canonical Runtime / Validation Links
+
+Use the clean service only:
+- bootstrap: `https://trading-bot-clean.up.railway.app/bootstrap-status`
+- compact fresh-day: `https://trading-bot-clean.up.railway.app/paper/fresh-day-check`
+- fresh-day guard: `https://trading-bot-clean.up.railway.app/paper/fresh-risk-day-baseline-guard-status`
+- routine self-check: `https://trading-bot-clean.up.railway.app/paper/self-check`
+- targeted full diagnostics: `https://trading-bot-clean.up.railway.app/paper/full-self-check`
+- routine daily audit: `https://trading-bot-clean.up.railway.app/paper/daily-audit`
+- full daily audit: `https://trading-bot-clean.up.railway.app/paper/daily-audit?full=1`
+- canonical ledger: `https://trading-bot-clean.up.railway.app/paper/canonical-execution-ledger-status`
+- quote/exit integrity: `https://trading-bot-clean.up.railway.app/paper/exit-price-integrity-status`
+
+Do not manually call `/paper/run` unless a specific future validation plan explicitly requires it.
+
+Known ops debt: `.github/workflows/refactor-audit.yml` still contains an older hard-coded `https://web-production-e1796.up.railway.app` runtime-research target even though `runtime_research_snapshot.py` defaults to `trading-bot-clean`. Do not treat that old-domain automated snapshot as clean-service acceptance evidence. Correct this metadata drift as governance/ops cleanup without mixing it into the current accounting recovery unless necessary.
+
+## Risk / Authority Boundaries — Preserve
 
 - soft daily-loss pause: `1.0%`
 - hard realized-loss halt: `2.5%`
 - hard intraday drawdown halt: `2.5%`
 - absolute daily-loss ceiling: `3.0%`
 - maximum configured account risk per trade at stop: `2.0%`
-- source terminal-price plausibility: `0.40x` minimum / `2.50x` maximum
-
-No risk threshold is to be weakened to create trades or make an audit pass.
-
-## Non-Negotiable Boundaries
-
-- Paper-only until explicit live-readiness approval.
-- No fabricated, deleted, rewritten, or manually edited historical ledger rows.
-- Rules remain sole execution authority.
-- ML remains shadow-only for execution.
-- Do not alter account state to make an audit pass.
-- Do not manually clear the current Aug 17 risk halt before identifying its contaminated-peak source.
-- Preserve forensic evidence before deleting or migrating state.
-- Prefer targeted correctness fixes over broad rewrites.
-- Both authoritative GitHub CI workflows must pass before runtime changes are merged/deployed.
-
-## Proactive Status / Next-Step Protocol
-
-1. Continue routine investigation, fix, PR, CI, review, and handoff maintenance automatically within already-agreed scope.
-2. Proactively report pass/fail and the immediate next action when material work completes.
-3. If work is still running, report what is in progress only when meaningful.
-4. If manual user action is unavoidable, provide exact numbered click-by-click instructions.
-5. Do not ask the user to manually edit runtime code when a connector/agent path can do it.
-6. Stop for new approval only for genuinely high-impact changes outside agreed scope, including live authority, ML execution authority, risk limits, strategy intent, or manual account-state alteration.
-
-## Conversation Continuity Protocol
-
-Warn before the active ChatGPT conversation becomes too long for safe continuation. Before recommending a new conversation:
-1. update this handoff with all material branch/PR/commit/deployment status, blockers, latest validation evidence, safety boundaries, and exact next action;
-2. provide one exact copy/paste continuation command;
-3. the user should never need to request this protocol again.
-
-Continuation command:
-
-```text
-Use the direct @GitHub connector and continue the Trading-bot project from sterlingfancher-cmyk/Trading-bot. Read PROJECT_HANDOFF_CURRENT.md first and treat it as the authoritative continuation state. Verify the current GitHub branch/PR/commit and latest canonical Railway daily audit before making changes. Continue from the exact next action documented in the handoff. Preserve all Stable Core safety, accounting, execution-authority, risk, paper-only, and ML-shadow boundaries. Do not restart completed historical investigations unless new evidence proves they are relevant. Continue routine in-scope fixes, PR review, CI validation, and handoff maintenance without waiting for repeated approvals. Proactively tell me when work completes, fails, is still in progress, or requires a manual step. If a manual step is unavoidable, give exact numbered instructions. Also follow the Conversation Continuity Protocol in PROJECT_HANDOFF_CURRENT.md.
-```
+- terminal-price plausibility: `0.40x` minimum / `2.50x` maximum
+- paper-only until explicit live-readiness approval
+- rules remain sole execution authority
+- ML remains shadow-only for execution
+- no fabricated/deleted/rewritten historical ledger rows
+- no manual account-state repair merely to pass an audit
 
 ## Exact Next Action
 
-First priority is the new Aug 17 evening contaminated-peak/risk-halt event. Obtain `/paper/exit-price-integrity-status` and `/paper/daily-audit?full=1`. Identify the actual source of the transient peak before any code or state change. Do not clear the halt manually and do not weaken the 2.5% threshold. If the source guard reports a new block or the full audit isolates a current symbol/price anomaly, trace that exact source path and only then consider a narrow prospective fix.
+The canonical ledger chain is healthy, but all 55 rows are currently associated with `legacy-pre-stable-core`, proving the active verified epoch identity is missing. Continue read-only provenance work before any account/state mutation:
 
-For TEM, the evening runtime audit still shows the same single historical duplicate-exit accounting defect and no new accounting error category across later canonical activity. No new TEM PR currently qualifies for advancement. Do not create another broad canonical-ledger rewrite, unwired helper, or speculative agent retry.
+1. inspect the clean-accounting and verified-snapshot recovery markers/status and archived successor evidence to determine whether the durable `stable-paper-v2-20260812-verified01` recovery completion evidence still exists;
+2. compare that evidence with the 55 canonical rows and their recorded epoch ids without editing them;
+3. establish the earliest point at which the active state lost `paper_accounting_epoch` / `accounting_epoch_id` and whether the stale snapshot resurrected by the pre-PR #98 X-Ray path is the exact source;
+4. only after provenance is mechanically proven, design a bounded recovery/successor epoch that preserves the 55-row hash chain and all historical evidence, then run the mandatory Change Safety Audit before any merge/deploy;
+5. after a safe authoritative state source is restored, require a new fresh-day reset from sane equity, then forward-session and clean-audit proof before closing Issue #82 or activating Stage F/G authority.
 
-For LRCX, do not modify merged PR #56 unless new deployed evidence proves a new source-level quote plausibility defect. Historical repo-agent workflow `31737484525` is complete, has no attached PR, and is superseded by PR #56. Do not merge automatically.
+Do not use the incomplete `$10,724.779592` reconstruction as an automatic state repair.
+
+## Conversation Continuity Protocol
+
+Keep updates in the active project chat. If the active conversation becomes too long for safe continuation, first update this handoff with all material PR/commit/deployment/runtime evidence and the exact next action, then provide one continuation command. Do not rely on a separate monitoring chat for project status.
+
+Continuation command if ever required:
+
+```text
+Use the direct @GitHub connector and continue the Trading-bot project from sterlingfancher-cmyk/Trading-bot. Read PROJECT_HANDOFF_CURRENT.md first and treat it as the authoritative continuation state. Keep all project updates in this chat only. Verify current main/PR/CI and the canonical Railway clean-service read-only evidence before changing code. Continue from the Exact Next Action. Preserve paper-only authority, hard risk thresholds, canonical ledger history, rules-only execution authority, ML shadow-only execution, and the Issue #82/#84/#94/#96 gates. Do not manually repair account state or clear halts from inference.
+```
