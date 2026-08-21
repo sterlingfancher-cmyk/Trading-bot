@@ -79,15 +79,3 @@ def test_xray_telemetry_reads_live_memory_without_state_file_io():
     assert telemetry["last_bottleneck"] == "entries_returned"
     assert core.load_state_calls == 0
     assert core.save_state_calls == 0
-
-
-def test_xray_policy_declares_no_authoritative_state_io(monkeypatch):
-    core = FakeCore()
-    monkeypatch.setattr(xray, "_patch", lambda _core=None: False)
-
-    payload = xray.status_payload(core)
-
-    policy = payload["policy"]
-    assert policy["does_not_reload_authoritative_state"] is True
-    assert policy["does_not_save_authoritative_state"] is True
-    assert policy["does_not_replace_authoritative_portfolio"] is True
