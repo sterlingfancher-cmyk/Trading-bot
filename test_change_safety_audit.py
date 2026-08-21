@@ -170,6 +170,23 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         ):
             self.assertIn(core_test, tests)
 
+    def test_runtime_research_snapshot_change_selects_automatic_capture_regression(self) -> None:
+        path = "runtime_research_snapshot.py"
+        categories, boundaries = classify_paths((path,))
+        tests = planned_regressions((path,))
+
+        self.assertIn("runtime_observability", categories)
+        self.assertIn("runtime_observability", boundaries)
+        self.assertIn("test_runtime_research_snapshot.py", tests)
+        for core_test in (
+            "test_architecture_stage_b.py",
+            "test_architecture_stage_c.py",
+            "test_architecture_stage_d_state_store.py",
+            "test_architecture_stage_e_accounting.py",
+            "test_architecture_stage_f_canary.py",
+        ):
+            self.assertIn(core_test, tests)
+
 
 if __name__ == "__main__":
     unittest.main()
