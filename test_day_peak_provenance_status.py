@@ -21,10 +21,10 @@ class _Core:
         return mapping.get(float(ts), "2026-08-21 13:15:00 CDT")
 
 
-def _report(time_text, equity, peak, positions):
+def _report(time_text, equity, peak, positions, date="2026-08-21"):
     return {
         "type": "intraday",
-        "date": "2026-08-21",
+        "date": date,
         "generated_local": time_text,
         "headline": {
             "equity": equity,
@@ -34,7 +34,7 @@ def _report(time_text, equity, peak, positions):
             "open_positions": positions,
         },
         "risk_controls": {
-            "date": "2026-08-21",
+            "date": date,
             "day_start_equity": 100.0,
             "day_peak_equity": peak,
             "intraday_drawdown_pct": max(0.0, (peak - equity) / peak * 100.0),
@@ -73,7 +73,13 @@ def _portfolio(transient=True):
             "intraday_history": [
                 _report("2026-08-21 13:05:00 CDT", 102.0, 102.0, ["OLD"]),
                 _report("2026-08-21 13:10:00 CDT", second_equity, 150.0, ["ABC"]),
-                _report("2026-08-20 13:10:00 CDT", 999.0, 999.0, ["STALE"]),
+                _report(
+                    "2026-08-20 13:10:00 CDT",
+                    999.0,
+                    999.0,
+                    ["STALE"],
+                    date="2026-08-20",
+                ),
             ],
         },
         "trades": [
