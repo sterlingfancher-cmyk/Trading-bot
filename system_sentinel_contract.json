@@ -1,0 +1,48 @@
+{
+  "version": "system-sentinel-contract-2026-08-20-v1",
+  "authority": "advisory_only",
+  "required_boundaries": [
+    "valuation",
+    "accounting",
+    "execution",
+    "risk",
+    "startup_runtime",
+    "configuration",
+    "architecture",
+    "runner",
+    "market_data"
+  ],
+  "incident_schema": [
+    "incident_id",
+    "severity",
+    "boundary",
+    "reason_code",
+    "evidence",
+    "suspected_cause",
+    "confidence",
+    "proposed_fix",
+    "selected_tests",
+    "full_audit_required",
+    "authority"
+  ],
+  "policy": {
+    "advisory_only": true,
+    "mandatory_core_tests_never_skipped": true,
+    "deterministic_test_selection": true,
+    "deterministic_incident_ids": true,
+    "auto_merges": false,
+    "writes_production_state": false,
+    "clears_halts": false,
+    "rewrites_execution_history": false,
+    "changes_strategy_or_sizing": false,
+    "changes_hard_risk_limits": false,
+    "changes_live_or_ml_authority": false,
+    "issue_94_remains_final_merge_gate": true
+  },
+  "self_healing": {
+    "enabled": false,
+    "authoritative_paths_allowed": false,
+    "future_non_authoritative_actions_require_allowlist": true,
+    "future_actions_must_be_reversible_idempotent": true
+  }
+}
