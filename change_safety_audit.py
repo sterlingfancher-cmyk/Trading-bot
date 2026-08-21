@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-21-v4-provenance"
+VERSION = "change-safety-audit-2026-08-21-v5-day-peak-provenance"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -35,6 +35,7 @@ PROVENANCE_TESTS = (
     "test_verified_snapshot_backup_provenance_status.py",
     "test_verified_snapshot_journal_ledger_provenance_status.py",
 )
+DAY_PEAK_PROVENANCE_TESTS = ("test_day_peak_provenance_status.py",)
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,10 @@ def changed_files(base: str, head: str) -> tuple[str, ...]:
 def _is_verified_snapshot_provenance_path(path: str) -> bool:
     lowered = path.lower()
     return "verified_snapshot" in lowered and "provenance" in lowered
+
+
+def _is_day_peak_provenance_path(path: str) -> bool:
+    return "day_peak_provenance" in path.lower()
 
 
 def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -98,6 +103,9 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
         if _is_verified_snapshot_provenance_path(path):
             categories.add("state_persistence")
             boundaries.update(("state", "accounting"))
+        if _is_day_peak_provenance_path(path):
+            categories.add("risk")
+            boundaries.update(("risk", "state"))
         if "risk" in path:
             categories.add("risk")
             boundaries.add("risk")
@@ -129,6 +137,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(CONFIG_TESTS)
     if any(_is_verified_snapshot_provenance_path(path) for path in path_tuple):
         tests.extend(PROVENANCE_TESTS)
+    if any(_is_day_peak_provenance_path(path) for path in path_tuple):
+        tests.extend(DAY_PEAK_PROVENANCE_TESTS)
     existing: list[str] = []
     seen: set[str] = set()
     for test in tests:
