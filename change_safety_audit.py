@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-21-v8-successor-replay"
+VERSION = "change-safety-audit-2026-08-21-v9-runtime-research-recovery-gate"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -42,6 +42,7 @@ PRICE_INTEGRITY_TESTS = (
 )
 SLS_RECOVERY_PROOF_TESTS = ("test_sls_bad_execution_recovery_proof.py",)
 SUCCESSOR_REPLAY_TESTS = ("test_verified_v2_successor_replay_status.py",)
+RUNTIME_RESEARCH_SNAPSHOT_TESTS = ("test_runtime_research_snapshot.py",)
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,10 @@ def _is_successor_replay_path(path: str) -> bool:
     return "verified_v2_successor_replay" in path.lower()
 
 
+def _is_runtime_research_snapshot_path(path: str) -> bool:
+    return "runtime_research_snapshot" in path.lower()
+
+
 def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     categories: set[str] = set()
     boundaries: set[str] = set()
@@ -128,6 +133,9 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
         if _is_sls_recovery_proof_path(path) or _is_successor_replay_path(path):
             categories.update(("state_persistence", "accounting_execution", "risk"))
             boundaries.update(("state", "accounting", "execution", "risk"))
+        if _is_runtime_research_snapshot_path(path):
+            categories.add("runtime_observability")
+            boundaries.add("runtime_observability")
         if "risk" in path:
             categories.add("risk")
             boundaries.add("risk")
@@ -167,6 +175,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(SLS_RECOVERY_PROOF_TESTS)
     if any(_is_successor_replay_path(path) for path in path_tuple):
         tests.extend(SUCCESSOR_REPLAY_TESTS)
+    if any(_is_runtime_research_snapshot_path(path) for path in path_tuple):
+        tests.extend(RUNTIME_RESEARCH_SNAPSHOT_TESTS)
     existing: list[str] = []
     seen: set[str] = set()
     for test in tests:
