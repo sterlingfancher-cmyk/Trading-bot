@@ -4,6 +4,7 @@ from unittest import mock
 
 import canonical_execution_ledger as ledger
 import verified_v2_successor_replay_status as replay
+import verified_v2_successor_replay_tem_provenance as temprov
 
 
 class FakeCore:
@@ -199,3 +200,36 @@ def test_startup_apply_does_not_read_ledger_or_runtime_state():
     assert payload["startup_reads_runtime_state"] is False
     assert payload["startup_reads_canonical_ledger"] is False
     assert payload["startup_writes_state_or_files"] is False
+
+
+def test_tem_provenance_reports_exact_field_match_without_mutation():
+    rows = _rows()
+    with mock.patch.object(ledger, "_read_rows", return_value=(rows, [])), mock.patch.object(
+        ledger, "_verify_rows", return_value=(True, [])
+    ):
+        payload = temprov.tem_duplicate_provenance_payload(FakeCore())
+
+    assert payload["overall"] == "pass"
+    assert payload["signature_exact"] is True
+    assert payload["failed_checks"] == []
+    assert payload["observed_row"]["execution_id"] == replay.TEM_DUPLICATE_EXECUTION_ID
+    assert payload["authority"]["writes_files"] is False
+    assert payload["authority"]["rewrites_or_relabels_canonical_ledger"] is False
+
+
+def test_tem_provenance_identifies_only_the_mismatched_field():
+    rows = _rows()
+    tem_row = next(
+        row for row in rows if row["execution_id"] == replay.TEM_DUPLICATE_EXECUTION_ID
+    )
+    tem_row["price"] = 52.904
+    with mock.patch.object(ledger, "_read_rows", return_value=(rows, [])), mock.patch.object(
+        ledger, "_verify_rows", return_value=(True, [])
+    ):
+        payload = temprov.tem_duplicate_provenance_payload(FakeCore())
+
+    assert payload["overall"] == "warn"
+    assert payload["diagnosis"] == "tem_duplicate_signature_field_mismatch_identified"
+    assert payload["signature_exact"] is False
+    assert payload["failed_checks"] == ["price"]
+    assert payload["field_checks"]["price"]["absolute_delta"] > temprov.PRICE_TOLERANCE
