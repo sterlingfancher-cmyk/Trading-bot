@@ -1,21 +1,36 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-21 10:05 CDT  
+Last updated: 2026-08-21 10:15 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
-Current `main`: `c6ef7958a247ae88ba9a5c3670ed756ac0d06426` (`Prevent diagnostic X-Ray from replacing fresh paper state (#98)`)  
+Current `main` before this handoff-only PR: `0874368ad5bf303337b8c94ed1c9ae967c2231b5` (`Update authoritative handoff through Aug 21 (#99)`)  
 Canonical Railway paper service: `https://trading-bot-clean.up.railway.app`
 
 ## Communication / Continuity Rule
 
-Keep Trading-bot progress updates in the active ChatGPT project conversation only. Do not surface project-status updates through separate ChatGPT monitoring conversations. On 2026-08-21 the project-specific `Trading System Completion` and `QQQ Repair Watch` monitoring tasks were disabled; `Trading Architecture Builder` was already disabled. Repository handoff maintenance remains required so a future conversation can recover exact state if continuity becomes necessary.
+Keep Trading-bot progress communication in the **currently active ChatGPT project conversation**. This is not permanently tied to one specific thread. When the project intentionally moves to a new ChatGPT conversation, update this handoff first, use the continuation command at the bottom, and treat the new conversation as the active project chat.
+
+Do not let project-specific monitoring tasks continue posting into an old/stale project conversation. On 2026-08-21 the `Trading System Completion` and `QQQ Repair Watch` monitoring tasks were disabled; `Trading Architecture Builder` was already disabled. They should remain disabled unless a future current project chat intentionally re-establishes monitoring in that active conversation.
+
+Repository handoff maintenance remains mandatory so a new conversation can recover exact state without relying on prior-chat memory.
 
 ## Executive Status
 
 Operational stabilization is still blocked by GitHub Issue #82. Runtime remains paper-only. Rules remain the sole execution authority. Live authority is disabled. ML/AI remains shadow-only for execution.
 
-The fresh-day protection itself is now behaving fail-closed, but the active authoritative paper account snapshot is corrupted and cannot seed a new risk day. The current live/on-disk snapshot reports approximately `cash=-26064.308325`, `equity=-26064.31`, no open positions, and `realized_total=-94929.16`. The current risk state remains the stale 2026-08-20 state with `day_start_equity=-26064.31`, `day_peak_equity=0.01`, `halted=true`, `halt_reason='daily loss limit hit (3.0%)'`, and `fresh_day_reset_pending=true`.
+The fresh-day protection is now behaving fail-closed, but the authoritative paper account snapshot is corrupted and cannot seed a new risk day. Current live/on-disk state is approximately:
+- `cash=-26064.308325`
+- `equity=-26064.31`
+- no open positions
+- `realized_total=-94929.16`
 
-Do not clear the halt, rewrite the risk peak, force a fresh-day baseline, or overwrite the account from a reconstructed balance merely to make the audit pass.
+The risk state remains stale from 2026-08-20 with:
+- `day_start_equity=-26064.31`
+- `day_peak_equity=0.01`
+- `halted=true`
+- `halt_reason='daily loss limit hit (3.0%)'`
+- `fresh_day_reset_pending=true`
+
+Do not clear the halt, rewrite the risk peak, force a fresh-day baseline, rewrite canonical ledger rows, or overwrite the account from an incomplete reconstruction merely to make an audit pass.
 
 ## 2026-08-21 Settled Runtime Evidence After PR #98
 
@@ -38,18 +53,18 @@ Do not clear the halt, rewrite the risk peak, force a fresh-day baseline, or ove
 - `fresh_day_reset_pending=true`
 - prospective only; no current-day rewrite, halt clear, peak rewrite, historical-accounting edit, order placement, strategy/sizing/threshold/live/ML authority change
 
-Interpretation: the guard is doing its job. It is refusing to manufacture a new 2026-08-21 risk baseline from invalid active equity.
+Interpretation: the guard is functioning correctly and refusing to manufacture a 2026-08-21 risk baseline from invalid active equity.
 
 ### Compact self-check
 
 `/paper/self-check` at `2026-08-21 09:51:12 CDT`:
-- overall `warn`, HTTP/status contract `ok`
+- overall `warn`, response/status `ok`
 - account: cash `-26064.308324919723`, equity `-26064.31`, positions `[]`, realized today `0.0`, realized total `-94929.16`, unrealized `0.0`
-- auto runner enabled and observed active; no active runner error
+- auto runner enabled and observed active; no current runner error
 - all 9 bounded runtime component checks pass
 - scanner/entry composition ownership checks pass
 - runtime shadow capture parity passes
-- risk remains halted/self-defense-active only because of the stale daily-loss halt state
+- risk remains halted/self-defense-active because of the stale daily-loss halt state
 
 ### Full daily audit
 
@@ -57,15 +72,16 @@ Interpretation: the guard is doing its job. It is refusing to manufacture a new 
 - overall `fail` because risk remains halted and accounting integrity is not reconciled
 - runner liveness passes; no active recursion/runtime error
 - market-data/provider accounting is complete and clean at snapshot
-- persistent volume is healthy; `/data/state.json` exists; in-memory/on-disk richness match; no recovery failure or detected state-file corruption
-- therefore PR #98 appears to have stopped the diagnostic X-Ray overwrite path, but the state being faithfully persisted is already the contaminated state
-- paper accounting reconstruction reports approximately `cash/equity=10724.779592`, `realized_total=724.779592`, zero positions, but coverage is incomplete with 193 ignored/unmatched exit rows, mostly legacy rows beginning on 2026-08-07
-- because coverage is incomplete, **do not promote or write `$10,724.779592` into authoritative state**
-- separate paper-ledger economic integrity also fails; the reconstructed number is evidence, not yet trusted recovery authority
+- persistent volume is healthy; `/data/state.json` exists; in-memory/on-disk richness match; no detected JSON corruption
+- PR #98 therefore appears to have stopped the diagnostic X-Ray overwrite path, but the state now being faithfully persisted is already contaminated
+- accounting reconstruction reports approximately `cash/equity=10724.779592`, `realized_total=724.779592`, zero positions
+- reconstruction coverage is incomplete with 193 ignored/unmatched exit rows, mostly legacy rows beginning 2026-08-07
+- separate ledger-economic integrity also fails
+- therefore `$10,724.779592` is evidence only and **must not be promoted automatically into authoritative state**
 
 ### Canonical execution ledger
 
-`/paper/canonical-execution-ledger-status` after PR #98:
+`/paper/canonical-execution-ledger-status`:
 - `status=ok`, `overall=pass`
 - `append_only=true`
 - `hook_applied=true`
@@ -77,7 +93,23 @@ Interpretation: the guard is doing its job. It is refusing to manufacture a new 
 - `current_epoch_rows=55`
 - last execution id `e746b3e674654f9199402c8904df1f43`
 
-This is the current decisive provenance finding: the active portfolio no longer exposes the verified `stable-paper-v2-20260812-verified01` accounting epoch, and all 55 surviving canonical rows are presently counted under `legacy-pre-stable-core`. The append-only chain itself is healthy. Do not relabel or rewrite these rows. Next recovery work must establish how the verified-snapshot epoch identity was lost/resurrected and use preserved recovery/forensic evidence rather than guessing.
+The hash chain is healthy and must remain untouched. The active portfolio no longer exposes `stable-paper-v2-20260812-verified01`; all 55 surviving canonical rows are currently classified by the runtime under `legacy-pre-stable-core`. Do not relabel or rewrite them.
+
+### Clean accounting epoch status — latest provenance evidence
+
+`/paper/clean-accounting-epoch-status` at approximately 10:15 CDT returned:
+- `status=blocked`, `overall=warn`
+- `marker_status=null`
+- `forensic_archive_dir=null`
+- `historical_recovery_decision=null`
+- `historical_evidence_archived=false`
+- `clean_start=false`
+- `zero_trade_baseline=false`
+- `validation_hold=false`
+
+Important interpretation: the returned `epoch_id=stable-paper-v1-20260810-clean01` is **not proof that the clean epoch is active**. In `clean_accounting_epoch.status_payload()`, when the target epoch is not active, the endpoint reports the target constant as `epoch_id` while `clean_start`, `zero_trade_baseline`, recovery decision, archive flag, and marker reveal the real inactive state. The null marker/archive plus false clean/zero-trade flags mean the current active state does not contain a valid active clean-epoch record and the expected clean-epoch completion marker is not present at the configured marker path.
+
+Combined with the canonical ledger reporting `legacy-pre-stable-core`, this strengthens the hypothesis that an older pre-stable-core snapshot was resurrected before PR #98 stopped X-Ray from replacing live state. It does **not** yet prove which backup/file did it.
 
 ## Issue #82 — Stabilization Exit Gate
 
@@ -96,22 +128,22 @@ Remaining acceptance:
 1. sane fresh-day risk initialization from a protected authoritative valuation;
 2. one normal forward paper market session after that clean reset;
 3. evidence-based historical-accounting disposition without rewriting immutable execution history;
-4. clean active audit: sane valuation, healthy runner/market data, valid canonical chain, no new active coverage/economic issue, and risk reflecting real economics.
+4. clean active audit with sane valuation, healthy runner/market data, valid canonical chain, no new active coverage/economic issue, and risk reflecting real economics.
 
-The current fresh-day result is `pending`, not accepted. That is the correct fail-closed state while active equity remains invalid.
+The current fresh-day state is `pending`, which is the correct fail-closed behavior while authoritative equity is invalid.
 
-## This Week's Reliability / Safety Changes
+## This Week's Reliability / Architecture / Governance Changes
 
 ### 2026-08-18
 
-- PR #79 merged: validate fresh cached quotes before `latest_price` return. Exact QQQ poisoned-cache regression; no strategy/risk/sizing authority change.
-- PR #80 merged: fail closed on catastrophic persisted equity marks so a poisoned stored `last_price` cannot bypass protected quote retrieval.
+- PR #79 merged: validate fresh cached quotes before `latest_price` return; exact poisoned-cache regression.
+- PR #80 merged: fail closed on catastrophic persisted `last_price` valuation fallback.
 - PR #81 merged: block duplicate full exits at the canonical pre-mutation boundary using the existing append-only ledger semantics; historical TEM evidence remains immutable.
 
 ### 2026-08-19
 
-- PR #83 merged: prospective fresh-risk-day baseline guard. Invalid/non-positive equity defers reset instead of becoming the new day's baseline.
-- Issue #84 opened: Stable Paper Core v3 architectural consolidation.
+- PR #83 merged: prospective fresh-risk-day baseline sanity guard. Invalid/non-positive equity defers reset.
+- Issue #84 opened: Stable Paper Core v3 architecture consolidation.
 - PR #85 merged: Stage A immutable canonical shadow state models and ownership contract.
 
 ### 2026-08-20
@@ -119,7 +151,7 @@ The current fresh-day result is `pending`, not accepted. That is the correct fai
 - PR #86 merged: compact observational `/paper/fresh-day-check` endpoint.
 - PR #87 merged: install fresh-day guard immediately after core `app` import and before full WSGI runtime composition; exact Gunicorn startup validation passed.
 - PR #88 merged: `MASTER_SYSTEM_AUDIT_2026-08-20.md` plus architecture-debt regression gate.
-  - latest audited source scale at creation: 250 Python files / 90,409 lines
+  - 250 Python files / 90,409 lines at audit creation
   - 34 runtime mutation overlaps
   - 5 environment conflicts
   - 5 route overlaps
@@ -130,49 +162,50 @@ The current fresh-day result is `pending`, not accepted. That is the correct fai
   - fragmented ownership included `save_state` 17 owners, `scan_signals` 14, `try_entries_and_rotations` 13, `entry_quality_check` 10, `enter_position` 9
 - PR #89 merged: Stage B deterministic shadow valuation service.
 - PR #90 merged: Stage C deterministic shadow risk engine.
-- PR #91 merged: Stage D shadow canonical StateStore with integrity hashing, atomic writes, backup/readback/restart invariants; production I/O still disabled.
+- PR #91 merged: Stage D shadow canonical StateStore with integrity hashing, atomic-write/backup/readback/restart invariants; no production I/O authority.
 - PR #92 merged: Stage E shadow ledger-derived bidirectional accounting projection.
 
 ### 2026-08-21
 
-- PR #93 merged: Stage F shadow canary readiness planner. Authoritative canary activation remains blocked by Issue #82.
+- PR #93 merged: Stage F shadow canary-readiness planner; authoritative activation remains blocked by Issue #82.
 - Issue #94 created for mandatory per-change regression/impact auditing.
-- PR #95 merged: exact-head `Change Safety Audit` workflow and policy. It classifies change surface, selects impact-aware regressions, always retains core canonical invariants, runs architecture/config/ownership/debt/startup checks, and fails closed on stale/missing/failing evidence. Issue #94 remains open until final post-rebuild enforcement/branch-protection acceptance is complete.
-- Issue #96 created for a self-diagnosing incident triage/recommendation engine.
-- PR #97 merged: shadow-only `system_sentinel` with deterministic incident classification and impact-aware test selection. It has no production state authority and no self-healing enabled. Issue #96 remains open until production advisory activation after stabilization/rebuild acceptance.
-- PR #98 merged to current main `c6ef7958a247ae88ba9a5c3670ed756ac0d06426`: diagnostic `entry_pipeline_xray` no longer loads/saves authoritative state or reassigns `core.portfolio`. Regression reproduces stale-file/live-memory split and proves no X-Ray state replacement.
-- PR #98 head passed Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit including exact Gunicorn startup smoke, and Change Safety Audit. Railway deployment status on the merged main commit reported success.
+- PR #95 merged: exact-head `Change Safety Audit` workflow/policy. Relevant future PRs must pass impact-aware regressions, core invariants, architecture/config/ownership/debt checks, and exact startup smoke; stale/missing/failing evidence blocks merge.
+- Issue #96 created for self-diagnosing incident triage/recommendation.
+- PR #97 merged: shadow-only `system_sentinel` foundation with deterministic incident classification and impact-aware test selection; no production state mutation or self-healing authority.
+- PR #98 merged as `c6ef7958a247ae88ba9a5c3670ed756ac0d06426`: `entry_pipeline_xray` no longer loads/saves authoritative state or reassigns `core.portfolio`; regression reproduces stale-file/live-memory split and proves X-Ray does not replace live state.
+- PR #98 passed Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit including exact Gunicorn startup smoke, and Change Safety Audit. Railway deployment succeeded.
+- PR #99 merged as `0874368ad5bf303337b8c94ed1c9ae967c2231b5`: authoritative handoff refreshed through Aug 21. It was documentation-only and did not change runtime behavior.
 
 ## Stable Paper Core v3 / Issue #84
 
-Issue #84 remains open. Shadow/parity implementation status:
+Issue #84 remains open. Shadow/parity status:
 - Stage A — merged (#85): immutable canonical state models
 - Stage B — merged (#89): deterministic valuation
 - Stage C — merged (#90): deterministic risk lifecycle
 - Stage D — merged (#91): shadow StateStore
 - Stage E — merged (#92): ledger/accounting projection
 - Stage F — merged (#93): canary readiness only; no authoritative activation
-- Stage G — not started/accepted; legacy mutation wrappers cannot be removed until authoritative cutover and parity evidence are clean
+- Stage G — not accepted; legacy mutation wrappers cannot be removed until authoritative cutover and parity evidence are clean
 
-Authoritative cutover remains blocked by Issue #82. Do not promote the shadow core merely to bypass the current corrupted state.
+Authoritative cutover remains blocked by Issue #82. Do not use the shadow core to bypass the current corrupted state.
 
 ## Mandatory Future Change Safety / Issue #94
 
-PR #95 has implemented the in-repository mandatory exact-head audit. Every relevant future PR must be reviewed against the exact PR head and must pass the Change Safety Audit plus required overlapping regressions/core invariants. A local unit test is never sufficient by itself. Missing, stale, incomplete, or failing audit evidence is a merge blocker.
+PR #95 implemented the in-repository exact-head audit. Every relevant future PR must be reviewed against the exact PR head and pass the Change Safety Audit plus the required overlapping regressions/core invariants. A local unit test is not sufficient. Missing, stale, incomplete, or failing audit evidence is a merge blocker.
 
-Final post-rebuild completion still includes repository-rule/branch-protection enforcement where permissions support it and final acceptance/closure of Issue #94.
+Final post-rebuild completion still includes repository-rule/branch-protection enforcement where permissions support it and acceptance/closure of Issue #94.
 
 ## Self-Diagnosing Sentinel / Issue #96
 
-PR #97 provides the shadow diagnostic foundation. It can classify supplied evidence across valuation, accounting, execution ledger, risk, startup, configuration, architecture ownership, runner, and market-data boundaries and select deterministic affected tests while retaining mandatory core tests.
+PR #97 provides the shadow diagnostic foundation. It can classify supplied evidence across valuation, accounting, execution ledger, risk, startup, configuration, ownership, runner, and market-data boundaries and select deterministic affected tests while retaining mandatory core tests.
 
 It must not automatically rewrite portfolio/accounting/risk state, clear halts, alter execution history, change strategy/sizing/hard-risk/live/ML authority, or auto-merge authoritative fixes. Production advisory activation waits for stable canonical ownership.
 
 ## Prior Verified Accounting Recovery — Preserve as Forensic Evidence
 
-The previously established recovery architecture created `stable-paper-v2-20260812-verified01` from a verified snapshot with an open LRCX lot and archived the prior contaminated epoch. Recovery code/forensic markers must be treated as evidence sources, not re-run blindly.
+The previously established recovery architecture created `stable-paper-v2-20260812-verified01` from a verified snapshot with an open LRCX lot and archived the prior contaminated epoch. Recovery code and forensic markers are evidence sources only; do not re-run the one-shot recovery blindly.
 
-The active 2026-08-21 runtime no longer exposes that verified epoch and the canonical ledger reports `legacy-pre-stable-core`. This discrepancy is now the next provenance investigation. Do not assume the verified epoch can simply be restored from the reconstructed `$10,724.779592` value, and do not rewrite current canonical rows to a different epoch id.
+The active 2026-08-21 runtime no longer exposes that verified epoch. The canonical ledger reports `legacy-pre-stable-core`, and the clean-epoch status now also reports no active clean metadata or clean completion marker at the expected path. The next task is therefore provenance discovery, not account repair.
 
 ## Historical TEM Duplicate Exit
 
@@ -181,7 +214,7 @@ Historical TEM sequence remains immutable evidence:
 2. first full exit `29.640567 @ 53.105`, execution `7b13d9194a23407f926667b2f48d4057`;
 3. duplicate full exit `@ 52.905`, execution `3530dbf965db4894ba93b7098cec3696`.
 
-PR #81 prospectively blocks a future duplicate full exit before cash/P&L/position/ledger mutation. Never delete, rewrite, fabricate, or relabel the historical TEM row to make accounting pass.
+PR #81 prospectively blocks a future duplicate full exit before cash/P&L/position/ledger mutation. Never delete, rewrite, fabricate, or relabel the historical TEM row.
 
 ## Canonical Runtime / Validation Links
 
@@ -194,11 +227,14 @@ Use the clean service only:
 - routine daily audit: `https://trading-bot-clean.up.railway.app/paper/daily-audit`
 - full daily audit: `https://trading-bot-clean.up.railway.app/paper/daily-audit?full=1`
 - canonical ledger: `https://trading-bot-clean.up.railway.app/paper/canonical-execution-ledger-status`
+- clean epoch status: `https://trading-bot-clean.up.railway.app/paper/clean-accounting-epoch-status`
+- state recovery status: `https://trading-bot-clean.up.railway.app/paper/state-recovery-status`
+- state I/O status: `https://trading-bot-clean.up.railway.app/paper/state-io-status`
 - quote/exit integrity: `https://trading-bot-clean.up.railway.app/paper/exit-price-integrity-status`
 
 Do not manually call `/paper/run` unless a specific future validation plan explicitly requires it.
 
-Known ops debt: `.github/workflows/refactor-audit.yml` still contains an older hard-coded `https://web-production-e1796.up.railway.app` runtime-research target even though `runtime_research_snapshot.py` defaults to `trading-bot-clean`. Do not treat that old-domain automated snapshot as clean-service acceptance evidence. Correct this metadata drift as governance/ops cleanup without mixing it into the current accounting recovery unless necessary.
+Known ops debt: `.github/workflows/refactor-audit.yml` still contains the older hard-coded `https://web-production-e1796.up.railway.app` runtime-research target even though `runtime_research_snapshot.py` defaults to `trading-bot-clean`. Do not treat the old-domain automated snapshot as clean-service acceptance evidence.
 
 ## Risk / Authority Boundaries — Preserve
 
@@ -216,22 +252,25 @@ Known ops debt: `.github/workflows/refactor-audit.yml` still contains an older h
 
 ## Exact Next Action
 
-The canonical ledger chain is healthy, but all 55 rows are currently associated with `legacy-pre-stable-core`, proving the active verified epoch identity is missing. Continue read-only provenance work before any account/state mutation:
+The clean-epoch endpoint now proves the expected clean completion marker/archive pointer is absent from the active status path, while the canonical ledger remains healthy under `legacy-pre-stable-core`.
 
-1. inspect the clean-accounting and verified-snapshot recovery markers/status and archived successor evidence to determine whether the durable `stable-paper-v2-20260812-verified01` recovery completion evidence still exists;
-2. compare that evidence with the 55 canonical rows and their recorded epoch ids without editing them;
-3. establish the earliest point at which the active state lost `paper_accounting_epoch` / `accounting_epoch_id` and whether the stale snapshot resurrected by the pre-PR #98 X-Ray path is the exact source;
-4. only after provenance is mechanically proven, design a bounded recovery/successor epoch that preserves the 55-row hash chain and all historical evidence, then run the mandatory Change Safety Audit before any merge/deploy;
-5. after a safe authoritative state source is restored, require a new fresh-day reset from sane equity, then forward-session and clean-audit proof before closing Issue #82 or activating Stage F/G authority.
+Continue with **read-mostly provenance**, not account mutation:
+
+1. inspect `/paper/state-recovery-status` to determine whether `state_guard` restored any backup at startup and compare current-state quality versus the largest backup (`decision`, `restored`, current/backup trade counts, runner timestamp ranks, size/quality);
+2. if a backup restoration occurred, identify which backup and whether that restoration predates the verified-snapshot epoch; do not restore another backup manually;
+3. if no restoration occurred, add a bounded observational provenance probe that reads only exact recovery marker files and forensic archive manifests/directories, with no state write/restore/relabel authority, then validate it through the mandatory Change Safety Audit;
+4. use that evidence to identify the earliest point at which `paper_accounting_epoch` / `accounting_epoch_id` disappeared and whether the pre-PR #98 X-Ray stale-file path is the exact source;
+5. only after provenance is mechanically proven, design a bounded successor recovery that preserves all 55 canonical ledger rows/hash chain and all historical evidence;
+6. after authoritative state is safely restored from proven evidence, require a new fresh-day reset from sane equity, then forward-session and clean-active-audit proof before closing Issue #82 or activating Stage F/G authority.
 
 Do not use the incomplete `$10,724.779592` reconstruction as an automatic state repair.
 
 ## Conversation Continuity Protocol
 
-Keep updates in the active project chat. If the active conversation becomes too long for safe continuation, first update this handoff with all material PR/commit/deployment/runtime evidence and the exact next action, then provide one continuation command. Do not rely on a separate monitoring chat for project status.
+Keep updates in the **current active project chat**, whichever ChatGPT conversation is presently designated for this project. If that conversation becomes too long for safe continuation, update this handoff with all material PR/commit/deployment/runtime evidence and the exact next action before moving. Then use the continuation command in the new conversation; the new conversation becomes the active project chat. Do not rely on an old monitoring thread for status.
 
-Continuation command if ever required:
+Continuation command if required:
 
 ```text
-Use the direct @GitHub connector and continue the Trading-bot project from sterlingfancher-cmyk/Trading-bot. Read PROJECT_HANDOFF_CURRENT.md first and treat it as the authoritative continuation state. Keep all project updates in this chat only. Verify current main/PR/CI and the canonical Railway clean-service read-only evidence before changing code. Continue from the Exact Next Action. Preserve paper-only authority, hard risk thresholds, canonical ledger history, rules-only execution authority, ML shadow-only execution, and the Issue #82/#84/#94/#96 gates. Do not manually repair account state or clear halts from inference.
+Use the direct @GitHub connector and continue the Trading-bot project from sterlingfancher-cmyk/Trading-bot. Read PROJECT_HANDOFF_CURRENT.md first and treat it as the authoritative continuation state. Treat this conversation as the current active project chat and keep project-status communication here. Verify current main/PR/CI and the canonical Railway clean-service read-only evidence before changing code. Continue from the Exact Next Action. Preserve paper-only authority, hard risk thresholds, canonical ledger history, rules-only execution authority, ML shadow-only execution, and the Issue #82/#84/#94/#96 gates. Do not manually repair account state or clear halts from inference.
 ```
