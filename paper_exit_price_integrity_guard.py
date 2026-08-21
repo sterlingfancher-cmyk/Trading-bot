@@ -6,7 +6,9 @@ protects three independent boundaries:
 
 1. ``latest_price`` rejects a catastrophically implausible terminal 5-minute
    close relative to recent same-symbol bars before that value is cached or
-   returned to position management.
+   returned to position management, and rejects catastrophic entry-relative
+   marks for an already-open position even when the provider series itself is
+   internally self-consistent (for example, a split-scale mismatch).
 2. ``calculate_equity`` refuses to reuse a catastrophically implausible stored
    ``last_price`` when no independently trusted fresh quote can be obtained.
 3. Full and partial paper exits retain the existing entry-anchored fail-closed
@@ -24,8 +26,10 @@ import statistics
 import time
 from typing import Any, Dict
 
-VERSION = "paper-exit-price-integrity-2026-08-13-v2-source-plausibility"
+VERSION = "paper-exit-price-integrity-2026-08-21-v3-symmetric-position-anchor"
 LONG_MIN_PRICE_RATIO = 0.40
+LONG_MAX_PRICE_RATIO = 2.50
+SHORT_MIN_PRICE_RATIO = 0.40
 SHORT_MAX_PRICE_RATIO = 2.50
 SOURCE_MIN_PRIOR_BARS = 6
 SOURCE_RECENT_PRIOR_BARS = 24
@@ -69,6 +73,15 @@ def _entry_anchor(pos: Dict[str, Any]) -> float:
 
 
 def anomaly(pos: Dict[str, Any], px: Any) -> Dict[str, Any] | None:
+    """Return a catastrophic entry-relative price issue for either direction.
+
+    The original guard intentionally covered adverse exit outliers. A proven
+    SLS split-scale mismatch showed that a wildly favorable mark is equally
+    dangerous: it can inflate position peak, account equity, realized P&L and
+    the monotonic intraday risk peak before later collapsing back to reality.
+    The same very-wide 0.40x..2.50x integrity envelope is therefore applied
+    symmetrically. This is quote plausibility, not a trading/profit threshold.
+    """
     price = _f(px, 0.0)
     entry = _entry_anchor(pos)
     side = str(pos.get("side") or "long").lower().strip()
@@ -87,11 +100,27 @@ def anomaly(pos: Dict[str, Any], px: Any) -> Dict[str, Any] | None:
                 "price_to_entry_ratio": ratio,
                 "side": side,
             }
+        if ratio <= SHORT_MIN_PRICE_RATIO:
+            return {
+                "reason": "catastrophic_short_favorable_price_outlier",
+                "price": price,
+                "entry": entry,
+                "price_to_entry_ratio": ratio,
+                "side": side,
+            }
         return None
 
     if ratio <= LONG_MIN_PRICE_RATIO:
         return {
             "reason": "catastrophic_long_exit_price_outlier",
+            "price": price,
+            "entry": entry,
+            "price_to_entry_ratio": ratio,
+            "side": "long",
+        }
+    if ratio >= LONG_MAX_PRICE_RATIO:
+        return {
+            "reason": "catastrophic_long_favorable_price_outlier",
             "price": price,
             "entry": entry,
             "price_to_entry_ratio": ratio,
@@ -172,6 +201,20 @@ def _mark_source_block(symbol: str, issue: Dict[str, Any]) -> None:
     }
 
 
+def _position_anchor_issue(core: Any, symbol: str, price: Any) -> Dict[str, Any] | None:
+    pos = _position(core, symbol)
+    if not pos:
+        return None
+    issue = anomaly(pos, price)
+    if issue is None:
+        return None
+    return {
+        **issue,
+        "reason": "catastrophic_open_position_price_outlier",
+        "position_anchor_reason": issue.get("reason"),
+    }
+
+
 def _wrap_latest_price(core: Any) -> bool:
     current = getattr(core, "latest_price", None)
     price_series = getattr(core, "price_series", None)
@@ -195,6 +238,12 @@ def _wrap_latest_price(core: Any) -> bool:
         if isinstance(cached, dict) and now - _f(cached.get("ts"), 0.0) < SOURCE_CACHE_TTL_SECONDS:
             cached_price = _f(cached.get("price"), 0.0)
             if cached_price > 0.0:
+                anchor_issue = _position_anchor_issue(core, key, cached_price)
+                if anchor_issue is not None:
+                    _mark_source_block(key, anchor_issue)
+                    data.pop(key, None)
+                    return None
+
                 validated_version = str(cached.get("source_plausibility_validated_version") or "")
                 validated_price = _f(cached.get("source_plausibility_validated_price"), 0.0)
                 if validated_version == VERSION and validated_price == cached_price:
@@ -232,6 +281,10 @@ def _wrap_latest_price(core: Any) -> bool:
                 return None
             px = _f(prices[-1], 0.0)
             if px <= 0.0:
+                return None
+            anchor_issue = _position_anchor_issue(core, key, px)
+            if anchor_issue is not None:
+                _mark_source_block(key, anchor_issue)
                 return None
             data[key] = {
                 "ts": now,
@@ -393,6 +446,8 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "version": VERSION,
         "paper_only": True,
         "long_min_price_ratio": LONG_MIN_PRICE_RATIO,
+        "long_max_price_ratio": LONG_MAX_PRICE_RATIO,
+        "short_min_price_ratio": SHORT_MIN_PRICE_RATIO,
         "short_max_price_ratio": SHORT_MAX_PRICE_RATIO,
         "source_plausibility": {
             "installed": source_installed,
@@ -400,11 +455,13 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "recent_prior_bars": SOURCE_RECENT_PRIOR_BARS,
             "min_price_ratio": SOURCE_MIN_PRICE_RATIO,
             "max_price_ratio": SOURCE_MAX_PRICE_RATIO,
+            "position_entry_anchor_enabled": True,
             "last_block": dict(_LAST_SOURCE_BLOCK) if _LAST_SOURCE_BLOCK else None,
         },
         "valuation_fallback": {
             "installed": valuation_installed,
             "fail_closed_on_catastrophic_stored_mark": True,
+            "symmetric_favorable_outlier_protection": True,
         },
         "active_block": risk.get("paper_exit_price_integrity_block"),
         "authority": {
