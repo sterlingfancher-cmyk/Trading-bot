@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-20-v1"
+VERSION = "change-safety-audit-2026-08-21-v2-provenance"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -30,6 +30,7 @@ RUNTIME_TESTS = (
 STATE_TESTS = ("test_state_store_stage_c.py",)
 DECISION_TESTS = ("test_shadow_decision_stage_d.py",)
 CONFIG_TESTS = ("test_architecture_stage_b.py",)
+PROVENANCE_TESTS = ("test_verified_snapshot_provenance_status.py",)
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,9 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
         if any(token in path for token in ("accounting", "ledger", "execution")):
             categories.add("accounting_execution")
             boundaries.update(("accounting", "execution"))
+        if "verified_snapshot_provenance" in path:
+            categories.add("state_persistence")
+            boundaries.update(("state", "accounting"))
         if "risk" in path:
             categories.add("risk")
             boundaries.add("risk")
@@ -97,7 +101,8 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
 
 
 def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
-    categories, _ = classify_paths(paths)
+    path_tuple = tuple(paths)
+    categories, _ = classify_paths(path_tuple)
     tests: list[str] = list(CORE_TESTS)
     if "runtime_composition" in categories or "workflow" in categories:
         tests.extend(RUNTIME_TESTS)
@@ -107,6 +112,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(DECISION_TESTS)
     if "configuration" in categories:
         tests.extend(CONFIG_TESTS)
+    if any("verified_snapshot_provenance" in path.lower() for path in path_tuple):
+        tests.extend(PROVENANCE_TESTS)
     existing = []
     seen = set()
     for test in tests:
