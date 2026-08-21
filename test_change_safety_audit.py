@@ -72,6 +72,7 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         for path in (
             "verified_snapshot_provenance_status.py",
             "verified_snapshot_backup_provenance_status.py",
+            "verified_snapshot_journal_ledger_provenance_status.py",
         ):
             categories, boundaries = classify_paths((path,))
             tests = planned_regressions((path,))
@@ -81,6 +82,9 @@ class ChangeSafetyAuditTests(unittest.TestCase):
             self.assertIn("accounting", boundaries)
             self.assertIn("test_verified_snapshot_provenance_status.py", tests)
             self.assertIn("test_verified_snapshot_backup_provenance_status.py", tests)
+            self.assertIn(
+                "test_verified_snapshot_journal_ledger_provenance_status.py", tests
+            )
             for core_test in (
                 "test_architecture_stage_b.py",
                 "test_architecture_stage_c.py",
