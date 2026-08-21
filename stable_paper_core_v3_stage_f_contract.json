@@ -1,0 +1,52 @@
+{
+  "version": "stable-paper-core-v3-stage-f-canary-readiness-2026-08-20-v1",
+  "stage": "F",
+  "authority": "shadow_only",
+  "target_interface": "trading.canary.CanaryReadinessPlanner",
+  "constraints": {
+    "max_canary_fraction": 0.05,
+    "rollback_switch_required": true,
+    "rollback_default_armed": true,
+    "runtime_registration": false,
+    "production_state_writes": false,
+    "order_authority": false,
+    "risk_mutation_authority": false,
+    "live_authority": false,
+    "ml_execution_authority": false
+  },
+  "required_evidence": [
+    "issue_82_fresh_risk_day_pass",
+    "issue_82_forward_session_pass",
+    "clean_active_accounting_audit",
+    "canonical_ledger_chain_valid",
+    "protected_valuation_sane",
+    "stage_b_valuation_parity",
+    "stage_c_risk_parity",
+    "stage_d_restart_parity",
+    "stage_e_accounting_parity",
+    "repository_validation_green",
+    "architecture_debt_gate_green",
+    "refactor_startup_audit_green"
+  ],
+  "promotion_blockers": [
+    "issue_82_open",
+    "missing_prospective_fresh_day_evidence",
+    "missing_normal_forward_session_evidence",
+    "missing_clean_active_accounting_audit",
+    "missing_stage_e_runtime_shadow_parity",
+    "authoritative_cutover_review_not_completed"
+  ],
+  "forbidden_authority": [
+    "production_canary_activation",
+    "runtime_registration",
+    "production_state_mutation",
+    "halt_clearing",
+    "order_placement",
+    "strategy_change",
+    "sizing_change",
+    "threshold_change",
+    "historical_ledger_rewrite",
+    "live_authority_change",
+    "ml_execution_authority_change"
+  ]
+}
