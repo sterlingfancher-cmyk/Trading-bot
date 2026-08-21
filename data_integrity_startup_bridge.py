@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-21-v34-tem-signature-provenance"
+VERSION = "data-integrity-startup-bridge-2026-08-21-v35-consolidated-v2-recovery-gate"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -41,19 +41,12 @@ MODULES = (
     # Trade-journal/canonical-ledger provenance probe. Its apply() is also
     # constant-time; journal/ledger reads occur only on its explicit route.
     "verified_snapshot_journal_ledger_provenance_status",
-    # Current-day risk-peak provenance probe. Its apply() is constant-time and
-    # reads in-process history/reports only when its explicit route is requested.
+    # Current-day risk-peak provenance remains available while the unsupported
+    # persisted peak is a separate Issue #82 evidence boundary.
     "day_peak_provenance_status",
-    # Exact SLS bad-execution counterfactual. Startup apply() is constant-time;
-    # the canonical ledger is read only when the explicit proof route is called.
-    "sls_bad_execution_recovery_proof",
-    # Deterministic verified-v2 successor projection. The route replays the
-    # immutable ledger counterfactually while retaining the proven TEM/SLS bad
-    # rows as evidence; startup apply() performs no ledger/state scan.
+    # Single consolidated verified-v2 forensic/recovery gate. It subsumes the
+    # one-off SLS and TEM field probes and reads the ledger only on its route.
     "verified_v2_successor_replay_status",
-    # Field-level read-only provenance for the immutable TEM duplicate row. This
-    # module intentionally has no apply(); it reads the ledger only on its route.
-    "verified_v2_successor_replay_tem_provenance",
     # Patch the exact one-shot recovery's journal rotation before the recovery
     # runs. The migration already owns the journal lock, so it must not call the
     # journal mirror recursively from inside that critical section.
