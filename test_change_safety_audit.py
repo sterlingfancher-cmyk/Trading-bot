@@ -68,23 +68,27 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         for boundary in ("startup_runtime", "state", "valuation", "accounting", "risk"):
             self.assertIn(boundary, boundaries)
 
-    def test_verified_snapshot_provenance_change_selects_focused_regression(self) -> None:
-        paths = ("verified_snapshot_provenance_status.py",)
-        categories, boundaries = classify_paths(paths)
-        tests = planned_regressions(paths)
-
-        self.assertIn("state_persistence", categories)
-        self.assertIn("state", boundaries)
-        self.assertIn("accounting", boundaries)
-        self.assertIn("test_verified_snapshot_provenance_status.py", tests)
-        for core_test in (
-            "test_architecture_stage_b.py",
-            "test_architecture_stage_c.py",
-            "test_architecture_stage_d_state_store.py",
-            "test_architecture_stage_e_accounting.py",
-            "test_architecture_stage_f_canary.py",
+    def test_verified_snapshot_provenance_change_selects_focused_regressions(self) -> None:
+        for path in (
+            "verified_snapshot_provenance_status.py",
+            "verified_snapshot_backup_provenance_status.py",
         ):
-            self.assertIn(core_test, tests)
+            categories, boundaries = classify_paths((path,))
+            tests = planned_regressions((path,))
+
+            self.assertIn("state_persistence", categories)
+            self.assertIn("state", boundaries)
+            self.assertIn("accounting", boundaries)
+            self.assertIn("test_verified_snapshot_provenance_status.py", tests)
+            self.assertIn("test_verified_snapshot_backup_provenance_status.py", tests)
+            for core_test in (
+                "test_architecture_stage_b.py",
+                "test_architecture_stage_c.py",
+                "test_architecture_stage_d_state_store.py",
+                "test_architecture_stage_e_accounting.py",
+                "test_architecture_stage_f_canary.py",
+            ):
+                self.assertIn(core_test, tests)
 
 
 if __name__ == "__main__":
