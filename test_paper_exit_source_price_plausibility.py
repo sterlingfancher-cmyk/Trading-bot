@@ -16,6 +16,8 @@ class FakeCore:
         self.download_calls = 0
         self.calculate_calls = 0
         self.save_calls = 0
+        self.exit_calls = 0
+        self.reduce_calls = 0
 
     def latest_price(self, symbol):
         raise AssertionError("wrapped latest_price must not delegate through the unsafe cache path")
@@ -46,9 +48,11 @@ class FakeCore:
         return equity
 
     def exit_position(self, symbol, px, *args, **kwargs):
+        self.exit_calls += 1
         return {"symbol": symbol, "price": px}
 
     def reduce_position(self, symbol, px, *args, **kwargs):
+        self.reduce_calls += 1
         return {"symbol": symbol, "price": px}
 
     def save_state(self, state=None):
@@ -190,3 +194,85 @@ def test_catastrophic_persisted_qqq_mark_is_not_reused_without_trusted_refresh()
     assert block["reason"] == "catastrophic_stored_mark_fallback_blocked"
     assert block["stored_price"] == 46.198091623192646
     assert core.portfolio["risk_controls"]["halted"] is True
+
+
+def _seed_sls_position(core, equity=13166.47, last_price=14.24):
+    core.portfolio.update({
+        "cash": 13159.073498029464,
+        "equity": equity,
+        "positions": {
+            "SLS": {
+                "side": "long",
+                "entry": 14.335,
+                "shares": 6.497145,
+                "last_price": last_price,
+                "peak": 14.40,
+            }
+        },
+        "risk_controls": {},
+    })
+
+
+def test_sls_split_scale_provider_series_is_blocked_by_open_position_anchor():
+    # Reproduces the 2026-08-21 failure class: an internally consistent provider
+    # series near 186 can evade same-series median checks even though the open
+    # position was entered near 14.335. Independent IEX evidence was near 14.2.
+    core = FakeCore([185.8, 186.0, 186.1, 186.2, 186.0, 186.3, 186.1, 186.2901])
+    _seed_sls_position(core)
+    guard.apply(core)
+
+    assert core.latest_price("SLS") is None
+    assert "SLS" not in core._price_cache["data"]
+    assert core.download_calls == 1
+
+    block = guard.status_payload(core)["source_plausibility"]["last_block"]
+    assert block["symbol"] == "SLS"
+    assert block["boundary"] == "latest_price"
+    assert block["reason"] == "catastrophic_open_position_price_outlier"
+    assert block["position_anchor_reason"] == "catastrophic_long_favorable_price_outlier"
+    assert block["price"] == 186.2901
+    assert block["price_to_entry_ratio"] > 12.0
+
+
+def test_sls_favorable_outlier_is_blocked_at_partial_exit_boundary():
+    core = FakeCore([14.20] * 8)
+    _seed_sls_position(core)
+    guard.apply(core)
+
+    result = core.reduce_position("SLS", 186.2901, 0.33, "partial_profit_long")
+
+    assert result is None
+    assert core.reduce_calls == 0
+    block = guard.status_payload(core)["active_block"]
+    assert block["symbol"] == "SLS"
+    assert block["boundary"] == "reduce_position"
+    assert block["reason"] == "catastrophic_long_favorable_price_outlier"
+    assert core.portfolio["risk_controls"]["halted"] is True
+
+
+def test_sls_catastrophic_favorable_stored_mark_cannot_poison_equity_again():
+    core = FakeCore([185.8, 186.0, 186.1, 186.2, 186.0, 186.3, 186.1, 186.2901])
+    _seed_sls_position(core, equity=13540.0, last_price=186.2901)
+    guard.apply(core)
+
+    result = core.calculate_equity(refresh_prices=True)
+
+    assert result == 13540.0
+    assert core.portfolio["equity"] == 13540.0
+    assert core.calculate_calls == 0
+    assert core.download_calls == 1
+    block = guard.status_payload(core)["active_block"]
+    assert block["boundary"] == "calculate_equity_fallback"
+    assert block["stored_mark_reason"] == "catastrophic_long_favorable_price_outlier"
+
+
+def test_plausible_long_winner_below_integrity_ceiling_is_not_blocked():
+    core = FakeCore([29.0] * 8)
+    _seed_sls_position(core)
+    guard.apply(core)
+
+    result = core.reduce_position("SLS", 29.0, 0.33, "partial_profit_long")
+
+    assert result == {"symbol": "SLS", "price": 29.0}
+    assert core.reduce_calls == 1
+    assert guard.status_payload(core)["active_block"] is None

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-21-v5-day-peak-provenance"
+VERSION = "change-safety-audit-2026-08-21-v6-price-integrity"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -36,6 +36,10 @@ PROVENANCE_TESTS = (
     "test_verified_snapshot_journal_ledger_provenance_status.py",
 )
 DAY_PEAK_PROVENANCE_TESTS = ("test_day_peak_provenance_status.py",)
+PRICE_INTEGRITY_TESTS = (
+    "test_paper_exit_source_price_plausibility.py",
+    "tests/test_paper_exit_guard_dynamic_owner.py",
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,11 @@ def _is_verified_snapshot_provenance_path(path: str) -> bool:
 
 def _is_day_peak_provenance_path(path: str) -> bool:
     return "day_peak_provenance" in path.lower()
+
+
+def _is_price_integrity_path(path: str) -> bool:
+    lowered = path.lower()
+    return "price_integrity" in lowered or "exit_price_integrity" in lowered
 
 
 def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -139,6 +148,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(PROVENANCE_TESTS)
     if any(_is_day_peak_provenance_path(path) for path in path_tuple):
         tests.extend(DAY_PEAK_PROVENANCE_TESTS)
+    if any(_is_price_integrity_path(path) for path in path_tuple):
+        tests.extend(PRICE_INTEGRITY_TESTS)
     existing: list[str] = []
     seen: set[str] = set()
     for test in tests:
