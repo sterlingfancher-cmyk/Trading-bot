@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-21-v29-verified-backup-provenance"
+VERSION = "data-integrity-startup-bridge-2026-08-21-v30-journal-ledger-provenance"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -32,12 +32,15 @@ MODULES = (
     "clean_accounting_epoch",
     "paper_bidirectional_accounting_guard",
     "paper_execution_timestamp_semantics",
-    # Small marker/archive forensic probe.  It deliberately runs before the
+    # Small marker/archive forensic probe. It deliberately runs before the
     # one-shot recovery module and does not import/call recovery implementations.
     "verified_snapshot_provenance_status",
-    # Backup/snapshot provenance probe.  Its apply() is constant-time and never
+    # Backup/snapshot provenance probe. Its apply() is constant-time and never
     # scans backups during startup; scanning occurs only on its explicit route.
     "verified_snapshot_backup_provenance_status",
+    # Trade-journal/canonical-ledger provenance probe. Its apply() is also
+    # constant-time; journal/ledger reads occur only on its explicit route.
+    "verified_snapshot_journal_ledger_provenance_status",
     # Patch the exact one-shot recovery's journal rotation before the recovery
     # runs. The migration already owns the journal lock, so it must not call the
     # journal mirror recursively from inside that critical section.
@@ -50,7 +53,7 @@ MODULES = (
     # the restored open LRCX lot and all future executions remain canonical.
     "verified_snapshot_accounting_baseline",
     # Issue #82 fresh-day gate: never initialize a new risk day from a
-    # non-finite/non-positive persisted valuation.  This guard is prospective and
+    # non-finite/non-positive persisted valuation. This guard is prospective and
     # never rewrites an already-initialized current day.
     "fresh_risk_day_baseline_guard",
     "absolute_daily_halt_lifecycle_guard",

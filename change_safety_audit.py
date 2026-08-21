@@ -10,11 +10,11 @@ import argparse
 import json
 import subprocess
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-21-v3-provenance"
+VERSION = "change-safety-audit-2026-08-21-v4-provenance"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -33,6 +33,7 @@ CONFIG_TESTS = ("test_architecture_stage_b.py",)
 PROVENANCE_TESTS = (
     "test_verified_snapshot_provenance_status.py",
     "test_verified_snapshot_backup_provenance_status.py",
+    "test_verified_snapshot_journal_ledger_provenance_status.py",
 )
 
 
@@ -79,7 +80,10 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
             categories.add("python")
         if name.startswith("test_") or "/test_" in path:
             categories.add("tests")
-        if any(token in path for token in ("bootstrap", "wsgi", "sitecustomize", "usercustomize", "app.py")):
+        if any(
+            token in path
+            for token in ("bootstrap", "wsgi", "sitecustomize", "usercustomize", "app.py")
+        ):
             categories.add("runtime_composition")
             boundaries.add("startup_runtime")
         if any(token in path for token in ("state", "persistence", "journal")):
@@ -97,7 +101,10 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
         if "risk" in path:
             categories.add("risk")
             boundaries.add("risk")
-        if any(token in path for token in ("signal", "scanner", "decision", "entry", "exit", "sizing")):
+        if any(
+            token in path
+            for token in ("signal", "scanner", "decision", "entry", "exit", "sizing")
+        ):
             categories.add("strategy_decision")
             boundaries.add("decision")
         if any(token in path for token in ("config", "contract", "railway", "procfile")):
@@ -122,8 +129,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(CONFIG_TESTS)
     if any(_is_verified_snapshot_provenance_path(path) for path in path_tuple):
         tests.extend(PROVENANCE_TESTS)
-    existing = []
-    seen = set()
+    existing: list[str] = []
+    seen: set[str] = set()
     for test in tests:
         if test not in seen and Path(test).exists():
             existing.append(test)
