@@ -25,7 +25,7 @@ import datetime as dt
 import math
 from typing import Any, Dict, List, Tuple
 
-VERSION = "verified-v2-successor-replay-status-2026-08-21-v3-consolidated-seven-invalid"
+VERSION = "verified-v2-successor-replay-status-2026-08-21-v4-uctt-canonical-precision"
 ROUTE = "/paper/verified-v2-successor-replay-status"
 TARGET_EPOCH_ID = "stable-paper-v2-20260812-verified01"
 TODAY = "2026-08-21"
@@ -74,11 +74,11 @@ KNOWN_INVALID_EXECUTIONS: tuple[dict[str, Any], ...] = (
         "action": "partial_exit",
         "symbol": "UCTT",
         "side": "long",
-        "price": 337.54,
-        "shares": 5.74555,
+        "price": 337.540009,
+        "shares": 5.74554981,
         "event_hash": "c7e23d77ecc86e6521f702b814828815a9f17e8f697c9baf07490be0e96ee41b",
         "reason": "proven_catastrophic_quote_outlier_retained_immutably_but_excluded_from_counterfactual_economics",
-        "evidence": "independent_alpaca_iex_one_minute_bars_near_94_at_2026-08-13T19:37Z_and_no_split",
+        "evidence": "exact_canonical_precision_from_automated_gate_plus_independent_alpaca_iex_one_minute_bars_near_94_at_2026-08-13T19:37Z_and_no_split",
     },
     {
         "key": "uctt_bad_duplicate_exit",
