@@ -1,0 +1,33 @@
+name: Stable Paper Core v3 Stage E Accounting Validation
+
+on:
+  pull_request:
+    paths:
+      - "trading/accounting.py"
+      - "trading/state.py"
+      - "stable_paper_core_v3_stage_e_contract.json"
+      - "test_architecture_stage_e_accounting.py"
+      - ".github/workflows/stable-paper-core-stage-e.yml"
+  push:
+    branches: [main]
+    paths:
+      - "trading/accounting.py"
+      - "trading/state.py"
+      - "stable_paper_core_v3_stage_e_contract.json"
+      - "test_architecture_stage_e_accounting.py"
+      - ".github/workflows/stable-paper-core-stage-e.yml"
+  workflow_dispatch:
+
+jobs:
+  stage-e-accounting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run Stage E accounting regressions
+        run: python -m unittest -v test_architecture_stage_e_accounting.py

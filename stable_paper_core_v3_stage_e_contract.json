@@ -1,0 +1,37 @@
+{
+  "version": "stable-paper-core-v3-stage-e-accounting-2026-08-20-v1",
+  "stage": "E",
+  "authority": "shadow_only",
+  "target_interface": "trading.accounting.CanonicalAccountingProjector",
+  "constraints": {
+    "append_only_execution_input": true,
+    "strict_sequence_order": true,
+    "duplicate_execution_id_rejected": true,
+    "unmatched_exit_rejected": true,
+    "opposing_books_rejected": true,
+    "bidirectional_margin_v1": true,
+    "historical_ledger_rewrite": false,
+    "state_file_io": false,
+    "risk_mutation": false,
+    "order_placement": false
+  },
+  "promotion_blockers": [
+    "issue_82_prospective_fresh_day_acceptance",
+    "normal_forward_paper_session",
+    "clean_active_accounting_audit",
+    "stage_e_runtime_shadow_parity",
+    "stage_f_canary_review"
+  ],
+  "forbidden_authority": [
+    "runtime_registration",
+    "production_state_mutation",
+    "historical_ledger_rewrite",
+    "risk_mutation",
+    "order_placement",
+    "strategy_change",
+    "sizing_change",
+    "threshold_change",
+    "live_authority_change",
+    "ml_execution_authority_change"
+  ]
+}
