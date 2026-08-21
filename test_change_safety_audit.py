@@ -130,6 +130,26 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         ):
             self.assertIn(core_test, tests)
 
+    def test_sls_recovery_proof_change_selects_focused_accounting_regression(self) -> None:
+        path = "sls_bad_execution_recovery_proof.py"
+        categories, boundaries = classify_paths((path,))
+        tests = planned_regressions((path,))
+
+        self.assertIn("state_persistence", categories)
+        self.assertIn("accounting_execution", categories)
+        self.assertIn("risk", categories)
+        for boundary in ("state", "accounting", "execution", "risk"):
+            self.assertIn(boundary, boundaries)
+        self.assertIn("test_sls_bad_execution_recovery_proof.py", tests)
+        for core_test in (
+            "test_architecture_stage_b.py",
+            "test_architecture_stage_c.py",
+            "test_architecture_stage_d_state_store.py",
+            "test_architecture_stage_e_accounting.py",
+            "test_architecture_stage_f_canary.py",
+        ):
+            self.assertIn(core_test, tests)
+
 
 if __name__ == "__main__":
     unittest.main()
