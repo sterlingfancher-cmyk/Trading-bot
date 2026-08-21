@@ -41,7 +41,7 @@ class FakeCore:
         }
 
     def local_ts_text(self):
-        return "2026-08-21 17:10:00 CDT"
+        return "2026-08-21 17:20:00 CDT"
 
 
 def _row(
@@ -72,6 +72,8 @@ def _row(
 def _rows(
     sls_bad_price=replay.SLS_BAD_PRICE,
     tost_bad_2_price=190.244995,
+    uctt_partial_price=337.540009,
+    uctt_partial_shares=5.74554981,
     uctt_partial_hash="c7e23d77ecc86e6521f702b814828815a9f17e8f697c9baf07490be0e96ee41b",
 ):
     return [
@@ -128,8 +130,8 @@ def _rows(
             "partial_exit",
             "UCTT",
             "long",
-            337.54,
-            5.74555,
+            uctt_partial_price,
+            uctt_partial_shares,
             "2026-08-13 14:37:13 CDT",
             "partial_profit_long",
             uctt_partial_hash,
@@ -281,16 +283,22 @@ def test_tem_canonical_precision_is_exact_and_display_rounding_is_not_accepted_a
     assert rounded["known_invalid_execution_disposition"]["tem_duplicate"]["failed_checks"] == ["price"]
 
 
-def test_uctt_partial_uses_exact_canonical_event_hash_and_economic_signature():
+def test_uctt_partial_uses_exact_canonical_precision_and_event_hash():
     payload = _payload(_rows())
     uctt = payload["known_invalid_execution_disposition"]["uctt_bad_partial_exit"]
     assert uctt["signature_exact"] is True
     assert uctt["failed_checks"] == []
+    assert uctt["observed_row"]["price"] == 337.540009
+    assert uctt["observed_row"]["shares"] == 5.74554981
 
-    changed = _payload(_rows(uctt_partial_hash="wrong-hash"))
-    assert changed["overall"] == "fail"
-    assert changed["known_invalid_execution_disposition"]["uctt_bad_partial_exit"]["failed_checks"] == ["event_hash"]
-    assert changed["projection"]["projection_complete"] is False
+    rounded = _payload(_rows(uctt_partial_price=337.54, uctt_partial_shares=5.74555))
+    assert rounded["overall"] == "fail"
+    assert rounded["known_invalid_execution_disposition"]["uctt_bad_partial_exit"]["failed_checks"] == ["price", "shares"]
+
+    changed_hash = _payload(_rows(uctt_partial_hash="wrong-hash"))
+    assert changed_hash["overall"] == "fail"
+    assert changed_hash["known_invalid_execution_disposition"]["uctt_bad_partial_exit"]["failed_checks"] == ["event_hash"]
+    assert changed_hash["projection"]["projection_complete"] is False
 
 
 def test_sls_signature_mismatch_fails_closed_before_projection():
