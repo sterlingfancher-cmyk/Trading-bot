@@ -25,7 +25,7 @@ import datetime as dt
 import math
 from typing import Any, Dict, List, Tuple
 
-VERSION = "verified-v2-successor-replay-status-2026-08-21-v5-replay-quantity-serialization-tolerance"
+VERSION = "verified-v2-successor-replay-status-2026-08-21-v6-unexplained-position-lineage"
 ROUTE = "/paper/verified-v2-successor-replay-status"
 TARGET_EPOCH_ID = "stable-paper-v2-20260812-verified01"
 TODAY = "2026-08-21"
@@ -207,6 +207,23 @@ def _row_view(row: Dict[str, Any], index: int | None = None) -> Dict[str, Any]:
     if index is not None:
         out["ledger_index"] = index
     return out
+
+
+def _state_trade_view(row: Dict[str, Any], index: int) -> Dict[str, Any]:
+    return {
+        "state_trade_index": index,
+        "execution_id": row.get("execution_id"),
+        "accounting_epoch_id": row.get("accounting_epoch_id"),
+        "recorded_local": row.get("recorded_local"),
+        "time": row.get("time"),
+        "action": row.get("action"),
+        "symbol": row.get("symbol"),
+        "side": row.get("side"),
+        "price": _f(row.get("price")),
+        "shares": _f(row.get("shares", row.get("qty"))),
+        "exit_reason": row.get("exit_reason"),
+        "event_hash": row.get("event_hash"),
+    }
 
 
 def _signature_checks(row: Dict[str, Any], expected: Dict[str, Any]) -> Dict[str, bool]:
@@ -604,6 +621,75 @@ def _state_comparison(portfolio: Dict[str, Any], projection: Dict[str, Any]) -> 
     }
 
 
+def _unexplained_position_lineage(
+    portfolio: Dict[str, Any],
+    ledger_rows: List[Dict[str, Any]],
+    symbols: List[str],
+) -> Dict[str, Any]:
+    current_positions = _d(portfolio.get("positions"))
+    state_trades = [row for row in _l(portfolio.get("trades")) if isinstance(row, dict)]
+    output: Dict[str, Any] = {}
+
+    for raw_symbol in sorted(set(symbols)):
+        symbol = str(raw_symbol or "").upper()
+        if not symbol:
+            continue
+        ledger_matches = [
+            (index, row)
+            for index, row in enumerate(ledger_rows)
+            if str(row.get("symbol") or "").upper() == symbol
+        ]
+        state_matches = [
+            (index, row)
+            for index, row in enumerate(state_trades)
+            if str(row.get("symbol") or "").upper() == symbol
+        ]
+        ledger_ids = [str(row.get("execution_id") or "") for _, row in ledger_matches]
+        state_ids = [str(row.get("execution_id") or "") for _, row in state_matches]
+        ledger_id_set = {value for value in ledger_ids if value}
+        state_id_set = {value for value in state_ids if value}
+        state_only_rows = [
+            _state_trade_view(row, index)
+            for index, row in state_matches
+            if str(row.get("execution_id") or "") not in ledger_id_set
+        ]
+        ledger_only_rows = [
+            _row_view(row, index)
+            for index, row in ledger_matches
+            if str(row.get("execution_id") or "") not in state_id_set
+        ]
+        state_only_exit_rows = [
+            row
+            for row in state_only_rows
+            if str(row.get("action") or "").lower() in {"exit", "partial_exit"}
+        ]
+
+        output[symbol] = {
+            "current_position_exists": symbol in current_positions,
+            "ledger_row_count": len(ledger_matches),
+            "state_trade_row_count": len(state_matches),
+            "ledger_execution_ids": ledger_ids,
+            "state_execution_ids": state_ids,
+            "same_execution_id_sets": ledger_id_set == state_id_set,
+            "ledger_only_execution_ids": sorted(ledger_id_set - state_id_set),
+            "state_only_execution_ids": sorted(state_id_set - ledger_id_set),
+            "ledger_only_rows": ledger_only_rows,
+            "state_only_rows": state_only_rows,
+            "state_only_exit_rows": state_only_exit_rows,
+            "state_only_exit_present": bool(state_only_exit_rows),
+            "ledger_only_execution_present": bool(ledger_only_rows),
+            "interpretation": (
+                "state_contains_exit_execution_not_present_in_canonical_ledger"
+                if state_only_exit_rows
+                else "ledger_and_state_execution_sets_differ_without_state_only_exit"
+                if ledger_id_set != state_id_set
+                else "execution_id_sets_match_but_position_state_differs"
+            ),
+        }
+
+    return output
+
+
 def _known_invalid_disposition(rows: List[Dict[str, Any]]) -> tuple[Dict[str, Any], bool]:
     disposition: Dict[str, Any] = {}
     all_exact = True
@@ -700,6 +786,16 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         if ledger_ready and bool(projection.get("projection_complete"))
         else {}
     )
+    unexplained_symbols = [
+        str(symbol)
+        for symbol in _l(comparison.get("unexplained_position_mismatches"))
+        if symbol
+    ]
+    unexplained_lineage = (
+        _unexplained_position_lineage(portfolio, rows, unexplained_symbols)
+        if unexplained_symbols
+        else {}
+    )
 
     if not chain_valid or ledger_errors:
         diagnosis = "canonical_ledger_invalid_recovery_gate_blocked"
@@ -752,6 +848,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "canonical_rows_after_last_known_invalid_count": len(rows_after_last_invalid),
         "projection": projection,
         "state_comparison": comparison,
+        "unexplained_position_lineage": unexplained_lineage,
         "current_risk": _risk_snapshot(portfolio),
         "recovery_readiness": {
             "counterfactual_successor_projection_mechanically_reproducible": bool(projection.get("projection_complete")),
@@ -763,6 +860,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "strict_invalid_signature_quantity_tolerance": QTY_TOLERANCE,
             "replay_quantity_serialization_tolerance": REPLAY_QTY_TOLERANCE,
             "replay_quantity_residue_adjustment_count": int(projection.get("quantity_residue_adjustment_count") or 0),
+            "unexplained_position_lineage_in_same_gate": bool(unexplained_lineage),
             "historical_execution_edit_required": False,
             "immutable_invalid_rows_must_remain_in_ledger": True,
             "state_write_authorized_by_this_probe": False,
@@ -773,6 +871,8 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "next_step": (
                 "use this consolidated gate as the sole forensic runtime input for a bounded exact-signature successor-state migration under validation hold; do not request another per-event manual probe"
                 if mechanically_complete
+                else "inspect unexplained_position_lineage in this same consolidated gate; do not request another manual endpoint or mutate state or ledger"
+                if unexplained_lineage
                 else "stop at the named gate failure; do not mutate state or ledger"
             ),
         },
