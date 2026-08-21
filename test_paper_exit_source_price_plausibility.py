@@ -196,16 +196,16 @@ def test_catastrophic_persisted_qqq_mark_is_not_reused_without_trusted_refresh()
     assert core.portfolio["risk_controls"]["halted"] is True
 
 
-def _seed_sls_position(core):
+def _seed_sls_position(core, equity=13166.47, last_price=14.24):
     core.portfolio.update({
         "cash": 13159.073498029464,
-        "equity": 13166.47,
+        "equity": equity,
         "positions": {
             "SLS": {
                 "side": "long",
                 "entry": 14.335,
                 "shares": 6.497145,
-                "last_price": 14.24,
+                "last_price": last_price,
                 "peak": 14.40,
             }
         },
@@ -252,9 +252,7 @@ def test_sls_favorable_outlier_is_blocked_at_partial_exit_boundary():
 
 def test_sls_catastrophic_favorable_stored_mark_cannot_poison_equity_again():
     core = FakeCore([185.8, 186.0, 186.1, 186.2, 186.0, 186.3, 186.1, 186.2901])
-    _seed_sls_position(core)
-    core.portfolio["equity"] = 13540.0
-    core.portfolio["positions"]["SLS"]["last_price"] = 186.2901
+    _seed_sls_position(core, equity=13540.0, last_price=186.2901)
     guard.apply(core)
 
     result = core.calculate_equity(refresh_prices=True)
