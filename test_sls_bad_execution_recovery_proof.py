@@ -7,8 +7,9 @@ import sls_bad_execution_recovery_proof as proof
 
 
 class FakeCore:
-    def __init__(self):
-        current_qty = proof.ENTRY_SHARES - proof.BAD_SHARES
+    def __init__(self, current_qty=None):
+        if current_qty is None:
+            current_qty = proof.ENTRY_SHARES - proof.BAD_SHARES
         self.portfolio = {
             "cash": 13159.073498029464,
             "equity": 13541.73,
@@ -151,8 +152,7 @@ def test_later_canonical_execution_requires_successor_replay():
 
 
 def test_quantity_mismatch_blocks_exact_counterfactual_proof():
-    core = FakeCore()
-    core.portfolio["positions"]["SLS"]["shares"] = 1.0
+    core = FakeCore(current_qty=1.0)
     rows = _ledger_rows(extra_after_bad=False)
 
     with mock.patch.object(ledger, "_read_rows", return_value=(rows, [])), mock.patch.object(
