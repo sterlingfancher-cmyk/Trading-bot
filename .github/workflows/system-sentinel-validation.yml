@@ -1,0 +1,35 @@
+name: System Sentinel Shadow Validation
+
+on:
+  pull_request:
+    paths:
+      - "system_sentinel.py"
+      - "system_sentinel_contract.json"
+      - "test_system_sentinel.py"
+      - ".github/workflows/system-sentinel-validation.yml"
+  workflow_dispatch:
+
+jobs:
+  sentinel-validation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run seeded incident and safety-boundary tests
+        run: python -m unittest -v test_system_sentinel.py
+      - name: Verify contract is advisory-only
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          row = json.loads(Path("system_sentinel_contract.json").read_text())
+          assert row["authority"] == "advisory_only"
+          assert row["policy"]["mandatory_core_tests_never_skipped"] is True
+          assert row["policy"]["auto_merges"] is False
+          assert row["policy"]["writes_production_state"] is False
+          assert row["self_healing"]["enabled"] is False
+          PY
