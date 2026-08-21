@@ -112,6 +112,24 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         ):
             self.assertIn(core_test, tests)
 
+    def test_price_integrity_change_selects_exact_quote_regressions(self) -> None:
+        path = "paper_exit_price_integrity_guard.py"
+        categories, boundaries = classify_paths((path,))
+        tests = planned_regressions((path,))
+
+        self.assertIn("valuation_market_data", categories)
+        self.assertIn("valuation", boundaries)
+        self.assertIn("test_paper_exit_source_price_plausibility.py", tests)
+        self.assertIn("tests/test_paper_exit_guard_dynamic_owner.py", tests)
+        for core_test in (
+            "test_architecture_stage_b.py",
+            "test_architecture_stage_c.py",
+            "test_architecture_stage_d_state_store.py",
+            "test_architecture_stage_e_accounting.py",
+            "test_architecture_stage_f_canary.py",
+        ):
+            self.assertIn(core_test, tests)
+
 
 if __name__ == "__main__":
     unittest.main()
