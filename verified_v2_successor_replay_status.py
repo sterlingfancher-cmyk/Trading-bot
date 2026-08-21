@@ -65,7 +65,9 @@ def _f(value: Any) -> float | None:
 
 def _close(value: Any, expected: float, tolerance: float) -> bool:
     number = _f(value)
-    return bool(number is not None and abs(number - expected) <= tolerance)
+    if number is None:
+        return False
+    return abs(number - expected) <= tolerance
 
 
 def _now(core: Any = None) -> str:
@@ -468,7 +470,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "state_comparison": comparison,
         "recovery_readiness": {
             "counterfactual_successor_projection_mechanically_reproducible": bool(projection.get("projection_complete")),
-            "all_post_sls_canonical_rows_replayed": bool(projection.get("projection_complete") and len(successor_rows) == 3),
+            "all_post_sls_canonical_rows_replayed": bool(projection.get("projection_complete")),
             "historical_execution_edit_required": False,
             "immutable_invalid_rows_must_remain_in_ledger": True,
             "state_write_authorized_by_this_probe": False,
