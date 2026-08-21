@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-21-v7-sls-recovery-proof"
+VERSION = "change-safety-audit-2026-08-21-v8-successor-replay"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -41,6 +41,7 @@ PRICE_INTEGRITY_TESTS = (
     "tests/test_paper_exit_guard_dynamic_owner.py",
 )
 SLS_RECOVERY_PROOF_TESTS = ("test_sls_bad_execution_recovery_proof.py",)
+SUCCESSOR_REPLAY_TESTS = ("test_verified_v2_successor_replay_status.py",)
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,10 @@ def _is_sls_recovery_proof_path(path: str) -> bool:
     return "sls_bad_execution_recovery_proof" in path.lower()
 
 
+def _is_successor_replay_path(path: str) -> bool:
+    return "verified_v2_successor_replay" in path.lower()
+
+
 def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     categories: set[str] = set()
     boundaries: set[str] = set()
@@ -120,7 +125,7 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
         if _is_day_peak_provenance_path(path):
             categories.add("risk")
             boundaries.update(("risk", "state"))
-        if _is_sls_recovery_proof_path(path):
+        if _is_sls_recovery_proof_path(path) or _is_successor_replay_path(path):
             categories.update(("state_persistence", "accounting_execution", "risk"))
             boundaries.update(("state", "accounting", "execution", "risk"))
         if "risk" in path:
@@ -160,6 +165,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(PRICE_INTEGRITY_TESTS)
     if any(_is_sls_recovery_proof_path(path) for path in path_tuple):
         tests.extend(SLS_RECOVERY_PROOF_TESTS)
+    if any(_is_successor_replay_path(path) for path in path_tuple):
+        tests.extend(SUCCESSOR_REPLAY_TESTS)
     existing: list[str] = []
     seen: set[str] = set()
     for test in tests:
