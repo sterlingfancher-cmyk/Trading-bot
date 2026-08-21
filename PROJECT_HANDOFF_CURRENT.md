@@ -1,9 +1,9 @@
 # Project Handoff — Authoritative Current Runtime
 
-Last updated: 2026-08-21 14:36 CDT  
+Last updated: 2026-08-21 16:45 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
-Current `main`: `da691224875aebf1464903be6f90937ee6dfaf01` (PR #105)  
-Active PR: #106 `agent/sls-bad-execution-recovery-proof-20260821`  
+Current `main`: `b7f685e460ec31fa1f93987ff29704c01bed650a` (PR #109)  
+Active PR: consolidated verified-v2 recovery gate on `agent/consolidated-v2-recovery-gate-20260821`  
 Authoritative paper runtime for Issue #82 validation: `https://web-production-e1796.up.railway.app`  
 Contaminated split-lineage service: `https://trading-bot-clean.up.railway.app`
 
@@ -26,66 +26,58 @@ Keep Trading-bot progress communication in the currently active ChatGPT project 
 
 Issue #82 remains the stabilization exit gate.
 
-The central discovery on Aug. 21 is that the two Railway services are **different persistent-state lineages running the same code**. The `trading-bot-clean` volume is contaminated legacy state and is not the Aug. 12 verified successor. The historically canonical `web-production-e1796` service still carries the mechanically proven `stable-paper-v2-20260812-verified01` lineage.
+The central Aug. 21 discovery is that the two Railway services are **different persistent-state lineages running the same code**. `trading-bot-clean` is contaminated legacy state and is not the Aug. 12 verified successor. The historically canonical `web-production-e1796` service still carries the mechanically proven `stable-paper-v2-20260812-verified01` lineage.
 
-Do not design recovery from the `trading-bot-clean` volume. Use `web-production-e1796` for all current #82 economic/risk validation until a deliberate service/volume consolidation is separately designed and proven.
+Do not design recovery from `trading-bot-clean`. Use `web-production-e1796` for all #82 economic/risk validation until a deliberate service/volume consolidation is separately designed and proven.
 
-The authoritative v2 account is structurally/accounting coherent except for two known immutable bad executions:
-1. the historical duplicate TEM full exit, prospectively blocked by PR #81; and
-2. a newly proven Aug. 21 SLS partial-profit execution at `186.2901` against an entry near `14.335`, prospectively blocked by PR #105.
+The authoritative v2 canonical ledger is hash-chain valid, currently 39 rows, all in `stable-paper-v2-20260812-verified01`. Five immutable executions now have independent evidence that their economic effects are invalid and must be excluded only from a counterfactual successor projection while their rows remain untouched:
 
-The account remains hard-halted because persisted `day_peak_equity=19150.437724108448` is not supported by retained equity observations. Do not clear the halt or rewrite the peak yet.
+1. TEM duplicate full exit `3530dbf965db4894ba93b7098cec3696`, exact immutable price `52.904999`, qty `29.640567`.
+2. SLS catastrophic favorable partial exit `b6584fe0e28744d8bfa2da26f413af70`, exact immutable price `186.2901`, qty `2.144057692`.
+3. TOST catastrophic favorable partial exit `fd685aa6387247ff99a05e7386c325e9`, `1.24333584 @ 73.940002`.
+4. TOST catastrophic favorable partial exit `cb10928f441148aaa3faf041a84bc4c8`, `1.24333584 @ 190.244995`.
+5. TOST catastrophic favorable partial exit `1451d91c06b34b199364b56f72ad376f`, `1.24333584 @ 74.269997`.
+
+The account remains hard-halted because persisted `day_peak_equity=19150.437724108448` is unsupported by retained equity observations. Do not clear the halt or rewrite the peak. The preferred recovery path is to correct successor economic state under validation hold while leaving the current-day halt/peak untouched, then allow the next legitimate fresh-risk-day initialization to occur prospectively from sane corrected economics.
 
 ## Split Railway State Lineage — Decisive Aug. 21 Evidence
 
 ### `trading-bot-clean` contaminated lineage
 
-Read-only provenance on the clean-domain service showed:
-- account cash/equity about `-26064.31`
+Read-only provenance showed:
+- cash/equity about `-26064.31`
 - zero positions
 - 303 state trade rows
 - stale risk day 2026-08-20 with `day_peak_equity=0.01`
-- canonical ledger 55 rows, all epoch `legacy-pre-stable-core`
-- retained backups and eight retained snapshots contain no Aug. 12 verified epoch object/signature
-- trade journal and backup contain no verified v2 top-level marker
+- canonical ledger 55 rows, all `legacy-pre-stable-core`
+- retained backups/snapshots do not preserve the Aug. 12 verified v2 epoch
+- trade journal/backup have no verified v2 top-level marker
 
-This volume is healthy persistence of the wrong historical lineage. No current backup should be restored.
+This service is healthy persistence of the wrong historical state boundary. Do not restore its backups or use it as authoritative account evidence.
 
 ### `web-production-e1796` verified successor lineage
 
-`/paper/canonical-execution-ledger-status` proved:
+Direct runtime evidence proved:
 - `current_epoch_id=stable-paper-v2-20260812-verified01`
-- hash chain valid
-- no parse/hash errors
-- 36 rows when first checked; later compact audit reported 37 rows
+- canonical hash chain valid with no parse/hash errors
 - authoritative execution hook active
+- sane current-day baseline initialization
+- runner/market-data healthy on settled self-check/audit
 
-`/paper/fresh-day-check` proved sane current-day initialization:
-- date `2026-08-21`
-- `day_start_equity=13166.470921819817`
-- `day_peak_equity=19150.437724108448`
-- `fresh_day_reset_pending=false`
-- baseline status `pass`
+The service initially showed 36 canonical rows, then 37, then 39 as additional executions were appended. All remain in the verified v2 epoch.
 
-Therefore the correct v2 lineage survived on the older Railway service and the earlier negative-account investigation was occurring on a separate persistent-state boundary.
+## Authoritative v2 Account / Audit Evidence — Aug. 21
 
-## Authoritative v2 Runtime Evidence — Aug. 21
-
-### Self-check
-
-At about 13:13 CDT:
+Settled self-check around 13:13 CDT:
 - cash `13159.073498029464`
 - equity about `13542.62`
 - positions `DHR`, `GH`, `SLS`, `TOST`
 - realized today `+368.68`
-- unrealized about `+6.46`
-- runner enabled, recent successful automatic cycles, no active runner error
-- all nine bounded runtime component checks passed
-- risk remained halted only because persisted intraday drawdown was about `29.283%`
+- runner enabled / no active error
+- all bounded runtime component checks passed
+- risk halted solely because persisted intraday drawdown was about 29.28%
 
-### Compact daily audit
-
-At 13:37 CDT:
+Compact daily audit around 13:37 CDT:
 - account cash `13159.073498029464`
 - equity `13541.79`
 - verified epoch `stable-paper-v2-20260812-verified01`
@@ -93,156 +85,151 @@ At 13:37 CDT:
 - historical recovery decision `verified_snapshot_rollforward`
 - starting cash `10768.497730982748`
 - starting equity `11885.824057382748`
-- historical evidence archived `true`
 - validation hold remains active / release blocked
 - reconstructed cash `13159.07351`
 - reconstructed equity `13541.791832`
 - reconstructed positions exactly `DHR`, `GH`, `SLS`, `TOST`
-- market data pass with 3527/3527 classified terminal outcomes and no in-flight requests
+- market-data accounting complete and provider circuit clear
 - runner pass / no active error
-- canonical ledger chain valid, active v2, 37 rows
+- ledger chain valid
 
-The only accounting warning is the already-known immutable duplicate TEM full exit:
-- entry `29.640567 @ 54.885`, execution `d647d8a0580b44edbab0224e6c339bfd`
-- first full exit `29.640567 @ 53.105`, execution `7b13d9194a23407f926667b2f48d4057`
-- duplicate full exit `29.640567 @ 52.905`, execution `3530dbf965db4894ba93b7098cec3696`
+The audit's original single coverage warning was the historical TEM duplicate. Subsequent forensics proved the account/ledger could still be internally coherent while carrying economically impossible quote-derived fills.
 
-PR #81 prospectively prevents recurrence. Never delete/rewrite/relabel the historical TEM row.
-
-## Day-Peak Forensics
+## Day-Peak Forensics — PR #104
 
 PR #104 merged as `9c724d4feb268c5705634c65790314e4912ece45` and added read-only `/paper/day-peak-provenance-status`.
 
-Authoritative v2 result:
+Authoritative result:
 - current equity about `13541.73`
 - day start `13166.470921819817`
 - persisted day peak `19150.437724108448`
 - current change from day start about `+2.85%`
 - reported drawdown from persisted peak about `29.288%`
-- rolling equity history max only `14285.11`
+- rolling equity history maximum only `14285.11`
 - retained history does **not** contain the current risk peak
 - no current-day compiled report headline contains the current risk peak
 - diagnosis `current_risk_peak_not_proven_by_retained_equity_observations`
 
-Important retained history boundary:
-- history around max moved from roughly `13166` to `14285.11` and immediately back near `13537`
-- this proved at least one transient valuation spike but did not explain the full `19150.44` risk peak
+The retained history did capture a transient jump from roughly `13166` to `14285.11` and immediately back near `13537`, proving at least one transient valuation spike. The later SLS evidence explains that retained jump, but not the entire unsupported `19150.44` risk peak.
 
-Do not rewrite the peak from this probe alone. The $19,150 peak still requires independent provenance/correction proof.
+## SLS Bad Execution — PRs #105 / #106
 
-## Newly Proven SLS Bad Execution — Aug. 21
+SLS entry:
+- execution `4dfe9d5b3e50432c820723ea9a39dcb0`
+- canonical entry quantity about `6.497144521 @ 14.335`
 
-Current-day state evidence:
-- SLS entry execution `4dfe9d5b3e50432c820723ea9a39dcb0`
-- entry `6.497145 @ 14.335`
-- bogus partial-profit execution `b6584fe0e28744d8bfa2da26f413af70`
-- partial exit `2.144058 @ 186.2901`
+Bad partial exit:
+- execution `b6584fe0e28744d8bfa2da26f413af70`
+- exact canonical qty `2.144057692 @ 186.2901`
 - exit reason `partial_profit_long`
-- current remaining shares about `4.353086829`
-- current SLS `peak=186.2901`
 
-Independent Alpaca IEX evidence gathered after the incident:
-- exact quote window around 14:50:30–14:51:35 UTC had bids roughly `14.16–14.23` and asks `14.26–14.27`
-- nearby IEX 1-minute bars were roughly `14.105–14.29`
-- no SLS forward/reverse split corporate action was reported for Aug. 18–22
-- recorded bad price `186.2901` was about `13.05x` the contemporaneous IEX ask and about `13.0x` the position entry
+Independent Alpaca IEX evidence at the execution window:
+- bids roughly `14.16–14.23`
+- asks roughly `14.26–14.27`
+- nearby 1-minute range about `14.105–14.29`
+- no SLS split/reverse-split action Aug. 18–22
 
-Economic consequence of the exact bad partial exit:
-- bogus cash proceeds `2.144058 * 186.2901 = 399.4167792258`
-- bogus realized PnL `(186.2901 - 14.335) * 2.144058 = 368.6817077958`
-- this explains essentially the entire audit `realized_today=368.68`
-- before the partial exit, marking all SLS shares near 186 also explains the retained equity-history spike to about `14285`
+The bogus row created about `$399.42` cash proceeds and about `$368.68` realized PnL, explaining essentially all reported `realized_today`. It also left SLS `peak=186.2901` and explains the retained equity-history spike near `14285`.
 
-The SLS event proves the accounting system can be internally coherent while faithfully reconstructing an economically invalid execution. The immutable bad execution must remain preserved as forensic evidence; recovery must use a successor-state/accounting disposition, not ledger editing.
+PR #105 merged as `da691224875aebf1464903be6f90937ee6dfaf01`. It prospectively added symmetric favorable/adverse quote-integrity protection using the broad 0.40x..2.50x position-entry anchor at fresh/cache, valuation fallback, full-exit, and partial-exit boundaries. Runtime confirmed version `paper-exit-price-integrity-2026-08-21-v3-symmetric-position-anchor`, `position_entry_anchor_enabled=true`, `symmetric_favorable_outlier_protection=true`, overall pass.
 
-## PR #105 — Symmetric Favorable Quote Integrity
+PR #106 merged as `8a42729fcf89dad5ab7de8df39073c727b8873a9`. Its read-only SLS recovery proof established that the SLS bad row was not terminal: three canonical TOST partial exits followed it.
 
-PR #105 merged as `da691224875aebf1464903be6f90937ee6dfaf01` after final exact-head Change Safety Audit, focused quote-integrity regressions, repository safety, architecture/ownership/config/debt checks, and exact Gunicorn startup smoke all passed. Both Railway deployment contexts subsequently reported success.
+## Successor Replay / TOST Evidence — PR #107
 
-Runtime confirmation on `web-production-e1796`:
-- version `paper-exit-price-integrity-2026-08-21-v3-symmetric-position-anchor`
-- `long_min_price_ratio=0.4`
-- `long_max_price_ratio=2.5`
-- `short_min_price_ratio=0.4`
-- `short_max_price_ratio=2.5`
-- `position_entry_anchor_enabled=true`
-- valuation fallback installed
-- `symmetric_favorable_outlier_protection=true`
-- overall `pass`
+PR #107 merged as `28d5a2a318b83fbdc0dce361571836e699734a19` and added deterministic read-only verified-v2 successor replay.
 
-Prospective behavior now blocks catastrophic favorable **and** adverse marks at fresh/cache, valuation-fallback, full-exit, and partial-exit boundaries. It does not change normal stops, strategy, sizing, live/ML authority, historical state, ledger rows, day peak, or halt state.
+Runtime result:
+- ledger chain valid
+- row count 39
+- all rows verified-v2
+- SLS signature exact
+- TEM row found once but initial expected display price `52.905` missed the immutable canonical value by one micro-dollar
+- three canonical rows after SLS were all TOST partial-profit exits
+- `state.trades` contained zero rows after SLS, showing those TOST rows were not reflected in current state economics
 
-## PR #106 — Read-only SLS Bad-Execution Recovery Proof
+Independent Alpaca IEX checks on the three TOST rows:
+- 13:11:11 CDT: recorded `73.940002`, market roughly `36.21–36.25`
+- 14:03:17 CDT: recorded `190.244995`, market roughly `36.44–36.47`
+- 14:35:20 CDT: recorded `74.269997`, market roughly `36.39–36.44`
+- no TOST forward/reverse/unit split action Aug. 18–22
 
-Active branch: `agent/sls-bad-execution-recovery-proof-20260821`.
+All three TOST rows are catastrophic favorable outliers. Their immutable rows must remain preserved, but their economic effects must not be replayed into a corrected successor state.
 
-Purpose: prove mechanically whether the exact invalid SLS partial exit is terminal in the canonical ledger and whether a deterministic arithmetic counterfactual can be formed without editing history.
+## TEM Precision Provenance — PR #109
 
-Planned route: `/paper/sls-bad-execution-recovery-proof`.
+PR #109 merged as `b7f685e460ec31fa1f93987ff29704c01bed650a` after exact-head Change Safety, Architecture Debt, Repository Safety, full Refactor/Ownership/Config/Startup audit, and Gunicorn smoke passed. Both Railway deployments succeeded.
 
-The route is reporting/counterfactual only. On explicit access it:
-- verifies exact SLS entry and bad partial-exit signatures in state trades;
-- line-reads the canonical ledger through its existing read/verify helpers and confirms hash-chain health;
-- reports whether any canonical executions occur after the bad SLS row;
-- checks current remaining SLS shares plus the bad-exit quantity reconcile to the original entry quantity;
-- records the independent IEX evidence described above;
-- computes the exact reversal arithmetic using the already-stored current SLS mark for valuation only;
-- does not fabricate a replacement fill price;
-- does not write state, edit/relabel/delete ledger rows, rewrite SLS peak/day peak, clear the halt, place orders, or change strategy/risk/sizing/live/ML authority.
+Runtime TEM provenance:
+- execution ID, epoch, action, symbol, side, quantity all exact
+- only failed field was price
+- observed immutable canonical price `52.904999`
+- prior expected display value `52.905`
+- absolute difference about `0.000001`
 
-If the bad SLS execution is the final canonical execution and all signatures reconcile, the route may classify the counterfactual as mechanically proven. That still does **not** authorize a state mutation; the candidate must next be compared against independent account/valuation evidence and then wrapped in a separate exact-signature successor migration under validation hold.
+This is serialization/display precision provenance, not a new economic contradiction. The successor gate must use the immutable canonical value `52.904999` and should not broadly loosen price tolerance.
 
-If later canonical executions exist, they must be replayed deterministically after removing only the bad event's economic effect before any migration can be considered.
+## Consolidated Recovery-Gate Policy — Current Work
+
+Too many one-off manual tests accumulated during Aug. 21 forensics. The current work consolidates them into the existing single route:
+
+`/paper/verified-v2-successor-replay-status`
+
+The consolidated gate:
+- exact-matches all five known invalid immutable rows at canonical precision;
+- verifies ledger chain, epoch, unique execution IDs, and terminal ordering;
+- excludes only those five rows from counterfactual economics while retaining every row in the immutable ledger;
+- replays every other canonical execution in original order from the exact Aug. 12 verified baseline;
+- compares projected positions/cash/equity against current state and flags unexplained differences outside known-invalid symbols;
+- reports current risk state but does not change it;
+- sets `manual_per_event_probe_required=false` when mechanically complete;
+- never writes state, rewrites the day peak, clears the halt, fabricates a fill, edits history, places orders, or changes strategy/risk/sizing/live/ML authority.
+
+The one-off SLS recovery-proof and TEM field-provenance modules remain in repository history/tests for evidence but are removed from startup route registration once the consolidated gate lands. The day-peak provenance route remains registered because the unsupported risk peak is still a separate #82 evidence boundary.
+
+After the consolidated gate deploys, the assistant should query it directly. Do not ask the user to run another per-event forensic endpoint. If the consolidated gate passes, proceed to design the bounded exact-signature successor-state migration under validation hold.
 
 ## Durable Verified-Recovery Provenance
 
 GitHub history independently proves the Aug. 12 successor existed:
 - PR #45 `9b659c88f77d5004e82ee0dda8e6d26c074621e8`: exact LRCX bad-tick recovery and creation of `stable-paper-v2-20260812-verified01`
-- PR #46 `16c4c2371e46d23d15057f172a37756ff5245342`: journal-lock deadlock fix after the recovery
+- PR #46 `16c4c2371e46d23d15057f172a37756ff5245342`: journal-lock deadlock fix after recovery
 - PR #48 `b5ea9d9192f7ac7cf65d8e342d11727ac3249b2b`: explicit successful v1→v2 successor compatibility
-- PR #52 `d82f6eb327c90dede362fc0160167ac8c18c327f`: canonical ledger already authoritative for v2 and compact reporting fixed to use active successor epoch
+- PR #52 `d82f6eb327c90dede362fc0160167ac8c18c327f`: canonical ledger already authoritative for v2 and reporting fixed to use active successor epoch
 
-Verified baseline constants from the recovery remain:
+Verified baseline constants:
 - starting cash `10768.497730982748`
 - starting equity `11885.824057382748`
 - restored LRCX `3.42486 @ 312.90`, verified mark `326.24`
 
-The clean-domain volume lost these runtime markers, but the `web-production` volume currently proves the v2 lineage directly through its active state and canonical ledger.
-
 ## Startup-Liveness Observation
 
-After several Aug. 21 deployments, `/bootstrap-status` repeatedly spent >60 seconds in `runtime_worker_registration` while:
-- loader thread remained alive
-- 5-second registration heartbeat continued advancing
-- pre-WSGI fresh-day guard remained installed/pass
-- application eventually became ready
+Several Aug. 21 deployments spent >60 seconds in `runtime_worker_registration` while the loader thread and heartbeat remained alive and the pre-WSGI fresh-day guard remained pass. The app eventually became ready. Treat this as slow cold start, not a proven hang, unless the same broad phase persists roughly 4–5 minutes or heartbeat stops.
 
-This is currently a slow cold-start condition, not a proven hang. If registration remains in the same broad phase for roughly 4–5 minutes or heartbeat stops advancing, treat it as a separate Issue #82 startup-liveness defect and add per-subphase timing/progress telemetry before changing registration behavior.
-
-Current `runtime_worker_registration.py` is an older synchronous stack with no per-component timing telemetry. Do not guess the slow component and do not parallelize/refactor registration without evidence.
+Do not guess or parallelize registration. If it becomes a real blocker, first add per-component read-only timing/progress telemetry. Consolidating superseded forensic registrations is allowed when directly replacing them with one owned route; do not use startup latency as justification for broad runtime refactors.
 
 ## Issue #82 — Stabilization Exit Gate
 
 Already satisfied/prospectively contained:
-- #56 source terminal-price plausibility
-- #79 fresh cached quote provenance/plausibility
+- #56 terminal-price plausibility
+- #79 cached quote freshness/provenance
 - #80 catastrophic persisted `last_price` fallback block
 - #81 duplicate full-exit preflight guard
-- #83/#87 fresh-day baseline sanity and pre-WSGI installation
-- #98 removal of X-Ray stale-file authoritative overwrite
-- canonical v2 service lineage mechanically rediscovered
-- sane fresh-day initialization on the v2 service
+- #83/#87 fresh-day baseline sanity + pre-WSGI installation
+- #98 X-Ray stale-state overwrite repair
+- authoritative v2 service lineage rediscovered
+- sane fresh-day initialization on authoritative v2 service
 - #105 symmetric favorable/adverse quote-integrity containment
+- exact immutable provenance for TEM, SLS, and three TOST bad executions
 
 Still required:
-1. mechanically prove the exact SLS successor-account counterfactual and any later-execution replay requirement;
-2. separately prove the source/correction boundary for the unsupported `$19,150.44` day peak;
-3. preserve immutable TEM and SLS bad executions while establishing an evidence-based successor accounting disposition;
-4. perform any recovery only through an exact-signature, archived, validation-hold migration — never manual state edits;
+1. get the consolidated five-execution verified-v2 recovery gate mechanically complete;
+2. perform any economic recovery only through an exact-signature, archived, validation-hold successor migration; never manual edits;
+3. leave the current-day halt/peak untouched unless a separate exact evidence boundary explicitly authorizes correction;
+4. obtain a sane next fresh-risk-day initialization from corrected economics;
 5. obtain one normal forward paper market session with runner/accounting/ledger/market-data/quote-integrity/execution healthy and no new accounting category;
-6. obtain clean active audit with sane valuation, valid canonical chain, no active economic/coverage issue except explicitly archived predecessor evidence, and risk reflecting actual economics.
-
-Authoritative canary/cutover/performance expansion remains blocked until #82 is satisfied.
+6. obtain a clean active audit with sane valuation, valid canonical chain, no active economic/coverage issue except archived predecessor evidence, and risk reflecting actual economics;
+7. only after #82, deliberately consolidate Railway service/domain/state boundary and continue Stable Paper Core v3 cutover.
 
 ## Stable Paper Core v3 / Issue #84
 
@@ -254,7 +241,7 @@ Merged shadow/parity stages:
 - #92 Stage E ledger-derived accounting projection
 - #93 Stage F bounded paper-canary planner, shadow only
 
-Stage G/cutover remains blocked by #82 and parity. Do not use shadow core to bypass stabilization.
+Stage G/cutover remains blocked by #82. Do not use shadow core to bypass stabilization.
 
 ## Mandatory Change Safety / Issue #94
 
@@ -268,13 +255,7 @@ PR #95 established the exact-head Change Safety Audit. Every relevant PR must pa
 - exact Gunicorn bootstrap smoke
 - final exact-head decision
 
-Later extensions:
-- #101/#102/#103 provenance regressions
-- #104 day-peak provenance regression
-- #105 focused price-integrity regressions
-- #106 adds focused SLS recovery-proof regression
-
-Repository branch protection on `main` was still not enabled when last checked; in-repository gate remains mandatory regardless.
+Later focused extensions cover provenance, day-peak, price-integrity, SLS recovery proof, and verified-v2 successor replay. Repository branch protection on `main` was still not enabled when last checked; the in-repo gate remains mandatory regardless.
 
 ## Self-Diagnosing Sentinel / Issue #96
 
@@ -282,7 +263,7 @@ PR #97 remains advisory/shadow only. It may classify incidents and recommend tes
 
 ## Architecture Program
 
-Aug. 20 master audit baseline: about 250 Python files / 90,409 LOC, 34 runtime mutation overlaps, 5 env conflicts, 5 route overlaps, 80 duplicate-function groups, 540 broad exception-pass sites, 8 watchdog loops, 32 critical findings. Fragmented owners included `save_state` 17, `scan_signals` 14, `try_entries_and_rotations` 13, `entry_quality_check` 10, `enter_position` 9.
+Aug. 20 master audit baseline: about 250 Python files / 90,409 LOC, 34 runtime mutation overlaps, 5 env conflicts, 5 route overlaps, 80 duplicate-function groups, 540 broad exception-pass sites, 8 watchdog loops, 32 critical findings.
 
 Canonical owners remain:
 - signals → `trading.signals.SignalEngine`
@@ -300,28 +281,26 @@ No big-bang rewrite. Cut over one authority boundary at a time after parity/proo
 
 ## Known CI / Ops Debt
 
-A separate `daily-operational-audit` workflow remains red from stale expectations that predate the latest provenance/quote work:
-1. next-action precedence expectation for an old recursion fixture;
-2. curated audit fixture expects `pass` instead of current `warn`;
-3. bootstrap overlay test expects obsolete `v6-registration-heartbeat` while production is now v7.
+A separate `daily-operational-audit` workflow remains red from stale expectations that predate current runtime behavior:
+1. old next-action/recursion fixture ordering;
+2. curated audit fixture expecting `pass` instead of current `warn`;
+3. bootstrap overlay expecting obsolete `v6-registration-heartbeat` while production is v7.
 
-Do not change runtime accounting/risk behavior merely to satisfy these stale expectations. Fix them separately under Issue #94 when not interleaving with the active SLS/risk forensics sequence.
+Treat this as #94 governance debt. Do not change runtime accounting/risk/strategy to satisfy stale fixtures.
 
 ## Current Runtime Links
 
-For Issue #82 authoritative validation use the verified v2 service:
+Authoritative v2 service:
 - bootstrap: `https://web-production-e1796.up.railway.app/bootstrap-status`
-- fresh-day: `https://web-production-e1796.up.railway.app/paper/fresh-day-check`
 - self-check: `https://web-production-e1796.up.railway.app/paper/self-check`
 - compact daily audit: `https://web-production-e1796.up.railway.app/paper/daily-audit`
-- full daily audit: `https://web-production-e1796.up.railway.app/paper/daily-audit?full=1`
 - canonical ledger: `https://web-production-e1796.up.railway.app/paper/canonical-execution-ledger-status`
+- quote-integrity: `https://web-production-e1796.up.railway.app/paper/exit-price-integrity-status`
 - day-peak provenance: `https://web-production-e1796.up.railway.app/paper/day-peak-provenance-status`
-- quote-integrity status: `https://web-production-e1796.up.railway.app/paper/exit-price-integrity-status`
-- SLS recovery proof after PR #106 deploy: `https://web-production-e1796.up.railway.app/paper/sls-bad-execution-recovery-proof`
+- single consolidated recovery gate after current deploy: `https://web-production-e1796.up.railway.app/paper/verified-v2-successor-replay-status`
 
-Do not use `trading-bot-clean` as authoritative economic evidence until the split-volume consolidation is separately designed and proven.
+Do not use `trading-bot-clean` as authoritative economic evidence until split-volume consolidation is separately designed and proven.
 
 ## Exact Next Action
 
-Finish PR #106 under the mandatory exact-head safety gate. After deployment, call only the authoritative v2 `/paper/sls-bad-execution-recovery-proof` route. If it proves the bad SLS row is terminal and the exact reversal reconciles, compare that counterfactual against independent account/valuation evidence before designing any exact-signature successor migration. Do not clear the halt or rewrite the `$19,150.44` risk peak during this sequence.
+Finish the consolidated recovery-gate PR under the mandatory exact-head safety gate. After authoritative Railway deployment succeeds, the assistant should query `/paper/verified-v2-successor-replay-status` directly rather than asking the user to run another one-off test. If diagnosis is `verified_v2_consolidated_recovery_gate_mechanically_complete`, use that single result as the sole forensic runtime input for a bounded successor-state migration design under validation hold. Do not clear the current halt or rewrite `day_peak_equity` during that sequence.
