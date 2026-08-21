@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-21-v33-verified-v2-successor-replay"
+VERSION = "data-integrity-startup-bridge-2026-08-21-v34-tem-signature-provenance"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -51,6 +51,9 @@ MODULES = (
     # immutable ledger counterfactually while retaining the proven TEM/SLS bad
     # rows as evidence; startup apply() performs no ledger/state scan.
     "verified_v2_successor_replay_status",
+    # Field-level read-only provenance for the immutable TEM duplicate row. This
+    # module intentionally has no apply(); it reads the ledger only on its route.
+    "verified_v2_successor_replay_tem_provenance",
     # Patch the exact one-shot recovery's journal rotation before the recovery
     # runs. The migration already owns the journal lock, so it must not call the
     # journal mirror recursively from inside that critical section.
