@@ -94,6 +94,24 @@ class ChangeSafetyAuditTests(unittest.TestCase):
             ):
                 self.assertIn(core_test, tests)
 
+    def test_day_peak_provenance_change_selects_focused_risk_regression(self) -> None:
+        path = "day_peak_provenance_status.py"
+        categories, boundaries = classify_paths((path,))
+        tests = planned_regressions((path,))
+
+        self.assertIn("risk", categories)
+        self.assertIn("risk", boundaries)
+        self.assertIn("state", boundaries)
+        self.assertIn("test_day_peak_provenance_status.py", tests)
+        for core_test in (
+            "test_architecture_stage_b.py",
+            "test_architecture_stage_c.py",
+            "test_architecture_stage_d_state_store.py",
+            "test_architecture_stage_e_accounting.py",
+            "test_architecture_stage_f_canary.py",
+        ):
+            self.assertIn(core_test, tests)
+
 
 if __name__ == "__main__":
     unittest.main()
