@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-21-v2-provenance"
+VERSION = "change-safety-audit-2026-08-21-v3-provenance"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -30,7 +30,10 @@ RUNTIME_TESTS = (
 STATE_TESTS = ("test_state_store_stage_c.py",)
 DECISION_TESTS = ("test_shadow_decision_stage_d.py",)
 CONFIG_TESTS = ("test_architecture_stage_b.py",)
-PROVENANCE_TESTS = ("test_verified_snapshot_provenance_status.py",)
+PROVENANCE_TESTS = (
+    "test_verified_snapshot_provenance_status.py",
+    "test_verified_snapshot_backup_provenance_status.py",
+)
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,11 @@ def _git(*args: str) -> str:
 def changed_files(base: str, head: str) -> tuple[str, ...]:
     text = _git("diff", "--name-only", f"{base}...{head}")
     return tuple(sorted({line.strip() for line in text.splitlines() if line.strip()}))
+
+
+def _is_verified_snapshot_provenance_path(path: str) -> bool:
+    lowered = path.lower()
+    return "verified_snapshot" in lowered and "provenance" in lowered
 
 
 def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -83,7 +91,7 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
         if any(token in path for token in ("accounting", "ledger", "execution")):
             categories.add("accounting_execution")
             boundaries.update(("accounting", "execution"))
-        if "verified_snapshot_provenance" in path:
+        if _is_verified_snapshot_provenance_path(path):
             categories.add("state_persistence")
             boundaries.update(("state", "accounting"))
         if "risk" in path:
@@ -112,7 +120,7 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(DECISION_TESTS)
     if "configuration" in categories:
         tests.extend(CONFIG_TESTS)
-    if any("verified_snapshot_provenance" in path.lower() for path in path_tuple):
+    if any(_is_verified_snapshot_provenance_path(path) for path in path_tuple):
         tests.extend(PROVENANCE_TESTS)
     existing = []
     seen = set()
