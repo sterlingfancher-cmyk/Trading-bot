@@ -41,7 +41,7 @@ class FakeCore:
         }
 
     def local_ts_text(self):
-        return "2026-08-21 16:40:00 CDT"
+        return "2026-08-21 17:10:00 CDT"
 
 
 def _row(
@@ -53,6 +53,7 @@ def _row(
     shares,
     recorded_local,
     exit_reason=None,
+    event_hash=None,
 ):
     return {
         "execution_id": execution_id,
@@ -64,11 +65,15 @@ def _row(
         "shares": shares,
         "recorded_local": recorded_local,
         "exit_reason": exit_reason,
-        "event_hash": f"hash-{execution_id}",
+        "event_hash": event_hash or f"hash-{execution_id}",
     }
 
 
-def _rows(sls_bad_price=replay.SLS_BAD_PRICE, tost_bad_2_price=190.244995):
+def _rows(
+    sls_bad_price=replay.SLS_BAD_PRICE,
+    tost_bad_2_price=190.244995,
+    uctt_partial_hash="c7e23d77ecc86e6521f702b814828815a9f17e8f697c9baf07490be0e96ee41b",
+):
     return [
         _row(
             "lrcx-valid-exit",
@@ -108,6 +113,47 @@ def _rows(sls_bad_price=replay.SLS_BAD_PRICE, tost_bad_2_price=190.244995):
             replay.TEM_DUPLICATE_QTY,
             "2026-08-14 08:48:37 CDT",
             "stop_loss",
+        ),
+        _row(
+            "uctt-entry",
+            "entry",
+            "UCTT",
+            "long",
+            93.22,
+            17.410757,
+            "2026-08-13 11:01:06 CDT",
+        ),
+        _row(
+            replay.UCTT_BAD_PARTIAL_EXECUTION_ID,
+            "partial_exit",
+            "UCTT",
+            "long",
+            337.54,
+            5.74555,
+            "2026-08-13 14:37:13 CDT",
+            "partial_profit_long",
+            uctt_partial_hash,
+        ),
+        _row(
+            "uctt-valid-exit",
+            "exit",
+            "UCTT",
+            "long",
+            94.025,
+            11.665207,
+            "2026-08-13 14:45:10 CDT",
+            "normal_exit",
+        ),
+        _row(
+            replay.UCTT_BAD_DUPLICATE_EXIT_EXECUTION_ID,
+            "exit",
+            "UCTT",
+            "long",
+            39.145,
+            11.665207,
+            "2026-08-13 14:59:04 CDT",
+            "stop_loss",
+            "d928b227f1f800b38e1b31fed9c35c9e62f2417f58c28b2d602a7c4104b71812",
         ),
         _row(
             "sls-entry",
@@ -177,12 +223,12 @@ def _payload(rows):
         return replay.status_payload(FakeCore())
 
 
-def test_consolidated_gate_excludes_exact_five_invalid_rows_and_replays_everything_else():
+def test_consolidated_gate_excludes_exact_seven_invalid_rows_and_replays_everything_else():
     payload = _payload(_rows())
 
     assert payload["overall"] == "pass"
     assert payload["diagnosis"] == "verified_v2_consolidated_recovery_gate_mechanically_complete"
-    assert payload["known_invalid_execution_count"] == 5
+    assert payload["known_invalid_execution_count"] == 7
     assert payload["all_known_invalid_signatures_exact"] is True
     assert payload["latest_invalid_is_last_canonical_execution"] is True
     assert payload["canonical_rows_after_last_known_invalid_count"] == 0
@@ -190,6 +236,8 @@ def test_consolidated_gate_excludes_exact_five_invalid_rows_and_replays_everythi
     disposition = payload["known_invalid_execution_disposition"]
     assert set(disposition) == {
         "tem_duplicate",
+        "uctt_bad_partial_exit",
+        "uctt_bad_duplicate_exit",
         "sls_bad_partial_exit",
         "tost_bad_partial_exit_1",
         "tost_bad_partial_exit_2",
@@ -200,9 +248,10 @@ def test_consolidated_gate_excludes_exact_five_invalid_rows_and_replays_everythi
 
     projection = payload["projection"]
     assert projection["projection_complete"] is True
-    assert projection["applied_execution_count"] == 5
-    assert projection["excluded_execution_count"] == 5
+    assert projection["applied_execution_count"] == 7
+    assert projection["excluded_execution_count"] == 7
     projected = {row["symbol"]: row for row in projection["candidate_positions"]}
+    assert abs(projected["UCTT"]["shares"] - 5.74555) < 1e-9
     assert abs(projected["SLS"]["shares"] - 6.497144521) < 1e-9
     assert abs(projected["TOST"]["shares"] - 3.767684364) < 1e-9
 
@@ -230,6 +279,18 @@ def test_tem_canonical_precision_is_exact_and_display_rounding_is_not_accepted_a
     rounded = _payload(rounded_rows)
     assert rounded["overall"] == "fail"
     assert rounded["known_invalid_execution_disposition"]["tem_duplicate"]["failed_checks"] == ["price"]
+
+
+def test_uctt_partial_uses_exact_canonical_event_hash_and_economic_signature():
+    payload = _payload(_rows())
+    uctt = payload["known_invalid_execution_disposition"]["uctt_bad_partial_exit"]
+    assert uctt["signature_exact"] is True
+    assert uctt["failed_checks"] == []
+
+    changed = _payload(_rows(uctt_partial_hash="wrong-hash"))
+    assert changed["overall"] == "fail"
+    assert changed["known_invalid_execution_disposition"]["uctt_bad_partial_exit"]["failed_checks"] == ["event_hash"]
+    assert changed["projection"]["projection_complete"] is False
 
 
 def test_sls_signature_mismatch_fails_closed_before_projection():
