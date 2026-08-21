@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-21-v28-verified-snapshot-provenance"
+VERSION = "data-integrity-startup-bridge-2026-08-21-v29-verified-backup-provenance"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -32,9 +32,12 @@ MODULES = (
     "clean_accounting_epoch",
     "paper_bidirectional_accounting_guard",
     "paper_execution_timestamp_semantics",
-    # Read-only forensic probe.  It deliberately runs before the exact one-shot
-    # recovery module and does not import/call either recovery implementation.
+    # Small marker/archive forensic probe.  It deliberately runs before the
+    # one-shot recovery module and does not import/call recovery implementations.
     "verified_snapshot_provenance_status",
+    # Backup/snapshot provenance probe.  Its apply() is constant-time and never
+    # scans backups during startup; scanning occurs only on its explicit route.
+    "verified_snapshot_backup_provenance_status",
     # Patch the exact one-shot recovery's journal rotation before the recovery
     # runs. The migration already owns the journal lock, so it must not call the
     # journal mirror recursively from inside that critical section.
