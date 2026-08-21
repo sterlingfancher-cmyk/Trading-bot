@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-21-v30-journal-ledger-provenance"
+VERSION = "data-integrity-startup-bridge-2026-08-21-v31-day-peak-provenance"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -41,6 +41,9 @@ MODULES = (
     # Trade-journal/canonical-ledger provenance probe. Its apply() is also
     # constant-time; journal/ledger reads occur only on its explicit route.
     "verified_snapshot_journal_ledger_provenance_status",
+    # Current-day risk-peak provenance probe. Its apply() is constant-time and
+    # reads in-process history/reports only when its explicit route is requested.
+    "day_peak_provenance_status",
     # Patch the exact one-shot recovery's journal rotation before the recovery
     # runs. The migration already owns the journal lock, so it must not call the
     # journal mirror recursively from inside that critical section.
