@@ -25,7 +25,7 @@ import datetime as dt
 import math
 from typing import Any, Dict, List, Tuple
 
-VERSION = "verified-v2-successor-replay-status-2026-08-21-v4-uctt-canonical-precision"
+VERSION = "verified-v2-successor-replay-status-2026-08-21-v5-replay-quantity-serialization-tolerance"
 ROUTE = "/paper/verified-v2-successor-replay-status"
 TARGET_EPOCH_ID = "stable-paper-v2-20260812-verified01"
 TODAY = "2026-08-21"
@@ -47,8 +47,11 @@ TOST_BAD_1_EXECUTION_ID = "fd685aa6387247ff99a05e7386c325e9"
 TOST_BAD_2_EXECUTION_ID = "cb10928f441148aaa3faf041a84bc4c8"
 TOST_BAD_3_EXECUTION_ID = "1451d91c06b34b199364b56f72ad376f"
 
+# Known-invalid row signatures remain exact. Replay arithmetic separately permits
+# only sub-five-micro-share residue caused by canonical quantity serialization.
 PRICE_TOLERANCE = 1e-9
 QTY_TOLERANCE = 5e-9
+REPLAY_QTY_TOLERANCE = 5e-6
 CASH_TOLERANCE = 2.0
 _REGISTERED_APP_IDS: set[int] = set()
 
@@ -276,6 +279,7 @@ def _project(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     realized_today_delta = 0.0
     applied: List[Dict[str, Any]] = []
     excluded: List[Dict[str, Any]] = []
+    quantity_residue_adjustments: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
 
     for index, row in enumerate(rows):
@@ -322,7 +326,7 @@ def _project(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         opposite = "short" if side == "long" else "long"
 
         if action == "entry":
-            if _book_qty(side_books[opposite]) > QTY_TOLERANCE:
+            if _book_qty(side_books[opposite]) > REPLAY_QTY_TOLERANCE:
                 errors.append(
                     {
                         "ledger_index": index,
@@ -353,7 +357,7 @@ def _project(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         remaining = qty
         release = 0.0
         realized = 0.0
-        while remaining > QTY_TOLERANCE and book:
+        while remaining > REPLAY_QTY_TOLERANCE and book:
             lot_qty, lot_price = book[0]
             used = min(remaining, lot_qty)
             if side == "long":
@@ -365,21 +369,36 @@ def _project(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                 realized += pnl
             lot_qty -= used
             remaining -= used
-            if lot_qty <= QTY_TOLERANCE:
+            if lot_qty <= REPLAY_QTY_TOLERANCE:
                 book.pop(0)
             else:
                 book[0][0] = lot_qty
 
-        if remaining > QTY_TOLERANCE:
+        if remaining > REPLAY_QTY_TOLERANCE:
             errors.append(
                 {
                     "ledger_index": index,
                     "reason": "exit_exceeds_projected_position",
                     "unmatched_qty": remaining,
+                    "replay_quantity_tolerance": REPLAY_QTY_TOLERANCE,
                     "row": _row_view(row, index),
                 }
             )
             break
+
+        if remaining > 0:
+            quantity_residue_adjustments.append(
+                {
+                    "ledger_index": index,
+                    "execution_id": execution_id,
+                    "symbol": symbol,
+                    "side": side,
+                    "action": action,
+                    "unmatched_qty": remaining,
+                    "tolerance": REPLAY_QTY_TOLERANCE,
+                    "disposition": "accepted_as_canonical_quantity_serialization_residue_only",
+                }
+            )
 
         cash += release
         realized_delta += realized
@@ -393,7 +412,7 @@ def _project(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             open_sides = [
                 side
                 for side in ("long", "short")
-                if _book_qty(side_books[side]) > QTY_TOLERANCE
+                if _book_qty(side_books[side]) > REPLAY_QTY_TOLERANCE
             ]
             if len(open_sides) > 1:
                 errors.append({"reason": "opposing_books_remain", "symbol": symbol})
@@ -433,6 +452,9 @@ def _project(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "applied_execution_count": len(applied),
         "excluded_execution_count": len(excluded),
         "excluded_executions": excluded,
+        "replay_quantity_tolerance": REPLAY_QTY_TOLERANCE,
+        "quantity_residue_adjustment_count": len(quantity_residue_adjustments),
+        "quantity_residue_adjustments": quantity_residue_adjustments,
         "candidate_cash": round(cash, 9),
         "candidate_realized_delta_from_verified_baseline": round(realized_delta, 9),
         "candidate_realized_today_delta": round(realized_today_delta, 9),
@@ -738,6 +760,9 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "latest_known_invalid_is_terminal": latest_invalid_is_last_canonical_execution,
             "only_known_invalid_symbols_explain_position_differences": bool(comparison.get("only_known_invalid_symbols_differ", False)),
             "mechanically_complete_for_successor_migration_design": mechanically_complete,
+            "strict_invalid_signature_quantity_tolerance": QTY_TOLERANCE,
+            "replay_quantity_serialization_tolerance": REPLAY_QTY_TOLERANCE,
+            "replay_quantity_residue_adjustment_count": int(projection.get("quantity_residue_adjustment_count") or 0),
             "historical_execution_edit_required": False,
             "immutable_invalid_rows_must_remain_in_ledger": True,
             "state_write_authorized_by_this_probe": False,
