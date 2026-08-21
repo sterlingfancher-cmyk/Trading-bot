@@ -18,6 +18,27 @@ A trading-behavior change must pass:
 
 "Forward test" means observation on data and market cycles that were not available when the change was designed. It does not mean predicting future prices.
 
+## Mandatory Exact-Head Change Safety Audit
+
+Every future pull request that can affect Python code, runtime behavior, configuration, persistence, workflows, startup, diagnostics, strategy, accounting, valuation, risk, execution, or repository validation must pass the canonical `Change Safety Audit` on the exact pull-request head SHA before merge or deployment.
+
+A local unit test or stage-specific check is never sufficient by itself. The mandatory audit must:
+
+- classify the changed surface and affected authority boundaries;
+- run targeted/impact-aware regression tests selected from the changed paths;
+- always run the canonical state, valuation, accounting, risk, and canary invariant suite;
+- run repository-wide safety validation and Railway configuration validation;
+- run the structural refactor audit with no new critical findings;
+- validate architecture ownership and typed configuration parity;
+- block any architecture-debt increase;
+- run the exact Gunicorn/bootstrap startup smoke;
+- verify the checked-out commit SHA exactly matches the pull-request head SHA;
+- emit a machine-readable `change_safety_audit_report.json` tied to that SHA.
+
+The audit fails closed when any required component is missing, stale, skipped, incomplete, or failing. A passing audit on an older commit does not satisfy a newer pull-request head. Repository rules/branch protection must require the `Change Safety Audit` check before merge where repository permissions support enforcement.
+
+The gate itself must retain regression proof that a seeded breaking condition is rejected and an all-green safe change is accepted. No alternate workflow or path-only change may bypass the canonical audit.
+
 ## Validation by Change Type
 
 ### Documentation, comments, formatting, and non-runtime workflow edits
@@ -127,3 +148,5 @@ Until the architecture audit and shadow-decision path are complete:
 - allow only urgent operational repairs and the testing/refactor foundation;
 - treat the existing performance audit V2 as advisory research;
 - do not promote new policy values from the research lab without forward paper evidence.
+
+The mandatory exact-head Change Safety Audit applies in addition to these temporary rebuild constraints. It does not authorize any cutover otherwise blocked by Issue #82 or the architecture migration plan.
