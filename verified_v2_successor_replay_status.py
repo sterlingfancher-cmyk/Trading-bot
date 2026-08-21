@@ -1,16 +1,18 @@
 """Consolidated read-only recovery gate for the verified v2 paper epoch.
 
-Issue #82 now has five immutable canonical executions with durable evidence that
+Issue #82 now has seven immutable canonical executions with durable evidence that
 their economic effects must not be used in a successor projection:
 
 * TEM duplicate full exit ``3530dbf965db4894ba93b7098cec3696``;
+* two UCTT invalid exits, including a catastrophic favorable partial exit and a
+  later unmatched/adverse exit inconsistent with independent market evidence;
 * SLS catastrophic favorable partial exit ``b6584fe0e28744d8bfa2da26f413af70``;
 * three TOST catastrophic favorable partial exits recorded after the SLS event.
 
 The canonical ledger remains immutable. This module verifies the hash chain and
 exact row signatures, starts from the mechanically verified 2026-08-12 v2
-baseline, excludes only the five proven-invalid economic effects, and replays
-every other canonical execution in original order.
+baseline, excludes only the proven-invalid economic effects, and replays every
+other canonical execution in original order.
 
 This is the single compact forensic/recovery gate. It never writes state, edits
 or relabels ledger rows, fabricates replacement fills, clears a halt, rewrites
@@ -23,7 +25,7 @@ import datetime as dt
 import math
 from typing import Any, Dict, List, Tuple
 
-VERSION = "verified-v2-successor-replay-status-2026-08-21-v2-consolidated-five-invalid"
+VERSION = "verified-v2-successor-replay-status-2026-08-21-v3-consolidated-seven-invalid"
 ROUTE = "/paper/verified-v2-successor-replay-status"
 TARGET_EPOCH_ID = "stable-paper-v2-20260812-verified01"
 TODAY = "2026-08-21"
@@ -35,6 +37,8 @@ BASELINE_LRCX_ENTRY = 312.90
 TEM_DUPLICATE_EXECUTION_ID = "3530dbf965db4894ba93b7098cec3696"
 TEM_DUPLICATE_PRICE = 52.904999
 TEM_DUPLICATE_QTY = 29.640567
+UCTT_BAD_PARTIAL_EXECUTION_ID = "e604e478d0df47ed9c7da1c7b290cba8"
+UCTT_BAD_DUPLICATE_EXIT_EXECUTION_ID = "b8062fa9c2464251b661957d0694bbfa"
 SLS_BAD_EXECUTION_ID = "b6584fe0e28744d8bfa2da26f413af70"
 SLS_BAD_PRICE = 186.2901
 SLS_BAD_QTY = 2.144057692
@@ -62,6 +66,34 @@ KNOWN_INVALID_EXECUTIONS: tuple[dict[str, Any], ...] = (
         "exit_reason": "stop_loss",
         "reason": "proven_duplicate_full_exit_retained_immutably_but_excluded_from_counterfactual_economics",
         "evidence": "prior_full_exit_closed_the_same_long_quantity_before_this_row",
+    },
+    {
+        "key": "uctt_bad_partial_exit",
+        "execution_id": UCTT_BAD_PARTIAL_EXECUTION_ID,
+        "accounting_epoch_id": TARGET_EPOCH_ID,
+        "action": "partial_exit",
+        "symbol": "UCTT",
+        "side": "long",
+        "price": 337.54,
+        "shares": 5.74555,
+        "event_hash": "c7e23d77ecc86e6521f702b814828815a9f17e8f697c9baf07490be0e96ee41b",
+        "reason": "proven_catastrophic_quote_outlier_retained_immutably_but_excluded_from_counterfactual_economics",
+        "evidence": "independent_alpaca_iex_one_minute_bars_near_94_at_2026-08-13T19:37Z_and_no_split",
+    },
+    {
+        "key": "uctt_bad_duplicate_exit",
+        "execution_id": UCTT_BAD_DUPLICATE_EXIT_EXECUTION_ID,
+        "accounting_epoch_id": TARGET_EPOCH_ID,
+        "action": "exit",
+        "symbol": "UCTT",
+        "side": "long",
+        "price": 39.145,
+        "shares": 11.665207,
+        "recorded_local": "2026-08-13 14:59:04 CDT",
+        "exit_reason": "stop_loss",
+        "event_hash": "d928b227f1f800b38e1b31fed9c35c9e62f2417f58c28b2d602a7c4104b71812",
+        "reason": "proven_unmatched_duplicate_and_catastrophic_quote_outlier_retained_immutably_but_excluded_from_counterfactual_economics",
+        "evidence": "prior_valid_uctt_exit_closed_the_remaining_quantity_and_independent_alpaca_iex_quote_at_2026-08-13T19:59:04Z_was_93.10x93.23_with_no_split",
     },
     {
         "key": "sls_bad_partial_exit",
@@ -175,7 +207,7 @@ def _row_view(row: Dict[str, Any], index: int | None = None) -> Dict[str, Any]:
 
 
 def _signature_checks(row: Dict[str, Any], expected: Dict[str, Any]) -> Dict[str, bool]:
-    return {
+    checks = {
         "execution_id": str(row.get("execution_id") or "") == str(expected["execution_id"]),
         "accounting_epoch_id": str(row.get("accounting_epoch_id") or "") == str(expected["accounting_epoch_id"]),
         "action": str(row.get("action") or "").lower() == str(expected["action"]),
@@ -183,9 +215,14 @@ def _signature_checks(row: Dict[str, Any], expected: Dict[str, Any]) -> Dict[str
         "side": str(row.get("side") or "long").lower() == str(expected["side"]),
         "price": _close(row.get("price"), float(expected["price"]), PRICE_TOLERANCE),
         "shares": _close(row.get("shares", row.get("qty")), float(expected["shares"]), QTY_TOLERANCE),
-        "recorded_local": str(row.get("recorded_local") or "") == str(expected["recorded_local"]),
-        "exit_reason": str(row.get("exit_reason") or "") == str(expected["exit_reason"]),
     }
+    if "recorded_local" in expected:
+        checks["recorded_local"] = str(row.get("recorded_local") or "") == str(expected["recorded_local"])
+    if "exit_reason" in expected:
+        checks["exit_reason"] = str(row.get("exit_reason") or "") == str(expected["exit_reason"])
+    if "event_hash" in expected:
+        checks["event_hash"] = str(row.get("event_hash") or "") == str(expected["event_hash"])
+    return checks
 
 
 def _signature_exact(row: Dict[str, Any], expected: Dict[str, Any]) -> bool:
@@ -697,7 +734,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "recovery_readiness": {
             "counterfactual_successor_projection_mechanically_reproducible": bool(projection.get("projection_complete")),
             "all_canonical_rows_accounted_for": bool(projection.get("projection_complete")),
-            "all_five_known_invalid_rows_exact": all_invalid_signatures_exact,
+            "all_seven_known_invalid_rows_exact": all_invalid_signatures_exact,
             "latest_known_invalid_is_terminal": latest_invalid_is_last_canonical_execution,
             "only_known_invalid_symbols_explain_position_differences": bool(comparison.get("only_known_invalid_symbols_differ", False)),
             "mechanically_complete_for_successor_migration_design": mechanically_complete,
