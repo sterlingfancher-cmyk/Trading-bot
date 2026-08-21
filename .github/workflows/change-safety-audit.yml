@@ -1,0 +1,235 @@
+name: Change Safety Audit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  change-safety-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      statuses: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Resolve exact base and head
+        id: refs
+        shell: bash
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA=$(git rev-parse HEAD^)
+          fi
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          test "$ACTUAL_SHA" = "$HEAD_SHA"
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Test the audit gate itself
+        id: gate_tests
+        continue-on-error: true
+        run: python -m unittest -v test_change_safety_audit.py
+
+      - name: Install declared runtime dependencies
+        id: dependencies
+        continue-on-error: true
+        run: |
+          python -m pip install --disable-pip-version-check --upgrade pip
+          python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run impact-aware regression plus canonical invariant suite
+        id: regressions
+        continue-on-error: true
+        run: |
+          python change_safety_audit.py \
+            --base "${{ steps.refs.outputs.base_sha }}" \
+            --head "${{ steps.refs.outputs.head_sha }}" \
+            --expected-head "${{ steps.refs.outputs.head_sha }}" \
+            --run-regressions \
+            --component regression_execution=success \
+            --json change_safety_regression_plan.json
+
+      - name: Repository-wide safety validation
+        id: repository_validation
+        continue-on-error: true
+        run: |
+          python repository_validation.py \
+            --base "${{ steps.refs.outputs.base_sha }}" \
+            --report repository_validation_report.json
+          python railway_config_validation.py
+
+      - name: Structural architecture audit
+        id: structural_audit
+        continue-on-error: true
+        run: |
+          python refactor_audit_cli.py \
+            --base "${{ steps.refs.outputs.base_sha }}" \
+            --json refactor_audit_report.json \
+            --markdown refactor_audit_report.md \
+            --fail-on-new-critical
+
+      - name: Architecture ownership validation
+        id: architecture_contract
+        continue-on-error: true
+        run: |
+          test -f refactor_audit_report.json
+          python architecture_contract_validation.py \
+            --audit refactor_audit_report.json \
+            --registry architecture_ownership_registry.json \
+            --json architecture_contract_report.json \
+            --markdown architecture_contract_report.md
+
+      - name: Typed configuration parity
+        id: typed_configuration
+        continue-on-error: true
+        run: |
+          test -f refactor_audit_report.json
+          python typed_configuration_snapshot.py \
+            --audit refactor_audit_report.json \
+            --contract typed_configuration_contract.json \
+            --json typed_configuration_report.json \
+            --markdown typed_configuration_report.md
+
+      - name: Block architecture debt growth
+        id: architecture_debt
+        continue-on-error: true
+        run: |
+          test -f refactor_audit_report.json
+          python architecture_debt_regression_gate.py \
+            --audit refactor_audit_report.json \
+            --json architecture_debt_regression_report.json
+
+      - name: Exact Gunicorn bootstrap startup smoke
+        id: startup_smoke
+        continue-on-error: true
+        env:
+          PORT: "8765"
+          DEFERRED_WSGI_BOOTSTRAP: "true"
+          WEB_WORKER_ALLOW_HEAVY_RESEARCH: "false"
+          PERFORMANCE_AUDIT_AUTO_BACKTEST_ENABLED: "false"
+          PERFORMANCE_AUDIT_V2_AUTO_BACKTEST_ENABLED: "false"
+          PERFORMANCE_AUDIT_V2_ENABLED: "false"
+        run: |
+          rm -f startup_gunicorn.log bootstrap_status.json bootstrap_root.json
+          PYTHONPATH=bootstrap:. gunicorn bootstrap_wsgi:app \
+            --bind 127.0.0.1:$PORT \
+            --workers 1 \
+            --threads 4 \
+            --timeout 180 \
+            >startup_gunicorn.log 2>&1 &
+          GUNICORN_PID=$!
+          cleanup() {
+            kill "$GUNICORN_PID" 2>/dev/null || true
+            wait "$GUNICORN_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 30); do
+            if curl --silent --show-error --fail "http://127.0.0.1:$PORT/bootstrap-status" >bootstrap_status.json; then
+              break
+            fi
+            kill -0 "$GUNICORN_PID" 2>/dev/null || { cat startup_gunicorn.log; exit 1; }
+            sleep 2
+          done
+          test -s bootstrap_status.json || { cat startup_gunicorn.log; exit 1; }
+          ready=false
+          for _ in $(seq 1 45); do
+            state=$(python - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path("bootstrap_status.json").read_text()).get("status", "unknown"))
+          PY
+          )
+            if [ "$state" = "ready" ]; then ready=true; break; fi
+            if [ "$state" = "error" ]; then cat bootstrap_status.json; cat startup_gunicorn.log; exit 1; fi
+            sleep 2
+            curl --silent --show-error --fail "http://127.0.0.1:$PORT/bootstrap-status" >bootstrap_status.json
+          done
+          test "$ready" = "true" || { cat bootstrap_status.json; cat startup_gunicorn.log; exit 1; }
+          curl --silent --show-error --fail "http://127.0.0.1:$PORT/" >bootstrap_root.json
+
+      - name: Final exact-head change safety decision
+        id: final_gate
+        if: always()
+        shell: bash
+        run: |
+          NEW_CRITICAL=$(python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("refactor_audit_report.json")
+          if not path.exists():
+              print(999)
+          else:
+              report = json.loads(path.read_text())
+              print(len(report.get("comparison", {}).get("new_critical", [])))
+          PY
+          )
+          python change_safety_audit.py \
+            --base "${{ steps.refs.outputs.base_sha }}" \
+            --head "${{ steps.refs.outputs.head_sha }}" \
+            --expected-head "${{ steps.refs.outputs.head_sha }}" \
+            --new-critical "$NEW_CRITICAL" \
+            --component gate_tests=${{ steps.gate_tests.outcome }} \
+            --component dependencies=${{ steps.dependencies.outcome }} \
+            --component targeted_regressions=${{ steps.regressions.outcome }} \
+            --component repository_validation=${{ steps.repository_validation.outcome }} \
+            --component structural_audit=${{ steps.structural_audit.outcome }} \
+            --component architecture_contract=${{ steps.architecture_contract.outcome }} \
+            --component typed_configuration=${{ steps.typed_configuration.outcome }} \
+            --component architecture_debt=${{ steps.architecture_debt.outcome }} \
+            --component startup_smoke=${{ steps.startup_smoke.outcome }} \
+            --json change_safety_audit_report.json
+
+      - name: Upload exact-head audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: change-safety-audit-${{ steps.refs.outputs.head_sha }}
+          path: |
+            change_safety_audit_report.json
+            change_safety_regression_plan.json
+            repository_validation_report.json
+            railway_config_validation_report.json
+            refactor_audit_report.json
+            refactor_audit_report.md
+            architecture_contract_report.json
+            architecture_contract_report.md
+            typed_configuration_report.json
+            typed_configuration_report.md
+            architecture_debt_regression_report.json
+            startup_gunicorn.log
+            bootstrap_status.json
+            bootstrap_root.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish exact-head status on main pushes
+        if: always() && github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const passed = '${{ steps.final_gate.outcome }}' === 'success';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: '${{ steps.refs.outputs.head_sha }}',
+              state: passed ? 'success' : 'failure',
+              context: 'change-safety-audit',
+              description: passed
+                ? 'Exact-head regression and architecture safety audit passed'
+                : 'Change safety audit failed; merge/deploy must remain blocked',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
