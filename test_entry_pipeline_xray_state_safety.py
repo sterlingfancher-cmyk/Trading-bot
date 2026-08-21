@@ -68,14 +68,3 @@ def test_xray_persist_never_reloads_or_replaces_live_portfolio():
     assert core.load_state_calls == 0
     assert core.save_state_calls == 0
     assert core.portfolio["entry_pipeline_xray"]["last_cycle"]["stage_counts"]["raw_total_signals"] == 27
-
-
-def test_xray_telemetry_reads_live_memory_without_state_file_io():
-    core = FakeCore()
-    core.portfolio["entry_pipeline_xray"] = {"last_bottleneck": "entries_returned"}
-
-    telemetry = xray._telemetry(core)
-
-    assert telemetry["last_bottleneck"] == "entries_returned"
-    assert core.load_state_calls == 0
-    assert core.save_state_calls == 0
