@@ -9,6 +9,12 @@ ensure the intended stack:
 It records stage counts, symbol paths, recent errors, the latest cycle, and the
 latest meaningful non-empty cycle. It does not change arguments, candidates,
 thresholds, sizing, return values, risk controls, or authority.
+
+X-Ray telemetry is deliberately in-memory with respect to the authoritative
+portfolio. It must never reload the state file, save the state file independently,
+or replace ``core.portfolio`` merely to record diagnostic data. The normal runtime
+persistence owner may persist the telemetry later as part of its ordinary state
+commit.
 """
 from __future__ import annotations
 
@@ -72,25 +78,28 @@ def _json_safe(value: Any, depth: int = 0) -> Any:
 
 
 def _state(core: Any) -> Dict[str, Any]:
+    """Return the live in-memory portfolio without authoritative state I/O.
+
+    X-Ray is diagnostic-only. Reloading the persisted state here can be unsafe:
+    a stale file snapshot can replace a newer protected in-memory valuation when
+    telemetry is saved. The runtime's normal state owner remains responsible for
+    persistence after the cycle.
+    """
     try:
-        state = core.load_state()
+        state = getattr(core, "portfolio", None)
         return state if isinstance(state, dict) else {}
     except Exception:
-        try:
-            return getattr(core, "portfolio", {}) or {}
-        except Exception:
-            return {}
+        return {}
 
 
 def _save(core: Any, state: Dict[str, Any]) -> None:
-    try:
-        core.save_state(state)
-        core.portfolio = state
-    except Exception:
-        try:
-            core.portfolio = state
-        except Exception:
-            pass
+    """No-op persistence boundary for diagnostic telemetry.
+
+    ``state`` is the live ``core.portfolio`` object returned by :func:`_state`,
+    so the telemetry mutation is already visible in memory. X-Ray must not call
+    ``load_state``, ``save_state``, or assign ``core.portfolio``.
+    """
+    return None
 
 
 def _symbol(row: Dict[str, Any]) -> str:
@@ -475,6 +484,9 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "does_not_change_return_value": True,
             "does_not_change_live_authority": True,
             "does_not_change_ml_authority": True,
+            "does_not_reload_authoritative_state": True,
+            "does_not_save_authoritative_state": True,
+            "does_not_replace_authoritative_portfolio": True,
             "preserves_last_meaningful_cycle": True,
             "captures_recent_errors": True,
             "max_symbol_rows": MAX_SYMBOL_ROWS,
