@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-21-v6-price-integrity"
+VERSION = "change-safety-audit-2026-08-21-v7-sls-recovery-proof"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -40,6 +40,7 @@ PRICE_INTEGRITY_TESTS = (
     "test_paper_exit_source_price_plausibility.py",
     "tests/test_paper_exit_guard_dynamic_owner.py",
 )
+SLS_RECOVERY_PROOF_TESTS = ("test_sls_bad_execution_recovery_proof.py",)
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,10 @@ def _is_price_integrity_path(path: str) -> bool:
     return "price_integrity" in lowered or "exit_price_integrity" in lowered
 
 
+def _is_sls_recovery_proof_path(path: str) -> bool:
+    return "sls_bad_execution_recovery_proof" in path.lower()
+
+
 def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     categories: set[str] = set()
     boundaries: set[str] = set()
@@ -115,6 +120,9 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
         if _is_day_peak_provenance_path(path):
             categories.add("risk")
             boundaries.update(("risk", "state"))
+        if _is_sls_recovery_proof_path(path):
+            categories.update(("state_persistence", "accounting_execution", "risk"))
+            boundaries.update(("state", "accounting", "execution", "risk"))
         if "risk" in path:
             categories.add("risk")
             boundaries.add("risk")
@@ -150,6 +158,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(DAY_PEAK_PROVENANCE_TESTS)
     if any(_is_price_integrity_path(path) for path in path_tuple):
         tests.extend(PRICE_INTEGRITY_TESTS)
+    if any(_is_sls_recovery_proof_path(path) for path in path_tuple):
+        tests.extend(SLS_RECOVERY_PROOF_TESTS)
     existing: list[str] = []
     seen: set[str] = set()
     for test in tests:
