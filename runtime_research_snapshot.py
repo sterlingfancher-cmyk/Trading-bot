@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_BASE_URL = "https://web-production-e1796.up.railway.app"
-VERSION = "runtime-research-snapshot-2026-08-24-v5-market-open-stabilization"
+VERSION = "runtime-research-snapshot-2026-08-24-v6-ready-settled-stabilization"
 
 ENDPOINTS = {
     "bootstrap_status": "/bootstrap-status",
@@ -74,6 +74,71 @@ def _fetch_json(url: str, retries: int, timeout: float) -> dict[str, Any]:
         "error": last_error or "unknown_fetch_error",
         "attempts": retries,
     }
+
+
+def _wait_for_delegate_ready(
+    base_url: str,
+    *,
+    wait_seconds: float,
+    poll_seconds: float,
+    timeout: float,
+) -> dict[str, Any]:
+    """Wait boundedly for the deferred WSGI delegate before broad capture.
+
+    This performs GETs against bootstrap status only. It never invokes a paper
+    cycle, mutates state, or changes runtime authority. A timeout is evidence,
+    not permission to restart or repair the service.
+    """
+    started = time.monotonic()
+    deadline = started + max(0.0, float(wait_seconds))
+    attempts = 0
+    last: dict[str, Any] = {}
+    if wait_seconds <= 0:
+        return {
+            "ready_before_capture": None,
+            "attempts": 0,
+            "waited_seconds": 0.0,
+            "last_status": None,
+            "last_phase": None,
+        }
+
+    while True:
+        attempts += 1
+        last = _fetch_json(
+            base_url.rstrip("/") + "/bootstrap-status",
+            retries=1,
+            timeout=max(5.0, min(float(timeout), 15.0)),
+        )
+        payload = _dict(last.get("payload"))
+        status = payload.get("status")
+        ready = bool(
+            last.get("status") == "ok"
+            and (payload.get("delegate_ready") or status == "ready")
+        )
+        now = time.monotonic()
+        if ready:
+            return {
+                "ready_before_capture": True,
+                "attempts": attempts,
+                "waited_seconds": round(now - started, 3),
+                "last_status": status,
+                "last_phase": payload.get("phase"),
+                "last_delegate_ready": payload.get("delegate_ready"),
+            }
+        if status == "error" or now >= deadline:
+            return {
+                "ready_before_capture": False,
+                "attempts": attempts,
+                "waited_seconds": round(now - started, 3),
+                "last_status": status,
+                "last_phase": payload.get("phase"),
+                "last_delegate_ready": payload.get("delegate_ready"),
+                "last_fetch_status": last.get("status"),
+                "last_error": last.get("error") or payload.get("error"),
+            }
+
+        remaining = max(0.0, deadline - now)
+        time.sleep(min(max(0.1, float(poll_seconds)), remaining))
 
 
 def _metric_subset(value: Any) -> dict[str, Any]:
@@ -359,6 +424,7 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
 def _markdown(report: dict[str, Any]) -> str:
     summary = _dict(report.get("summary"))
     connectivity = _dict(summary.get("connectivity"))
+    settlement = _dict(report.get("settlement"))
     self_check = _dict(summary.get("self_check"))
     fresh_day = _dict(summary.get("fresh_day"))
     daily_audit = _dict(summary.get("daily_audit"))
@@ -371,6 +437,8 @@ def _markdown(report: dict[str, Any]) -> str:
         "",
         f"- Snapshot status: **{str(report.get('status', 'unknown')).upper()}**",
         f"- Base URL: `{report.get('base_url')}`",
+        f"- Ready before broad capture: `{settlement.get('ready_before_capture')}`",
+        f"- Readiness wait: `{settlement.get('waited_seconds')}` seconds / `{settlement.get('attempts')}` attempts",
         f"- Reachable: `{connectivity.get('reachable_count')}/{connectivity.get('total_count')}`",
         f"- Listener reachable: `{connectivity.get('listener_reachable')}`",
         f"- Application ready: `{connectivity.get('application_ready')}`",
@@ -479,11 +547,19 @@ def main() -> int:
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--ready-wait-seconds", type=float, default=180.0)
+    parser.add_argument("--ready-poll-seconds", type=float, default=5.0)
     parser.add_argument("--json", default="runtime_research_snapshot.json")
     parser.add_argument("--markdown", default="runtime_research_snapshot.md")
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
+    settlement = _wait_for_delegate_ready(
+        base_url,
+        wait_seconds=max(0.0, args.ready_wait_seconds),
+        poll_seconds=max(0.1, args.ready_poll_seconds),
+        timeout=max(5.0, args.timeout),
+    )
     raw: dict[str, dict[str, Any]] = {}
     with ThreadPoolExecutor(
         max_workers=max(1, min(args.workers, len(ENDPOINTS)))
@@ -515,6 +591,7 @@ def main() -> int:
         "version": VERSION,
         "base_url": base_url,
         "read_only": True,
+        "settlement": settlement,
         "endpoints": ENDPOINTS,
         "summary": summary,
         "raw": raw,
