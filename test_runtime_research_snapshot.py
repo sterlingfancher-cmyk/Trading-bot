@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 import runtime_research_snapshot as snapshot
 
@@ -184,6 +185,40 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
         self.assertEqual(gate["overall"], "fail")
         self.assertFalse(gate["mechanically_complete_for_successor_migration_design"])
         self.assertFalse(gate["manual_per_event_probe_required"])
+
+    def test_readiness_wait_reaches_delegate_before_broad_capture(self):
+        loading = {
+            "status": "ok",
+            "payload": {
+                "status": "loading",
+                "phase": "runtime_worker_registration",
+                "delegate_ready": False,
+            },
+        }
+        ready = {
+            "status": "ok",
+            "payload": {
+                "status": "ready",
+                "phase": "ready",
+                "delegate_ready": True,
+            },
+        }
+        with mock.patch.object(
+            snapshot,
+            "_fetch_json",
+            side_effect=[loading, ready],
+        ), mock.patch.object(snapshot.time, "sleep", return_value=None):
+            result = snapshot._wait_for_delegate_ready(
+                snapshot.DEFAULT_BASE_URL,
+                wait_seconds=5.0,
+                poll_seconds=0.1,
+                timeout=5.0,
+            )
+
+        self.assertTrue(result["ready_before_capture"])
+        self.assertEqual(result["attempts"], 2)
+        self.assertEqual(result["last_status"], "ready")
+        self.assertTrue(result["last_delegate_ready"])
 
 
 if __name__ == "__main__":
