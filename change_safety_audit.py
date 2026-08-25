@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-25-v10-retired-external-paper-runner"
+VERSION = "change-safety-audit-2026-08-25-v11-issue82-successor-epoch"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -42,6 +42,7 @@ PRICE_INTEGRITY_TESTS = (
 )
 SLS_RECOVERY_PROOF_TESTS = ("test_sls_bad_execution_recovery_proof.py",)
 SUCCESSOR_REPLAY_TESTS = ("test_verified_v2_successor_replay_status.py",)
+SUCCESSOR_EPOCH_MIGRATION_TESTS = ("test_verified_v2_successor_epoch_migration.py",)
 RUNTIME_RESEARCH_SNAPSHOT_TESTS = ("test_runtime_research_snapshot.py",)
 LEGACY_EXTERNAL_PAPER_RUNNER_TESTS = ("test_legacy_external_paper_runner_retired.py",)
 
@@ -92,6 +93,10 @@ def _is_successor_replay_path(path: str) -> bool:
     return "verified_v2_successor_replay" in path.lower()
 
 
+def _is_successor_epoch_migration_path(path: str) -> bool:
+    return "verified_v2_successor_epoch_migration" in path.lower()
+
+
 def _is_runtime_research_snapshot_path(path: str) -> bool:
     return "runtime_research_snapshot" in path.lower()
 
@@ -135,7 +140,7 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
         if _is_day_peak_provenance_path(path):
             categories.add("risk")
             boundaries.update(("risk", "state"))
-        if _is_sls_recovery_proof_path(path) or _is_successor_replay_path(path):
+        if _is_sls_recovery_proof_path(path) or _is_successor_replay_path(path) or _is_successor_epoch_migration_path(path):
             categories.update(("state_persistence", "accounting_execution", "risk"))
             boundaries.update(("state", "accounting", "execution", "risk"))
         if _is_runtime_research_snapshot_path(path):
@@ -180,6 +185,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(SLS_RECOVERY_PROOF_TESTS)
     if any(_is_successor_replay_path(path) for path in path_tuple):
         tests.extend(SUCCESSOR_REPLAY_TESTS)
+    if any(_is_successor_epoch_migration_path(path) for path in path_tuple):
+        tests.extend(SUCCESSOR_EPOCH_MIGRATION_TESTS)
     if any(_is_runtime_research_snapshot_path(path) for path in path_tuple):
         tests.extend(RUNTIME_RESEARCH_SNAPSHOT_TESTS)
     if any(_is_legacy_external_paper_runner_path(path) for path in path_tuple):
