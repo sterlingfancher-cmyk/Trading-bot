@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import daily_data_integrity_audit_overlay as integrity_overlay
 import daily_operational_audit as audit
 
 
@@ -71,7 +72,21 @@ class DailyOperationalAuditTests(unittest.TestCase):
             try_entries_and_rotations=lambda *args, **kwargs: None,
         )
 
-    def test_curated_audit_has_exactly_twelve_bounded_sections(self) -> None:
+    @staticmethod
+    def _passing_integrity_section():
+        return {
+            "status": "pass",
+            "reasons": [],
+            "provider_circuit_open": False,
+            "protected_symbols_blocked": [],
+            "active_contaminated_feature_count": 0,
+            "provider_request_accounting": {
+                "in_flight_or_unclassified_requests": 0,
+                "accounting_complete_at_snapshot": True,
+            },
+        }
+
+    def test_curated_audit_has_exactly_thirteen_bounded_sections_after_integrity_overlay(self) -> None:
         core = self._core()
         composition = {
             "stack_stable": True,
@@ -118,12 +133,16 @@ class DailyOperationalAuditTests(unittest.TestCase):
 
         with patch.object(audit, "_status_payload", side_effect=status), patch.object(
             audit, "_state_persistence", return_value=persistence
+        ), patch.object(
+            integrity_overlay,
+            "build_integrity_section",
+            return_value=self._passing_integrity_section(),
         ):
             payload = audit.build_payload(core)
 
         self.assertEqual(payload["overall"], "pass")
-        self.assertEqual(len(payload["sections"]), 12)
-        self.assertEqual(payload["sections"]["11_conclusion"]["checked_sections"], 10)
+        self.assertEqual(len(payload["sections"]), 13)
+        self.assertEqual(payload["sections"]["11_conclusion"]["checked_sections"], 11)
         self.assertEqual(payload["sections"]["12_next_action"]["status"], "none")
         self.assertEqual(payload["performance_contract"]["route_fanout_count"], 0)
         self.assertEqual(payload["performance_contract"]["external_provider_calls"], 0)
@@ -156,6 +175,10 @@ class DailyOperationalAuditTests(unittest.TestCase):
         }
         with patch.object(audit, "_status_payload", return_value={}), patch.object(
             audit, "_state_persistence", return_value=persistence
+        ), patch.object(
+            integrity_overlay,
+            "build_integrity_section",
+            return_value=self._passing_integrity_section(),
         ):
             payload = audit.build_payload(core)
 
