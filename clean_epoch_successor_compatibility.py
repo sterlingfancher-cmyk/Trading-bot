@@ -16,6 +16,7 @@ from typing import Any, Dict
 VERSION = "clean-epoch-successor-compatibility-2026-08-25-v2-v3-chain"
 OLD_EPOCH_ID = "stable-paper-v1-20260810-clean01"
 VERIFIED_V2_EPOCH_ID = "stable-paper-v2-20260812-verified01"
+NEW_EPOCH_ID = VERIFIED_V2_EPOCH_ID
 ISSUE82_V3_EPOCH_ID = "stable-paper-v3-20260825-successor01"
 _APPLIED = False
 
