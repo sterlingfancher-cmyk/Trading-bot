@@ -5,14 +5,15 @@ import verified_v2_successor_epoch_migration as migration
 import verified_v2_successor_epoch_migration_precondition_compatibility as compat
 
 
-def _core():
+def _core(epoch_id=None):
+    active = epoch_id or migration.OLD_EPOCH_ID
     return types.SimpleNamespace(portfolio={
         "cash": 13357.87,
         "equity": 13535.92,
         "positions": {},
         "trades": [{"execution_id": "historical-row"}],
-        "accounting_epoch_id": migration.OLD_EPOCH_ID,
-        "paper_accounting_epoch": {"id": migration.OLD_EPOCH_ID, "validation_hold": True},
+        "accounting_epoch_id": active,
+        "paper_accounting_epoch": {"id": active, "validation_hold": True},
     })
 
 
@@ -72,9 +73,7 @@ def test_any_marker_mismatch_leaves_original_startup_error_fail_closed(monkeypat
 
 
 def test_non_v2_active_epoch_leaves_original_error_fail_closed(monkeypatch):
-    core = _core()
-    core.portfolio["accounting_epoch_id"] = "unexpected-epoch"
-    core.portfolio["paper_accounting_epoch"]["id"] = "unexpected-epoch"
+    core = _core("unexpected-epoch")
     monkeypatch.setattr(migration, "_marker", lambda: copy.deepcopy(_completed_marker()))
 
     result = compat._defer_exact_interrupted_completion_error(
