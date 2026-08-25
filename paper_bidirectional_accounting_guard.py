@@ -21,7 +21,11 @@ import copy
 import datetime as dt
 from typing import Any, Dict, List, Tuple
 
-VERSION = "paper-bidirectional-accounting-2026-08-10-v1"
+VERSION = "paper-bidirectional-accounting-2026-08-25-v2-state-trade-qty-tolerance"
+# state.trades serializes execution quantities to six decimals. Accept only the
+# bounded sub-five-micro-share residue already proven safe by canonical replay;
+# material quantity gaps remain coverage failures and cannot create cash.
+STATE_TRADE_QTY_SERIALIZATION_TOLERANCE = 5e-6
 _APPLIED = False
 _REGISTERED_APP_IDS: set[int] = set()
 
@@ -229,7 +233,7 @@ def analyze_ledger(pf: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
         if timestamp[:10] == today:
             realized_today += trade_realized
 
-        if remaining > 1e-6:
+        if remaining > STATE_TRADE_QTY_SERIALIZATION_TOLERANCE:
             ignored += 1
             coverage_issues.append({
                 "trade_index": index,
@@ -420,6 +424,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "applied": _APPLIED,
         "supports_long_short": True,
         "short_margin_model": "entry_notional_reserved_and_released_with_pnl",
+        "state_trade_qty_serialization_tolerance": STATE_TRADE_QTY_SERIALIZATION_TOLERANCE,
         "coverage_complete": bool(rebuilt.get("coverage_complete")),
         "baseline_type": rebuilt.get("baseline_type"),
         "parsed_trade_rows": int(rebuilt.get("parsed_trade_rows") or 0),
