@@ -6,12 +6,14 @@ reported in both ``coverage_issues`` and ``economic_issues`` and expected
 actually reports the exact TEM duplicate once as a coverage issue and exposes
 ``cash``, ``equity`` and ``open_positions`` directly.
 
-This shim changes only that migration evidence reader. It remains fail-closed:
-there must be at most one issue in each collection, at least one issue overall,
-every reported issue must be the exact known TEM duplicate, reconstructed cash
-must agree within one cent, reconstructed open-position side/quantity/basis must
-match the current state, and mark-derived equity may differ by at most two
-dollars to allow the already-observed sub-dollar asynchronous valuation refresh.
+Production later proved one additional startup-composition shape: the successor
+cutover can complete and persist its exact durable marker, then a stale verified-v2
+state can be restored by later registration before the final startup consistency
+owner runs. The migration correctly reports that mismatch as an error, but doing
+so inside the bridge prevents the finalizer from getting the chance to repair the
+already-proven interrupted completion. This compatibility layer therefore defers
+only that exact error shape to the dedicated finalizer. It never performs the
+cutover itself and leaves every other migration error unchanged.
 
 No state, ledger, risk, order, strategy, sizing, threshold, live, or ML authority
 is added here.
@@ -20,7 +22,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
-VERSION = "verified-v2-successor-precondition-production-shape-2026-08-25-v1"
+VERSION = "verified-v2-successor-precondition-production-shape-2026-08-25-v2-finalizer-deferral"
 EQUITY_MARK_DRIFT_TOLERANCE = 2.0
 QTY_SERIALIZATION_TOLERANCE = 5e-6
 ENTRY_PRICE_TOLERANCE = 1e-4
@@ -83,6 +85,67 @@ def _production_active_accounting_evidence(migration: Any, core: Any) -> Tuple[D
     return result, ok
 
 
+def _active_epoch_id(migration: Any, core: Any) -> str:
+    pf = migration._portfolio(core)
+    epoch = migration._d(pf.get("paper_accounting_epoch"))
+    return str(epoch.get("id") or pf.get("accounting_epoch_id") or "")
+
+
+def _exact_interrupted_completion(migration: Any, core: Any) -> bool:
+    if core is None:
+        return False
+    marker = migration._marker()
+    return bool(
+        marker.get("status") == "completed"
+        and str(marker.get("target_epoch_id") or "") == migration.TARGET_EPOCH_ID
+        and str(marker.get("prior_epoch_id") or "") == migration.OLD_EPOCH_ID
+        and marker.get("canonical_ledger_unchanged") is True
+        and _active_epoch_id(migration, core) == migration.OLD_EPOCH_ID
+    )
+
+
+def _defer_exact_interrupted_completion_error(
+    migration: Any, core: Any, result: Any
+) -> Any:
+    if not isinstance(result, dict):
+        return result
+    if not (
+        result.get("status") == "error"
+        and result.get("reason") == "completed_marker_present_but_successor_epoch_not_active"
+        and _exact_interrupted_completion(migration, core)
+    ):
+        return result
+    return {
+        "status": "pending_finalizer",
+        "overall": "warn",
+        "version": VERSION,
+        "reason": "exact_interrupted_completion_deferred_to_finalizer",
+        "active_epoch_id": migration.OLD_EPOCH_ID,
+        "target_epoch_id": migration.TARGET_EPOCH_ID,
+        "completed_marker_present": True,
+        "canonical_ledger_unchanged": True,
+        "finalizer_retry_owner": "verified_v2_successor_epoch_migration_finalizer",
+        "writes_state": False,
+    }
+
+
+def _install_migration_apply_compatibility(migration: Any) -> None:
+    current = getattr(migration, "apply", None)
+    if not callable(current):
+        return
+    if getattr(current, "_interrupted_completion_compatibility_version", None) == VERSION:
+        return
+    original = current
+
+    def wrapped(runtime_core: Any = None) -> Any:
+        result = original(runtime_core)
+        return _defer_exact_interrupted_completion_error(migration, runtime_core, result)
+
+    wrapped._interrupted_completion_compatibility_version = VERSION  # type: ignore[attr-defined]
+    wrapped._interrupted_completion_original_apply = original  # type: ignore[attr-defined]
+    migration.apply = wrapped
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     global _APPLIED
     try:
@@ -91,15 +154,14 @@ def apply(core: Any = None) -> Dict[str, Any]:
         return {"status": "error", "overall": "fail", "version": VERSION, "error": f"{type(exc).__name__}: {exc}"}
 
     current = getattr(migration, "_active_accounting_evidence", None)
-    if getattr(current, "_production_shape_compatibility_version", None) == VERSION:
-        _APPLIED = True
-        return status_payload(core)
+    if getattr(current, "_production_shape_compatibility_version", None) != VERSION:
+        def wrapped(runtime_core: Any) -> Tuple[Dict[str, Any], bool]:
+            return _production_active_accounting_evidence(migration, runtime_core)
 
-    def wrapped(runtime_core: Any) -> Tuple[Dict[str, Any], bool]:
-        return _production_active_accounting_evidence(migration, runtime_core)
+        wrapped._production_shape_compatibility_version = VERSION  # type: ignore[attr-defined]
+        migration._active_accounting_evidence = wrapped
 
-    wrapped._production_shape_compatibility_version = VERSION  # type: ignore[attr-defined]
-    migration._active_accounting_evidence = wrapped
+    _install_migration_apply_compatibility(migration)
     _APPLIED = True
     return status_payload(core)
 
@@ -110,10 +172,13 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "overall": "pass" if _APPLIED else "warn",
         "version": VERSION,
         "production_accounting_payload_shape_supported": bool(_APPLIED),
+        "exact_interrupted_completion_error_deferred_to_finalizer": bool(_APPLIED),
         "equity_mark_drift_tolerance_dollars": EQUITY_MARK_DRIFT_TOLERANCE,
         "authority": {
             "precondition_only": True,
             "writes_state": False,
+            "defers_only_exact_completed_v3_marker_with_verified_v2_reversion": True,
+            "finalizer_remains_only_retry_owner": True,
             "edits_or_deletes_canonical_rows": False,
             "rewrites_current_day_peak": False,
             "clears_hard_halt": False,
