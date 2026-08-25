@@ -177,6 +177,119 @@ def test_production_compatibility_adds_no_state_or_trading_authority():
     assert authority["changes_live_or_ml_authority"] is False
 
 
+def test_exact_completed_v3_marker_with_verified_v2_reversion_defers_only_to_finalizer(monkeypatch):
+    marker = {
+        "status": "completed",
+        "target_epoch_id": migration.TARGET_EPOCH_ID,
+        "prior_epoch_id": migration.OLD_EPOCH_ID,
+        "canonical_ledger_unchanged": True,
+        "archive_dir": "/archive/issue82",
+    }
+    monkeypatch.setattr(migration, "_marker", lambda: copy.deepcopy(marker))
+    core = types.SimpleNamespace(portfolio=_portfolio())
+    original = {
+        "status": "error",
+        "overall": "fail",
+        "reason": "completed_marker_present_but_successor_epoch_not_active",
+    }
+
+    result = compat._defer_exact_interrupted_completion_error(migration, core, original)
+
+    assert result["status"] == "pending_finalizer"
+    assert result["overall"] == "warn"
+    assert result["reason"] == "exact_interrupted_completion_deferred_to_finalizer"
+    assert result["active_epoch_id"] == migration.OLD_EPOCH_ID
+    assert result["target_epoch_id"] == migration.TARGET_EPOCH_ID
+    assert result["canonical_ledger_unchanged"] is True
+    assert result["finalizer_retry_owner"] == "verified_v2_successor_epoch_migration_finalizer"
+    assert result["writes_state"] is False
+
+
+def test_successor_startup_deferral_fails_closed_on_marker_epoch_or_error_mismatch(monkeypatch):
+    exact = {
+        "status": "completed",
+        "target_epoch_id": migration.TARGET_EPOCH_ID,
+        "prior_epoch_id": migration.OLD_EPOCH_ID,
+        "canonical_ledger_unchanged": True,
+    }
+    startup_error = {
+        "status": "error",
+        "overall": "fail",
+        "reason": "completed_marker_present_but_successor_epoch_not_active",
+    }
+    core = types.SimpleNamespace(portfolio=_portfolio())
+    for field, value in (
+        ("status", "cutover_started"),
+        ("target_epoch_id", "wrong-target"),
+        ("prior_epoch_id", "wrong-prior"),
+        ("canonical_ledger_unchanged", False),
+    ):
+        marker = {**exact, field: value}
+        monkeypatch.setattr(migration, "_marker", lambda row=marker: copy.deepcopy(row))
+        result = compat._defer_exact_interrupted_completion_error(migration, core, startup_error)
+        assert result == startup_error
+
+    unexpected_epoch = {
+        **_portfolio(),
+        "accounting_epoch_id": "unexpected-epoch",
+        "paper_accounting_epoch": {"id": "unexpected-epoch", "validation_hold": True},
+    }
+    monkeypatch.setattr(migration, "_marker", lambda: copy.deepcopy(exact))
+    result = compat._defer_exact_interrupted_completion_error(
+        migration, types.SimpleNamespace(portfolio=unexpected_epoch), startup_error
+    )
+    assert result == startup_error
+
+    unrelated = {"status": "error", "overall": "fail", "reason": "different_failure"}
+    result = compat._defer_exact_interrupted_completion_error(migration, core, unrelated)
+    assert result == unrelated
+
+
+def test_successor_startup_apply_wrapper_does_not_write_state(monkeypatch):
+    marker = {
+        "status": "completed",
+        "target_epoch_id": migration.TARGET_EPOCH_ID,
+        "prior_epoch_id": migration.OLD_EPOCH_ID,
+        "canonical_ledger_unchanged": True,
+    }
+    monkeypatch.setattr(migration, "_marker", lambda: copy.deepcopy(marker))
+    core = types.SimpleNamespace(portfolio=_portfolio())
+    before = copy.deepcopy(core.portfolio)
+    calls = {"original": 0}
+
+    def original(runtime_core=None):
+        calls["original"] += 1
+        assert runtime_core is core
+        return {
+            "status": "error",
+            "overall": "fail",
+            "reason": "completed_marker_present_but_successor_epoch_not_active",
+        }
+
+    monkeypatch.setattr(migration, "apply", original)
+    compat._install_migration_apply_compatibility(migration)
+    result = migration.apply(core)
+
+    assert result["status"] == "pending_finalizer"
+    assert calls["original"] == 1
+    assert core.portfolio == before
+
+
+def test_successor_startup_compatibility_keeps_finalizer_as_only_retry_owner():
+    authority = compat.status_payload(None)["authority"]
+    assert authority["writes_state"] is False
+    assert authority["defers_only_exact_completed_v3_marker_with_verified_v2_reversion"] is True
+    assert authority["finalizer_remains_only_retry_owner"] is True
+    assert authority["edits_or_deletes_canonical_rows"] is False
+    assert authority["rewrites_current_day_peak"] is False
+    assert authority["clears_hard_halt"] is False
+    assert authority["places_orders"] is False
+    assert authority["changes_strategy"] is False
+    assert authority["changes_thresholds"] is False
+    assert authority["changes_risk_or_sizing"] is False
+    assert authority["changes_live_or_ml_authority"] is False
+
+
 def test_recovery_gate_must_be_exact_and_mechanically_complete(monkeypatch):
     payload = {
         "overall": "pass",
