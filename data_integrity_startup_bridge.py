@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-21-v35-consolidated-v2-recovery-gate"
+VERSION = "data-integrity-startup-bridge-2026-08-25-v36-issue82-successor-epoch"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -55,9 +55,13 @@ MODULES = (
     # incident. It archives the contaminated epoch and starts a verified snapshot
     # epoch under a validation hold; it is not a generic loss reset.
     "verified_snapshot_epoch_recovery",
-    # Final accounting adapter so the new epoch can begin from verified cash plus
-    # the restored open LRCX lot and all future executions remain canonical.
+    # Accounting adapter must be active before the Issue #82 successor cutover so
+    # the current verified-v2 open-position baseline is reconciled exactly.
     "verified_snapshot_accounting_baseline",
+    # One-shot Issue #82 historical disposition. It archives verified-v2 evidence,
+    # preserves current economics/risk exactly, keeps the canonical ledger intact,
+    # and starts the v3 active accounting window under validation hold.
+    "verified_v2_successor_epoch_migration",
     # Issue #82 fresh-day gate: never initialize a new risk day from a
     # non-finite/non-positive persisted valuation. This guard is prospective and
     # never rewrites an already-initialized current day.
