@@ -85,22 +85,19 @@ def _production_active_accounting_evidence(migration: Any, core: Any) -> Tuple[D
     return result, ok
 
 
-def _active_epoch_id(migration: Any, core: Any) -> str:
-    pf = migration._portfolio(core)
-    epoch = migration._d(pf.get("paper_accounting_epoch"))
-    return str(epoch.get("id") or pf.get("accounting_epoch_id") or "")
-
-
 def _exact_interrupted_completion(migration: Any, core: Any) -> bool:
     if core is None:
         return False
     marker = migration._marker()
+    pf = migration._portfolio(core)
+    epoch = migration._d(pf.get("paper_accounting_epoch"))
+    active_epoch = str(epoch.get("id") or pf.get("accounting_epoch_id") or "")
     return bool(
         marker.get("status") == "completed"
         and str(marker.get("target_epoch_id") or "") == migration.TARGET_EPOCH_ID
         and str(marker.get("prior_epoch_id") or "") == migration.OLD_EPOCH_ID
         and marker.get("canonical_ledger_unchanged") is True
-        and _active_epoch_id(migration, core) == migration.OLD_EPOCH_ID
+        and active_epoch == migration.OLD_EPOCH_ID
     )
 
 
@@ -137,13 +134,13 @@ def _install_migration_apply_compatibility(migration: Any) -> None:
         return
     original = current
 
-    def wrapped(runtime_core: Any = None) -> Any:
+    def interrupted_completion_compatible_apply(runtime_core: Any = None) -> Any:
         result = original(runtime_core)
         return _defer_exact_interrupted_completion_error(migration, runtime_core, result)
 
-    wrapped._interrupted_completion_compatibility_version = VERSION  # type: ignore[attr-defined]
-    wrapped._interrupted_completion_original_apply = original  # type: ignore[attr-defined]
-    migration.apply = wrapped
+    interrupted_completion_compatible_apply._interrupted_completion_compatibility_version = VERSION  # type: ignore[attr-defined]
+    interrupted_completion_compatible_apply._interrupted_completion_original_apply = original  # type: ignore[attr-defined]
+    migration.apply = interrupted_completion_compatible_apply
 
 
 def apply(core: Any = None) -> Dict[str, Any]:
@@ -155,11 +152,11 @@ def apply(core: Any = None) -> Dict[str, Any]:
 
     current = getattr(migration, "_active_accounting_evidence", None)
     if getattr(current, "_production_shape_compatibility_version", None) != VERSION:
-        def wrapped(runtime_core: Any) -> Tuple[Dict[str, Any], bool]:
+        def production_shape_accounting_evidence(runtime_core: Any) -> Tuple[Dict[str, Any], bool]:
             return _production_active_accounting_evidence(migration, runtime_core)
 
-        wrapped._production_shape_compatibility_version = VERSION  # type: ignore[attr-defined]
-        migration._active_accounting_evidence = wrapped
+        production_shape_accounting_evidence._production_shape_compatibility_version = VERSION  # type: ignore[attr-defined]
+        migration._active_accounting_evidence = production_shape_accounting_evidence
 
     _install_migration_apply_compatibility(migration)
     _APPLIED = True
