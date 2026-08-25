@@ -1,9 +1,10 @@
 """Compatibility guard for legitimately superseded clean accounting epochs.
 
-The 2026-08-10 clean epoch migration leaves a durable completion marker. A later,
-explicit verified-snapshot roll-forward is allowed to supersede that epoch. This
-shim teaches the old migration to treat only that exact successor relationship as
-healthy instead of reporting a missing active epoch.
+The 2026-08-10 clean epoch migration leaves a durable completion marker. Later,
+explicit verified-snapshot roll-forwards are allowed to supersede that epoch.
+This shim teaches the old migration to treat only the exact v1->v2 and
+v1->v2->v3 successor relationships as healthy instead of reporting a missing
+active epoch.
 
 It does not mutate account state, risk limits, strategy, sizing, live authority,
 or ML authority. Any unrelated epoch mismatch continues to fail closed.
@@ -12,9 +13,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "clean-epoch-successor-compatibility-2026-08-12-v1"
+VERSION = "clean-epoch-successor-compatibility-2026-08-25-v2-v3-chain"
 OLD_EPOCH_ID = "stable-paper-v1-20260810-clean01"
-NEW_EPOCH_ID = "stable-paper-v2-20260812-verified01"
+VERIFIED_V2_EPOCH_ID = "stable-paper-v2-20260812-verified01"
+ISSUE82_V3_EPOCH_ID = "stable-paper-v3-20260825-successor01"
 _APPLIED = False
 
 
@@ -22,16 +24,31 @@ def _d(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _is_verified_successor(core: Any) -> bool:
+def _successor_epoch(core: Any) -> str | None:
     pf = getattr(core, "portfolio", None)
     pf = pf if isinstance(pf, dict) else {}
     epoch = _d(pf.get("paper_accounting_epoch"))
-    return bool(
-        str(epoch.get("id") or "") == NEW_EPOCH_ID
+    epoch_id = str(epoch.get("id") or "")
+    if bool(
+        epoch_id == VERIFIED_V2_EPOCH_ID
         and str(epoch.get("prior_epoch_id") or "") == OLD_EPOCH_ID
         and str(epoch.get("historical_recovery_decision") or "") == "verified_snapshot_rollforward"
         and bool(epoch.get("historical_evidence_archived", False))
-    )
+    ):
+        return VERIFIED_V2_EPOCH_ID
+    if bool(
+        epoch_id == ISSUE82_V3_EPOCH_ID
+        and str(epoch.get("prior_epoch_id") or "") == VERIFIED_V2_EPOCH_ID
+        and str(epoch.get("historical_recovery_decision") or "") == "verified_v2_historical_disposition_successor_rollforward"
+        and bool(epoch.get("historical_evidence_archived", False))
+        and bool(epoch.get("validation_hold", False))
+    ):
+        return ISSUE82_V3_EPOCH_ID
+    return None
+
+
+def _is_verified_successor(core: Any) -> bool:
+    return _successor_epoch(core) is not None
 
 
 def apply(core: Any = None) -> Dict[str, Any]:
@@ -49,7 +66,8 @@ def apply(core: Any = None) -> Dict[str, Any]:
     prior = getattr(current, "_successor_compatibility_prior", current)
 
     def wrapped(runtime_core: Any = None):
-        if runtime_core is not None and _is_verified_successor(runtime_core):
+        successor = _successor_epoch(runtime_core) if runtime_core is not None else None
+        if successor:
             pf = getattr(runtime_core, "portfolio", None)
             epoch = _d(_d(pf).get("paper_accounting_epoch"))
             return {
@@ -58,7 +76,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
                 "version": getattr(clean, "VERSION", None),
                 "compatibility_version": VERSION,
                 "epoch_id": OLD_EPOCH_ID,
-                "superseded_by_epoch_id": NEW_EPOCH_ID,
+                "superseded_by_epoch_id": successor,
                 "historical_recovery_decision": epoch.get("historical_recovery_decision"),
                 "historical_evidence_archived": bool(epoch.get("historical_evidence_archived", False)),
             }
@@ -72,11 +90,13 @@ def apply(core: Any = None) -> Dict[str, Any]:
 
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
+    successor = _successor_epoch(core) if core is not None else None
     return {
         "status": "ok" if _APPLIED else "pending",
         "overall": "pass" if _APPLIED else "warn",
         "version": VERSION,
-        "verified_successor_present": bool(core is not None and _is_verified_successor(core)),
+        "verified_successor_present": bool(successor),
+        "successor_epoch_id": successor,
         "reporting_compatibility_only": True,
     }
 
