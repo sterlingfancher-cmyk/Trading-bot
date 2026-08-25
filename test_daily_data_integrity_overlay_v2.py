@@ -218,7 +218,7 @@ class DailyDataIntegrityOverlayV2Tests(unittest.TestCase):
 
     def test_bootstrap_source_contains_registration_heartbeat_contract(self):
         source = Path("bootstrap_wsgi.py").read_text(encoding="utf-8")
-        self.assertIn("v6-registration-heartbeat", source)
+        self.assertIn("deferred-wsgi-bootstrap-2026-08-20-v7-pre-wsgi-fresh-risk-guard", source)
         self.assertIn("registration_elapsed_seconds", source)
         self.assertIn("registration_slow", source)
         self.assertIn("runtime-registration-bootstrap-heartbeat", source)
