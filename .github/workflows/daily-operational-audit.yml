@@ -119,7 +119,7 @@ jobs:
 
           assert bootstrap.get("status") == "ready", bootstrap
           assert bootstrap.get("delegate_ready") is True, bootstrap
-          assert bootstrap.get("version") == "deferred-wsgi-bootstrap-2026-08-06-v6-registration-heartbeat", bootstrap
+          assert bootstrap.get("version") == "deferred-wsgi-bootstrap-2026-08-20-v7-pre-wsgi-fresh-risk-guard", bootstrap
           assert isinstance(bootstrap.get("registration_duration_seconds"), (int, float)), bootstrap
           assert daily.get("status") == "ok", daily
           assert daily.get("type") == "daily_operational_audit", daily
