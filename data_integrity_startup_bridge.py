@@ -61,7 +61,7 @@ MODULES = (
     # The authoritative analyzer reports the TEM duplicate once as a coverage
     # issue and exposes cash/equity/open_positions directly. Patch only the
     # successor migration's evidence reader to that production payload shape.
-    "verified_v2_successor_epoch_precondition_compatibility",
+    "verified_v2_successor_epoch_migration_precondition_compatibility",
     # One-shot Issue #82 historical disposition. It archives verified-v2 evidence,
     # preserves current economics/risk exactly, keeps the canonical ledger intact,
     # and starts the v3 active accounting window under validation hold.
