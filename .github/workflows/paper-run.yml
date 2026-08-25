@@ -1,29 +1,18 @@
-name: Scheduled Paper Trading Run
+name: Retired Legacy External Paper Runner
 
 on:
-  schedule:
-    # Runs about every 5 minutes. GitHub may delay cron jobs slightly.
-    - cron: "*/5 * * * *"
+  # Intentionally manual-only and non-mutating. The former five-minute scheduler
+  # targeted the non-authoritative Dazzling Railway state boundary and could
+  # create split-brain paper-cycle ownership. Canonical Splendid owns its own
+  # internal automatic runner; do not repoint this workflow to another service.
   workflow_dispatch:
 
-concurrency:
-  group: paper-trading-runner
-  cancel-in-progress: true
-
 jobs:
-  run-paper-engine:
+  retired:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
     steps:
-      - name: Trigger Railway paper engine
-        env:
-          RUN_KEY: ${{ secrets.RUN_KEY }}
-          BOT_BASE_URL: https://trading-bot-clean.up.railway.app
+      - name: Explain retired runner
         run: |
-          if [ -z "$RUN_KEY" ]; then
-            echo "Missing RUN_KEY secret. Add it in GitHub repo Settings > Secrets and variables > Actions."
-            exit 1
-          fi
-
-          RESPONSE=$(curl -sS --fail --max-time 120 "$BOT_BASE_URL/paper/run?key=$RUN_KEY")
-          echo "$RESPONSE"
+          echo "Legacy external paper-cycle scheduler is retired."
+          echo "This workflow intentionally performs no HTTP request and owns no trading cycle."
+          echo "Canonical paper-cycle ownership remains with the Splendid service internal runner."
