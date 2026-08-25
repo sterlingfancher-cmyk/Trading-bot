@@ -423,12 +423,16 @@ def test_newer_valid_rows_after_latest_invalid_are_replayed_and_do_not_block_gat
         )
     ]
     core = FakeCore()
-    core.portfolio["positions"]["LATER"] = {
-        "side": "long",
-        "shares": 1.0,
-        "entry": 10.0,
-        "last_price": 10.0,
-    }
+    core.portfolio["positions"].update(
+        {
+            "LATER": {
+                "side": "long",
+                "shares": 1.0,
+                "entry": 10.0,
+                "last_price": 10.0,
+            }
+        }
+    )
     with mock.patch.object(ledger, "_read_rows", return_value=(rows, [])), mock.patch.object(
         ledger, "_verify_rows", return_value=(True, [])
     ):
