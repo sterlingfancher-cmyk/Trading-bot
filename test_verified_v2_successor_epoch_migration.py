@@ -5,6 +5,7 @@ import sys
 import types
 
 import verified_v2_successor_epoch_migration as migration
+import verified_v2_successor_epoch_migration_precondition_compatibility as compat
 
 
 def _portfolio():
@@ -36,6 +37,41 @@ def _portfolio():
     }
 
 
+def _tem_issue():
+    return {
+        "symbol": "TEM",
+        "action": "exit",
+        "reason": "exit_exceeds_reconstructed_position",
+        "requested_qty": migration.TEM_DUPLICATE_QTY,
+        "price": migration.TEM_DUPLICATE_PRICE,
+    }
+
+
+def _production_portfolio():
+    pf = _portfolio()
+    pf["equity"] = 13535.92
+    pf["positions"]["DHR"]["last_price"] = 215.62
+    pf["positions"]["SLS"]["last_price"] = 13.995
+    return pf
+
+
+def _production_accounting_result():
+    return {
+        "status": "partial",
+        "coverage_complete": False,
+        "coverage_issues": [_tem_issue()],
+        "coverage_issue_count": 1,
+        "economic_issues": [],
+        "economic_issue_count": 0,
+        "cash": 13357.874573,
+        "equity": 13535.392322,
+        "open_positions": {
+            "DHR": {"side": "long", "qty": 0.540749, "entry_price": 216.96, "last_price": 215.6199951171875},
+            "SLS": {"side": "long", "qty": 4.353087, "entry_price": 14.335, "last_price": 13.994999885559082},
+        },
+    }
+
+
 def test_successor_state_preserves_current_economics_and_risk_exactly():
     before = _portfolio()
     original = copy.deepcopy(before)
@@ -62,14 +98,8 @@ def test_successor_state_preserves_current_economics_and_risk_exactly():
 
 def test_exact_tem_duplicate_is_the_only_allowed_active_accounting_issue(monkeypatch):
     result = {
-        "coverage_issues": [{
-            "symbol": "TEM", "action": "exit", "reason": "exit_exceeds_reconstructed_position",
-            "requested_qty": migration.TEM_DUPLICATE_QTY, "price": migration.TEM_DUPLICATE_PRICE,
-        }],
-        "economic_issues": [{
-            "symbol": "TEM", "action": "exit", "reason": "exit_exceeds_reconstructed_position",
-            "requested_qty": migration.TEM_DUPLICATE_QTY, "price": migration.TEM_DUPLICATE_PRICE,
-        }],
+        "coverage_issues": [_tem_issue()],
+        "economic_issues": [_tem_issue()],
         "coverage_issue_count": 1,
         "economic_issue_count": 1,
         "reconstructed_cash": 13357.87452,
@@ -88,6 +118,63 @@ def test_exact_tem_duplicate_is_the_only_allowed_active_accounting_issue(monkeyp
     fake.analyze_ledger = lambda pf, core: copy.deepcopy(bad)
     _, ready = migration._active_accounting_evidence(core)
     assert ready is False
+
+
+def test_production_accounting_shape_allows_exact_tem_coverage_issue_only(monkeypatch):
+    result = _production_accounting_result()
+    fake = types.SimpleNamespace(analyze_ledger=lambda pf, core: copy.deepcopy(result))
+    monkeypatch.setitem(sys.modules, "paper_bidirectional_accounting_guard", fake)
+    core = types.SimpleNamespace(portfolio=_production_portfolio())
+
+    observed, ready = compat._production_active_accounting_evidence(migration, core)
+
+    assert ready is True
+    assert observed["coverage_issue_count"] == 1
+    assert observed["economic_issue_count"] == 0
+
+
+def test_production_precondition_fails_closed_on_any_second_issue(monkeypatch):
+    result = _production_accounting_result()
+    result["economic_issues"] = [{
+        "symbol": "TOST", "action": "exit", "reason": "exit_exceeds_reconstructed_position",
+        "requested_qty": 1.0, "price": 36.0,
+    }]
+    result["economic_issue_count"] = 1
+    fake = types.SimpleNamespace(analyze_ledger=lambda pf, core: copy.deepcopy(result))
+    monkeypatch.setitem(sys.modules, "paper_bidirectional_accounting_guard", fake)
+
+    _, ready = compat._production_active_accounting_evidence(
+        migration, types.SimpleNamespace(portfolio=_production_portfolio())
+    )
+    assert ready is False
+
+
+def test_production_precondition_fails_closed_on_state_mismatch(monkeypatch):
+    fake = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "paper_bidirectional_accounting_guard", fake)
+    core = types.SimpleNamespace(portfolio=_production_portfolio())
+
+    cash_bad = _production_accounting_result(); cash_bad["cash"] += 0.02
+    equity_bad = _production_accounting_result(); equity_bad["equity"] -= compat.EQUITY_MARK_DRIFT_TOLERANCE + 1.0
+    qty_bad = _production_accounting_result(); qty_bad["open_positions"]["SLS"]["qty"] += 0.001
+    for result in (cash_bad, equity_bad, qty_bad):
+        fake.analyze_ledger = lambda pf, runtime_core, row=result: copy.deepcopy(row)
+        _, ready = compat._production_active_accounting_evidence(migration, core)
+        assert ready is False
+
+
+def test_production_compatibility_adds_no_state_or_trading_authority():
+    status = compat.status_payload(None)
+    authority = status["authority"]
+    assert authority["writes_state"] is False
+    assert authority["edits_or_deletes_canonical_rows"] is False
+    assert authority["rewrites_current_day_peak"] is False
+    assert authority["clears_hard_halt"] is False
+    assert authority["places_orders"] is False
+    assert authority["changes_strategy"] is False
+    assert authority["changes_thresholds"] is False
+    assert authority["changes_risk_or_sizing"] is False
+    assert authority["changes_live_or_ml_authority"] is False
 
 
 def test_recovery_gate_must_be_exact_and_mechanically_complete(monkeypatch):
