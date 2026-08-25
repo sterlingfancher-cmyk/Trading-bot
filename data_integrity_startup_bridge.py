@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-25-v37-issue82-production-precondition"
+VERSION = "data-integrity-startup-bridge-2026-08-25-v38-issue82-successor-finalizer"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -81,6 +81,11 @@ MODULES = (
     "provider_request_accounting_overlay",
     "daily_audit_response_reconciliation",
     "multi_asset_shadow_ranker",
+    # Final Issue #82 consistency owner. Production proved that later startup
+    # composition could restore verified-v2 after the v3 cutover completed. This
+    # exact-marker finalizer runs last in both apply and route-registration passes
+    # and can retry only that proven interrupted-completion shape.
+    "verified_v2_successor_epoch_migration_finalizer",
 )
 
 
