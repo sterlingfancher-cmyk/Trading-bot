@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-25-v36-issue82-successor-epoch"
+VERSION = "data-integrity-startup-bridge-2026-08-25-v37-issue82-production-precondition"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -58,6 +58,10 @@ MODULES = (
     # Accounting adapter must be active before the Issue #82 successor cutover so
     # the current verified-v2 open-position baseline is reconciled exactly.
     "verified_snapshot_accounting_baseline",
+    # The authoritative analyzer reports the TEM duplicate once as a coverage
+    # issue and exposes cash/equity/open_positions directly. Patch only the
+    # successor migration's evidence reader to that production payload shape.
+    "verified_v2_successor_epoch_precondition_compatibility",
     # One-shot Issue #82 historical disposition. It archives verified-v2 evidence,
     # preserves current economics/risk exactly, keeps the canonical ledger intact,
     # and starts the v3 active accounting window under validation hold.
