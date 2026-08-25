@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-21-v9-runtime-research-recovery-gate"
+VERSION = "change-safety-audit-2026-08-25-v10-retired-external-paper-runner"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -43,6 +43,7 @@ PRICE_INTEGRITY_TESTS = (
 SLS_RECOVERY_PROOF_TESTS = ("test_sls_bad_execution_recovery_proof.py",)
 SUCCESSOR_REPLAY_TESTS = ("test_verified_v2_successor_replay_status.py",)
 RUNTIME_RESEARCH_SNAPSHOT_TESTS = ("test_runtime_research_snapshot.py",)
+LEGACY_EXTERNAL_PAPER_RUNNER_TESTS = ("test_legacy_external_paper_runner_retired.py",)
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,10 @@ def _is_successor_replay_path(path: str) -> bool:
 
 def _is_runtime_research_snapshot_path(path: str) -> bool:
     return "runtime_research_snapshot" in path.lower()
+
+
+def _is_legacy_external_paper_runner_path(path: str) -> bool:
+    return path.lower() == ".github/workflows/paper-run.yml"
 
 
 def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -177,6 +182,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(SUCCESSOR_REPLAY_TESTS)
     if any(_is_runtime_research_snapshot_path(path) for path in path_tuple):
         tests.extend(RUNTIME_RESEARCH_SNAPSHOT_TESTS)
+    if any(_is_legacy_external_paper_runner_path(path) for path in path_tuple):
+        tests.extend(LEGACY_EXTERNAL_PAPER_RUNNER_TESTS)
     existing: list[str] = []
     seen: set[str] = set()
     for test in tests:
