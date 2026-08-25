@@ -2,20 +2,21 @@
 
 Production evidence on 2026-08-25 proved that the bounded successor migration can
 complete successfully and then be followed by a stale v2 state restore during
-later startup registration.  The immutable ledger remained unchanged and the
+later startup registration. The immutable ledger remained unchanged and the
 completed migration marker remained durable, but the active in-memory/on-disk
 accounting epoch no longer matched that marker.
 
-This finalizer runs last in the data-integrity startup bridge.  It does nothing
-when v3 is already active.  It may retry the already-authorized cutover only for
+This finalizer runs last in the data-integrity startup bridge. It does nothing
+when v3 is already active. It may retry the already-authorized cutover only for
 one exact interrupted-completion shape: the durable completed v3 marker exists,
 the active epoch has reverted specifically to verified v2, the consolidated
 11-signature recovery gate is still fully ready, and the active accounting window
-still contains only the exact proven TEM duplicate issue.  The existing cutover
+still contains only the exact proven TEM duplicate issue. The existing cutover
 then re-archives the current verified state and re-verifies that canonical ledger
 bytes are unchanged.
 
-No historical ledger row is edited/deleted/relabelled.  No halt or day peak is
+Status reads are strictly observational. Only startup composition calls apply().
+No historical ledger row is edited/deleted/relabelled. No halt or day peak is
 cleared or rewritten, and no strategy, sizing, threshold, live, ML, or order
 authority is changed.
 """
@@ -23,7 +24,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "verified-v2-successor-epoch-finalizer-2026-08-25-v1"
+VERSION = "verified-v2-successor-epoch-finalizer-2026-08-25-v2-readonly-status"
 _REGISTERED_APP_IDS: set[int] = set()
 _LAST: Dict[str, Any] = {}
 
@@ -51,6 +52,48 @@ def _active_result(migration: Any, core: Any, *, retried: bool) -> Dict[str, Any
         "state_trade_rows": len(migration._l(pf.get("trades"))),
         "canonical_ledger_unchanged": bool(marker.get("canonical_ledger_unchanged", False)),
         "interrupted_completion_retry_performed": retried,
+    }
+
+
+def _observed_status(migration: Any, core: Any = None) -> Dict[str, Any]:
+    if core is None:
+        return dict(_LAST) if _LAST else {
+            "status": "pending",
+            "overall": "warn",
+            "version": VERSION,
+            "reason": "runtime_missing",
+        }
+
+    active_epoch = _epoch_id(migration, core)
+    marker = migration._marker()
+    pf = migration._portfolio(core)
+    epoch = migration._d(pf.get("paper_accounting_epoch"))
+    if active_epoch == migration.TARGET_EPOCH_ID:
+        return {
+            "status": "validation_hold",
+            "overall": "pass",
+            "version": VERSION,
+            "active_epoch_id": active_epoch,
+            "prior_epoch_id": migration.OLD_EPOCH_ID,
+            "completed_marker_present": marker.get("status") == "completed",
+            "historical_evidence_archived": bool(epoch.get("historical_evidence_archived", False)),
+            "forensic_archive_dir": epoch.get("forensic_archive_dir") or marker.get("archive_dir"),
+            "validation_hold": bool(epoch.get("validation_hold", False)),
+            "state_trade_rows": len(migration._l(pf.get("trades"))),
+            "canonical_ledger_unchanged": bool(marker.get("canonical_ledger_unchanged", False)),
+            "interrupted_completion_retry_performed": bool(_LAST.get("interrupted_completion_retry_performed", False)),
+        }
+
+    return {
+        "status": _LAST.get("status", "blocked"),
+        "overall": _LAST.get("overall", "warn"),
+        "version": VERSION,
+        "reason": _LAST.get("reason", "successor_finalizer_not_active"),
+        "active_epoch_id": active_epoch,
+        "marker_status": marker.get("status"),
+        "marker_target_epoch_id": marker.get("target_epoch_id"),
+        "completed_marker_present": marker.get("status") == "completed",
+        "interrupted_completion_retry_performed": bool(_LAST.get("interrupted_completion_retry_performed", False)),
     }
 
 
@@ -153,15 +196,21 @@ def apply(core: Any = None) -> Dict[str, Any]:
 
 
 def status_payload(core: Any = None) -> Dict[str, Any]:
-    result = apply(core) if core is not None else dict(_LAST)
+    try:
+        import verified_v2_successor_epoch_migration as migration
+        result = _observed_status(migration, core)
+    except Exception as exc:
+        result = {"status": "error", "overall": "fail", "version": VERSION, "error": f"{type(exc).__name__}: {exc}"}
     return {
         **result,
         "type": "verified_v2_successor_epoch_migration_finalizer_status",
+        "status_reads_are_observational": True,
         "authority": {
             "paper_only": True,
             "retries_only_exact_completed_v3_marker_with_verified_v2_reversion": True,
             "preserves_current_cash_equity_positions_and_risk": True,
             "archives_evidence_before_retry": True,
+            "status_reads_write_state": False,
             "edits_or_deletes_canonical_rows": False,
             "rotates_or_truncates_canonical_ledger": False,
             "rewrites_current_day_peak": False,
@@ -176,6 +225,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
 
 
 def register_routes(flask_app: Any, core: Any = None) -> Dict[str, Any]:
+    # Startup composition is allowed to call apply(). The HTTP view below is not.
     result = apply(core)
     if flask_app is None:
         return result
