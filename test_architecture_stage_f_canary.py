@@ -8,6 +8,8 @@ import unittest
 from test_issue126_successor_accounting_reconcile_boundary import (
     Issue126SuccessorAccountingBoundaryTests,
 )
+from test_issue126_successor_compatibility import Issue126SuccessorCompatibilityTests
+from test_verified_v3_successor_epoch_migration import Issue126V3V4SuccessorMigrationTests
 from trading.canary import (
     CanaryEvidence,
     CanaryInvariantError,
