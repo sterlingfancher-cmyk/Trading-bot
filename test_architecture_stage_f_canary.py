@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 import unittest
 
+from test_issue126_successor_accounting_reconcile_boundary import (
+    Issue126SuccessorAccountingBoundaryTests,
+)
 from trading.canary import (
     CanaryEvidence,
     CanaryInvariantError,
