@@ -112,7 +112,9 @@ def _f(value: Any) -> float | None:
 
 def _close(value: Any, expected: float, tolerance: float) -> bool:
     number = _f(value)
-    return number is not None and abs(number - expected) <= tolerance
+    if number is None:
+        return False
+    return abs(number - expected) <= tolerance
 
 
 def _now(core: Any = None) -> str:
