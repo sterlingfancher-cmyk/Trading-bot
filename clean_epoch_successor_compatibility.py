@@ -2,9 +2,8 @@
 
 The 2026-08-10 clean epoch migration leaves a durable completion marker. Later,
 explicit verified-snapshot roll-forwards are allowed to supersede that epoch.
-This shim teaches the old migration to treat only the exact v1->v2 and
-v1->v2->v3 successor relationships as healthy instead of reporting a missing
-active epoch.
+This shim teaches the old migration to treat only the exact v1->v2->v3->v4
+successor relationships as healthy instead of reporting a missing active epoch.
 
 It does not mutate account state, risk limits, strategy, sizing, live authority,
 or ML authority. Any unrelated epoch mismatch continues to fail closed.
@@ -13,11 +12,13 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "clean-epoch-successor-compatibility-2026-08-25-v2-v3-chain"
+VERSION = "clean-epoch-successor-compatibility-2026-08-26-v3-v4-chain"
 OLD_EPOCH_ID = "stable-paper-v1-20260810-clean01"
 VERIFIED_V2_EPOCH_ID = "stable-paper-v2-20260812-verified01"
 NEW_EPOCH_ID = VERIFIED_V2_EPOCH_ID
 ISSUE82_V3_EPOCH_ID = "stable-paper-v3-20260825-successor01"
+ISSUE126_V4_EPOCH_ID = "stable-paper-v4-20260826-successor01"
+ISSUE126_V4_DECISION = "issue126_sls_reentrant_accounting_successor_rollforward"
 _APPLIED = False
 
 
@@ -45,6 +46,14 @@ def _successor_epoch(core: Any) -> str | None:
         and bool(epoch.get("validation_hold", False))
     ):
         return ISSUE82_V3_EPOCH_ID
+    if bool(
+        epoch_id == ISSUE126_V4_EPOCH_ID
+        and str(epoch.get("prior_epoch_id") or "") == ISSUE82_V3_EPOCH_ID
+        and str(epoch.get("historical_recovery_decision") or "") == ISSUE126_V4_DECISION
+        and bool(epoch.get("historical_evidence_archived", False))
+        and bool(epoch.get("validation_hold", False))
+    ):
+        return ISSUE126_V4_EPOCH_ID
     return None
 
 
