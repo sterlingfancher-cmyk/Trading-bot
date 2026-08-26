@@ -12,7 +12,7 @@ import verified_v2_successor_epoch_migration_precondition_compatibility as v2_co
 
 class Issue126SuccessorCompatibilityTests(unittest.TestCase):
     @staticmethod
-    def _v4_core():
+    def _v4_core(*, canonical_history_retained_immutably=True):
         return types.SimpleNamespace(portfolio={
             "accounting_epoch_id": clean_compat.ISSUE126_V4_EPOCH_ID,
             "paper_accounting_epoch": {
@@ -21,7 +21,7 @@ class Issue126SuccessorCompatibilityTests(unittest.TestCase):
                 "historical_recovery_decision": clean_compat.ISSUE126_V4_DECISION,
                 "historical_evidence_archived": True,
                 "validation_hold": True,
-                "canonical_history_retained_immutably": True,
+                "canonical_history_retained_immutably": canonical_history_retained_immutably,
             },
         })
 
@@ -61,8 +61,7 @@ class Issue126SuccessorCompatibilityTests(unittest.TestCase):
         self.assertFalse(result["writes_state"])
 
     def test_v2_migration_compatibility_fails_closed_on_v4_lineage_mismatch(self):
-        core = self._v4_core()
-        core.portfolio["paper_accounting_epoch"]["canonical_history_retained_immutably"] = False
+        core = self._v4_core(canonical_history_retained_immutably=False)
         self.assertFalse(v2_compat._exact_issue126_v4_successor(v2_migration, core))
 
     def test_compatibility_adds_no_trading_or_state_authority(self):
