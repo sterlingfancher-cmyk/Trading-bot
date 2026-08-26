@@ -62,7 +62,7 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
         equity = cash + dhr_qty * 215.79
         return cash, dhr_qty, equity
 
-    def _portfolio(self):
+    def _portfolio(self, *, halt_reason="canonical execution lifecycle integrity halt"):
         projected_cash, dhr_qty, _ = self._projection_numbers()
         invalid_notional = float(migration.EXPECTED_V3_ROWS[2]["shares"]) * 16.04
         rows = self._rows()[-3:]
@@ -101,7 +101,7 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
                 "day_start_equity": 13535.962581344369,
                 "day_peak_equity": 13618.111792229607,
                 "halted": True,
-                "halt_reason": "canonical execution lifecycle integrity halt",
+                "halt_reason": halt_reason,
                 "intraday_drawdown_pct": 0.121,
             },
             "accounting_epoch_id": migration.OLD_EPOCH_ID,
@@ -230,8 +230,7 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
     def test_preconditions_do_not_accept_a_different_halt(self):
         import canonical_execution_ledger as ledger
         import paper_bidirectional_accounting_guard as accounting
-        core = types.SimpleNamespace(portfolio=self._portfolio())
-        core.portfolio["risk_controls"]["halt_reason"] = "different halt"
+        core = types.SimpleNamespace(portfolio=self._portfolio(halt_reason="different halt"))
         expected_cash, expected_qty, expected_equity = self._projection_numbers()
         accounting_result = {
             "coverage_issues": [{"action": "partial_exit", "symbol": "SLS", "side": "long", "reason": "exit_exceeds_reconstructed_position", "requested_qty": 1.436519, "price": 16.04}],
