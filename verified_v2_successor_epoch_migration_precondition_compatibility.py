@@ -12,8 +12,13 @@ state can be restored by later registration before the final startup consistency
 owner runs. The migration correctly reports that mismatch as an error, but doing
 so inside the bridge prevents the finalizer from getting the chance to repair the
 already-proven interrupted completion. This compatibility layer therefore defers
-only that exact error shape to the dedicated finalizer. It never performs the
-cutover itself and leaves every other migration error unchanged.
+only that exact error shape to the dedicated finalizer.
+
+Issue #126 introduces one later exact successor relationship: v3 may be archived
+into the verified v4 accounting epoch. Once that exact v4 epoch is active, the
+older v2->v3 migration is legitimately superseded and must not report its durable
+v3 completion marker as an active-epoch error. This compatibility is reporting
+only; the v4 migration remains the sole v3->v4 write owner.
 
 No state, ledger, risk, order, strategy, sizing, threshold, live, or ML authority
 is added here.
@@ -22,10 +27,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
-VERSION = "verified-v2-successor-precondition-production-shape-2026-08-25-v2-finalizer-deferral"
+VERSION = "verified-v2-successor-precondition-production-shape-2026-08-26-v3-v4-supersession"
 EQUITY_MARK_DRIFT_TOLERANCE = 2.0
 QTY_SERIALIZATION_TOLERANCE = 5e-6
 ENTRY_PRICE_TOLERANCE = 1e-4
+ISSUE126_V4_EPOCH_ID = "stable-paper-v4-20260826-successor01"
+ISSUE126_V4_DECISION = "issue126_sls_reentrant_accounting_successor_rollforward"
 _APPLIED = False
 
 
@@ -101,9 +108,23 @@ def _exact_interrupted_completion(migration: Any, core: Any) -> bool:
     )
 
 
-def _defer_exact_interrupted_completion_error(
-    migration: Any, core: Any, result: Any
-) -> Any:
+def _exact_issue126_v4_successor(migration: Any, core: Any) -> bool:
+    if core is None:
+        return False
+    pf = migration._portfolio(core)
+    epoch = migration._d(pf.get("paper_accounting_epoch"))
+    active_epoch = str(epoch.get("id") or pf.get("accounting_epoch_id") or "")
+    return bool(
+        active_epoch == ISSUE126_V4_EPOCH_ID
+        and str(epoch.get("prior_epoch_id") or "") == migration.TARGET_EPOCH_ID
+        and str(epoch.get("historical_recovery_decision") or "") == ISSUE126_V4_DECISION
+        and bool(epoch.get("historical_evidence_archived", False))
+        and bool(epoch.get("validation_hold", False))
+        and bool(epoch.get("canonical_history_retained_immutably", False))
+    )
+
+
+def _defer_exact_interrupted_completion_error(migration: Any, core: Any, result: Any) -> Any:
     if not isinstance(result, dict):
         return result
     if not (
@@ -135,6 +156,16 @@ def _install_migration_apply_compatibility(migration: Any) -> None:
     original = current
 
     def interrupted_completion_compatible_apply(runtime_core: Any = None) -> Any:
+        if _exact_issue126_v4_successor(migration, runtime_core):
+            return {
+                "status": "superseded",
+                "overall": "pass",
+                "version": VERSION,
+                "active_epoch_id": ISSUE126_V4_EPOCH_ID,
+                "superseded_epoch_id": migration.TARGET_EPOCH_ID,
+                "reason": "exact_issue126_v4_successor_active",
+                "writes_state": False,
+            }
         result = original(runtime_core)
         return _defer_exact_interrupted_completion_error(migration, runtime_core, result)
 
@@ -170,12 +201,14 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "version": VERSION,
         "production_accounting_payload_shape_supported": bool(_APPLIED),
         "exact_interrupted_completion_error_deferred_to_finalizer": bool(_APPLIED),
+        "exact_issue126_v4_successor_supersession_supported": bool(_APPLIED),
         "equity_mark_drift_tolerance_dollars": EQUITY_MARK_DRIFT_TOLERANCE,
         "authority": {
             "precondition_only": True,
             "writes_state": False,
             "defers_only_exact_completed_v3_marker_with_verified_v2_reversion": True,
-            "finalizer_remains_only_retry_owner": True,
+            "accepts_only_exact_issue126_v4_successor_as_v3_supersession": True,
+            "finalizer_remains_only_v2_to_v3_retry_owner": True,
             "edits_or_deletes_canonical_rows": False,
             "rewrites_current_day_peak": False,
             "clears_hard_halt": False,
