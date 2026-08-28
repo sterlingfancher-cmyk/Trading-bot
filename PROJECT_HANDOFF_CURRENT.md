@@ -1,11 +1,13 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-08-28 12:05 CDT  
+Last updated: 2026-08-28 14:38 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Current runtime code baseline: `54df8c9edf43af645b5abac4f6d93c262aeeff37` (squash merge of PR #134)  
-Current `main` before this handoff refresh: `1600dd0e5cdc4e162a587c0e6478dd1f9f95eb72`  
+Current deployed runtime code baseline: `54df8c9edf43af645b5abac4f6d93c262aeeff37` (squash merge of PR #134)  
+Current `main`: `90e7e8da74022fcd6994cd9474044ef5c30ddcc4`  
+Active repair branch: `fix/issue126-row46-canonical-only-20260828`  
+Active repair branch head before this handoff update: `dcf97474192244560b3dc7ac77e4f4381bcc818d`  
 Active stability/accounting issue: Issue #126
 
 ## Communication and Continuity
@@ -79,21 +81,49 @@ The current persisted state proves the row-46 economic effect was never mirrored
 
 `canonical_execution_ledger.py` deliberately appends the immutable canonical row before invoking the prior `record_trade()` state mirror. The evidence therefore classifies row 46 as a **valid canonical-only DHR full exit whose state/cash mirror did not complete**, rather than as a second invalid execution artifact.
 
-Successor-recovery rule is now exact:
+Successor-recovery rule is exact:
 - retain all 46 canonical rows immutably;
 - replay the valid SLS full exit, valid DHR partial, and valid DHR full exit;
 - exclude only invalid SLS partial execution `90b22aad76074031906e0c6459dfa0bc` from successor economics;
 - require the pre-cutover state to prove row 46 is absent from `state.trades`, DHR remains exactly at the reconstructable remainder, and row-46 cash proceeds are absent;
-- the deterministic v4 successor projection should therefore have **no open positions**;
+- deterministic v4 successor projection is flat with **no open positions**;
 - preserve validation hold and the lifecycle halt through cutover until clean active-v4 evidence independently proves any release is safe.
 
-A new guarded repo-agent repair was triggered from Issue #126 at midday with those exact requirements. Repo-agent workflow run `33192730802` is the active bounded repair. It must abort if it produces a truncated/replaced migration file or unrelated changes. Any resulting PR must be exact-diff reviewed and pass the complete mandatory exact-head gate suite before automatic merge.
+## 2026-08-28 Pre-Close Direct Repair
 
-## Current Authoritative Splendid Runtime — 2026-08-28 Midday Evidence
+The guarded repo-agent has now failed twice before any repository write while attempting this bounded row-46 repair:
+- midday run `33192730802` failed because the generated response was malformed JSON;
+- retry run `33204222733` / job `98961037342` failed with `JSONDecodeError: Unterminated string` after the generated full-file JSON response was truncated inside `verified_v3_successor_epoch_migration.py`.
 
-Latest automated read-only runtime snapshot:
+Both failures were contained before branch/PR/runtime mutation. They are repo-agent transport/generation failures, not trading-runtime mutations.
+
+To avoid repeatedly delegating a proven bounded repair through the failing large-JSON path, the repair is now being performed directly on `fix/issue126-row46-canonical-only-20260828` from exact main `90e7e8da74022fcd6994cd9474044ef5c30ddcc4`.
+
+Direct production commit `a71c599c1502de66f08e17a3a86035a0f25297fc` updates only the exact-evidence successor migration logic so it:
+- requires 46 total canonical rows and four exact ordered v3 signatures;
+- keeps the original three mirrored state trades as the only permitted pre-cutover `state.trades` rows;
+- requires canonical row 46 to be absent from the state-trade mirror;
+- requires DHR to remain in state at the exact reconstructed post-partial remainder within existing quantity tolerance;
+- requires current cash to prove the invalid SLS partial effect is still present while row-46 DHR proceeds are still absent;
+- replays the valid SLS full exit, valid DHR partial, and valid canonical-only DHR full exit;
+- excludes only the exact invalid SLS partial from successor economics;
+- projects a flat v4 successor with no open positions;
+- preserves immutable canonical history, current lifecycle halt, current risk state/history, validation hold, paper-only authority, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
+
+Focused regression commit `dcf97474192244560b3dc7ac77e4f4381bcc818d` adds `tests/test_verified_v3_terminal_dhr_recovery.py` covering:
+- exact fourth-row DHR signature and event-hash fail-closed behavior;
+- requirement that row 46 remain canonical-only pre-cutover;
+- deterministic replay to a flat successor while excluding only the invalid SLS row;
+- successor state preserving halt/history/validation hold;
+- fail-closed preconditions for wrong cash or wrong DHR remainder.
+
+This branch is **not merged** yet. The next boundary is exact diff review plus the complete exact-head validation suite. If any unexpected deletion, unrelated mutation, compilation/test failure, architecture/ownership regression, or startup failure appears, do not merge.
+
+## Current Authoritative Splendid Runtime — 2026-08-28 Pre-Close Baseline
+
+Until the direct repair is safely merged and deployed, the latest authoritative read-only Splendid evidence remains the midday proof boundary:
 - application bootstrap: ready/delegating; no bootstrap error;
-- runner: PASS, no active error; latest successful run `2026-08-28 09:34:57 CDT`;
+- runner: PASS, no active error; latest recorded successful run in the evidence `2026-08-28 09:34:57 CDT`;
 - canonical ledger: PASS, append-only/hash-valid, 46 rows, 4 current-v3 rows;
 - account cash: `13483.47647864577`;
 - account equity: approximately `13602.08`;
@@ -108,13 +138,15 @@ Latest automated read-only runtime snapshot:
 - validation hold remains active;
 - no strategy/sizing/risk-threshold/live/ML authority was changed.
 
-The overall audit remains FAIL because the successor accounting repair has not yet been applied, not because runner, market data, canonical hash chain, bootstrap, or fresh-day initialization are unhealthy.
+The overall audit remains FAIL until successor accounting recovery is proven and applied. This is a fail-closed accounting/lifecycle condition, not a runner, market-data, bootstrap, canonical-chain, or genuine daily-loss failure.
 
 ## Immediate Next Action
 
-Inspect the repo-agent output for run `33192730802`. Accept only a bounded migration/test repair that encodes the exact 46-row/four-v3-row evidence, requires row 46 to be canonical-only and economically unapplied in pre-cutover state, replays DHR row 46 into the successor, excludes only the exact invalid SLS partial, and projects no open positions. Reject any destructive or overbroad diff.
+Create and exact-diff review the direct repair PR. Accept only the migration file, focused terminal-DHR regression file, and this handoff update. Require the mandatory exact-head Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit including exact Gunicorn smoke, plus affected focused Stable Paper/invariant regressions.
 
-If a safe PR is produced, require the full exact-head safety suite before automatic squash merge, then validate authoritative Splendid deployment/bootstrap/daily-audit evidence. No user action is currently required.
+If and only if every required exact-head gate is green and the diff remains inside the declared paper-only accounting-recovery boundary, squash-merge automatically. Then wait for deployment and use fresh automated Splendid evidence to prove the v4 cutover completed with canonical ledger unchanged/hash-valid, zero unexplained active-v4 accounting issues, deterministic cash/equity, no open positions, zero successor state-trade rows, validation hold retained, lifecycle halt retained unless independently and prospectively proven safe to release, and healthy bootstrap/runner/market-data/state persistence.
+
+No user action is currently required.
 
 ## Completion Criteria for Issue #126
 

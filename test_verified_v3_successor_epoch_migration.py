@@ -19,7 +19,7 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
             "realized_today": 0.0,
             "realized_total": 42.0,
             "positions": {
-                "DHR": {"side": "long", "qty": 0.540748758, "entry_price": 216.960007, "mark": 215.79},
+                "DHR": {"side": "long", "qty": migration.EXPECTED_BASELINE_DHR_QTY, "entry_price": 216.960007, "mark": 215.79},
                 "SLS": {"side": "long", "qty": migration.EXPECTED_BASELINE_SLS_QTY, "entry_price": 14.335, "mark": 14.45},
             },
         }
@@ -38,36 +38,27 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
             }
             for index in range(migration.EXPECTED_V3_START_INDEX)
         ]
-        rows.extend([
-            {
-                **migration.EXPECTED_V3_ROWS[0],
-                "shares": migration.EXPECTED_BASELINE_SLS_QTY,
-            },
-            {
-                **migration.EXPECTED_V3_ROWS[1],
-                "shares": 0.178447,
-            },
-            dict(migration.EXPECTED_V3_ROWS[2]),
-        ])
+        rows.extend(dict(expected) for expected in migration.EXPECTED_V3_ROWS)
         for row in rows:
             row.pop("ledger_index", None)
             row.pop("economic_disposition", None)
         return rows
 
     def _projection_numbers(self):
-        cash = migration.EXPECTED_BASELINE_CASH
-        cash += migration.EXPECTED_BASELINE_SLS_QTY * 13.62
-        cash += 0.178447 * 242.4872
-        dhr_qty = 0.540748758 - 0.178447
-        equity = cash + dhr_qty * 215.79
-        return cash, dhr_qty, equity
+        cash_after_mirrored_valid = migration.EXPECTED_BASELINE_CASH
+        cash_after_mirrored_valid += migration.EXPECTED_BASELINE_SLS_QTY * float(migration.EXPECTED_V3_ROWS[0]["price"])
+        cash_after_mirrored_valid += float(migration.EXPECTED_V3_ROWS[1]["shares"]) * float(migration.EXPECTED_V3_ROWS[1]["price"])
+        dhr_remainder = migration.EXPECTED_DHR_REMAINDER
+        final_clean_cash = cash_after_mirrored_valid + dhr_remainder * float(migration.EXPECTED_V3_ROWS[3]["price"])
+        pre_terminal_equity = cash_after_mirrored_valid + dhr_remainder * 215.79
+        return final_clean_cash, dhr_remainder, cash_after_mirrored_valid, pre_terminal_equity
 
     def _portfolio(self, *, halt_reason="canonical execution lifecycle integrity halt"):
-        projected_cash, dhr_qty, _ = self._projection_numbers()
-        invalid_notional = float(migration.EXPECTED_V3_ROWS[2]["shares"]) * 16.04
-        rows = self._rows()[-3:]
+        _, dhr_qty, pre_terminal_cash, _ = self._projection_numbers()
+        invalid_notional = float(migration.EXPECTED_V3_ROWS[2]["shares"]) * float(migration.EXPECTED_V3_ROWS[2]["price"])
+        mirrored_rows = self._rows()[migration.EXPECTED_V3_START_INDEX:migration.EXPECTED_V3_START_INDEX + 3]
         trades = []
-        for row in rows:
+        for row in mirrored_rows:
             trades.append({
                 "execution_id": row["execution_id"],
                 "accounting_epoch_id": migration.OLD_EPOCH_ID,
@@ -79,7 +70,7 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
                 "canonical_ledger_event_hash": row["event_hash"],
             })
         return {
-            "cash": projected_cash + invalid_notional,
+            "cash": pre_terminal_cash + invalid_notional,
             "equity": 13601.69,
             "positions": {
                 "DHR": {"side": "long", "shares": dhr_qty, "qty": dhr_qty, "entry": 216.960007, "last_price": 215.79},
@@ -129,22 +120,24 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
             "raw_rows": rows,
         }
 
-    def test_exact_production_rows_project_only_dhr_and_exclude_invalid_sls_partial(self):
+    def test_exact_production_rows_project_flat_and_exclude_only_invalid_sls_partial(self):
         core = types.SimpleNamespace(portfolio=self._portfolio())
         projection = migration._project(core, self._baseline_snapshot(), self._canonical())
-        expected_cash, expected_qty, expected_equity = self._projection_numbers()
+        expected_cash, _, _, _ = self._projection_numbers()
 
         self.assertEqual(projection["status"], "ok")
-        self.assertEqual(projection["open_symbols"], ["DHR"])
+        self.assertEqual(projection["open_symbols"], [])
+        self.assertEqual(projection["positions"], {})
         self.assertEqual(projection["excluded_execution_ids"], [migration.INVALID_EXECUTION_ID])
         self.assertEqual(projection["valid_execution_ids"], [
             migration.EXPECTED_V3_ROWS[0]["execution_id"],
             migration.EXPECTED_V3_ROWS[1]["execution_id"],
+            migration.EXPECTED_V3_ROWS[3]["execution_id"],
         ])
         self.assertAlmostEqual(projection["cash"], expected_cash, places=6)
-        self.assertAlmostEqual(projection["positions"]["DHR"]["shares"], expected_qty, places=9)
-        self.assertAlmostEqual(projection["equity"], expected_equity, places=6)
+        self.assertAlmostEqual(projection["equity"], expected_cash, places=6)
         self.assertNotIn("SLS", projection["positions"])
+        self.assertNotIn("DHR", projection["positions"])
 
     def test_exact_canonical_signature_fails_closed_on_hash_mismatch_or_extra_v3_row(self):
         import canonical_execution_ledger as ledger
@@ -153,6 +146,8 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
             observed, ready = migration._canonical_evidence(types.SimpleNamespace())
         self.assertTrue(ready)
         self.assertTrue(observed["v3_rows_exact"])
+        self.assertEqual(observed["row_count"], 46)
+        self.assertEqual(observed["v3_row_count"], 4)
 
         bad = copy.deepcopy(rows)
         bad[-1]["event_hash"] = "wrong"
@@ -185,20 +180,22 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
         self.assertEqual(before["accounting_epoch_id"], migration.OLD_EPOCH_ID)
         self.assertEqual(after["accounting_epoch_id"], migration.TARGET_EPOCH_ID)
         self.assertEqual(after["trades"], [])
-        self.assertEqual(sorted(after["positions"]), ["DHR"])
+        self.assertEqual(after["positions"], {})
+        self.assertAlmostEqual(after["cash"], after["equity"], places=6)
         self.assertEqual(after["risk_controls"], original_risk)
         self.assertEqual(after["history"], original_history)
         epoch = after["paper_accounting_epoch"]
         self.assertTrue(epoch["validation_hold"])
         self.assertFalse(epoch["validation_released"])
         self.assertEqual(epoch["invalid_execution_id"], migration.INVALID_EXECUTION_ID)
+        self.assertEqual(epoch["terminal_valid_dhr_execution_id"], migration.TERMINAL_DHR_EXECUTION_ID)
         self.assertTrue(epoch["canonical_history_retained_immutably"])
 
     def test_exact_authoritative_contamination_shape_satisfies_preconditions(self):
         import canonical_execution_ledger as ledger
         import paper_bidirectional_accounting_guard as accounting
         core = types.SimpleNamespace(portfolio=self._portfolio())
-        expected_cash, expected_qty, expected_equity = self._projection_numbers()
+        _, expected_qty, pre_terminal_cash, pre_terminal_equity = self._projection_numbers()
         accounting_result = {
             "status": "partial",
             "coverage_complete": False,
@@ -215,8 +212,8 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
             "coverage_issue_count": 1,
             "economic_issues": [],
             "economic_issue_count": 0,
-            "cash": expected_cash,
-            "equity": expected_equity,
+            "cash": pre_terminal_cash,
+            "equity": pre_terminal_equity,
             "open_positions": {
                 "DHR": {"side": "long", "qty": expected_qty, "entry_price": 216.960007, "last_price": 215.79}
             },
@@ -226,17 +223,18 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
             pre = migration._preconditions(core)
         self.assertEqual(pre["failed"], [])
         self.assertTrue(all(pre["checks"].values()))
+        self.assertEqual(pre["projection"]["open_symbols"], [])
 
     def test_preconditions_do_not_accept_a_different_halt(self):
         import canonical_execution_ledger as ledger
         import paper_bidirectional_accounting_guard as accounting
         core = types.SimpleNamespace(portfolio=self._portfolio(halt_reason="different halt"))
-        expected_cash, expected_qty, expected_equity = self._projection_numbers()
+        _, expected_qty, pre_terminal_cash, pre_terminal_equity = self._projection_numbers()
         accounting_result = {
             "coverage_issues": [{"action": "partial_exit", "symbol": "SLS", "side": "long", "reason": "exit_exceeds_reconstructed_position", "requested_qty": 1.436519, "price": 16.04}],
             "economic_issues": [],
-            "cash": expected_cash,
-            "equity": expected_equity,
+            "cash": pre_terminal_cash,
+            "equity": pre_terminal_equity,
             "open_positions": {"DHR": {"qty": expected_qty}},
         }
         rows = self._rows()
@@ -257,7 +255,7 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
             marker = Path(folder) / "marker.json"
             core = types.SimpleNamespace(portfolio=self._portfolio(), local_ts_text=lambda: "2026-08-26 14:00:00 CDT")
             projection = migration._project(core, self._baseline_snapshot(), self._canonical())
-            pre = {"projection": projection, "canonical": {"row_count": 45, "chain_valid": True}}
+            pre = {"projection": projection, "canonical": {"row_count": 46, "chain_valid": True}}
             risk_before = copy.deepcopy(core.portfolio["risk_controls"])
             history_before = copy.deepcopy(core.portfolio["history"])
             saved = {}
@@ -280,7 +278,9 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
             self.assertEqual(core.portfolio["risk_controls"], risk_before)
             self.assertEqual(core.portfolio["history"], history_before)
             self.assertEqual(core.portfolio["accounting_epoch_id"], migration.TARGET_EPOCH_ID)
+            self.assertEqual(core.portfolio["positions"], {})
             self.assertEqual(saved["state"]["trades"], [])
+            self.assertEqual(saved["state"]["positions"], {})
 
     def test_authority_never_clears_halt_or_edits_ledger(self):
         authority = migration.status_payload(None)["authority"]
