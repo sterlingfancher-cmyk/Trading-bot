@@ -7,9 +7,9 @@ SLS position, allowing one later SLS partial exit that cannot be matched to any
 remaining canonical quantity.
 
 This module never changes the append-only canonical ledger. It requires the
-exact three-row v3 canonical shape proven by the post-PR-127 Splendid snapshot,
+exact four-row v3 canonical shape proven by the post-PR-127 Splendid snapshots,
 excludes only the exact invalid SLS partial row from successor economics, replays
-the two valid rows from the verified v3 snapshot baseline, archives the complete
+the three valid rows from the verified v3 snapshot baseline, archives the complete
 v3 persistence, and starts a v4 verified-snapshot accounting epoch.
 
 The existing canonical lifecycle halt and current-day risk peak are preserved.
@@ -28,17 +28,18 @@ import shutil
 import threading
 from typing import Any, Dict, List, Tuple
 
-VERSION = "verified-v3-successor-epoch-migration-2026-08-26-v1-issue126-sls-disposition"
+VERSION = "verified-v3-successor-epoch-migration-2026-08-28-v2-issue126-terminal-dhr"
 OLD_EPOCH_ID = "stable-paper-v3-20260825-successor01"
 TARGET_EPOCH_ID = "stable-paper-v4-20260826-successor01"
 PRIOR_EPOCH_ID = "stable-paper-v2-20260812-verified01"
 DECISION_ID = "issue-126-sls-reentrant-accounting-disposition-2026-08-26"
 HISTORICAL_DECISION = "issue126_sls_reentrant_accounting_successor_rollforward"
-EXPECTED_LEDGER_ROW_COUNT = 45
+EXPECTED_LEDGER_ROW_COUNT = 46
 EXPECTED_V3_START_INDEX = 42
 EXPECTED_BASELINE_CASH = 13357.874520862653
 EXPECTED_BASELINE_EQUITY = 13535.962581344369
 EXPECTED_BASELINE_SLS_QTY = 4.353086829
+EXPECTED_BASELINE_DHR_QTY = 0.540748758
 QTY_TOLERANCE = 5e-6
 PRICE_TOLERANCE = 5e-6
 MONEY_TOLERANCE = 0.01
@@ -87,9 +88,25 @@ EXPECTED_V3_ROWS: tuple[dict[str, Any], ...] = (
         "event_hash": "d39e877f34bcf9d5a720a8bfd94a66ebace9d8cfa30987bedce29a1112db8774",
         "economic_disposition": "exclude_exact_invalid_reentrant_artifact",
     },
+    {
+        "ledger_index": 45,
+        "execution_id": "ae9d82d3d25748459f37842679d501cd",
+        "accounting_epoch_id": OLD_EPOCH_ID,
+        "action": "exit",
+        "symbol": "DHR",
+        "side": "long",
+        "price": 203.039993,
+        "shares": 0.36230183,
+        "event_hash": "0a3af37e3f69477acbc49a29454a8cd377d509186e3c60fa53aa3fe0ae3592b8",
+        "economic_disposition": "valid_replay_canonical_only_state_mirror_missing",
+    },
 )
+MIRRORED_V3_ROWS = EXPECTED_V3_ROWS[:3]
 INVALID_EXECUTION_ID = EXPECTED_V3_ROWS[2]["execution_id"]
 INVALID_EVENT_HASH = EXPECTED_V3_ROWS[2]["event_hash"]
+TERMINAL_DHR_EXECUTION_ID = EXPECTED_V3_ROWS[3]["execution_id"]
+TERMINAL_DHR_EVENT_HASH = EXPECTED_V3_ROWS[3]["event_hash"]
+EXPECTED_DHR_REMAINDER = EXPECTED_BASELINE_DHR_QTY - float(EXPECTED_V3_ROWS[1]["shares"])
 
 
 def _d(value: Any) -> Dict[str, Any]:
@@ -202,6 +219,11 @@ def _baseline_snapshot(pf: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
         issues.append("v3_baseline_sls_side_mismatch")
     if not _close(sls.get("qty", sls.get("shares")), EXPECTED_BASELINE_SLS_QTY, QTY_TOLERANCE):
         issues.append("v3_baseline_sls_qty_mismatch")
+    dhr = _d(positions.get("DHR"))
+    if str(dhr.get("side") or "long").lower() != "long":
+        issues.append("v3_baseline_dhr_side_mismatch")
+    if not _close(dhr.get("qty", dhr.get("shares")), EXPECTED_BASELINE_DHR_QTY, QTY_TOLERANCE):
+        issues.append("v3_baseline_dhr_qty_mismatch")
     return snap, issues
 
 
@@ -271,8 +293,8 @@ def _canonical_evidence(core: Any) -> Tuple[Dict[str, Any], bool]:
 def _state_trade_evidence(pf: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
     trades = [row for row in _l(pf.get("trades")) if isinstance(row, dict)]
     checks: List[Dict[str, Any]] = []
-    exact = len(trades) == len(EXPECTED_V3_ROWS)
-    for index, expected in enumerate(EXPECTED_V3_ROWS):
+    exact = len(trades) == len(MIRRORED_V3_ROWS)
+    for index, expected in enumerate(MIRRORED_V3_ROWS):
         row = trades[index] if index < len(trades) else {}
         row_checks = {
             "execution_id": str(row.get("execution_id") or "") == str(expected["execution_id"]),
@@ -280,13 +302,20 @@ def _state_trade_evidence(pf: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
             "action": str(row.get("action") or "").lower() == str(expected["action"]),
             "symbol": str(row.get("symbol") or "").upper() == str(expected["symbol"]),
             "side": str(row.get("side") or "long").lower() == str(expected["side"]),
-            "price": _close(row.get("price"), float(expected["price"]), 1e-6),
+            "price": _close(row.get("price"), float(expected["price"]), PRICE_TOLERANCE),
             "canonical_ledger_event_hash": str(row.get("canonical_ledger_event_hash") or "") == str(expected["event_hash"]),
         }
         row_exact = bool(row and all(row_checks.values()))
         exact = exact and row_exact
         checks.append({"trade_index": index, "execution_id": row.get("execution_id"), "checks": row_checks, "exact": row_exact})
-    return {"state_trade_count": len(trades), "state_trade_rows_exact": bool(exact), "rows": checks}, bool(exact)
+    terminal_absent = all(str(row.get("execution_id") or "") != TERMINAL_DHR_EXECUTION_ID for row in trades)
+    exact = exact and terminal_absent
+    return {
+        "state_trade_count": len(trades),
+        "state_trade_rows_exact": bool(exact),
+        "terminal_dhr_execution_absent": terminal_absent,
+        "rows": checks,
+    }, bool(exact)
 
 
 def _opening_books(snapshot: Dict[str, Any]) -> Tuple[float, Dict[str, Dict[str, float]], float, float, List[str]]:
@@ -452,7 +481,7 @@ def _accounting_cross_check(core: Any, projection: Dict[str, Any]) -> Tuple[Dict
             and str(row.get("symbol") or "").upper() == "SLS"
             and str(row.get("action") or "").lower() == "partial_exit"
             and _close(row.get("requested_qty", row.get("shares")), 1.436519, QTY_TOLERANCE)
-            and _close(row.get("price"), 16.04, 1e-6)
+            and _close(row.get("price"), 16.04, PRICE_TOLERANCE)
         )
 
     issue_shape = bool(len(coverage) == 1 and all(exact_issue(row) for row in all_issues) and len(economics) <= 1)
@@ -463,22 +492,38 @@ def _accounting_cross_check(core: Any, projection: Dict[str, Any]) -> Tuple[Dict
         rebuilt_symbols = sorted(str(value).upper() for value in _l(result.get("reconstructed_open_positions")))
     else:
         rebuilt_symbols = sorted(str(value).upper() for value in rebuilt_positions)
-    projected_positions = _d(projection.get("positions"))
-    qty_match = True
-    if rebuilt_positions and set(rebuilt_positions) == set(projected_positions):
-        for symbol, expected in projected_positions.items():
-            observed = _d(rebuilt_positions.get(symbol))
-            if not _close(observed.get("qty", observed.get("shares")), float(expected.get("shares") or 0.0), QTY_TOLERANCE):
-                qty_match = False
-    elif rebuilt_symbols != sorted(projected_positions):
-        qty_match = False
+
+    terminal = EXPECTED_V3_ROWS[3]
+    terminal_notional = float(terminal["shares"]) * float(terminal["price"])
+    projected_cash = _f(projection.get("cash"))
+    expected_pre_terminal_cash = (projected_cash - terminal_notional) if projected_cash is not None else None
+    dhr_current = _d(_d(_portfolio(core).get("positions")).get("DHR"))
+    dhr_mark = _f(dhr_current.get("last_price", dhr_current.get("mark")))
+    if dhr_mark is None or dhr_mark <= 0:
+        dhr_mark = _f(_d(_d(_d(_portfolio(core).get("paper_accounting_epoch")).get("verified_snapshot_baseline")).get("positions")).get("DHR", {}).get("mark"))
+    expected_pre_terminal_equity = (
+        expected_pre_terminal_cash + (EXPECTED_DHR_REMAINDER * dhr_mark)
+        if expected_pre_terminal_cash is not None and dhr_mark is not None and dhr_mark > 0
+        else None
+    )
+
+    qty_match = rebuilt_symbols == ["DHR"]
+    if rebuilt_positions:
+        observed = _d(rebuilt_positions.get("DHR"))
+        qty_match = qty_match and _close(observed.get("qty", observed.get("shares")), EXPECTED_DHR_REMAINDER, QTY_TOLERANCE)
+
     ready = bool(
         issue_shape
-        and rebuilt_cash is not None and abs(rebuilt_cash - float(projection.get("cash") or 0.0)) <= MONEY_TOLERANCE
-        and rebuilt_equity is not None and abs(rebuilt_equity - float(projection.get("equity") or 0.0)) <= EQUITY_TOLERANCE
-        and rebuilt_symbols == sorted(projected_positions)
+        and rebuilt_cash is not None and expected_pre_terminal_cash is not None
+        and abs(rebuilt_cash - expected_pre_terminal_cash) <= MONEY_TOLERANCE
+        and rebuilt_equity is not None and expected_pre_terminal_equity is not None
+        and abs(rebuilt_equity - expected_pre_terminal_equity) <= EQUITY_TOLERANCE
         and qty_match
     )
+    result = dict(result)
+    result["issue126_expected_pre_terminal_cash"] = expected_pre_terminal_cash
+    result["issue126_expected_pre_terminal_equity"] = expected_pre_terminal_equity
+    result["issue126_expected_pre_terminal_dhr_qty"] = EXPECTED_DHR_REMAINDER
     return result, ready
 
 
@@ -492,23 +537,49 @@ def _preconditions(core: Any) -> Dict[str, Any]:
     risk = _d(pf.get("risk_controls"))
     risk_exact = bool(risk.get("halted") and str(risk.get("halt_reason") or "") == "canonical execution lifecycle integrity halt")
     projected_symbols = sorted(_d(projection.get("positions")))
-    projected_shape = projection.get("status") == "ok" and projected_symbols == ["DHR"] and projection.get("excluded_execution_ids") == [INVALID_EXECUTION_ID]
+    projected_shape = bool(
+        projection.get("status") == "ok"
+        and projected_symbols == []
+        and projection.get("excluded_execution_ids") == [INVALID_EXECUTION_ID]
+        and projection.get("valid_execution_ids") == [
+            EXPECTED_V3_ROWS[0]["execution_id"],
+            EXPECTED_V3_ROWS[1]["execution_id"],
+            EXPECTED_V3_ROWS[3]["execution_id"],
+        ]
+    )
+
+    current_positions = _d(pf.get("positions"))
+    dhr_current = _d(current_positions.get("DHR"))
+    terminal_state_shape_exact = bool(
+        set(str(symbol).upper() for symbol in current_positions) == {"DHR", "SLS"}
+        and str(dhr_current.get("side") or "long").lower() == "long"
+        and _close(dhr_current.get("qty", dhr_current.get("shares")), EXPECTED_DHR_REMAINDER, QTY_TOLERANCE)
+    )
+
     current_cash = _f(pf.get("cash"))
     projected_cash = _f(projection.get("cash"))
     invalid_notional = float(EXPECTED_V3_ROWS[2]["shares"]) * float(EXPECTED_V3_ROWS[2]["price"])
-    invalid_cash_effect_exact = bool(
-        current_cash is not None and projected_cash is not None
-        and abs((current_cash - projected_cash) - invalid_notional) <= MONEY_TOLERANCE
+    terminal_notional = float(EXPECTED_V3_ROWS[3]["shares"]) * float(EXPECTED_V3_ROWS[3]["price"])
+    expected_pre_cutover_cash = (
+        projected_cash + invalid_notional - terminal_notional
+        if projected_cash is not None
+        else None
     )
+    terminal_cash_effect_absent = bool(
+        current_cash is not None and expected_pre_cutover_cash is not None
+        and abs(current_cash - expected_pre_cutover_cash) <= MONEY_TOLERANCE
+    )
+
     checks = {
         "paper_runtime": _paper_only(),
         "baseline_exact": not baseline_issues,
-        "canonical_chain_and_exact_three_v3_rows": canonical_ready,
-        "state_trade_mirror_exact_three_v3_rows": state_trades_ready,
+        "canonical_chain_and_exact_four_v3_rows": canonical_ready,
+        "state_trade_mirror_exact_original_three_v3_rows": state_trades_ready,
+        "canonical_only_terminal_dhr_state_shape_exact": terminal_state_shape_exact,
+        "canonical_only_terminal_cash_effect_absent": terminal_cash_effect_absent,
         "existing_lifecycle_halt_preserved": risk_exact,
-        "deterministic_projection_clean": bool(projected_shape),
-        "invalid_partial_cash_effect_exact": invalid_cash_effect_exact,
-        "legacy_accounting_cross_check_exact": cross_ready,
+        "deterministic_projection_clean_flat": bool(projected_shape),
+        "legacy_accounting_cross_check_exact_pre_terminal_state": cross_ready,
     }
     failed = [name for name, ok in checks.items() if not ok]
     return {
@@ -520,6 +591,9 @@ def _preconditions(core: Any) -> Dict[str, Any]:
         "projection": projection,
         "accounting_cross_check": cross,
         "invalid_partial_cash_effect_dollars": invalid_notional,
+        "terminal_dhr_cash_effect_dollars": terminal_notional,
+        "expected_pre_cutover_cash": expected_pre_cutover_cash,
+        "expected_dhr_remainder": EXPECTED_DHR_REMAINDER,
     }
 
 
@@ -556,13 +630,16 @@ def _archive_state(core: Any, pre: Dict[str, Any], ledger_path: str, ledger_dige
         "created_local": _now(core),
         "archive_dir": archive_dir,
         "evidence": {
-            "authoritative_snapshot_workflow_run": 33001743744,
-            "authoritative_snapshot_artifact_id": 9619045572,
+            "authoritative_snapshot_workflow_run": 33181093054,
+            "authoritative_snapshot_artifact_id": 9689875237,
             "prospective_fix_main_sha": "71c3e0777f82f3b1521b3ab17df53a25fb1d91d1",
             "canonical_row_count": _d(pre.get("canonical")).get("row_count"),
             "canonical_v3_rows": _d(pre.get("canonical")).get("rows"),
             "invalid_execution_id": INVALID_EXECUTION_ID,
             "invalid_event_hash": INVALID_EVENT_HASH,
+            "terminal_valid_dhr_execution_id": TERMINAL_DHR_EXECUTION_ID,
+            "terminal_valid_dhr_event_hash": TERMINAL_DHR_EVENT_HASH,
+            "terminal_valid_dhr_was_canonical_only_pre_cutover": True,
             "invalid_row_retained_immutably": True,
             "invalid_row_economic_effect_excluded_only_in_successor_projection": True,
         },
@@ -593,8 +670,8 @@ def build_successor_state(pf: Dict[str, Any], projection: Dict[str, Any], archiv
     positions = copy.deepcopy(_d(projection.get("positions")))
     cash = float(projection.get("cash") or 0.0)
     equity = float(projection.get("equity") or 0.0)
-    if cash <= 0 or equity <= 0 or sorted(positions) != ["DHR"]:
-        raise RuntimeError("deterministic successor projection is not sane")
+    if cash <= 0 or equity <= 0 or positions or abs(equity - cash) > EQUITY_TOLERANCE:
+        raise RuntimeError("deterministic successor projection is not sane and flat")
     if not bool(risk_before.get("halted")) or str(risk_before.get("halt_reason") or "") != "canonical execution lifecycle integrity halt":
         raise RuntimeError("expected lifecycle halt is not active")
 
@@ -614,15 +691,6 @@ def build_successor_state(pf: Dict[str, Any], projection: Dict[str, Any], archiv
     state["performance"] = perf
     state["risk_controls"] = risk_before
 
-    snapshot_positions: Dict[str, Dict[str, Any]] = {}
-    for symbol, raw in positions.items():
-        pos = _d(raw)
-        snapshot_positions[symbol] = {
-            "side": str(pos.get("side") or "long"),
-            "qty": float(pos.get("shares", pos.get("qty")) or 0.0),
-            "entry_price": float(pos.get("entry", pos.get("entry_price")) or 0.0),
-            "mark": float(pos.get("last_price") or 0.0),
-        }
     snapshot = {
         "verified": True,
         "version": VERSION,
@@ -631,9 +699,10 @@ def build_successor_state(pf: Dict[str, Any], projection: Dict[str, Any], archiv
         "equity": equity,
         "realized_today": float(projection.get("realized_today") or 0.0),
         "realized_total": float(projection.get("realized_total") or 0.0),
-        "positions": snapshot_positions,
-        "source": "deterministic_v3_verified_snapshot_plus_exact_valid_canonical_replay",
+        "positions": {},
+        "source": "deterministic_v3_verified_snapshot_plus_exact_valid_canonical_replay_including_terminal_dhr",
         "invalid_execution_retained_but_excluded_from_successor_economics": INVALID_EXECUTION_ID,
+        "terminal_valid_dhr_execution_replayed": TERMINAL_DHR_EXECUTION_ID,
     }
     state["accounting_epoch_id"] = TARGET_EPOCH_ID
     state["paper_accounting_epoch"] = {
@@ -649,7 +718,7 @@ def build_successor_state(pf: Dict[str, Any], projection: Dict[str, Any], archiv
         "verified_snapshot_baseline": snapshot,
         "historical_recovery_decision": HISTORICAL_DECISION,
         "prior_epoch_id": OLD_EPOCH_ID,
-        "prior_epoch_disposition": "archived_with_exact_issue126_sls_reentrant_artifact_disposition_and_immutable_canonical_ledger_retained",
+        "prior_epoch_disposition": "archived_with_exact_issue126_sls_reentrant_artifact_disposition_terminal_dhr_replay_and_immutable_canonical_ledger_retained",
         "historical_evidence_archived": True,
         "forensic_archive_dir": archive_dir,
         "validation_hold": True,
@@ -661,6 +730,8 @@ def build_successor_state(pf: Dict[str, Any], projection: Dict[str, Any], archiv
         "valid_path_rows_baseline": 0,
         "invalid_execution_id": INVALID_EXECUTION_ID,
         "invalid_event_hash": INVALID_EVENT_HASH,
+        "terminal_valid_dhr_execution_id": TERMINAL_DHR_EXECUTION_ID,
+        "terminal_valid_dhr_event_hash": TERMINAL_DHR_EVENT_HASH,
         "canonical_history_retained_immutably": True,
     }
     return state
@@ -725,6 +796,8 @@ def _cutover(core: Any, pre: Dict[str, Any], *, retried: bool = False) -> Dict[s
         "canonical_ledger_sha256_before": digest_before,
         "invalid_execution_id": INVALID_EXECUTION_ID,
         "invalid_event_hash": INVALID_EVENT_HASH,
+        "terminal_valid_dhr_execution_id": TERMINAL_DHR_EXECUTION_ID,
+        "terminal_valid_dhr_event_hash": TERMINAL_DHR_EVENT_HASH,
     }
     _atomic_json(MARKER_FILE, started)
     successor = build_successor_state(_portfolio(core), _d(pre.get("projection")), str(archive.get("archive_dir") or ""), started_local)
@@ -765,6 +838,7 @@ def _active_status(core: Any) -> Dict[str, Any]:
         "validation_hold": bool(epoch.get("validation_hold", False)),
         "canonical_ledger_unchanged": bool(marker.get("canonical_ledger_unchanged", False)),
         "invalid_execution_retained_immutably": str(epoch.get("invalid_execution_id") or "") == INVALID_EXECUTION_ID,
+        "terminal_valid_dhr_execution_replayed": str(epoch.get("terminal_valid_dhr_execution_id") or "") == TERMINAL_DHR_EXECUTION_ID,
         "state_trade_rows": len(_l(pf.get("trades"))),
         "positions": sorted(_d(pf.get("positions"))),
         "cash": pf.get("cash"),
@@ -858,6 +932,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "archives_prior_v3_evidence": True,
             "clears_active_state_trade_window": True,
             "retains_invalid_canonical_row_immutably": True,
+            "replays_terminal_valid_canonical_only_dhr_exit": True,
             "excludes_only_exact_invalid_row_from_successor_economics": True,
             "edits_or_deletes_canonical_rows": False,
             "rotates_or_truncates_canonical_ledger": False,
