@@ -1,10 +1,11 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-08-28 09:46 CDT  
+Last updated: 2026-08-28 12:05 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
 Current runtime code baseline: `54df8c9edf43af645b5abac4f6d93c262aeeff37` (squash merge of PR #134)  
+Current `main` before this handoff refresh: `1600dd0e5cdc4e162a587c0e6478dd1f9f95eb72`  
 Active stability/accounting issue: Issue #126
 
 ## Communication and Continuity
@@ -33,7 +34,7 @@ PR #127 (`71c3e0777f82f3b1521b3ab17df53a25fb1d91d1`) prospectively contained tha
 
 PR #128 (`4b3c4aa8e4cd0fb9203a95bb80091060b24d28b2`) added the exact-evidence v3→v4 successor migration. It requires the proven v3 baseline, exact known v3 execution signatures, immutable hash-valid canonical history, exact ordering, deterministic replay excluding only the proven invalid SLS partial, archival evidence, validation hold, and exact preservation of risk/history/canonical ledger.
 
-Known v3 rows from the original 45-row proof boundary:
+Known original v3 rows from the 45-row proof boundary:
 1. Valid SLS full exit `9ab93335faff4e3293d24ebe0bad4e87`.
 2. Valid DHR partial exit `26702f252870490c8f1ddab86ce794f5`.
 3. Proven invalid re-entrant SLS partial `90b22aad76074031906e0c6459dfa0bc`, retained immutably but excluded from successor economics only when its exact signature remains proven.
@@ -46,57 +47,74 @@ A direct bounded repair was created on `fix/issue126-price-serialization-2026082
 - production diff exactly one line: `PRICE_TOLERANCE = 1e-9` -> `PRICE_TOLERANCE = 5e-6` in `verified_v3_successor_epoch_migration.py`;
 - added `tests/test_verified_v3_signature_checks.py` proving an in-bound serialization delta passes only with exact identity/event hash, an out-of-bound price fails, and event-hash mismatch remains fail-closed.
 
-PR #134 exact head `c3cef758d1e2a0fdcd414168402c3cbd6b5fd585` passed every required exact-head gate, including Change Safety impact-aware regressions/core invariant suite, Repository Safety/Performance, Architecture Debt, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research audit, focused Stable Paper regressions, and both exact Gunicorn startup smokes. It was squash-merged automatically as current runtime code baseline `54df8c9edf43af645b5abac4f6d93c262aeeff37`.
+PR #134 exact head `c3cef758d1e2a0fdcd414168402c3cbd6b5fd585` passed every required exact-head gate, including Change Safety impact-aware regressions/core invariant suite, Repository Safety/Performance, Architecture Debt, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research audit, focused Stable Paper regressions, and both exact Gunicorn startup smokes. It was squash-merged automatically as runtime code baseline `54df8c9edf43af645b5abac4f6d93c262aeeff37`.
 
 Both Railway deployment contexts and the post-merge repository/refactor validations are green.
 
-Fresh Splendid bootstrap evidence after deployment proves the price repair worked: all three previously known v3 rows now pass every exact check — ledger index, execution ID, accounting epoch, action, symbol, side, quantity, price, and immutable event hash.
+Fresh Splendid bootstrap evidence after deployment proves the price repair worked: all three previously known v3 rows now pass every exact check — ledger index, execution ID, epoch, action, symbol, side, quantity, price, and immutable event hash.
 
-## New Fail-Closed Boundary — Canonical Row 46
+## 2026-08-28 Midday Forensic Classification — Canonical Row 46
 
-Fresh authoritative Splendid evidence at approximately 09:41-09:43 CDT shows the canonical ledger legitimately advanced while Issue #126 was being repaired:
-- canonical chain: valid and parse-clean;
-- total canonical rows: 46;
-- active v3 canonical rows: 4;
-- last execution ID: `ae9d82d3d25748459f37842679d501cd`;
-- the migration still expects the previously proven 45-row / 3-v3-row evidence boundary.
+Fresh automated Splendid snapshot evidence from workflow run `33181093054` / runtime artifact `9689875237` proves the fourth v3 row is not another SLS artifact. It is an exact DHR full-exit row:
+- ledger index `45` (46th canonical row);
+- execution ID `ae9d82d3d25748459f37842679d501cd`;
+- epoch `stable-paper-v3-20260825-successor01`;
+- action `exit`;
+- symbol/side `DHR` / `long`;
+- shares `0.36230183`;
+- price `203.039993`;
+- exit reason `stop_loss`;
+- event hash `0a3af37e3f69477acbc49a29454a8cd377d509186e3c60fa53aa3fe0ae3592b8`;
+- recorded local `2026-08-27 09:21:47 CDT`.
 
-Therefore v3→v4 migration correctly remains blocked. This is no longer the old price-tolerance defect. Do **not** increase `EXPECTED_LEDGER_ROW_COUNT`, accept the fourth row, exclude it, or replay it until the exact immutable row metadata and economic effect of execution `ae9d82d3d25748459f37842679d501cd` are independently proven. The row may be a legitimate exit under the fail-closed risk halt; classification must come from evidence, not inference.
+The canonical ledger remains parse-clean/hash-valid with exactly 46 rows and exactly four v3 rows. Row 46 is ordered after the original valid SLS full exit, valid DHR partial, and invalid re-entrant SLS partial.
 
-Current migration status:
-- baseline exact: PASS;
-- all three original known row signatures: PASS;
-- canonical chain: PASS;
-- existing lifecycle halt preserved: PASS;
-- exact-three-v3-row boundary: FAIL because v3 row count is now 4;
-- deterministic projection/cross-check: intentionally not run because canonical precondition failed.
+The verified v3 baseline DHR quantity is `0.540748758`. The valid DHR partial row exits `0.17844717`; active accounting reconstruction after the three mirrored state-trade rows shows the remaining DHR quantity as `0.3623017583401764` at entry `216.9600067138672`. Canonical row 46 quantity `0.36230183` therefore closes the reconstructed remainder within the existing exact migration `QTY_TOLERANCE`.
 
-## Current Authoritative Splendid Runtime — 2026-08-28 Morning
+The current persisted state proves the row-46 economic effect was never mirrored:
+- current cash `13483.47647864577` equals the v3 baseline plus the valid SLS full-exit proceeds, valid DHR partial proceeds, and invalid SLS partial proceeds, but excludes the DHR row-46 exit proceeds;
+- DHR is still open in state;
+- `state.trades` still contains exactly the original three v3 rows and does not contain row 46;
+- active accounting reconstruction remains DHR-only after ignoring the invalid SLS partial.
 
-Fresh read-only runtime snapshot and full daily-audit evidence:
-- application bootstrap: ready/delegating after normal cold-start registration; delegate ready;
-- runner: PASS, no active error; latest successful run `2026-08-28 09:34:57 CDT`; latest completed cycle `09:35:06 CDT`;
+`canonical_execution_ledger.py` deliberately appends the immutable canonical row before invoking the prior `record_trade()` state mirror. The evidence therefore classifies row 46 as a **valid canonical-only DHR full exit whose state/cash mirror did not complete**, rather than as a second invalid execution artifact.
+
+Successor-recovery rule is now exact:
+- retain all 46 canonical rows immutably;
+- replay the valid SLS full exit, valid DHR partial, and valid DHR full exit;
+- exclude only invalid SLS partial execution `90b22aad76074031906e0c6459dfa0bc` from successor economics;
+- require the pre-cutover state to prove row 46 is absent from `state.trades`, DHR remains exactly at the reconstructable remainder, and row-46 cash proceeds are absent;
+- the deterministic v4 successor projection should therefore have **no open positions**;
+- preserve validation hold and the lifecycle halt through cutover until clean active-v4 evidence independently proves any release is safe.
+
+A new guarded repo-agent repair was triggered from Issue #126 at midday with those exact requirements. Repo-agent workflow run `33192730802` is the active bounded repair. It must abort if it produces a truncated/replaced migration file or unrelated changes. Any resulting PR must be exact-diff reviewed and pass the complete mandatory exact-head gate suite before automatic merge.
+
+## Current Authoritative Splendid Runtime — 2026-08-28 Midday Evidence
+
+Latest automated read-only runtime snapshot:
+- application bootstrap: ready/delegating; no bootstrap error;
+- runner: PASS, no active error; latest successful run `2026-08-28 09:34:57 CDT`;
 - canonical ledger: PASS, append-only/hash-valid, 46 rows, 4 current-v3 rows;
-- account cash: approximately `13483.476479`;
+- account cash: `13483.47647864577`;
 - account equity: approximately `13602.08`;
 - active state positions: `DHR`, `SLS`;
 - active state trade rows: 3;
-- accounting integrity: WARN because the exact known invalid SLS partial remains unmatched; coverage issue count 1, economic issue count 1 in the compact audit;
-- reconstructed clean state from the three state-trade rows remains DHR-only, but no successor write is allowed until row 46 is classified;
-- market data: PASS; provider circuit clear; no provider failures in the audited snapshot;
-- state persistence: PASS; persistent mount, state and backup present, in-memory/on-disk richness matched;
-- fresh-day baseline: sane; date `2026-08-28`, day start/peak approximately `13606.02`, reset not pending;
+- accounting integrity: WARN with exactly one coverage issue and one economic issue, both the known invalid SLS partial;
+- reconstructed clean state from mirrored state trades remains DHR-only;
+- market data: PASS; 103 classified terminal outcomes, zero in-flight/unclassified requests, provider circuit clear;
+- state persistence/bootstrap diagnostics healthy;
+- fresh-day baseline: PASS, date `2026-08-28`, day start/peak approximately `13606.02`, reset not pending;
 - risk: intentionally FAIL because `canonical execution lifecycle integrity halt` remains active; intraday drawdown approximately `0.029%`;
 - validation hold remains active;
 - no strategy/sizing/risk-threshold/live/ML authority was changed.
 
-The overall daily audit remains FAIL because of the intentional lifecycle/accounting safety boundary, not because runner, state persistence, market data, canonical hash chain, or fresh-day initialization are unhealthy.
+The overall audit remains FAIL because the successor accounting repair has not yet been applied, not because runner, market data, canonical hash chain, bootstrap, or fresh-day initialization are unhealthy.
 
 ## Immediate Next Action
 
-Obtain read-only exact forensic evidence for canonical execution `ae9d82d3d25748459f37842679d501cd`: ledger index, epoch, action, symbol, side, quantity, price, event hash, predecessor hash/order, matching state/journal evidence, and economic effect. Determine whether it is a valid post-containment execution or a new lifecycle artifact.
+Inspect the repo-agent output for run `33192730802`. Accept only a bounded migration/test repair that encodes the exact 46-row/four-v3-row evidence, requires row 46 to be canonical-only and economically unapplied in pre-cutover state, replays DHR row 46 into the successor, excludes only the exact invalid SLS partial, and projects no open positions. Reject any destructive or overbroad diff.
 
-Only after that evidence is complete may the successor migration evidence boundary be revised. Any revision must remain exact-signature based, preserve every canonical row immutably, keep validation hold/lifecycle halt fail-closed, and pass the full mandatory gate suite before merge. No user action is currently required.
+If a safe PR is produced, require the full exact-head safety suite before automatic squash merge, then validate authoritative Splendid deployment/bootstrap/daily-audit evidence. No user action is currently required.
 
 ## Completion Criteria for Issue #126
 
