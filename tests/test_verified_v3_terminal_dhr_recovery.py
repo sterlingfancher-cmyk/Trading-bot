@@ -18,7 +18,7 @@ def _mirrored_trade(expected):
     return row
 
 
-def _baseline_snapshot():
+def _terminal_dhr_fixture_snapshot():
     return {
         "verified": True,
         "cash": migration.EXPECTED_BASELINE_CASH,
@@ -54,7 +54,7 @@ def _fake_portfolio(current_cash=None, dhr_qty=None):
         invalid = migration.EXPECTED_V3_ROWS[2]
         projection = migration._project(
             SimpleNamespace(portfolio={"positions": {}}),
-            _baseline_snapshot(),
+            _terminal_dhr_fixture_snapshot(),
             _canonical_payload(),
         )
         current_cash = (
@@ -130,7 +130,7 @@ def test_state_trade_evidence_requires_terminal_dhr_row_to_be_canonical_only():
 def test_projection_replays_terminal_dhr_and_excludes_only_invalid_sls():
     core = SimpleNamespace(portfolio={"positions": {}})
 
-    projection = migration._project(core, _baseline_snapshot(), _canonical_payload())
+    projection = migration._project(core, _terminal_dhr_fixture_snapshot(), _canonical_payload())
 
     assert projection["status"] == "ok"
     assert projection["open_symbols"] == []
@@ -149,7 +149,7 @@ def test_successor_state_is_flat_and_preserves_halt_and_history():
     pf["history"] = [13500.0, 13600.0]
     projection = migration._project(
         SimpleNamespace(portfolio=pf),
-        _baseline_snapshot(),
+        _terminal_dhr_fixture_snapshot(),
         _canonical_payload(),
     )
 
@@ -167,10 +167,10 @@ def test_successor_state_is_flat_and_preserves_halt_and_history():
 def test_preconditions_require_exact_canonical_only_terminal_state_and_cash(monkeypatch):
     pf = _fake_portfolio()
     core = SimpleNamespace(portfolio=pf)
-    projection = migration._project(core, _baseline_snapshot(), _canonical_payload())
+    projection = migration._project(core, _terminal_dhr_fixture_snapshot(), _canonical_payload())
 
     monkeypatch.setattr(migration, "_paper_only", lambda: True)
-    monkeypatch.setattr(migration, "_baseline_snapshot", lambda _pf: (_baseline_snapshot(), []))
+    monkeypatch.setattr(migration, "_baseline_snapshot", lambda _pf: (_terminal_dhr_fixture_snapshot(), []))
     monkeypatch.setattr(migration, "_canonical_evidence", lambda _core: (_canonical_payload(), True))
     monkeypatch.setattr(
         migration,
