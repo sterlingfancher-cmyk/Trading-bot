@@ -7,9 +7,7 @@ import verified_v3_successor_epoch_migration as migration
 
 
 def _canonical_row(expected):
-    row = copy.deepcopy(expected)
-    row.pop("economic_disposition", None)
-    return row
+    return {key: copy.deepcopy(value) for key, value in expected.items() if key != "economic_disposition"}
 
 
 def _mirrored_trade(expected):
