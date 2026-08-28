@@ -1,126 +1,116 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-08-26 16:42 CDT  
+Last updated: 2026-08-28 09:46 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Runtime code baseline before this handoff refresh: `71c3e0777f82f3b1521b3ab17df53a25fb1d91d1` (squash merge of PR #127)  
-Active recovery work: Issue #126, draft PR #128 `fix/issue-126-v3-v4-successor-recovery`
+Current runtime code baseline: `54df8c9edf43af645b5abac4f6d93c262aeeff37` (squash merge of PR #134)  
+Active stability/accounting issue: Issue #126
 
 ## Communication and Continuity
 
-Keep Trading-bot progress updates in the currently active ChatGPT conversation until the user intentionally starts a new one. Before any intentional chat transition, refresh this handoff with the exact current repository/runtime boundary so the next conversation can continue without reconstructing history.
+Keep Trading-bot progress updates in the currently active ChatGPT conversation until the user intentionally starts a new one. Before any intentional chat transition, refresh this handoff with the exact repository/runtime boundary so the next conversation can continue without reconstructing history.
 
-After every material finding, bug fix, PR, merge, authoritative runtime validation, blocker, accounting/risk boundary change, or issue closure, update this file. Do not leave the handoff stale behind the actual project state.
-
-The user wants to be as hands-off as possible for bug/stability work. Do not ask the user to perform routine debugging, code edits, GitHub work, CI review, or runtime evidence collection when connected tools can do it. Notify the user when an issue is fixed and when a genuinely user-only action is required.
-
-## Autonomous Bug-Fix Authorization
-
-The user explicitly authorized automatic bug fixing for bounded correctness/stability defects.
-
-For a demonstrated bug, the assistant may autonomously:
-- investigate repository and authoritative Splendid evidence;
-- create/update a bounded branch and PR;
-- add focused regression coverage;
-- repair CI failures that are directly caused by the proposed fix;
-- require and review all mandatory exact-head safety gates;
-- merge a routine safe bug-fix PR automatically once every required exact-head gate is green and the change remains inside the authority boundaries below;
-- validate the authoritative Splendid deployment after merge;
-- update this handoff and notify the user that the issue was fixed.
-
-Do not wait for user permission for routine safe bug-fix merges that meet those conditions. Escalate to the user only when a decision crosses an authority boundary, requires credentials/UI action unavailable to connected tools, changes intended trading behavior, or cannot be resolved safely from evidence.
+After every material finding, bug fix, PR, merge, authoritative runtime validation, blocker, accounting/risk boundary change, or issue closure, update this file. The user wants to be as hands-off as possible for routine stability work: investigate, fix, test, merge bounded safe repairs, validate deployment, and notify after meaningful progress. Escalate only decisions/actions that genuinely require the user.
 
 ## Standing Safety / Authority Boundaries
 
-- Paper-only unless the user separately authorizes live trading.
+- Paper-only unless separately authorized.
 - Rules engine remains sole execution authority; ML/AI remains shadow-only.
 - Never delete, edit, relabel, truncate, or fabricate immutable canonical execution-ledger rows.
 - Never manually clear a lifecycle/risk halt merely to make an audit pass.
-- Never manually rewrite `day_peak_equity`, risk-day history, account history, or historical accounting state merely to make an audit pass.
-- Do not casually call `/paper/run`; prefer existing automated read-only runtime snapshots and audit evidence.
-- Do not change strategy logic, signal/participation thresholds, sizing policy, hard-risk thresholds, live authority, or ML execution authority as part of bug/stability repair unless the user separately authorizes that behavior change.
-- Historical corrections must be evidence-based successor accounting dispositions with archived evidence and validation hold, not edits to immutable history.
-- Every relevant code fix must pass the exact-head Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit, exact Gunicorn startup smoke, and any affected focused invariant suite before automatic merge.
+- Never rewrite `day_peak_equity`, risk-day history, account history, or historical accounting state merely to make an audit pass.
+- Do not casually call `/paper/run`; prefer existing automated read-only runtime snapshots/audits.
+- Do not change strategy logic, signal/participation thresholds, sizing policy, hard-risk thresholds, live authority, or ML execution authority as part of bug/stability repair without separate authorization.
+- Historical corrections must use exact-evidence successor accounting with archived evidence and validation hold, never immutable-history edits.
+- Every relevant code repair must pass exact-head Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit, exact Gunicorn smoke, and affected focused invariant suites before automatic merge.
 
-## Scheduled Operational Audits
+## Issue #126 — Root Cause and Prospective Containment
 
-Active weekday audit cadence in `America/Chicago`:
-- Morning audit: 09:30 CDT/CT.
-- Midday audit: 12:00 CDT/CT.
-- Pre-close audit: 14:30 CDT/CT, approximately 30 minutes before the regular U.S. equity close.
+The original defect was a re-entrant legacy accounting read during SLS full-exit processing. State deleted SLS, then `set_cooldown()` re-entered accounting before the new canonical row was mirrored into state, allowing the closed SLS position to be reconstructed from the verified snapshot. That resurrected position later generated an impossible SLS partial exit.
 
-Each audit starts from this handoff, current GitHub state, open stability/accounting issues and PRs, and the authoritative Splendid paper runtime. It checks bootstrap/runner health, canonical ledger integrity, accounting coverage/economic integrity, cash/equity/positions sanity, recent executions, market-data accounting, and risk state. Demonstrated bugs should be fixed autonomously under the standing boundaries rather than merely reported.
+PR #127 (`71c3e0777f82f3b1521b3ab17df53a25fb1d91d1`) prospectively contained that failure for successor generations v3+ under validation hold: legacy accounting reconciliation remains observational/fail-closed and may not auto-repair cash/positions during that in-flight window. The existing contaminated v3 state and immutable ledger were deliberately not rewritten.
 
-An hourly condition watch for Issue #126 is also active while that repair remains open. It should notify only for meaningful progress, a fixed issue, a significant blocker, or a user-only action.
+PR #128 (`4b3c4aa8e4cd0fb9203a95bb80091060b24d28b2`) added the exact-evidence v3→v4 successor migration. It requires the proven v3 baseline, exact known v3 execution signatures, immutable hash-valid canonical history, exact ordering, deterministic replay excluding only the proven invalid SLS partial, archival evidence, validation hold, and exact preservation of risk/history/canonical ledger.
 
-## Current Issue #126 Status
+Known v3 rows from the original 45-row proof boundary:
+1. Valid SLS full exit `9ab93335faff4e3293d24ebe0bad4e87`.
+2. Valid DHR partial exit `26702f252870490c8f1ddab86ce794f5`.
+3. Proven invalid re-entrant SLS partial `90b22aad76074031906e0c6459dfa0bc`, retained immutably but excluded from successor economics only when its exact signature remains proven.
 
-PR #127 was squash-merged into main as `71c3e0777f82f3b1521b3ab17df53a25fb1d91d1`. It prospectively fixed the re-entrant accounting repair that could resurrect an already-closed successor-epoch position during the narrow window between state mutation and canonical `record_trade()`.
+## 2026-08-28 Morning Repair — PR #134
 
-Root cause: a valid SLS full exit mutated cash/deleted SLS, then `set_cooldown()` re-entered the legacy accounting wrapper before the new canonical exit row existed. The wrapper reconstructed the just-closed SLS position from the prior snapshot and restored it. That resurrected position later generated an impossible SLS partial execution.
+The remaining verifier defect was numeric price comparison against canonical ledger values serialized with `round(price, 6)`. Repo-agent attempts #129-#133 were rejected/closed unmerged because their generated file replacement diffs were destructive. No unsafe replacement was merged.
 
-PR #127 makes successor generations v3+ under validation hold observational/fail-closed for this accounting read and suppresses automatic state repair during that in-flight window. Verified-v2 legacy behavior is intentionally preserved.
+A direct bounded repair was created on `fix/issue126-price-serialization-20260828`:
+- production diff exactly one line: `PRICE_TOLERANCE = 1e-9` -> `PRICE_TOLERANCE = 5e-6` in `verified_v3_successor_epoch_migration.py`;
+- added `tests/test_verified_v3_signature_checks.py` proving an in-bound serialization delta passes only with exact identity/event hash, an out-of-bound price fails, and event-hash mismatch remains fail-closed.
 
-Fresh settled post-merge Splendid evidence on the PR #127 code baseline proved:
-- canonical ledger hash chain valid;
-- ledger row count exactly 45;
-- exactly three v3 canonical executions;
-- no additional lifecycle artifact appeared after the prospective fix deployed;
-- the only active accounting defect remains the exact known invalid SLS partial row;
-- current contaminated v3 state remains safely halted and was not manually rewritten.
+PR #134 exact head `c3cef758d1e2a0fdcd414168402c3cbd6b5fd585` passed every required exact-head gate, including Change Safety impact-aware regressions/core invariant suite, Repository Safety/Performance, Architecture Debt, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research audit, focused Stable Paper regressions, and both exact Gunicorn startup smokes. It was squash-merged automatically as current runtime code baseline `54df8c9edf43af645b5abac4f6d93c262aeeff37`.
 
-Exact v3 canonical rows relevant to the successor recovery:
-1. Valid SLS full exit: execution `9ab93335faff4e3293d24ebe0bad4e87`, `4.353086829 @ 13.62`.
-2. Valid DHR partial exit: execution `26702f252870490c8f1ddab86ce794f5`, `0.063287453 @ 217.61`.
-3. Invalid re-entrant SLS partial: execution `90b22aad76074031906e0c6459dfa0bc`, `1.43651871 @ 13.005`, retained immutably but excluded from successor economics only if its full exact signature and chain position remain unchanged.
+Both Railway deployment contexts and the post-merge repository/refactor validations are green.
 
-The deterministic clean projection from the verified v3 baseline plus the two valid v3 executions is approximately:
-- cash `13460.434677`;
-- equity around `13538.662872` using the retained DHR mark;
-- sole open position DHR, quantity approximately `0.477461547`, entry `216.960007`;
-- SLS closed.
+Fresh Splendid bootstrap evidence after deployment proves the price repair worked: all three previously known v3 rows now pass every exact check — ledger index, execution ID, accounting epoch, action, symbol, side, quantity, price, and immutable event hash.
 
-The existing risk-controls object, lifecycle halt, current-day peak, and history must be preserved exactly through the accounting successor cutover. Halt release is a separate evidence boundary after clean-state validation.
+## New Fail-Closed Boundary — Canonical Row 46
 
-## Draft PR #128 — v3 to v4 Successor Recovery
+Fresh authoritative Splendid evidence at approximately 09:41-09:43 CDT shows the canonical ledger legitimately advanced while Issue #126 was being repaired:
+- canonical chain: valid and parse-clean;
+- total canonical rows: 46;
+- active v3 canonical rows: 4;
+- last execution ID: `ae9d82d3d25748459f37842679d501cd`;
+- the migration still expects the previously proven 45-row / 3-v3-row evidence boundary.
 
-PR #128: `Recover Issue #126 into deterministic v4 successor epoch`  
-Branch: `fix/issue-126-v3-v4-successor-recovery`  
-Initial exact head at PR creation: `3eb2a513bd650dc318b5a351435a33a8e14d1153`  
-Target successor epoch: `stable-paper-v4-20260826-successor01`
+Therefore v3→v4 migration correctly remains blocked. This is no longer the old price-tolerance defect. Do **not** increase `EXPECTED_LEDGER_ROW_COUNT`, accept the fourth row, exclude it, or replay it until the exact immutable row metadata and economic effect of execution `ae9d82d3d25748459f37842679d501cd` are independently proven. The row may be a legitimate exit under the fail-closed risk halt; classification must come from evidence, not inference.
 
-Design boundary:
-- require exact verified v3 baseline and exact 45-row canonical shape;
-- require exact signatures for the two valid v3 executions and the one invalid re-entrant SLS partial;
-- archive complete v3 persistence before cutover;
-- rebuild successor economics from the verified v3 baseline plus only the two valid v3 rows;
-- retain all canonical rows unchanged and verify ledger bytes are identical before/after cutover;
-- start v4 under validation hold;
-- preserve risk controls/history exactly, including the lifecycle halt and current-day peak;
-- provide exact marker-based startup retry handling if a legacy startup owner restores v3 after a completed bounded cutover;
-- update legacy v1/v2/v3 compatibility readers only to recognize exact v4 lineage, without granting them v3→v4 write authority.
+Current migration status:
+- baseline exact: PASS;
+- all three original known row signatures: PASS;
+- canonical chain: PASS;
+- existing lifecycle halt preserved: PASS;
+- exact-three-v3-row boundary: FAIL because v3 row count is now 4;
+- deterministic projection/cross-check: intentionally not run because canonical precondition failed.
 
-Initial PR #128 CI state at this handoff refresh:
-- Stable Paper Core Stage-F focused invariant validation: PASS.
-- Repository Safety and Performance Audit Validation: PASS.
-- Architecture Debt Regression Gate: FAIL on structural debt growth only, not on accounting arithmetic. The gate reported +1 duplicate function group, +1 dynamic mutation target, +1 mutation overlap / overlapping mutation owner warning, and associated warning/info deltas.
-- Change Safety and full Refactor/Startup audits were still running at the last check.
+## Current Authoritative Splendid Runtime — 2026-08-28 Morning
 
-Do not merge PR #128 until the architecture-debt regression is repaired without weakening the gate and all mandatory exact-head checks are green. The current intended next action is to remove the demonstrated duplicate helper/mutation-overlap debt, rerun exact-head CI, then automatically merge if all safety gates pass and validate authoritative Splendid v4 evidence.
+Fresh read-only runtime snapshot and full daily-audit evidence:
+- application bootstrap: ready/delegating after normal cold-start registration; delegate ready;
+- runner: PASS, no active error; latest successful run `2026-08-28 09:34:57 CDT`; latest completed cycle `09:35:06 CDT`;
+- canonical ledger: PASS, append-only/hash-valid, 46 rows, 4 current-v3 rows;
+- account cash: approximately `13483.476479`;
+- account equity: approximately `13602.08`;
+- active state positions: `DHR`, `SLS`;
+- active state trade rows: 3;
+- accounting integrity: WARN because the exact known invalid SLS partial remains unmatched; coverage issue count 1, economic issue count 1 in the compact audit;
+- reconstructed clean state from the three state-trade rows remains DHR-only, but no successor write is allowed until row 46 is classified;
+- market data: PASS; provider circuit clear; no provider failures in the audited snapshot;
+- state persistence: PASS; persistent mount, state and backup present, in-memory/on-disk richness matched;
+- fresh-day baseline: sane; date `2026-08-28`, day start/peak approximately `13606.02`, reset not pending;
+- risk: intentionally FAIL because `canonical execution lifecycle integrity halt` remains active; intraday drawdown approximately `0.029%`;
+- validation hold remains active;
+- no strategy/sizing/risk-threshold/live/ML authority was changed.
+
+The overall daily audit remains FAIL because of the intentional lifecycle/accounting safety boundary, not because runner, state persistence, market data, canonical hash chain, or fresh-day initialization are unhealthy.
+
+## Immediate Next Action
+
+Obtain read-only exact forensic evidence for canonical execution `ae9d82d3d25748459f37842679d501cd`: ledger index, epoch, action, symbol, side, quantity, price, event hash, predecessor hash/order, matching state/journal evidence, and economic effect. Determine whether it is a valid post-containment execution or a new lifecycle artifact.
+
+Only after that evidence is complete may the successor migration evidence boundary be revised. Any revision must remain exact-signature based, preserve every canonical row immutably, keep validation hold/lifecycle halt fail-closed, and pass the full mandatory gate suite before merge. No user action is currently required.
 
 ## Completion Criteria for Issue #126
 
-Issue #126 may close only after all of the following are proven prospectively:
-- PR #127 prospective containment remains active with no new resurrection/lifecycle artifact;
+Issue #126 may close only after all are proven:
+- prospective containment remains active;
+- every v3 canonical row through the cutover boundary is independently classified;
 - deterministic v3→v4 successor recovery completes from exact evidence;
-- canonical ledger remains append-only/hash-valid and byte-unchanged through recovery;
+- canonical ledger remains append-only/hash-valid and unchanged through recovery;
 - active v4 accounting has zero unexplained coverage/economic issues;
-- cash/equity/open positions match the deterministic projection within defined bounded tolerances;
-- authoritative Splendid bootstrap/runner/market-data/risk diagnostics are healthy apart from any intentionally retained lifecycle halt;
-- any halt release is separately justified by clean-state/lifecycle evidence rather than manual clearing;
-- this handoff is refreshed with the final clean state and issue closure.
+- cash/equity/open positions match deterministic projection within bounded tolerances;
+- authoritative Splendid bootstrap/runner/market-data/state diagnostics are healthy apart from any intentionally retained lifecycle halt;
+- any halt release is separately justified by clean lifecycle evidence, never manual clearing;
+- this handoff is refreshed with final clean state and Issue #126 closure.
 
 ## Working Principle
 
-Correctness, accounting integrity, runtime stability, and deterministic recovery remain ahead of performance optimization. Once the active stability/accounting issues are fully closed with clean authoritative evidence, performance work may resume under the separate strategy/risk-change authority process.
+Correctness, accounting integrity, runtime stability, and deterministic recovery remain ahead of performance optimization. Resume performance work only after active stability/accounting issues are fully closed with clean authoritative evidence.
