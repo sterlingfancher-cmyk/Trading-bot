@@ -494,7 +494,7 @@ def _accounting_cross_check(core: Any, projection: Dict[str, Any]) -> Tuple[Dict
         rebuilt_symbols = sorted(str(value).upper() for value in rebuilt_positions)
 
     terminal = EXPECTED_V3_ROWS[3]
-    terminal_notional = float(terminal["shares"]) * float(terminal["price"])
+    terminal_notional = float(terminal["shares"]) * float(terminal["price"]) 
     projected_cash = _f(projection.get("cash"))
     expected_pre_terminal_cash = (projected_cash - terminal_notional) if projected_cash is not None else None
     dhr_current = _d(_d(_portfolio(core).get("positions")).get("DHR"))
@@ -527,6 +527,32 @@ def _accounting_cross_check(core: Any, projection: Dict[str, Any]) -> Tuple[Dict
     return result, ready
 
 
+# New helper: precise DHR alias-shape checks. Exposed so focused tests may exercise
+# the alias-shape logic directly without invoking the heavier canonical/project
+# machinery. This implements the required exact shape: positions exactly DHR+SLS,
+# DHR side long, qty (explicit 'qty' field) approximately EXPECTED_BASELINE_DHR_QTY
+# and shares (explicit 'shares' field) approximately EXPECTED_DHR_REMAINDER.
+# Important: do NOT fallback qty->shares when checking the qty alias.
+def _terminal_dhr_alias_checks(pf: Dict[str, Any]) -> Dict[str, Any]:
+    current_positions = _d(pf.get("positions"))
+    symbols_ok = set(str(symbol).upper() for symbol in current_positions) == {"DHR", "SLS"}
+    dhr_current = _d(current_positions.get("DHR"))
+    side_ok = str(dhr_current.get("side") or "long").lower() == "long"
+
+    # Explicit alias checks: do not fallback qty->shares.
+    qty_alias_exact = _close(dhr_current.get("qty"), EXPECTED_BASELINE_DHR_QTY, QTY_TOLERANCE)
+    shares_alias_exact = _close(dhr_current.get("shares"), EXPECTED_DHR_REMAINDER, QTY_TOLERANCE)
+
+    exact = bool(symbols_ok and side_ok and qty_alias_exact and shares_alias_exact)
+    return {
+        "symbols_exact": symbols_ok,
+        "side_exact": side_ok,
+        "qty_alias_exact": qty_alias_exact,
+        "shares_alias_exact": shares_alias_exact,
+        "exact": exact,
+    }
+
+
 def _preconditions(core: Any) -> Dict[str, Any]:
     pf = _portfolio(core)
     snapshot, baseline_issues = _baseline_snapshot(pf)
@@ -550,11 +576,10 @@ def _preconditions(core: Any) -> Dict[str, Any]:
 
     current_positions = _d(pf.get("positions"))
     dhr_current = _d(current_positions.get("DHR"))
-    terminal_state_shape_exact = bool(
-        set(str(symbol).upper() for symbol in current_positions) == {"DHR", "SLS"}
-        and str(dhr_current.get("side") or "long").lower() == "long"
-        and _close(dhr_current.get("qty", dhr_current.get("shares")), EXPECTED_DHR_REMAINDER, QTY_TOLERANCE)
-    )
+
+    # Use the new helper to build precise alias checks.
+    terminal_alias_checks = _terminal_dhr_alias_checks(pf)
+    terminal_state_shape_exact = terminal_alias_checks.get("exact", False)
 
     current_cash = _f(pf.get("cash"))
     projected_cash = _f(projection.get("cash"))
@@ -575,7 +600,10 @@ def _preconditions(core: Any) -> Dict[str, Any]:
         "baseline_exact": not baseline_issues,
         "canonical_chain_and_exact_four_v3_rows": canonical_ready,
         "state_trade_mirror_exact_original_three_v3_rows": state_trades_ready,
-        "canonical_only_terminal_dhr_state_shape_exact": terminal_state_shape_exact,
+        # Expose both alias checks separately for clarity and testing.
+        "canonical_only_terminal_dhr_qty_alias_exact": bool(terminal_alias_checks.get("qty_alias_exact")),
+        "canonical_only_terminal_dhr_shares_alias_exact": bool(terminal_alias_checks.get("shares_alias_exact")),
+        "canonical_only_terminal_dhr_state_shape_exact": bool(terminal_state_shape_exact),
         "canonical_only_terminal_cash_effect_absent": terminal_cash_effect_absent,
         "existing_lifecycle_halt_preserved": risk_exact,
         "deterministic_projection_clean_flat": bool(projected_shape),
@@ -834,7 +862,7 @@ def _active_status(core: Any) -> Dict[str, Any]:
         "epoch_id": TARGET_EPOCH_ID,
         "prior_epoch_id": OLD_EPOCH_ID,
         "historical_evidence_archived": bool(epoch.get("historical_evidence_archived", False)),
-        "forensic_archive_dir": epoch.get("forensic_archive_dir") or marker.get("archive_dir"),
+        "forensic_archive_dir": epoch.get("forensic_evidence_archive_dir") or marker.get("archive_dir"),
         "validation_hold": bool(epoch.get("validation_hold", False)),
         "canonical_ledger_unchanged": bool(marker.get("canonical_ledger_unchanged", False)),
         "invalid_execution_retained_immutably": str(epoch.get("invalid_execution_id") or "") == INVALID_EXECUTION_ID,
