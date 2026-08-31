@@ -21,7 +21,7 @@ from typing import Any
 ROOT = Path.cwd().resolve()
 MODEL = os.getenv("REPO_AGENT_MODEL", "gpt-5-mini")
 MAX_INSTRUCTION = 4000
-MAX_CONTEXT_CHARS = 80000
+MAX_CONTEXT_CHARS = 120000
 MAX_FILES = 8
 MAX_FILE_CHARS = 120000
 
@@ -144,7 +144,7 @@ def build_context(instruction: str) -> str:
         remaining = MAX_CONTEXT_CHARS - total
         if remaining <= 1000:
             break
-        clipped = text[: min(remaining, 15000)]
+        clipped = text[: min(remaining, 60000)]
         pieces.append(f"\n===== {rel} =====\n{clipped}")
         total += len(clipped)
 
