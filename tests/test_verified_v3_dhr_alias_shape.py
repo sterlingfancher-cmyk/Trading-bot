@@ -55,3 +55,15 @@ def test_both_aliases_set_to_remainder_fails():
     core = _make_core(mod.EXPECTED_DHR_REMAINDER, mod.EXPECTED_DHR_REMAINDER)
     pre = mod._preconditions(core)
     assert pre["checks"]["canonical_only_terminal_dhr_state_shape_exact"] is False
+
+
+def test_missing_qty_alias_fails_closed():
+    core = _make_core(None, mod.EXPECTED_DHR_REMAINDER)
+    pre = mod._preconditions(core)
+    assert pre["checks"]["canonical_only_terminal_dhr_state_shape_exact"] is False
+
+
+def test_missing_shares_alias_fails_closed():
+    core = _make_core(mod.EXPECTED_BASELINE_DHR_QTY, None)
+    pre = mod._preconditions(core)
+    assert pre["checks"]["canonical_only_terminal_dhr_state_shape_exact"] is False
