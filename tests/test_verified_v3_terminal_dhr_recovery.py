@@ -67,7 +67,8 @@ def _fake_portfolio(current_cash=None, dhr_qty=None):
         "positions": {
             "DHR": {
                 "side": "long",
-                "qty": dhr_qty,
+                "qty": migration.EXPECTED_BASELINE_DHR_QTY,
+                "shares": dhr_qty,
                 "entry": 216.9600067138672,
                 "last_price": 203.0,
             },
@@ -186,6 +187,6 @@ def test_preconditions_require_exact_canonical_only_terminal_state_and_cash(monk
     assert pre["checks"]["canonical_only_terminal_cash_effect_absent"] is False
 
     pf["cash"] -= 1.0
-    pf["positions"]["DHR"]["qty"] += 0.01
+    pf["positions"]["DHR"]["shares"] += 0.01
     pre = migration._preconditions(core)
     assert pre["checks"]["canonical_only_terminal_dhr_state_shape_exact"] is False

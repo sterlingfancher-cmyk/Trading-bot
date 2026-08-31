@@ -73,7 +73,7 @@ class Issue126V3V4SuccessorMigrationTests(unittest.TestCase):
             "cash": pre_terminal_cash + invalid_notional,
             "equity": 13601.69,
             "positions": {
-                "DHR": {"side": "long", "shares": dhr_qty, "qty": dhr_qty, "entry": 216.960007, "last_price": 215.79},
+                "DHR": {"side": "long", "shares": dhr_qty, "qty": migration.EXPECTED_BASELINE_DHR_QTY, "entry": 216.960007, "last_price": 215.79},
                 "SLS": {
                     "side": "long",
                     "shares": migration.EXPECTED_BASELINE_SLS_QTY - float(migration.EXPECTED_V3_ROWS[2]["shares"]),
