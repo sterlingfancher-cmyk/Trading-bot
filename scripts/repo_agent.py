@@ -182,7 +182,7 @@ def call_openai(instruction: str, context: str) -> dict[str, Any]:
                 "content": f"Instruction:\n{instruction}\n\nRepository context:\n{context}",
             },
         ],
-        "max_output_tokens": 12000,
+        "max_output_tokens": 24000,
     }
     request = urllib.request.Request(
         "https://api.openai.com/v1/responses",
