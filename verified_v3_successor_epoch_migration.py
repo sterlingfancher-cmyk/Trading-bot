@@ -550,10 +550,22 @@ def _preconditions(core: Any) -> Dict[str, Any]:
 
     current_positions = _d(pf.get("positions"))
     dhr_current = _d(current_positions.get("DHR"))
+
+    # Replace prior permissive fallback behavior with an explicit, fail-closed alias check.
+    # Required: positions set exactly {'DHR','SLS'}, DHR side 'long',
+    # - qty must be approximately EXPECTED_BASELINE_DHR_QTY
+    # - shares must be approximately EXPECTED_DHR_REMAINDER
+    # Both checks must be present and pass. No qty->shares fallback or generic prefer-shares allowed.
+    dhr_qty_value = dhr_current.get("qty")
+    dhr_shares_value = dhr_current.get("shares")
+    qty_alias_ok = _close(dhr_qty_value, EXPECTED_BASELINE_DHR_QTY, QTY_TOLERANCE) if dhr_qty_value is not None else False
+    shares_alias_ok = _close(dhr_shares_value, EXPECTED_DHR_REMAINDER, QTY_TOLERANCE) if dhr_shares_value is not None else False
+
     terminal_state_shape_exact = bool(
         set(str(symbol).upper() for symbol in current_positions) == {"DHR", "SLS"}
         and str(dhr_current.get("side") or "long").lower() == "long"
-        and _close(dhr_current.get("qty", dhr_current.get("shares")), EXPECTED_DHR_REMAINDER, QTY_TOLERANCE)
+        and qty_alias_ok
+        and shares_alias_ok
     )
 
     current_cash = _f(pf.get("cash"))
