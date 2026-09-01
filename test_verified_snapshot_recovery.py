@@ -119,3 +119,67 @@ def test_snapshot_baseline_future_exit_closes_restored_lot(monkeypatch):
     assert rebuilt["parsed_trade_rows"] == 1
     assert rebuilt["open_positions"] == {}
     assert math.isclose(rebuilt["cash"], 11885.824057, abs_tol=1e-5)
+
+
+def test_snapshot_baseline_reconstructs_verified_flat_successor_without_trade_rows(monkeypatch):
+    monkeypatch.setattr(bidirectional, "analyze_ledger", getattr(bidirectional.analyze_ledger, "_verified_snapshot_baseline_prior", bidirectional.analyze_ledger))
+    baseline._APPLIED = False
+    core = types.SimpleNamespace()
+    assert baseline.apply(core)["status"] == "ok"
+    pf = {
+        "cash": 13533.996429678442,
+        "equity": 13533.996429678442,
+        "positions": {},
+        "trades": [],
+        "paper_accounting_epoch": {
+            "id": "stable-paper-v4-20260826-successor01",
+            "baseline_type": "verified_snapshot_with_open_position",
+            "verified_snapshot_baseline": {
+                "verified": True,
+                "cash": 13533.996429678442,
+                "equity": 13533.996429678442,
+                "realized_today": -1.770445283984143,
+                "realized_total": -409.3204452839842,
+                "positions": {},
+            },
+        },
+    }
+    rebuilt = bidirectional.analyze_ledger(pf, core)
+    assert rebuilt["status"] == "ok"
+    assert rebuilt["coverage_complete"] is True
+    assert rebuilt["parsed_trade_rows"] == 0
+    assert rebuilt["ignored_trade_rows"] == 0
+    assert rebuilt["coverage_issue_count"] == 0
+    assert rebuilt["economic_issue_count"] == 0
+    assert rebuilt["open_positions"] == {}
+    assert rebuilt["verified_flat_snapshot_baseline"] is True
+    assert math.isclose(rebuilt["cash"], 13533.996429678442, abs_tol=1e-6)
+    assert math.isclose(rebuilt["equity"], 13533.996429678442, abs_tol=1e-6)
+
+
+def test_snapshot_baseline_flat_shape_fails_closed_when_equity_is_not_cash(monkeypatch):
+    monkeypatch.setattr(bidirectional, "analyze_ledger", getattr(bidirectional.analyze_ledger, "_verified_snapshot_baseline_prior", bidirectional.analyze_ledger))
+    baseline._APPLIED = False
+    core = types.SimpleNamespace()
+    baseline.apply(core)
+    pf = {
+        "cash": 13533.996429678442,
+        "equity": 13600.0,
+        "positions": {},
+        "trades": [],
+        "paper_accounting_epoch": {
+            "id": "stable-paper-v4-20260826-successor01",
+            "baseline_type": "verified_snapshot_with_open_position",
+            "verified_snapshot_baseline": {
+                "verified": True,
+                "cash": 13533.996429678442,
+                "equity": 13600.0,
+                "positions": {},
+            },
+        },
+    }
+    rebuilt = bidirectional.analyze_ledger(pf, core)
+    assert rebuilt["status"] == "partial"
+    assert rebuilt["coverage_complete"] is False
+    assert rebuilt["coverage_issue_count"] == 1
+    assert rebuilt["coverage_issues"][0]["reason"] == "verified_flat_snapshot_not_cash_equivalent"
