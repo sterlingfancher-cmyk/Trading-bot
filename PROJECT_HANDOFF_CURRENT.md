@@ -1,11 +1,11 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-01 14:39 CDT  
+Last updated: 2026-09-01 15:08 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Current `main`: `7d821b6ebb1cd517a8b857fd52d3f8e6e63ae9f6`  
-Active stability/accounting issue: none; active runtime-observability/performance issue: Issue #146; active repair PR: #148
+Current runtime-code `main`: `2782873ba68399c8071fc079ca03cbf3a259c074` (PR #149); this handoff update is documentation-only and follows that validated runtime code.  
+Active stability/accounting issue: none; active runtime-observability/performance issue: none; active repair PR: none.
 
 ## Communication and Continuity
 
@@ -98,7 +98,7 @@ Exact PR head `e3204ea6f3174ea2d31f0624fa110d963bb9369c` passed Change Safety Au
 
 A fresh post-deploy retry confirmed the intended Issue #143 behavior: active `stable-paper-v4-20260826-successor01` makes the legacy verified-v2 gate nonblocking while retaining its raw evidence. Issue #143 is therefore closed as completed.
 
-## Issue #146 — Required Core Status/Root Latency
+## Issue #146 — Required Core Status/Root Latency — Closed 2026-09-01
 
 The post-PR-145 authoritative retry exposed a distinct runtime-observability/performance defect. `/paper/status` is explicitly a required core endpoint in the self-check contract, yet both `/paper/status` and `/` exceeded the runtime research collector's 20-second read timeout on two attempts.
 
@@ -120,28 +120,52 @@ The first main-push runtime snapshot after PR #147 landed was captured while Spl
 - fresh-day baseline passed, risk was not halted, and intraday drawdown was approximately `0.011%`;
 - self-defense was active only because the runtime was inside the configured final 30 minutes before the regular close. The compact daily audit therefore reported FAIL from that intentional late-day entry-defense condition, not from account loss, canonical divergence, lifecycle corruption, runner failure, or a new accounting defect.
 
-This proves PR #147 removed one expensive save path but did not remove the remaining latency source. Static trace shows the legacy root and `/paper/status` handlers still execute status-building work that can touch equity/risk/market/scanner/state-diagnostic surfaces during a read-only request.
+This proved PR #147 removed one expensive save path but did not remove the remaining latency source. Static trace showed the legacy root and `/paper/status` handlers still executed status-building work that could touch equity/risk/market/scanner/state-diagnostic surfaces during a read-only request.
 
 ### PR #148 — Lightweight Read-Only Core Status Views
 
-Active PR #148 (`fix/issue-146-lightweight-core-status`) is the bounded successor repair. It replaces only Flask view ownership for `home` and `paper_status` with a small in-memory snapshot overlay registered last in the existing runtime overlay stack. The new views read already-materialized portfolio/runtime fields only. They do not call `save_state`, state/journal reconciliation, `calculate_equity`, market-data fetches, scanner work, state-file diagnostics, automatic/manual cycles, order methods, or authority-changing code. Focused regressions explicitly fail if the new views invoke those legacy helpers and verify that endpoint ownership can be reasserted deterministically.
+PR #148 (`fix/issue-146-lightweight-core-status`) added a bounded before-request intercept for GET/HEAD `/` and `/paper/status`, returning an already-materialized in-memory read-only status snapshot before the expensive legacy handlers execute. It does not replace trading authority, persist state, recalculate equity, fetch market data, scan journals, run cycles, place orders, or change strategy/risk/sizing/live/ML authority.
 
-Current PR #148 head before this handoff update: `b52a1e07e7b0d6224b2c7667ce0a5909baedadca`. The pre-PR compare is bounded to one new read-only overlay, one focused test module, and a small `usercustomize.py` registration change; no `app.py` trading logic, persistence implementation, accounting/recovery code, risk logic, strategy/signals/sizing, canonical ledger, live authority, or ML authority is changed.
+PR #148 exact head `b819e7ab88b5fc1065f2301b136ca7a0fa0b5d54` passed Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, the full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit including exact Gunicorn smoke, and focused Issue #146 regressions. It was squash-merged as `17e7b816fc7b1de3f6096453fde431fffad958af`.
 
-Do not merge PR #148 unless the exact final head passes Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit including exact Gunicorn smoke, and the focused Issue #146 regressions. After merge/deployment, require a fresh authoritative Splendid read-only snapshot proving both `/paper/status` and root respond inside the normal 20-second collector boundary before closing Issue #146.
+Fresh authoritative post-PR-148 Splendid evidence proved `/paper/status` was fixed at approximately 0.201 seconds. Root `/` also returned quickly, but returned the intended lightweight HTML while `runtime_research_snapshot.py` explicitly requested `Accept: application/json` and parsed JSON. That produced a `JSONDecodeError` false failure. This was a narrow content-negotiation defect, not a trading/accounting/canonical/risk defect.
+
+### PR #149 — Root JSON Negotiation and Final Acceptance
+
+PR #149 (`fix/issue-146-root-json-negotiation`) preserved lightweight HTML for normal browser requests while returning the same bounded in-memory JSON snapshot when the client explicitly prefers `application/json`. The exact diff was surgical: only the read-only override plus one focused regression, with 16 additions and 1 deletion and no trading-state or authority change.
+
+Exact PR #149 head `4191f3fb205943ebb150e5a057ed2ae25a90936f` passed all required exact-head gates: Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit including exact Gunicorn smoke, and the focused Issue #146 regression. It was automatically squash-merged as `2782873ba68399c8071fc079ca03cbf3a259c074`.
+
+The first automatic post-merge capture hit Splendid during slow-but-live deferred registration and was not used as final acceptance. A read-only rerun after settle at approximately 15:06 CDT proved:
+- bootstrap `status=ready`, phase `delegating`, `delegate_ready=true`, and application readiness true;
+- no required endpoint failures;
+- root `/` HTTP 200 in approximately `0.274s`, returning `readonly-core-status-override-2026-09-01-v3-root-json-negotiation` JSON to the collector;
+- `/paper/status` HTTP 200 in approximately `0.425s` with the same v3 read-only snapshot;
+- active epoch `stable-paper-v4-20260826-successor01` remains under `validation_hold=true`;
+- canonical execution ledger remains append-only/hash-valid at 53 rows, 7 in the current v4 epoch;
+- accounting coverage is complete with `coverage_issue_count=0` and `economic_issue_count=0`; reconstructed open positions are exactly BBAI and DELL and reconstructed cash/equity agree with persisted values within sub-cent rounding;
+- cash approximately `11835.98`, equity approximately `13555.37`, open positions BBAI and DELL;
+- market-data accounting passes with provider circuit closed;
+- runner passes with no active error and last successful automatic run at approximately 14:58:02 CDT;
+- fresh-day baseline passes; risk is not halted; intraday drawdown is `0.0%`;
+- self-defense is active only for the intentional final-30-minute-before-close entry-defense policy. The compact daily audit therefore reports `overall=fail`/risk fail solely from that policy state, while there is no actual risk halt, canonical defect, accounting coverage/economic issue, runner failure, or market-data failure.
+
+Issue #146 was closed as completed on this evidence. No state, canonical history, halt/validation hold, strategy, sizing, hard-risk threshold, live authority, ML authority, or order authority was changed by the repair.
 
 ## Current Validation Boundary
 
-There is no active canonical/accounting correctness defect. Issue #146 is an observability/performance defect isolated to the legacy required core status/root views. The late-day self-defense condition observed at 14:30 CDT is expected policy behavior and does not authorize any risk/halt/hold change.
+There is no active canonical/accounting correctness defect and no active Issue #146 endpoint-latency defect. The observed late-day self-defense condition is expected policy behavior and does not authorize any risk/halt/hold change.
 
-The next governed trading-state decision remains validation-hold release for the clean v4 successor. Do not release it merely because Issue #126 is closed. Require a bounded release gate proving the configured forward-validation criteria are satisfied while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
+The next governed trading-state decision remains validation-hold release for the clean v4 successor. Do not release it merely because Issues #126, #143, and #146 are closed. Require a bounded release gate proving the configured forward-validation criteria are satisfied while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
 
 No `/paper/run`, manual halt/hold release, canonical mutation, day-peak rewrite, historical-state rewrite, or trading-authority change is authorized by this handoff.
 
 ## Immediate Next Action
 
-Validate PR #148 at its exact final head. If every required gate and focused regression is green and the diff remains bounded, squash-merge automatically. Then wait for authoritative Splendid deployment to settle and run a fresh read-only runtime snapshot. Close Issue #146 only when `/paper/status` and `/` are responsive inside the normal collector timeout and there is no new genuine required endpoint/runtime/accounting/canonical/risk failure.
+Continue the scheduled morning, midday, and pre-close read-only operational audits against Splendid. Treat the final-30-minute self-defense entry block as expected policy unless it persists outside its configured window or is accompanied by a genuine halt/loss/canonical/accounting/runtime defect.
 
-Separately evaluate validation-hold release only from explicit clean forward-validation evidence; do not manually clear the hold.
+Separately evaluate validation-hold release only from explicit clean forward-validation evidence; do not manually clear the hold. The current forward evidence is structurally healthy, but validation-release remains a separate governed decision.
+
+If a new demonstrated bug appears, repair it automatically within the standing safety boundary, require all exact-head gates, merge only when green, validate authoritative Splendid deployment evidence, and record every material finding/repair/merge/runtime result in this handoff.
 
 Correctness, accounting integrity, runtime stability, and deterministic recovery remain ahead of performance optimization.
