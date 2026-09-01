@@ -27,23 +27,10 @@ class Issue146ReadonlyCoreStatusTests(unittest.TestCase):
                 "equity": 13548.40,
                 "peak": 13549.83,
                 "positions": {
-                    "BBAI": {
-                        "side": "short",
-                        "entry": 4.9,
-                        "shares": 100.0,
-                        "last_price": 4.8,
-                    },
-                    "DELL": {
-                        "side": "short",
-                        "entry": 120.0,
-                        "shares": 5.0,
-                        "last_price": 119.0,
-                    },
+                    "BBAI": {"side": "short", "entry": 4.9, "shares": 100.0, "last_price": 4.8},
+                    "DELL": {"side": "short", "entry": 120.0, "shares": 5.0, "last_price": 119.0},
                 },
-                "performance": {
-                    "realized_pnl_today": 0.0,
-                    "unrealized_pnl": 10.0,
-                },
+                "performance": {"realized_pnl_today": 0.0, "unrealized_pnl": 10.0},
                 "realized_pnl": {"date": "2026-09-01", "today": 0.0},
                 "risk_controls": {
                     "date": "2026-09-01",
@@ -59,22 +46,14 @@ class Issue146ReadonlyCoreStatusTests(unittest.TestCase):
                     "hard_halt": False,
                     "reasons": ["inside final 30 minutes before close"],
                 },
-                "last_market": {
-                    "market_mode": "neutral",
-                    "regime": "neutral",
-                    "risk_score": 50,
-                },
+                "last_market": {"market_mode": "neutral", "regime": "neutral", "risk_score": 50},
                 "scanner_audit": {"signals_found": 2},
                 "auto_runner": {
                     "enabled": True,
                     "thread_started": True,
                     "last_successful_run_local": "2026-09-01 14:24:51 CDT",
                     "last_error": None,
-                    "last_result": {
-                        "market_mode": "neutral",
-                        "entries": [],
-                        "exits": [],
-                    },
+                    "last_result": {"market_mode": "neutral", "entries": [], "exits": []},
                 },
                 "trades": [{"symbol": "NVDA", "action": "exit_short"}],
                 "history": [13533.99, 13548.40],
@@ -111,14 +90,16 @@ class Issue146ReadonlyCoreStatusTests(unittest.TestCase):
         self.assertFalse(payload["authority"]["places_orders"])
         self.assertEqual(self.forbidden_calls, [])
 
-    def test_root_is_lightweight_and_uses_same_in_memory_snapshot(self) -> None:
+    def test_root_is_json_collector_compatible_and_read_only(self) -> None:
         override.install(self.core)
         with self.app.test_request_context("/", method="GET"):
             response = self._handler()()
-            text = response.get_data(as_text=True)
-        self.assertIn("Trading Bot", text)
-        self.assertIn("BBAI, DELL", text)
-        self.assertIn(override.VERSION, text)
+            payload = response.get_json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["surface"], "root")
+        self.assertEqual(payload["position_symbols"], ["BBAI", "DELL"])
+        self.assertEqual(payload["version"], override.VERSION)
+        self.assertTrue(payload["authority"]["read_only"])
         self.assertEqual(self.forbidden_calls, [])
 
     def test_full_query_does_not_reenable_expensive_legacy_status(self) -> None:
