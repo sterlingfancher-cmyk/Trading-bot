@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-"""Bounded read-only overrides for the required core status and root routes.
+"""Bounded read-only intercept for the required core status and root routes.
 
 Issue #146 showed that the legacy Flask handlers for /paper/status and / can exceed
 our 20-second read-only audit boundary even when the rest of the runtime is healthy.
-These replacements deliberately read only already-materialized in-memory state.
-They do not recalculate equity, fetch market data, scan journals, inspect the state
-file, persist state, run a cycle, or change trading authority.
+This module installs one Flask before-request interceptor scoped only to GET/HEAD on
+those two paths. It reads already-materialized in-memory state and returns before the
+legacy expensive handlers execute. It does not replace route ownership, persist
+state, recalculate equity, fetch market data, scan journals, run cycles, or alter
+trading authority.
 """
 
 import html
@@ -14,7 +16,8 @@ from typing import Any, Dict
 
 from flask import Response, jsonify, request
 
-VERSION = "readonly-core-status-override-2026-09-01-v1"
+VERSION = "readonly-core-status-override-2026-09-01-v2-before-request"
+_INSTALLED_APP_IDS: set[int] = set()
 
 
 def _dict(value: Any) -> Dict[str, Any]:
@@ -220,7 +223,7 @@ def _home(core: Any):
 <p>Status: <strong>running</strong></p>
 <p>Cash: {html.escape(str(row.get('cash')))} | Equity: {html.escape(str(row.get('equity')))}</p>
 <p>Positions: {html.escape(positions)}</p>
-<p>Read-only status override: {html.escape(VERSION)}</p>
+<p>Read-only status intercept: {html.escape(VERSION)}</p>
 <p><a href=\"/paper/status\">JSON status</a> · <a href=\"/paper/self-check\">Self-check</a> · <a href=\"/paper/daily-audit\">Daily audit</a></p>
 </body></html>"""
     return Response(body, status=200, mimetype="text/html")
@@ -228,31 +231,29 @@ def _home(core: Any):
 
 def install(core: Any) -> Dict[str, Any]:
     app = getattr(core, "app", None)
-    if app is None or not hasattr(app, "view_functions"):
+    if app is None or not hasattr(app, "before_request"):
         return {"status": "pending", "version": VERSION, "reason": "flask_app_unavailable"}
 
-    replaced = []
+    app_id = id(app)
+    if app_id not in _INSTALLED_APP_IDS:
+        def readonly_core_status_preflight():
+            if request.method not in {"GET", "HEAD"}:
+                return None
+            if request.path == "/paper/status":
+                return _paper_status(core)
+            if request.path == "/":
+                return _home(core)
+            return None
 
-    if "paper_status" in app.view_functions:
-        def paper_status_view():
-            return _paper_status(core)
-
-        paper_status_view._readonly_core_status_override_version = VERSION  # type: ignore[attr-defined]
-        app.view_functions["paper_status"] = paper_status_view
-        replaced.append("paper_status")
-
-    if "home" in app.view_functions:
-        def home_view():
-            return _home(core)
-
-        home_view._readonly_core_status_override_version = VERSION  # type: ignore[attr-defined]
-        app.view_functions["home"] = home_view
-        replaced.append("home")
+        app.before_request(readonly_core_status_preflight)
+        _INSTALLED_APP_IDS.add(app_id)
 
     return {
-        "status": "ok" if {"paper_status", "home"}.issubset(set(replaced)) else "pending",
+        "status": "ok",
         "version": VERSION,
-        "replaced_endpoints": replaced,
+        "intercepted_paths": ["/", "/paper/status"],
+        "methods": ["GET", "HEAD"],
         "read_only": True,
         "persists_state": False,
+        "replaces_route_ownership": False,
     }
