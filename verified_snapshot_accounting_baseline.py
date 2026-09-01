@@ -1,10 +1,12 @@
-"""Accounting adapter for a verified snapshot epoch with an open paper position.
+"""Accounting adapter for a verified snapshot paper epoch.
 
 The 2026-08-12 recovery cannot honestly restart from a zero-position baseline:
 independent market evidence proves that the catastrophic LRCX 36.26 paper exit
-was a bad tick and the remaining 3.42486-share lot must be restored.  This
+was a bad tick and the remaining 3.42486-share lot must be restored. This
 adapter lets the existing bidirectional reconciler start from a verified cash +
-open-lot snapshot while keeping all future executions on the canonical ledger.
+position snapshot while keeping all future executions on the canonical ledger.
+It also recognizes a verified flat snapshot when a later deterministic successor
+replay has closed every opening lot before the new epoch begins.
 
 No strategy, sizing, risk-limit, live, or ML authority is changed.
 """
@@ -12,7 +14,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-VERSION = "verified-snapshot-accounting-baseline-2026-08-12-v1"
+VERSION = "verified-snapshot-accounting-baseline-2026-09-01-v2-flat-successor"
+FLAT_EQUITY_TOLERANCE = 0.05
 _APPLIED = False
 
 
@@ -80,6 +83,66 @@ def _adjust_issue_indexes(rows: Any, synthetic_count: int) -> List[Dict[str, Any
     return out
 
 
+def _flat_snapshot_result(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    baseline_cash = _f(snapshot.get("cash"), 0.0)
+    baseline_equity = _f(snapshot.get("equity"), 0.0)
+    sane = bool(
+        baseline_cash > 0.0
+        and baseline_equity > 0.0
+        and abs(baseline_equity - baseline_cash) <= FLAT_EQUITY_TOLERANCE
+    )
+    if not sane:
+        return {
+            "status": "partial",
+            "reason": "verified_flat_snapshot_not_cash_equivalent",
+            "coverage_complete": False,
+            "parsed_trade_rows": 0,
+            "ignored_trade_rows": 1,
+            "coverage_issues": [{
+                "reason": "verified_flat_snapshot_not_cash_equivalent",
+                "baseline_cash": round(baseline_cash, 6),
+                "baseline_equity": round(baseline_equity, 6),
+            }],
+            "coverage_issue_count": 1,
+            "economic_issues": [],
+            "economic_issue_count": 0,
+            "accounting_model": "bidirectional_margin_v1",
+            "supports_long_short": True,
+            "baseline_type": "verified_snapshot_with_open_position",
+            "baseline_position_count": 0,
+            "verified_snapshot_epoch": True,
+        }
+    realized_today = _f(snapshot.get("realized_today"), 0.0)
+    realized_total = _f(snapshot.get("realized_total"), 0.0)
+    return {
+        "status": "ok",
+        "coverage_complete": True,
+        "parsed_trade_rows": 0,
+        "ignored_trade_rows": 0,
+        "initial_cash": round(baseline_cash, 6),
+        "baseline_cash": round(baseline_cash, 6),
+        "baseline_equity": round(baseline_equity, 6),
+        "cash": round(baseline_cash, 6),
+        "equity": round(baseline_equity, 6),
+        "market_value": 0.0,
+        "realized_total": round(realized_total, 6),
+        "realized_today": round(realized_today, 6),
+        "unrealized_pnl": 0.0,
+        "open_positions": {},
+        "reconstructed_open_positions": [],
+        "coverage_issues": [],
+        "coverage_issue_count": 0,
+        "economic_issues": [],
+        "economic_issue_count": 0,
+        "accounting_model": "bidirectional_margin_v1",
+        "supports_long_short": True,
+        "baseline_type": "verified_snapshot_with_open_position",
+        "baseline_position_count": 0,
+        "verified_snapshot_epoch": True,
+        "verified_flat_snapshot_baseline": True,
+    }
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     global _APPLIED
     try:
@@ -106,7 +169,9 @@ def apply(core: Any = None) -> Dict[str, Any]:
             return prior(pf, runtime_core)
 
         synthetic = _synthetic_entry_rows(snap)
-        if not synthetic and _d(snap.get("positions")):
+        snapshot_positions = _d(snap.get("positions"))
+        actual_trades = _l(pf.get("trades"))
+        if not synthetic and snapshot_positions:
             return {
                 "status": "partial",
                 "coverage_complete": False,
@@ -120,9 +185,11 @@ def apply(core: Any = None) -> Dict[str, Any]:
                 "supports_long_short": True,
                 "baseline_type": "verified_snapshot_with_open_position",
             }
+        if not synthetic and not snapshot_positions and not actual_trades:
+            return _flat_snapshot_result(snap)
 
         working = {
-            "trades": [dict(row) if isinstance(row, dict) else row for row in _l(pf.get("trades"))],
+            "trades": [dict(row) if isinstance(row, dict) else row for row in actual_trades],
             "positions": {symbol: dict(raw) if isinstance(raw, dict) else raw for symbol, raw in _d(pf.get("positions")).items()},
         }
         for key in ("initial_cash", "starting_cash", "starting_equity", "initial_equity"):
@@ -130,7 +197,6 @@ def apply(core: Any = None) -> Dict[str, Any]:
                 working[key] = pf.get(key)
         if isinstance(pf.get("history"), list):
             working["history"] = list(pf.get("history") or [])
-        actual_trades = _l(working.get("trades"))
         reserved = sum(_f(row.get("shares")) * _f(row.get("price")) for row in synthetic)
         baseline_cash = _f(snap.get("cash"), 0.0)
         working["initial_cash"] = baseline_cash + reserved
@@ -182,6 +248,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "overall": "pass" if active else "warn",
         "version": VERSION,
         "snapshot_baseline_supported": bool(active),
+        "verified_flat_snapshot_baseline_supported": bool(active),
         "paper_accounting_only": True,
     }
 
