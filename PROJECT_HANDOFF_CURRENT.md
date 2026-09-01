@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-08-31 22:36 CDT  
+Last updated: 2026-08-31 23:28 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Current `main` repair baseline before this handoff commit: `baccd041751c8e2e4a603cec097bb16d4c21c73d` (squash merge of PR #142)  
+Current `main` baseline before this handoff commit: `d7978b74a891aa630fb652549f997956cba401d8`  
 Active stability/accounting issue: Issue #126
 
 ## Communication and Continuity
@@ -77,6 +77,12 @@ PR #142 exact head `4db57469c2c75d36a5b3d0660bdffe521b908748` passed:
 
 PR #142 was squash-merged automatically as `baccd041751c8e2e4a603cec097bb16d4c21c73d`.
 
+## 2026-08-31 PR #142 Deployment Boundary
+
+Current `main` documentation baseline `d7978b74a891aa630fb652549f997956cba401d8` is deployed successfully to authoritative Splendid (`web-production-e1796.up.railway.app`). The exact-main Change Safety Audit also completed successfully. No new open repair PR or newly discovered correctness issue is present beyond Issue #126.
+
+A fresh direct read-only request to the Splendid audit endpoint from the automation execution environment still fails at DNS resolution. Treat this as an evidence-access limitation only; do not infer active accounting health from deployment success alone and do not alter runtime state in response.
+
 ## Current Validation Boundary
 
 Issue #126 remains open intentionally. Fresh read-only authoritative Splendid evidence after deployment of PR #142 must now prove:
@@ -91,7 +97,7 @@ No `/paper/run`, manual halt/hold release, canonical mutation, day-peak rewrite,
 
 ## Immediate Next Action
 
-Allow PR #142 to deploy to authoritative Splendid, then obtain a fresh read-only repository runtime-research snapshot/audit. If active v4 accounting is clean and all other acceptance evidence remains intact, evaluate Issue #126 closure and any separate halt/validation-hold release boundary from that exact evidence only.
+Obtain a fresh read-only authoritative Splendid repository runtime-research snapshot/audit from an execution path that can resolve the service. If active v4 accounting is clean and all other acceptance evidence remains intact, evaluate Issue #126 closure and any separate halt/validation-hold release boundary from that exact evidence only.
 
 ## Completion Criteria for Issue #126
 
