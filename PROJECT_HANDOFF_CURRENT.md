@@ -1,11 +1,11 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-01 09:37 CDT  
+Last updated: 2026-09-01 10:48 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Current `main` baseline before this handoff commit: `842c249b53c7c604fdc89679715d5a07712a7f0d`  
-Active stability/accounting issue: none; active diagnostics-only follow-up: Issue #143
+Current code baseline before this handoff commit: `3421829a68d898bbb413e5638372c95f78fb1177`  
+Active stability/accounting issue: none; active runtime-observability/performance issue: Issue #146
 
 ## Communication and Continuity
 
@@ -69,50 +69,63 @@ PR #142 added a narrow fail-closed verified-flat baseline path. It reports accou
 
 A flat snapshot with a material cash/equity mismatch remains a coverage failure. Existing verified-open-position behavior is unchanged. The repair does not mutate portfolio state, canonical history, risk state, halt/validation hold, strategy, signals, sizing, hard-risk thresholds, live authority, ML authority, or order authority.
 
-PR #142 exact head `4db57469c2c75d36a5b3d0660bdffe521b908748` passed:
-- Change Safety Audit, including impact-aware canonical invariant regressions and exact Gunicorn bootstrap startup smoke;
-- Repository Safety and Performance Audit Validation;
-- Architecture Debt Regression Gate;
-- full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit.
-
-PR #142 was squash-merged automatically as `baccd041751c8e2e4a603cec097bb16d4c21c73d`.
+PR #142 exact head `4db57469c2c75d36a5b3d0660bdffe521b908748` passed Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, the full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit, and exact Gunicorn startup smoke. PR #142 was squash-merged automatically as `baccd041751c8e2e4a603cec097bb16d4c21c73d`.
 
 ## 2026-09-01 Morning Acceptance — Issue #126 Closed
 
-A fresh read-only authoritative Splendid runtime-research capture completed at approximately 09:32 CDT using the deployed PR #142 code. The runtime and accounting acceptance boundary is now clean:
-- active epoch remains `stable-paper-v4-20260826-successor01` under validation hold;
-- daily audit reports `overall=pass` and accounting integrity `status=ok`;
-- `coverage_complete=true`, `coverage_issue_count=0`, and `economic_issue_count=0`;
-- canonical execution ledger is append-only/hash-valid at 48 rows with 2 current-v4 rows;
-- the two new post-cutover rows form a legitimate exact NVDA short lifecycle: entry `9c0aaec4bf2547bc9fff1f4514687025`, 4.698849 @ 216.021, followed by exit `666fe83500a540cebce5bb142553f5f1`, 4.698849 @ 218.31;
-- active state is flat with no open positions; cash is `13523.240757873831`, equity `13523.24`, and reconstructed cash/equity `13523.240764`;
-- runner is PASS with no active error and last successful run `2026-09-01 09:29:24 CDT`;
-- market-data accounting is PASS with 7,593 classified terminal outcomes and zero in-flight/unclassified requests;
-- fresh-day baseline is sane/pass with `day_start_equity=13533.996429678442`, `day_peak_equity=13534.0`, and approximately 0.079% daily loss/drawdown;
-- risk is PASS and no lifecycle/risk halt is currently active;
-- self-check is PASS with no failing components;
-- the v3→v4 migration provenance remains archived and exact, and the invalid SLS partial remains immutable historical evidence excluded only from successor economics.
+A fresh read-only authoritative Splendid runtime-research capture completed at approximately 09:32 CDT using the deployed PR #142 code. The runtime and accounting acceptance boundary was clean:
+- active epoch remained `stable-paper-v4-20260826-successor01` under validation hold;
+- daily audit reported `overall=pass`, accounting coverage complete, zero coverage issues, and zero economic issues;
+- canonical execution ledger remained append-only/hash-valid;
+- runner, market-data accounting, fresh-day state, risk, and self-check passed;
+- the v3→v4 migration provenance remained archived and exact, with the invalid SLS partial retained as immutable historical evidence and excluded only from successor economics.
 
-Issue #126 was closed as completed on this evidence. No code repair or state mutation was required during the 2026-09-01 morning audit. Validation hold remains active and should only be released through a separate governed validation-release decision; Issue #126 closure does not itself authorize hold release.
+Issue #126 was closed as completed on this evidence. Validation hold remains active and should only be released through a separate governed validation-release decision; Issue #126 closure does not itself authorize hold release.
 
-## Issue #143 — Diagnostics-Only Snapshot Classification Follow-up
+## 2026-09-01 Issue #143 Resolution — PR #145
 
-The same clean 2026-09-01 capture exposed a non-authoritative observability defect in `runtime_research_snapshot.py`. The wrapper reports `overall=warn` even though active v4 runtime/accounting is healthy because:
-- it still treats the superseded verified-v2 recovery probe as an active health gate; that probe correctly returns `canonical_ledger_epoch_lineage_not_exactly_verified_v2` on a v4 lineage;
-- it treats failure of the optional root `/` JSON endpoint as a warning even when bootstrap, paper status, self-check, fresh-day, and daily-audit endpoints prove the application ready.
+Issue #143 tracked a diagnostics-only false WARN in `runtime_research_snapshot.py`: the collector treated the legacy verified-v2 recovery gate as active on a healthy v4 lineage and treated the optional root endpoint as blocking even when required runtime health was proven.
 
-Issue #143 tracks this diagnostics-only false-WARN classification. An autonomous `/agent` repair request has been issued with a strict boundary: continue collecting the legacy v2 probe as historical evidence, but make it non-applicable to v4+ overall health; preserve v2 fail/warn behavior; treat root as optional only when required readiness endpoints are healthy; keep all genuine self-check/fresh-day/daily-audit/required-endpoint failures fail-closed; add focused regressions; do not touch state, execution, risk, strategy, sizing, live, ML, or order authority. No PR exists yet at this handoff point.
+PR #145 implemented a surgical two-file repair:
+- preserve collection/raw evidence from the legacy verified-v2 recovery endpoint;
+- when active daily-audit epoch is `stable-paper-v4-*` or later, mark that old v2 gate superseded/non-applicable to overall classification;
+- preserve fail-closed behavior for active verified-v2 failures;
+- permit root `/` to be nonblocking only when bootstrap, paper status, application readiness, and self-check prove required health;
+- preserve warning behavior for required endpoint, self-check, fresh-day, daily-audit, accounting/risk, and research-run failures;
+- add focused regressions for v4 lineage, optional root failure, and required endpoint failures.
+
+Exact PR head `e3204ea6f3174ea2d31f0624fa110d963bb9369c` passed Change Safety Audit including impact-aware canonical invariant regressions and exact Gunicorn smoke, Repository Safety/Performance, Architecture Debt, and the full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research audit. PR #145 was squash-merged as `3421829a68d898bbb413e5638372c95f78fb1177` and authoritative Splendid deployment succeeded.
+
+A fresh post-deploy retry confirmed the intended Issue #143 behavior: active `stable-paper-v4-20260826-successor01` makes the legacy verified-v2 gate nonblocking while retaining its raw evidence. Issue #143 is therefore closed as completed.
+
+## Issue #146 — Required Core Status/Root Latency
+
+The same post-PR-145 authoritative retry exposed a distinct runtime-observability/performance defect that must not be hidden by Issue #143 classification logic. `/paper/status` is explicitly a required core endpoint in the self-check contract, yet both `/paper/status` and `/` exceeded the runtime research collector's 20-second read timeout on two attempts.
+
+At the same snapshot, independent required evidence was healthy:
+- `/bootstrap-status` returned HTTP 200 and reported ready/delegating;
+- `/paper/self-check` returned PASS with no base failures and open paper positions `NOW`, `BBAI`, and `DELL`;
+- `/paper/fresh-day-check` returned PASS with reset pending false;
+- `/paper/daily-audit` returned overall PASS;
+- active epoch remained `stable-paper-v4-20260826-successor01` with `validation_hold=true`;
+- accounting coverage was complete with zero coverage issues and zero economic issues;
+- canonical ledger remained hash-valid at 51 rows with five v4 rows;
+- runner had no active error, risk passed, and no risk/lifecycle halt was active.
+
+The runtime research snapshot therefore correctly remained WARN after Issue #143 was fixed because `/paper/status` is a required core endpoint and timed out. Issue #146 now owns the bounded diagnosis/repair of `/paper/status` and root read latency. Do not solve it by suppressing the required endpoint or merely increasing the audit timeout without evidence that the timeout itself is invalid. The repair must not alter strategy, signals, sizing, hard-risk limits, canonical/accounting state, validation hold, live authority, ML authority, or order authority.
 
 ## Current Validation Boundary
 
-There is no active trading stability/accounting defect. Continue routine read-only morning, midday, and pre-close operational audits. Treat any future canonical/accounting/runtime regression as a new issue unless evidence proves it is a continuation of an existing defect.
+There is no active canonical/accounting correctness defect. Issue #146 is an active required-core runtime observability/performance defect. Continue normal autonomous paper operation and read-only audits while the endpoint latency is diagnosed; the healthy accounting/risk evidence does not authorize weakening `/paper/status`'s required-core contract.
 
-The next governed trading-state decision is validation-hold release for the clean v4 successor. Do not release it merely because Issue #126 is closed. Require a bounded release gate proving the configured forward-validation criteria are satisfied while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
+The next governed trading-state decision remains validation-hold release for the clean v4 successor. Do not release it merely because Issue #126 is closed. Require a bounded release gate proving the configured forward-validation criteria are satisfied while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
 
 No `/paper/run`, manual halt/hold release, canonical mutation, day-peak rewrite, historical-state rewrite, or trading-authority change is authorized by this handoff.
 
 ## Immediate Next Action
 
-Complete Issue #143 only as a diagnostics/read-only repair with mandatory exact-head safety gates. Continue normal autonomous audits against authoritative Splendid. If v4 accounting, canonical lifecycle, runner, market-data, persistence, fresh-day risk state, or startup health regresses, investigate and repair it under the standing bounded safety rules. Separately evaluate the existing validation-hold release mechanism only from explicit clean forward-validation evidence; do not manually clear the hold.
+Diagnose Issue #146 as a bounded read-only/status-path performance repair. Preserve `/paper/status` as a required fail-closed core endpoint. Add focused latency/regression coverage and require every standard exact-head safety/audit gate before automatic merge. After deployment, require a fresh authoritative runtime snapshot with `/paper/status` responsive and the overall research snapshot no longer WARN before closing Issue #146.
+
+Separately evaluate validation-hold release only from explicit clean forward-validation evidence; do not manually clear the hold.
 
 Correctness, accounting integrity, runtime stability, and deterministic recovery remain ahead of performance optimization.
