@@ -229,6 +229,19 @@ def _home(core: Any):
     return Response(body, status=200, mimetype="text/html")
 
 
+def _build_preflight(core: Any):
+    def readonly_core_status_preflight():
+        if request.method not in {"GET", "HEAD"}:
+            return None
+        if request.path == "/paper/status":
+            return _paper_status(core)
+        if request.path == "/":
+            return _home(core)
+        return None
+
+    return readonly_core_status_preflight
+
+
 def install(core: Any) -> Dict[str, Any]:
     app = getattr(core, "app", None)
     if app is None or not hasattr(app, "before_request"):
@@ -236,16 +249,7 @@ def install(core: Any) -> Dict[str, Any]:
 
     app_id = id(app)
     if app_id not in _INSTALLED_APP_IDS:
-        def readonly_core_status_preflight():
-            if request.method not in {"GET", "HEAD"}:
-                return None
-            if request.path == "/paper/status":
-                return _paper_status(core)
-            if request.path == "/":
-                return _home(core)
-            return None
-
-        app.before_request(readonly_core_status_preflight)
+        app.before_request(_build_preflight(core))
         _INSTALLED_APP_IDS.add(app_id)
 
     return {
