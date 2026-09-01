@@ -16,7 +16,7 @@ from typing import Any, Dict
 
 from flask import Response, jsonify, request
 
-VERSION = "readonly-core-status-override-2026-09-01-v2-before-request"
+VERSION = "readonly-core-status-override-2026-09-01-v3-root-json-negotiation"
 _INSTALLED_APP_IDS: set[int] = set()
 
 
@@ -215,6 +215,8 @@ def _paper_status(core: Any):
 
 def _home(core: Any):
     row = _snapshot(core)
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify(row)
     positions = ", ".join(row.get("position_symbols", [])) or "none"
     body = f"""<!doctype html>
 <html><head><meta charset=\"utf-8\"><title>Trading Bot Status</title></head>
