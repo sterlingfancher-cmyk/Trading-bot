@@ -11,12 +11,11 @@ state, recalculate equity, fetch market data, scan journals, run cycles, or alte
 trading authority.
 """
 
-import html
 from typing import Any, Dict
 
-from flask import Response, jsonify, request
+from flask import jsonify, request
 
-VERSION = "readonly-core-status-override-2026-09-01-v2-before-request"
+VERSION = "readonly-core-status-override-2026-09-01-v3-root-json"
 _INSTALLED_APP_IDS: set[int] = set()
 
 
@@ -47,9 +46,8 @@ def _snapshot(core: Any) -> Dict[str, Any]:
 
     compact_positions: Dict[str, Any] = {}
     for symbol, raw in positions.items():
-        pos = _dict(raw)
         compact_positions[str(symbol)] = _subset(
-            pos,
+            raw,
             (
                 "side",
                 "entry",
@@ -215,18 +213,8 @@ def _paper_status(core: Any):
 
 def _home(core: Any):
     row = _snapshot(core)
-    positions = ", ".join(row.get("position_symbols", [])) or "none"
-    body = f"""<!doctype html>
-<html><head><meta charset=\"utf-8\"><title>Trading Bot Status</title></head>
-<body>
-<h1>Trading Bot</h1>
-<p>Status: <strong>running</strong></p>
-<p>Cash: {html.escape(str(row.get('cash')))} | Equity: {html.escape(str(row.get('equity')))}</p>
-<p>Positions: {html.escape(positions)}</p>
-<p>Read-only status intercept: {html.escape(VERSION)}</p>
-<p><a href=\"/paper/status\">JSON status</a> · <a href=\"/paper/self-check\">Self-check</a> · <a href=\"/paper/daily-audit\">Daily audit</a></p>
-</body></html>"""
-    return Response(body, status=200, mimetype="text/html")
+    row["surface"] = "root"
+    return jsonify(row)
 
 
 def _build_preflight(core: Any):
