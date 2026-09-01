@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_BASE_URL = "https://web-production-e1796.up.railway.app"
-VERSION = "runtime-research-snapshot-2026-08-24-v5-market-open-stabilization"
+VERSION = "runtime-research-snapshot-2026-09-01-v6-lineage-aware-classification"
 
 ENDPOINTS = {
     "bootstrap_status": "/bootstrap-status",
@@ -41,6 +41,18 @@ def _dict(value: Any) -> dict[str, Any]:
 
 def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _stable_paper_epoch_generation(epoch_id: Any) -> int | None:
+    text = str(epoch_id or "")
+    prefix = "stable-paper-v"
+    if not text.startswith(prefix):
+        return None
+    generation_text = text[len(prefix) :].split("-", 1)[0]
+    try:
+        return int(generation_text)
+    except (TypeError, ValueError):
+        return None
 
 
 def _fetch_json(url: str, retries: int, timeout: float) -> dict[str, Any]:
@@ -254,6 +266,34 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
     audit_overall = audit_payload.get("overall")
     v2_run_status = v2_payload.get("run_status") or latest.get("status") or "unknown"
 
+    active_epoch_id = _dict(audit_payload.get("accounting_epoch")).get("epoch_id")
+    active_epoch_generation = _stable_paper_epoch_generation(active_epoch_id)
+    recovery_gate_superseded = bool(
+        active_epoch_generation is not None and active_epoch_generation >= 4
+    )
+    root_optional_nonblocking = bool(
+        "root" in failures
+        and "bootstrap_status" in reachable
+        and "paper_status" in reachable
+        and "self_check" in reachable
+        and application_ready
+        and self_overall == "pass"
+        and paper_payload.get("status") in {None, "ok", "pass"}
+    )
+    nonblocking_failures = set()
+    if root_optional_nonblocking:
+        nonblocking_failures.add("root")
+    if recovery_gate_superseded:
+        nonblocking_failures.add("verified_v2_recovery_gate")
+    classification_failures = sorted(set(failures) - nonblocking_failures)
+    recovery_gate["classification_applicable"] = not recovery_gate_superseded
+    recovery_gate["classification_reason"] = (
+        "superseded_by_active_v4_plus_lineage"
+        if recovery_gate_superseded
+        else "active_verified_v2_recovery_gate"
+    )
+    recovery_gate["active_epoch_id"] = active_epoch_id
+
     if not listener_reachable:
         overall = "error"
     elif not application_ready:
@@ -264,9 +304,9 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
         overall = "warn"
     elif audit_overall not in {None, "pass"}:
         overall = "warn"
-    elif recovery_overall not in {None, "pass"}:
+    elif not recovery_gate_superseded and recovery_overall not in {None, "pass"}:
         overall = "warn"
-    elif str(v2_run_status).lower() == "error" or failures:
+    elif str(v2_run_status).lower() == "error" or classification_failures:
         overall = "warn"
     else:
         overall = "pass"
@@ -278,6 +318,8 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "total_count": len(raw),
             "reachable_endpoints": reachable,
             "failed_endpoints": failures,
+            "classification_failed_endpoints": classification_failures,
+            "nonblocking_failed_endpoints": sorted(nonblocking_failures),
             "listener_reachable": listener_reachable,
             "application_ready": application_ready,
             "delegate_ready": delegate_ready,
@@ -287,6 +329,7 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "bootstrap_elapsed_seconds": bootstrap_payload.get("elapsed_seconds"),
             "loader_thread_alive": bootstrap_payload.get("loader_thread_alive"),
             "root_status": root_payload.get("status"),
+            "root_optional_nonblocking": root_optional_nonblocking,
             "paper_status": paper_payload.get("status"),
         },
         "self_check": {
@@ -377,6 +420,8 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- Bootstrap phase: `{connectivity.get('bootstrap_phase')}`",
         f"- Bootstrap error: `{connectivity.get('bootstrap_error')}`",
         f"- Failed endpoints: `{connectivity.get('failed_endpoints')}`",
+        f"- Classification failures: `{connectivity.get('classification_failed_endpoints')}`",
+        f"- Nonblocking failures: `{connectivity.get('nonblocking_failed_endpoints')}`",
         "",
         "## Paper Runtime",
         "",
@@ -412,6 +457,9 @@ def _markdown(report: dict[str, Any]) -> str:
         "## Verified-v2 Recovery Gate",
         "",
         f"- Overall: `{recovery_gate.get('overall')}`",
+        f"- Classification applicable: `{recovery_gate.get('classification_applicable')}`",
+        f"- Classification reason: `{recovery_gate.get('classification_reason')}`",
+        f"- Active epoch: `{recovery_gate.get('active_epoch_id')}`",
         f"- Diagnosis: `{recovery_gate.get('diagnosis')}`",
         f"- Version: `{recovery_gate.get('version')}`",
         f"- Ledger rows / chain: `{recovery_gate.get('ledger_row_count')}` / `{recovery_gate.get('chain_valid')}`",

@@ -11,6 +11,7 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
         recovery_overall="pass",
         fresh_baseline_status="pass",
         audit_overall="pass",
+        epoch_id="stable-paper-v2-20260812-verified01",
     ):
         raw = {
             name: {"status": "ok", "payload": {}}
@@ -45,7 +46,7 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
             "overall": audit_overall,
             "generated_local": "2026-08-24 10:30:00 CDT",
             "accounting_epoch": {
-                "epoch_id": "stable-paper-v2-20260812-verified01",
+                "epoch_id": epoch_id,
                 "validation_hold": True,
             },
             "accounting_integrity": {
@@ -56,7 +57,7 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
             "execution_ledger": {
                 "chain_valid": True,
                 "row_count": 39,
-                "current_epoch_id": "stable-paper-v2-20260812-verified01",
+                "current_epoch_id": epoch_id,
             },
             "market_data": {"status": "pass"},
             "runner": {
@@ -126,6 +127,7 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
         self.assertEqual(summary["overall"], "pass")
         gate = summary["recovery_gate"]
         self.assertEqual(gate["overall"], "pass")
+        self.assertTrue(gate["classification_applicable"])
         self.assertEqual(gate["ledger_row_count"], 39)
         self.assertEqual(gate["known_invalid_execution_count"], 7)
         self.assertTrue(gate["all_known_invalid_signatures_exact"])
@@ -176,14 +178,79 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
         self.assertEqual(summary["daily_audit"]["coverage_issue_count"], 1)
         self.assertEqual(summary["daily_audit"]["economic_issue_count"], 1)
 
-    def test_failed_recovery_gate_warns_snapshot_without_manual_probe_regression(self):
+    def test_failed_recovery_gate_warns_on_active_verified_v2_lineage(self):
         summary = snapshot._summarize(self._raw(recovery_overall="fail"))
 
         self.assertEqual(summary["overall"], "warn")
         gate = summary["recovery_gate"]
         self.assertEqual(gate["overall"], "fail")
+        self.assertTrue(gate["classification_applicable"])
+        self.assertEqual(
+            gate["classification_reason"], "active_verified_v2_recovery_gate"
+        )
         self.assertFalse(gate["mechanically_complete_for_successor_migration_design"])
         self.assertFalse(gate["manual_per_event_probe_required"])
+
+    def test_failed_verified_v2_gate_is_superseded_on_active_v4_lineage(self):
+        raw = self._raw(
+            recovery_overall="fail",
+            epoch_id="stable-paper-v4-20260826-successor01",
+        )
+        raw["verified_v2_recovery_gate"]["payload"]["diagnosis"] = (
+            "canonical_ledger_epoch_lineage_not_exactly_verified_v2"
+        )
+
+        summary = snapshot._summarize(raw)
+
+        self.assertEqual(summary["overall"], "pass")
+        gate = summary["recovery_gate"]
+        self.assertEqual(gate["overall"], "fail")
+        self.assertFalse(gate["classification_applicable"])
+        self.assertEqual(
+            gate["classification_reason"],
+            "superseded_by_active_v4_plus_lineage",
+        )
+        self.assertEqual(
+            gate["active_epoch_id"], "stable-paper-v4-20260826-successor01"
+        )
+
+    def test_optional_root_failure_does_not_warn_when_required_runtime_is_healthy(self):
+        raw = self._raw(
+            recovery_overall="fail",
+            epoch_id="stable-paper-v4-20260826-successor01",
+        )
+        raw["root"] = {"status": "error", "error": "HTTPError: 404"}
+
+        summary = snapshot._summarize(raw)
+
+        self.assertEqual(summary["overall"], "pass")
+        connectivity = summary["connectivity"]
+        self.assertIn("root", connectivity["failed_endpoints"])
+        self.assertNotIn("root", connectivity["classification_failed_endpoints"])
+        self.assertIn("root", connectivity["nonblocking_failed_endpoints"])
+        self.assertTrue(connectivity["root_optional_nonblocking"])
+
+    def test_root_failure_stays_blocking_when_required_self_check_is_unhealthy(self):
+        raw = self._raw(epoch_id="stable-paper-v4-20260826-successor01")
+        raw["root"] = {"status": "error", "error": "HTTPError: 404"}
+        raw["self_check"]["payload"]["overall"] = "fail"
+
+        summary = snapshot._summarize(raw)
+
+        self.assertEqual(summary["overall"], "warn")
+        self.assertIn("root", summary["connectivity"]["classification_failed_endpoints"])
+        self.assertFalse(summary["connectivity"]["root_optional_nonblocking"])
+
+    def test_required_endpoint_failure_still_warns_on_v4(self):
+        raw = self._raw(epoch_id="stable-paper-v4-20260826-successor01")
+        raw["paper_status"] = {"status": "error", "error": "timeout"}
+
+        summary = snapshot._summarize(raw)
+
+        self.assertEqual(summary["overall"], "warn")
+        self.assertIn(
+            "paper_status", summary["connectivity"]["classification_failed_endpoints"]
+        )
 
 
 if __name__ == "__main__":
