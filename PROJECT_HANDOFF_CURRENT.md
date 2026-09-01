@@ -1,17 +1,18 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-08-31 17:41 CDT  
+Last updated: 2026-08-31 20:38 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Current `main` repair baseline before this handoff commit: `39511bd53fe599a8e3a1564b7d3887af3021b29f` (squash merge of PR #141)  
+Current `main` before this handoff commit: `2d3e120c9dd389d71097fb4479279b69217ae610`  
+Current Issue #126 repair baseline: `39511bd53fe599a8e3a1564b7d3887af3021b29f` (squash merge of PR #141)  
 Active stability/accounting issue: Issue #126
 
 ## Communication and Continuity
 
 Keep all Trading-bot progress, blockers, merge notices, runtime findings, and issue-status updates in the currently active main ChatGPT Trading conversation. Do not branch individual issue updates into separate chats unless the user explicitly requests a transition.
 
-The user wants routine bounded stability work handled automatically: investigate, repair, test, merge when every required exact-head gate is green, then validate authoritative Splendid deployment evidence. Escalate only genuinely blocked or authority-changing decisions.
+Routine bounded stability work should be handled automatically: investigate, repair, test, merge when every required exact-head gate is green, then validate authoritative Splendid deployment evidence. Escalate only genuinely blocked or authority-changing decisions.
 
 ## Standing Safety / Authority Boundaries
 
@@ -46,33 +47,35 @@ Fresh forensic evidence showed the remaining v3→v4 verifier blocker was the pe
 - DHR `qty` remains approximately the verified baseline DHR quantity;
 - DHR `shares` is approximately the post-partial DHR remainder.
 
-The previous migration predicate used a permissive `qty` with `shares` fallback and compared the selected value to the remainder. That could not represent the proven persisted alias divergence exactly.
-
-PR #141 changed only the production verifier boundary so `canonical_only_terminal_dhr_state_shape_exact` now requires all of the following fail-closed:
+PR #141 changed only the production verifier boundary so `canonical_only_terminal_dhr_state_shape_exact` requires all of the following fail-closed:
 - positions exactly `DHR` and `SLS`;
 - DHR side `long`;
 - DHR `qty` approximately `EXPECTED_BASELINE_DHR_QTY`;
 - DHR `shares` approximately `EXPECTED_DHR_REMAINDER`;
 - both aliases must be present and valid; there is no fallback.
 
-Focused regressions were added for the valid production alias divergence, wrong qty, wrong shares, missing qty, missing shares, and both aliases incorrectly set to the remainder. Two older Issue #126 test fixtures still encoded the superseded `qty == remainder` shape; they were corrected to model baseline `qty` plus remainder `shares` without weakening any production check or safety expectation.
+Focused regressions cover the valid production alias divergence, wrong qty, wrong shares, missing qty, missing shares, and both aliases incorrectly set to the remainder. Two older Issue #126 test fixtures that still encoded the superseded `qty == remainder` shape were corrected to baseline `qty` plus remainder `shares` without weakening production checks.
 
-PR #141 exact final head `0f92f4f216a60b1641d69a3516262af005a7205e` passed every required exact-head gate:
-- Change Safety Audit;
-- Repository Safety and Performance Audit Validation;
-- Architecture Debt Regression Gate;
-- full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit;
-- impact-aware canonical invariant regressions;
-- exact Gunicorn bootstrap startup smoke.
+PR #141 exact final head `0f92f4f216a60b1641d69a3516262af005a7205e` passed every required exact-head gate, including Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit, impact-aware canonical invariant regressions, and exact Gunicorn bootstrap startup smoke.
 
-PR #141 was squash-merged automatically as `39511bd53fe599a8e3a1564b7d3887af3021b29f` after all required gates were green.
+PR #141 was squash-merged automatically as `39511bd53fe599a8e3a1564b7d3887af3021b29f`.
+
+## 2026-08-31 Post-Merge Deployment Status
+
+The subsequent handoff commit `2d3e120c9dd389d71097fb4479279b69217ae610` is green on current `main`.
+
+GitHub commit status now confirms successful Railway deployment to the authoritative Splendid service `web-production-e1796.up.railway.app`. The legacy Railway deployment is also green, and the exact-head Change Safety Audit on current `main` is successful.
+
+There are no open repair pull requests. No new operational issue has been demonstrated beyond the still-open Issue #126 acceptance boundary.
+
+Direct read-only Splendid access from the current automation execution environment still fails intermittent DNS resolution. This is an observation-environment limitation only and is not production-failure evidence. Because the decisive v4 accounting/runtime payload could not be fetched from this environment in this run, do not infer that Issue #126 is complete solely from deployment success.
 
 ## Current Validation Boundary
 
-No canonical row, lifecycle halt, validation hold, day peak, historical accounting state, strategy, signals, sizing, hard-risk threshold, live authority, ML authority, or order authority was manually changed by the PR #141 repair.
+No canonical row, lifecycle halt, validation hold, day peak, historical accounting state, strategy, signals, sizing, hard-risk threshold, live authority, ML authority, or order authority was manually changed by the PR #141 repair or handoff updates.
 
-Authoritative post-merge Splendid validation is still required before Issue #126 may close. The next fresh runtime evidence must prove:
-- deployment contains the PR #141 merge;
+Authoritative post-deploy Splendid validation is still required before Issue #126 may close. Fresh read-only runtime evidence must prove:
+- deployed runtime contains the PR #141 repair;
 - v4 successor cutover completes or is already active as intended;
 - canonical ledger remains append-only/hash-valid and unchanged through recovery;
 - active v4 accounting has zero unexplained coverage/economic issues;
@@ -81,11 +84,9 @@ Authoritative post-merge Splendid validation is still required before Issue #126
 - lifecycle halt remains active unless independently proven safe to release through a separate bounded evidence gate;
 - bootstrap, runner, market data, state persistence, and accounting diagnostics are healthy.
 
-Direct Splendid network access from the current automation execution environment has intermittently failed DNS resolution. Treat that as an observation-environment limitation only; it is not evidence of a production-runtime failure. Prefer the repository's automated authoritative Splendid snapshot/audit artifacts when direct access is unavailable.
-
 ## Immediate Next Action
 
-Wait for the PR #141 merge deployment to reach Splendid, then obtain fresh read-only authoritative runtime evidence. Do not call `/paper/run`, manually release the halt/validation hold, or close Issue #126 before the post-deploy acceptance boundary is proven.
+Obtain the next fresh read-only authoritative Splendid runtime snapshot/audit, preferably through an existing repository automation artifact when direct network access is unavailable. Do not call `/paper/run`, manually release the halt/validation hold, or close Issue #126 before the post-deploy acceptance boundary is proven.
 
 If a new regression is demonstrated, create the narrowest paper-only repair, preserve immutable evidence and authority boundaries, add focused regressions, and require the complete exact-head safety gate set before merge.
 
