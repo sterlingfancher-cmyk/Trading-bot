@@ -1,11 +1,11 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-01 10:48 CDT  
+Last updated: 2026-09-01 11:31 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Current code baseline before this handoff commit: `3421829a68d898bbb413e5638372c95f78fb1177`  
-Active stability/accounting issue: none; active runtime-observability/performance issue: Issue #146
+Current code baseline before this handoff commit: `a490075a6d630dce2c866acd5216d8daeda1a67d`  
+Active stability/accounting issue: none; active runtime-observability/performance issue: Issue #146; active repair PR: #147
 
 ## Communication and Continuity
 
@@ -100,23 +100,21 @@ A fresh post-deploy retry confirmed the intended Issue #143 behavior: active `st
 
 ## Issue #146 — Required Core Status/Root Latency
 
-The same post-PR-145 authoritative retry exposed a distinct runtime-observability/performance defect that must not be hidden by Issue #143 classification logic. `/paper/status` is explicitly a required core endpoint in the self-check contract, yet both `/paper/status` and `/` exceeded the runtime research collector's 20-second read timeout on two attempts.
+The post-PR-145 authoritative retry exposed a distinct runtime-observability/performance defect. `/paper/status` is explicitly a required core endpoint in the self-check contract, yet both `/paper/status` and `/` exceeded the runtime research collector's 20-second read timeout on two attempts.
 
-At the same snapshot, independent required evidence was healthy:
-- `/bootstrap-status` returned HTTP 200 and reported ready/delegating;
-- `/paper/self-check` returned PASS with no base failures and open paper positions `NOW`, `BBAI`, and `DELL`;
-- `/paper/fresh-day-check` returned PASS with reset pending false;
-- `/paper/daily-audit` returned overall PASS;
-- active epoch remained `stable-paper-v4-20260826-successor01` with `validation_hold=true`;
-- accounting coverage was complete with zero coverage issues and zero economic issues;
-- canonical ledger remained hash-valid at 51 rows with five v4 rows;
-- runner had no active error, risk passed, and no risk/lifecycle halt was active.
+At the same snapshot, independent required evidence was healthy: bootstrap, self-check, fresh-day, daily audit, accounting coverage/economics, canonical ledger integrity, runner, and risk all passed; active epoch remained `stable-paper-v4-20260826-successor01` with `validation_hold=true`.
 
-The runtime research snapshot therefore correctly remained WARN after Issue #143 was fixed because `/paper/status` is a required core endpoint and timed out. Issue #146 now owns the bounded diagnosis/repair of `/paper/status` and root read latency. Do not solve it by suppressing the required endpoint or merely increasing the audit timeout without evidence that the timeout itself is invalid. The repair must not alter strategy, signals, sizing, hard-risk limits, canonical/accounting state, validation hold, live authority, ML authority, or order authority.
+### 2026-09-01 Root cause and PR #147
+
+Static trace on current main identified a concrete latency source. `app.py`'s `/paper/status` GET executes `save_state(portfolio)` after building the status snapshot. The active `state_journal_apply_guardrail` is already the existing owner wrapping `core.save_state`; before delegating a save it rebuilds state/journal reconciliation for the candidate state, loads persisted state, rebuilds reconciliation for disk state, then calls the original persistence path. Therefore a required read-only GET can perform journal scans, disk reads, JSON persistence/fsync work, and stale-write reconciliation. That violates the intended observability boundary and can occupy the web worker long enough for the immediately following optional root request to time out too.
+
+PR #147 (`fix/issue-146-readonly-status-persistence`) is the bounded repair. It changes the existing save-state owner rather than adding another mutation owner. Only request-scoped GET/HEAD `/paper/status` skips the redundant save and expensive stale-write reconciliation. Automatic trading cycles, repair routes, POSTs, and every non-status save continue through the unchanged stale-write guard and original persistence path. Focused regressions prove GET/HEAD status performs neither persistence nor guard scans, while non-status saves and a hypothetical status POST still delegate and execute the guard.
+
+PR #147 current head after code/tests is `07b48a718192da2cce40dcf314822feb2e962a85`; this handoff update advances that branch once more. No merge is authorized until exact-head Change Safety, Repository Safety/Performance, Architecture Debt, full ownership/config/state/runtime/startup/research audit, exact Gunicorn smoke, and focused regressions are all green. Post-deploy acceptance still requires fresh Splendid evidence that `/paper/status` is responsive and the overall runtime-research snapshot no longer WARNs for the required core endpoint.
 
 ## Current Validation Boundary
 
-There is no active canonical/accounting correctness defect. Issue #146 is an active required-core runtime observability/performance defect. Continue normal autonomous paper operation and read-only audits while the endpoint latency is diagnosed; the healthy accounting/risk evidence does not authorize weakening `/paper/status`'s required-core contract.
+There is no active canonical/accounting correctness defect. Issue #146 remains an active required-core runtime observability/performance defect with bounded repair PR #147. Continue normal autonomous paper operation and read-only audits while CI validates the repair; healthy accounting/risk evidence does not authorize weakening `/paper/status`'s required-core contract.
 
 The next governed trading-state decision remains validation-hold release for the clean v4 successor. Do not release it merely because Issue #126 is closed. Require a bounded release gate proving the configured forward-validation criteria are satisfied while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
 
@@ -124,7 +122,7 @@ No `/paper/run`, manual halt/hold release, canonical mutation, day-peak rewrite,
 
 ## Immediate Next Action
 
-Diagnose Issue #146 as a bounded read-only/status-path performance repair. Preserve `/paper/status` as a required fail-closed core endpoint. Add focused latency/regression coverage and require every standard exact-head safety/audit gate before automatic merge. After deployment, require a fresh authoritative runtime snapshot with `/paper/status` responsive and the overall research snapshot no longer WARN before closing Issue #146.
+Wait for PR #147 exact-head CI/audit evidence. If every required gate passes, squash-merge automatically; otherwise repair only the demonstrated failure without weakening required-core observability. After deployment, run fresh authoritative read-only Splendid validation and close Issue #146 only when `/paper/status` responds within the normal collector boundary and no genuine required endpoint/runtime/accounting/risk failure remains.
 
 Separately evaluate validation-hold release only from explicit clean forward-validation evidence; do not manually clear the hold.
 

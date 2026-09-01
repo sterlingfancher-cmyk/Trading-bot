@@ -12,6 +12,14 @@ app state can immediately save the old open-position view back over the repaired
 file. This module now also wraps core.save_state. If an outgoing save would
 reintroduce a state/journal full-exit mismatch while the persisted file is already
 clean, the stale write is blocked and the core module is resynced from disk.
+
+2026-09-01 follow-up:
+/paper/status is a required read-only observability route, but app.py calls
+save_state() while building that GET response. The stale-write wrapper previously
+performed journal/disk reconciliation before delegating every such save, turning a
+status read into potentially expensive persistence work. The wrapper now skips only
+the redundant save initiated by GET/HEAD /paper/status while preserving all normal
+runtime persistence and stale-write protection.
 """
 from __future__ import annotations
 
@@ -22,7 +30,7 @@ import os
 import tempfile
 from typing import Any, Dict
 
-VERSION = "state-journal-apply-direct-persist-2026-05-13-memory-sync"
+VERSION = "state-journal-apply-direct-persist-2026-09-01-readonly-status"
 _PATCHED: set[int] = set()
 _CORE_SAVE_PATCHED: set[int] = set()
 _LAST_STALE_WRITE_BLOCK: Dict[str, Any] = {}
@@ -128,9 +136,6 @@ def _sync_core_state(core: Any | None, state: Dict[str, Any]) -> Dict[str, Any]:
                 synced_attrs.append(attr)
         except Exception:
             continue
-    # Some code paths may not expose a single named global. Keep a canonical
-    # repaired copy available for diagnostics and future patches without forcing
-    # app.py itself to know this module exists.
     try:
         setattr(core, "STATE_JOURNAL_REPAIRED_STATE", copy.deepcopy(state))
         setattr(core, "STATE_JOURNAL_REPAIRED_STATE_LOCAL", _now_text())
@@ -146,6 +151,20 @@ def _guard_for_state(guard_module: Any, state: Dict[str, Any]) -> Dict[str, Any]
         return guard_module.build_guard(state=state, journal=journal, core=None)
     except Exception as exc:
         return {"status": "error", "active": None, "error": repr(exc)}
+
+
+def _is_readonly_status_request() -> bool:
+    """Return True only for the required read-only /paper/status GET/HEAD route."""
+    try:
+        from flask import has_request_context, request
+
+        return bool(
+            has_request_context()
+            and request.path == "/paper/status"
+            and request.method in {"GET", "HEAD"}
+        )
+    except Exception:
+        return False
 
 
 def _install_core_stale_write_guard(core: Any | None, guard_module: Any, state_file: str) -> Dict[str, Any]:
@@ -166,6 +185,16 @@ def _install_core_stale_write_guard(core: Any | None, guard_module: Any, state_f
 
     def protected_save_state(state: Dict[str, Any], *args: Any, **kwargs: Any) -> Any:
         global _LAST_STALE_WRITE_BLOCK
+
+        # /paper/status is a GET/HEAD observability surface. app.py already builds
+        # its response from the current in-memory state and then redundantly calls
+        # save_state(). Skipping only that request-scoped persistence prevents the
+        # read path from paying journal/disk reconciliation and fsync costs. All
+        # automatic cycles, repair paths, POSTs, and non-status saves still flow
+        # through the exact stale-write guard below.
+        if _is_readonly_status_request():
+            return None
+
         if isinstance(state, dict):
             candidate_guard = _guard_for_state(guard_module, state)
             disk_state = _load_json_direct(str(state_file))
@@ -217,8 +246,6 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
 
     stale_write_guard_status = _install_core_stale_write_guard(core, guard_module, str(state_file))
 
-    # Force the repair module to persist directly to /data/state.json instead of
-    # going through app/core wrappers that may hold a stale in-memory state object.
     def direct_load_state(active_core: Any | None = None) -> Dict[str, Any]:
         return _load_json_direct(str(state_file))
 
@@ -237,8 +264,6 @@ def apply(guard_module: Any, core: Any | None = None) -> Dict[str, Any]:
         pass
 
     def call_original_repair(apply_flag: bool) -> Any:
-        # Always pass core=None so repair/post-repair verification reloads the
-        # persisted file, not a potentially stale app module state.
         try:
             return original_repair(apply=apply_flag, core=None)
         except TypeError as exc:
