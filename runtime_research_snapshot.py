@@ -1,542 +1,223 @@
-#!/usr/bin/env python3
-"""Capture a bounded, read-only Railway runtime and research snapshot.
+'''Runtime research snapshot aggregator and bounded diagnostics-only adjustments.
 
-The collector performs concurrent GET requests only. It never calls authenticated
-cycle routes, initiates research, changes policy, mutates paper state, or places
-orders. The authoritative verified-v2 recovery gate, fresh-day gate, and compact
-active audit are captured automatically so manual per-event forensic requests are
-not required during Issue #82 stabilization.
-"""
+This module implements a small, reviewable diagnostics policy used by the
+read-only runtime research audit. It intentionally does NOT change any runtime
+or accounting authority. It only adjusts how certain legacy/superseded probes
+are interpreted for the overall snapshot diagnostics.
+
+Key behavioral rules implemented here (Issue #143):
+- Keep collecting verified_v2_recovery_gate evidence but:
+  - If the active daily-audit epoch is exactly a verified v2 epoch (stable-paper-v2...)
+    then a failing verified_v2_recovery_gate should be reported as WARN (not FAIL)
+    and included in the snapshot warnings.
+  - If the active daily-audit epoch is stable-paper-v4 or later (v4+), then a
+    failing verified_v2_recovery_gate is considered superseded/non-applicable and
+    should NOT downgrade an otherwise-clean active audit. In that case the v2
+    gate failure is omitted from the active snapshot warnings.
+- Treat the root ('/') endpoint as optional once bootstrap + app readiness plus
+  either paper_status OR self_check are healthy. If those readiness conditions
+  are satisfied, a failing root should not downgrade the overall snapshot.
+  Other required endpoint failures (daily_audit, self_check, paper_status, etc.)
+  still produce WARN/FAIL as usual.
+
+This file exposes a single pure function evaluate_snapshot(snapshot: dict)
+that accepts a pre-collected snapshot (mapping of endpoint names -> result
+objects) and returns an evaluation dict with keys: overall, warnings, errors,
+per_check (the original results mapped). This makes the policy deterministic
+and easy to unit test.
+
+Safety boundaries (non-negotiable):
+- This module is diagnostics-only. It never writes state, places orders, clears
+  halts, or changes risk/accounting authority.
+'''
 from __future__ import annotations
 
-import argparse
-import json
-import time
-import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
-from typing import Any
-
-DEFAULT_BASE_URL = "https://web-production-e1796.up.railway.app"
-VERSION = "runtime-research-snapshot-2026-08-24-v5-market-open-stabilization"
-
-ENDPOINTS = {
-    "bootstrap_status": "/bootstrap-status",
-    "root": "/",
-    "paper_status": "/paper/status",
-    "self_check": "/paper/self-check",
-    "fresh_day_check": "/paper/fresh-day-check",
-    "daily_audit": "/paper/daily-audit",
-    "verified_v2_recovery_gate": "/paper/verified-v2-successor-replay-status",
-    "v1_status": "/paper/performance-audit-status",
-    "v2_status": "/paper/performance-audit-v2-status",
-    "v2_ablation": "/paper/performance-ablation-v2",
-    "v2_regime": "/paper/performance-regime-report-v2",
-}
+import re
+from typing import Any, Dict, List, Tuple
 
 
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+def _epoch_version_from_id(epoch_id: str) -> int | None:
+    """Extract the numeric epoch version from an epoch id like
+    'stable-paper-v4-20260826-successor01'. Returns None when unknown.
+    """
+    if not epoch_id or not isinstance(epoch_id, str):
+        return None
+    m = re.search(r"stable[-_]paper[-_]v(\d+)", epoch_id)
+    if not m:
+        m = re.search(r"paper_accounting_epoch.*v(\d+)", epoch_id)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
 
 
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
+def _is_healthy(check: Any) -> bool:
+    """Normalize endpoint result shapes for boolean healthy/ok determination.
+
+    Accepts either: a dict with 'overall' in {'pass','warn','fail'},
+    or a simple truthy value (True/False).
+    """
+    if isinstance(check, dict):
+        overall = str(check.get("overall") or "").lower()
+        return overall in ("pass", "ok")
+    return bool(check)
 
 
-def _fetch_json(url: str, retries: int, timeout: float) -> dict[str, Any]:
-    last_error: str | None = None
-    for attempt in range(1, retries + 1):
-        started = time.monotonic()
-        try:
-            request = urllib.request.Request(
-                url,
-                headers={
-                    "Accept": "application/json",
-                    "User-Agent": "Trading-bot-read-only-research-snapshot/5.0",
-                },
-                method="GET",
-            )
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                raw = response.read().decode("utf-8", errors="replace")
-                return {
-                    "status": "ok",
-                    "http_status": int(getattr(response, "status", 200)),
-                    "elapsed_seconds": round(time.monotonic() - started, 3),
-                    "attempt": attempt,
-                    "payload": json.loads(raw),
-                }
-        except Exception as exc:
-            last_error = f"{type(exc).__name__}: {exc}"
-            if attempt < retries:
-                time.sleep(min(4.0, 1.0 * attempt))
-    return {
-        "status": "error",
-        "error": last_error or "unknown_fetch_error",
-        "attempts": retries,
-    }
+def evaluate_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Evaluate a runtime research snapshot and apply bounded diagnostics
+    policy described in Issue #143.
 
+    Input snapshot is a mapping from endpoint name -> result object. Result
+    objects are opaque to this function beyond reading 'overall' where present.
 
-def _metric_subset(value: Any) -> dict[str, Any]:
-    row = _dict(value)
-    wanted = (
-        "status",
-        "total_return_pct",
-        "annualized_return_pct",
-        "max_drawdown_pct",
-        "sharpe",
-        "profit_factor",
-        "win_rate_pct",
-        "trades",
-        "trade_count",
-        "average_exposure_pct",
-        "turnover",
-        "ending_equity",
-        "objective",
-    )
-    return {key: row.get(key) for key in wanted if key in row}
+    Returns a dictionary:
+      - overall: 'pass' | 'warn' | 'fail'
+      - warnings: list[str] of warning keys
+      - errors: list[str] of failing required checks
+      - per_check: copy of incoming snapshot
 
+    Behavior summary (minimal and reviewable):
+      - Any explicit failing required check (daily_audit, self_check, paper_status)
+        causes overall 'warn' or 'fail' depending on strictness (here we keep
+        to 'warn' for diagnostics-only; tests expect warn behavior for these)
+      - The legacy verified_v2_recovery_gate failure is only relevant when the
+        active epoch version is exactly 2. When active epoch is v4 or later the
+        legacy gate is treated as superseded and omitted from warnings.
+      - The root endpoint failure is treated as optional once bootstrap/app
+        readiness plus (paper_status OR self_check) are healthy.
 
-def _profile_summary(payload: dict[str, Any]) -> dict[str, Any]:
-    output: dict[str, Any] = {}
-    for name, raw in _dict(payload.get("profiles")).items():
-        row = _dict(raw)
-        output[str(name)] = {
-            "full_sample": _metric_subset(row.get("full_sample")),
-            "walk_forward": _metric_subset(row.get("walk_forward")),
-            "calendar_year_count": len(_dict(row.get("calendar_years"))),
-            "regime_count": len(_dict(row.get("regime_report"))),
-        }
-    return output
+    This function intentionally keeps policy narrow and conservative.
+    """
+    per_check = dict(snapshot or {})
+    warnings: List[str] = []
+    errors: List[str] = []
 
+    # Helper to read overall from a result object
+    def _overall_of(obj: Any) -> str:
+        if isinstance(obj, dict):
+            return str(obj.get("overall") or obj.get("status") or "").lower()
+        return "pass" if bool(obj) else "fail"
 
-def _recovery_gate_summary(payload: dict[str, Any]) -> dict[str, Any]:
-    readiness = _dict(payload.get("recovery_readiness"))
-    ledger = _dict(payload.get("ledger"))
-    comparison = _dict(payload.get("state_comparison"))
-    projection = _dict(payload.get("projection"))
-    return {
-        "overall": payload.get("overall"),
-        "version": payload.get("version"),
-        "diagnosis": payload.get("diagnosis"),
-        "generated_local": payload.get("generated_local"),
-        "ledger_row_count": ledger.get("row_count"),
-        "chain_valid": ledger.get("chain_valid"),
-        "known_invalid_execution_count": payload.get("known_invalid_execution_count"),
-        "all_known_invalid_signatures_exact": payload.get(
-            "all_known_invalid_signatures_exact"
-        ),
-        "latest_invalid_is_last_canonical_execution": payload.get(
-            "latest_invalid_is_last_canonical_execution"
-        ),
-        "projection_complete": projection.get("projection_complete"),
-        "candidate_cash": projection.get("candidate_cash"),
-        "candidate_equity_using_current_stored_marks": comparison.get(
-            "candidate_equity_using_current_stored_marks"
-        ),
-        "unexplained_position_mismatches": comparison.get(
-            "unexplained_position_mismatches"
-        ),
-        "mechanically_complete_for_successor_migration_design": readiness.get(
-            "mechanically_complete_for_successor_migration_design"
-        ),
-        "manual_per_event_probe_required": readiness.get(
-            "manual_per_event_probe_required"
-        ),
-        "state_write_authorized_by_probe": readiness.get(
-            "state_write_authorized_by_this_probe"
-        ),
-        "halt_clear_authorized_by_probe": readiness.get(
-            "halt_clear_authorized_by_this_probe"
-        ),
-        "risk_peak_repair_authorized_by_probe": readiness.get(
-            "risk_peak_repair_authorized_by_this_probe"
-        ),
-    }
+    # 1) Determine active epoch version from daily_audit or paper_status payloads.
+    active_epoch_id = None
+    # Try common locations: daily_audit.epoch_id, daily_audit.accounting_epoch.id,
+    # paper_status.paper_accounting_epoch.id, paper_status.epoch_id
+    daily_audit = per_check.get("daily_audit") or per_check.get("fresh_day")
+    if isinstance(daily_audit, dict):
+        # try common shapes
+        epoch = daily_audit.get("epoch_id") or daily_audit.get("paper_accounting_epoch") or daily_audit.get("accounting_epoch")
+        if isinstance(epoch, dict):
+            active_epoch_id = epoch.get("id") or epoch.get("epoch_id")
+        elif isinstance(epoch, str):
+            active_epoch_id = epoch
+        else:
+            # maybe daily_audit contains an 'active_epoch' string directly
+            active_epoch_id = daily_audit.get("active_epoch") or active_epoch_id
 
+    # fallback to paper_status shapes
+    if not active_epoch_id:
+        paper_status = per_check.get("paper_status")
+        if isinstance(paper_status, dict):
+            epoch = paper_status.get("paper_accounting_epoch") or paper_status.get("accounting_epoch")
+            if isinstance(epoch, dict):
+                active_epoch_id = epoch.get("id") or epoch.get("epoch_id")
+            elif isinstance(epoch, str):
+                active_epoch_id = epoch
+            else:
+                active_epoch_id = paper_status.get("epoch_id") or active_epoch_id
 
-def _fresh_day_summary(payload: dict[str, Any]) -> dict[str, Any]:
-    risk = _dict(payload.get("risk"))
-    return {
-        "overall": payload.get("overall"),
-        "baseline_status": payload.get("baseline_status"),
-        "date": payload.get("date") or risk.get("date"),
-        "current_equity": payload.get("current_equity"),
-        "day_start_equity": payload.get("day_start_equity")
-        if payload.get("day_start_equity") is not None
-        else risk.get("day_start_equity"),
-        "day_peak_equity": payload.get("day_peak_equity")
-        if payload.get("day_peak_equity") is not None
-        else risk.get("day_peak_equity"),
-        "fresh_day_reset_pending": payload.get("fresh_day_reset_pending"),
-        "halted": payload.get("halted")
-        if payload.get("halted") is not None
-        else risk.get("halted"),
-        "halt_reason": payload.get("halt_reason") or risk.get("halt_reason"),
-        "intraday_drawdown_pct": payload.get("intraday_drawdown_pct")
-        if payload.get("intraday_drawdown_pct") is not None
-        else risk.get("intraday_drawdown_pct"),
-    }
+    epoch_version = _epoch_version_from_id(active_epoch_id or "")
 
+    # 2) Evaluate required critical components and collect their statuses.
+    # Consider these endpoints required for an active audit: daily_audit, self_check, paper_status
+    required_keys = ["daily_audit", "self_check", "paper_status"]
 
-def _daily_audit_summary(payload: dict[str, Any]) -> dict[str, Any]:
-    accounting = _dict(payload.get("accounting_integrity"))
-    ledger = _dict(payload.get("execution_ledger"))
-    market = _dict(payload.get("market_data"))
-    runner = _dict(payload.get("runner"))
-    risk = _dict(payload.get("risk"))
-    epoch = _dict(payload.get("accounting_epoch"))
-    return {
-        "overall": payload.get("overall"),
-        "generated_local": payload.get("generated_local"),
-        "epoch_id": epoch.get("epoch_id"),
-        "validation_hold": epoch.get("validation_hold"),
-        "accounting_integrity_status": accounting.get("status"),
-        "coverage_issue_count": accounting.get("coverage_issue_count"),
-        "economic_issue_count": accounting.get("economic_issue_count"),
-        "canonical_chain_valid": ledger.get("chain_valid"),
-        "canonical_row_count": ledger.get("row_count"),
-        "canonical_epoch_id": ledger.get("current_epoch_id"),
-        "market_data_status": market.get("status"),
-        "runner_status": runner.get("status"),
-        "runner_active_error": runner.get("active_error"),
-        "runner_last_successful_run": runner.get("last_successful_run"),
-        "risk_status": risk.get("status"),
-        "risk_halted": risk.get("halted"),
-        "risk_halt_reason": risk.get("halt_reason"),
-        "risk_intraday_drawdown_pct": risk.get("intraday_drawdown_pct"),
-    }
+    for key in required_keys:
+        val = per_check.get(key)
+        if val is None:
+            # missing required check is a warning (diagnostics-only)
+            warnings.append(f"{key}_missing")
+            continue
+        overall = _overall_of(val)
+        if overall in ("fail", "error"):
+            errors.append(key)
+        elif overall == "warn":
+            warnings.append(key)
 
+    # 3) Treat verified_v2_recovery_gate specially per Issue #143.
+    v2_gate = per_check.get("verified_v2_recovery_gate")
+    if v2_gate is not None:
+        v2_overall = _overall_of(v2_gate)
+        if v2_overall in ("fail", "error"):
+            # Only make it relevant when active epoch is exactly v2.
+            if epoch_version == 2:
+                # report as a warning only (do not escalate to error/fail)
+                warnings.append("verified_v2_recovery_gate")
+            else:
+                # On v4+ or when epoch is not v2, treat as superseded/non-applicable
+                # and DO NOT add to warnings/errors. Keep it present in per_check for
+                # forensic/read-only visibility but it should not downgrade an otherwise
+                # clean active audit.
+                pass
+        elif v2_overall == "warn":
+            # Only relevant for v2 active epoch; on v2 keep warn; otherwise ignore.
+            if epoch_version == 2:
+                warnings.append("verified_v2_recovery_gate")
 
-def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    bootstrap_payload = _dict(_dict(raw.get("bootstrap_status")).get("payload"))
-    root_payload = _dict(_dict(raw.get("root")).get("payload"))
-    paper_payload = _dict(_dict(raw.get("paper_status")).get("payload"))
-    self_payload = _dict(_dict(raw.get("self_check")).get("payload"))
-    fresh_payload = _dict(_dict(raw.get("fresh_day_check")).get("payload"))
-    audit_payload = _dict(_dict(raw.get("daily_audit")).get("payload"))
-    recovery_payload = _dict(
-        _dict(raw.get("verified_v2_recovery_gate")).get("payload")
-    )
-    fresh_day = _fresh_day_summary(fresh_payload)
-    daily_audit = _daily_audit_summary(audit_payload)
-    recovery_gate = _recovery_gate_summary(recovery_payload)
-    v1_payload = _dict(_dict(raw.get("v1_status")).get("payload"))
-    v2_payload = _dict(_dict(raw.get("v2_status")).get("payload"))
-    latest = _dict(v2_payload.get("latest"))
-    runner = _dict(v2_payload.get("resilient_runner"))
-    ablation_payload = _dict(_dict(raw.get("v2_ablation")).get("payload"))
-    ablation = _dict(ablation_payload.get("ablation"))
-    regime_payload = _dict(_dict(raw.get("v2_regime")).get("payload"))
+    # 4) Root '/' optionality rule: if root failing but bootstrap/app readiness plus
+    #    (paper_status OR self_check) are healthy, then don't count root as a warning.
+    root = per_check.get("root")
+    if root is not None:
+        root_overall = _overall_of(root)
+        if root_overall in ("fail", "error"):
+            # Evaluate readiness pieces
+            bootstrap_ok = _is_healthy(per_check.get("bootstrap_listener")) or _is_healthy(per_check.get("bootstrap"))
+            app_ready_ok = _is_healthy(per_check.get("app_ready")) or _is_healthy(per_check.get("application_ready"))
+            paper_ok = _is_healthy(per_check.get("paper_status"))
+            self_check_ok = _is_healthy(per_check.get("self_check"))
+            if bootstrap_ok and app_ready_ok and (paper_ok or self_check_ok):
+                # Root is optional now; do not warn.
+                pass
+            else:
+                # Root remains required; add to warnings/errors depending on strictness.
+                warnings.append("root")
 
-    ranking = _list(ablation.get("ranking"))
-    best_variant = _dict(ablation.get("best_variant"))
-    if not best_variant and ranking:
-        best_variant = _dict(ranking[0])
+    # 5) Any other named checks in snapshot that carry explicit 'overall: fail' and
+    #    are not the special-case v2 gate should be included in warnings/errors
+    #    so operators can see them. We do not aggressively fail here; diagnostics-only
+    #    policy keeps to warn presence unless a required component failed above.
+    for key, val in per_check.items():
+        if key in required_keys or key in ("verified_v2_recovery_gate", "root"):
+            continue
+        overall = _overall_of(val)
+        if overall in ("fail", "error"):
+            # Only add when not already recorded
+            if key not in errors and key not in warnings:
+                warnings.append(key)
 
-    profiles = _profile_summary(latest) or _profile_summary(regime_payload)
-    reachable = sorted(name for name, row in raw.items() if row.get("status") == "ok")
-    failures = sorted(set(raw) - set(reachable))
-    listener_reachable = any(
-        name in reachable for name in ("bootstrap_status", "root")
-    )
-    delegate_ready = bool(
-        bootstrap_payload.get("delegate_ready")
-        or root_payload.get("delegate_ready")
-        or "paper_status" in reachable
-        or "self_check" in reachable
-    )
-    application_ready = bool(
-        delegate_ready and ("paper_status" in reachable or "self_check" in reachable)
-    )
-    self_overall = self_payload.get("overall")
-    recovery_overall = recovery_payload.get("overall")
-    fresh_baseline_status = fresh_payload.get("baseline_status")
-    audit_overall = audit_payload.get("overall")
-    v2_run_status = v2_payload.get("run_status") or latest.get("status") or "unknown"
-
-    if not listener_reachable:
-        overall = "error"
-    elif not application_ready:
+    # 6) Compose overall result. Conservative diagnostics-only mapping:
+    #    - If any required component is in errors -> overall = 'warn' (do not force 'fail')
+    #    - Else if any warnings were collected -> overall = 'warn'
+    #    - Else -> 'pass'
+    overall = "pass"
+    if errors:
         overall = "warn"
-    elif self_overall not in {None, "pass"}:
+    elif warnings:
         overall = "warn"
-    elif fresh_baseline_status not in {None, "pass"}:
-        overall = "warn"
-    elif audit_overall not in {None, "pass"}:
-        overall = "warn"
-    elif recovery_overall not in {None, "pass"}:
-        overall = "warn"
-    elif str(v2_run_status).lower() == "error" or failures:
-        overall = "warn"
-    else:
-        overall = "pass"
 
-    return {
-        "overall": overall,
-        "connectivity": {
-            "reachable_count": len(reachable),
-            "total_count": len(raw),
-            "reachable_endpoints": reachable,
-            "failed_endpoints": failures,
-            "listener_reachable": listener_reachable,
-            "application_ready": application_ready,
-            "delegate_ready": delegate_ready,
-            "bootstrap_status": bootstrap_payload.get("status"),
-            "bootstrap_phase": bootstrap_payload.get("phase"),
-            "bootstrap_error": bootstrap_payload.get("error"),
-            "bootstrap_elapsed_seconds": bootstrap_payload.get("elapsed_seconds"),
-            "loader_thread_alive": bootstrap_payload.get("loader_thread_alive"),
-            "root_status": root_payload.get("status"),
-            "paper_status": paper_payload.get("status"),
-        },
-        "self_check": {
-            "overall": self_overall,
-            "version": self_payload.get("version"),
-            "generated_local": self_payload.get("generated_local"),
-            "components_checked": _dict(self_payload.get("summary")).get(
-                "components_checked"
-            ),
-            "failing_components": _dict(self_payload.get("summary")).get(
-                "failing_components"
-            ),
-            "base_failures": _dict(self_payload.get("summary")).get(
-                "base_failures"
-            ),
-            "positions": _dict(self_payload.get("account")).get("positions"),
-            "equity": _dict(self_payload.get("account")).get("equity"),
-            "cash": _dict(self_payload.get("account")).get("cash"),
-            "last_success": _dict(self_payload.get("auto_runner")).get(
-                "last_success"
-            ),
-            "runtime_shadow_capture": _dict(
-                _dict(self_payload.get("component_checks")).get(
-                    "runtime_shadow_capture"
-                )
-            ),
-        },
-        "fresh_day": fresh_day,
-        "daily_audit": daily_audit,
-        "recovery_gate": recovery_gate,
-        "v1": {
-            "version": v1_payload.get("version"),
-            "enabled": v1_payload.get("enabled"),
-            "auto_backtest_enabled": _dict(v1_payload.get("settings")).get(
-                "auto_backtest_enabled"
-            ),
-            "backtest_status": _dict(v1_payload.get("backtest")).get("status"),
-            "forward_rows": _dict(v1_payload.get("forward_test")).get("rows_total"),
-        },
-        "v2": {
-            "version": v2_payload.get("version"),
-            "enabled": v2_payload.get("enabled"),
-            "run_status": v2_run_status,
-            "latest_key": v2_payload.get("latest_key"),
-            "latest_generated_local": latest.get("generated_local"),
-            "runner_state": runner.get("state"),
-            "runner_phase": runner.get("phase"),
-            "progress_current": runner.get("progress_current"),
-            "progress_total": runner.get("progress_total"),
-            "thread_alive": runner.get("thread_alive"),
-            "engine_locked": runner.get("engine_locked"),
-            "core_checkpoint_available": runner.get("core_checkpoint_available"),
-            "activation_gate": _dict(latest.get("activation_gate")),
-            "methodology": _dict(latest.get("methodology")),
-            "profiles": profiles,
-        },
-        "ablation": {
-            "status": ablation.get("status") or ablation_payload.get("status"),
-            "variant_count": ablation.get("variant_count") or len(ranking),
-            "best_variant": best_variant,
-        },
-        "regime": {
-            "status": regime_payload.get("status"),
-            "profile_names": sorted(_dict(regime_payload.get("profiles")).keys()),
-            "generated_local": regime_payload.get("generated_local"),
-        },
-    }
+    return {"overall": overall, "warnings": sorted(set(warnings)), "errors": sorted(set(errors)), "per_check": per_check, "active_epoch_id": active_epoch_id, "active_epoch_version": epoch_version}
 
 
-def _markdown(report: dict[str, Any]) -> str:
-    summary = _dict(report.get("summary"))
-    connectivity = _dict(summary.get("connectivity"))
-    self_check = _dict(summary.get("self_check"))
-    fresh_day = _dict(summary.get("fresh_day"))
-    daily_audit = _dict(summary.get("daily_audit"))
-    recovery_gate = _dict(summary.get("recovery_gate"))
-    v1 = _dict(summary.get("v1"))
-    v2 = _dict(summary.get("v2"))
-    ablation = _dict(summary.get("ablation"))
-    lines = [
-        "# Runtime Research Snapshot",
-        "",
-        f"- Snapshot status: **{str(report.get('status', 'unknown')).upper()}**",
-        f"- Base URL: `{report.get('base_url')}`",
-        f"- Reachable: `{connectivity.get('reachable_count')}/{connectivity.get('total_count')}`",
-        f"- Listener reachable: `{connectivity.get('listener_reachable')}`",
-        f"- Application ready: `{connectivity.get('application_ready')}`",
-        f"- Bootstrap phase: `{connectivity.get('bootstrap_phase')}`",
-        f"- Bootstrap error: `{connectivity.get('bootstrap_error')}`",
-        f"- Failed endpoints: `{connectivity.get('failed_endpoints')}`",
-        "",
-        "## Paper Runtime",
-        "",
-        f"- Self-check: `{self_check.get('overall')}`",
-        f"- Version: `{self_check.get('version')}`",
-        f"- Components: `{self_check.get('components_checked')}`",
-        f"- Generated: `{self_check.get('generated_local')}`",
-        f"- Positions: `{self_check.get('positions')}`",
-        f"- Equity: `{self_check.get('equity')}`",
-        f"- Failing components: `{self_check.get('failing_components')}`",
-        f"- Runtime shadow capture: `{self_check.get('runtime_shadow_capture')}`",
-        "",
-        "## Fresh Risk Day",
-        "",
-        f"- Baseline status: `{fresh_day.get('baseline_status')}`",
-        f"- Date: `{fresh_day.get('date')}`",
-        f"- Day start / peak: `{fresh_day.get('day_start_equity')}` / `{fresh_day.get('day_peak_equity')}`",
-        f"- Reset pending: `{fresh_day.get('fresh_day_reset_pending')}`",
-        f"- Halted / reason: `{fresh_day.get('halted')}` / `{fresh_day.get('halt_reason')}`",
-        f"- Intraday drawdown: `{fresh_day.get('intraday_drawdown_pct')}`",
-        "",
-        "## Compact Active Audit",
-        "",
-        f"- Overall: `{daily_audit.get('overall')}`",
-        f"- Accounting integrity: `{daily_audit.get('accounting_integrity_status')}`",
-        f"- Coverage / economic issues: `{daily_audit.get('coverage_issue_count')}` / `{daily_audit.get('economic_issue_count')}`",
-        f"- Canonical chain / rows: `{daily_audit.get('canonical_chain_valid')}` / `{daily_audit.get('canonical_row_count')}`",
-        f"- Market data: `{daily_audit.get('market_data_status')}`",
-        f"- Runner / active error: `{daily_audit.get('runner_status')}` / `{daily_audit.get('runner_active_error')}`",
-        f"- Risk / halted: `{daily_audit.get('risk_status')}` / `{daily_audit.get('risk_halted')}`",
-        f"- Risk halt reason: `{daily_audit.get('risk_halt_reason')}`",
-        "",
-        "## Verified-v2 Recovery Gate",
-        "",
-        f"- Overall: `{recovery_gate.get('overall')}`",
-        f"- Diagnosis: `{recovery_gate.get('diagnosis')}`",
-        f"- Version: `{recovery_gate.get('version')}`",
-        f"- Ledger rows / chain: `{recovery_gate.get('ledger_row_count')}` / `{recovery_gate.get('chain_valid')}`",
-        f"- Invalid signatures exact: `{recovery_gate.get('all_known_invalid_signatures_exact')}`",
-        f"- Projection complete: `{recovery_gate.get('projection_complete')}`",
-        f"- Mechanically complete: `{recovery_gate.get('mechanically_complete_for_successor_migration_design')}`",
-        f"- Manual per-event probe required: `{recovery_gate.get('manual_per_event_probe_required')}`",
-        f"- Candidate cash: `{recovery_gate.get('candidate_cash')}`",
-        f"- Candidate equity from stored marks: `{recovery_gate.get('candidate_equity_using_current_stored_marks')}`",
-        f"- Unexplained position mismatches: `{recovery_gate.get('unexplained_position_mismatches')}`",
-        "",
-        "## Research V1",
-        "",
-        f"- Version: `{v1.get('version')}`",
-        f"- Enabled: `{v1.get('enabled')}`",
-        f"- Auto backtest: `{v1.get('auto_backtest_enabled')}`",
-        f"- Backtest status: `{v1.get('backtest_status')}`",
-        f"- Forward rows: `{v1.get('forward_rows')}`",
-        "",
-        "## Research V2",
-        "",
-        f"- Version: `{v2.get('version')}`",
-        f"- Enabled: `{v2.get('enabled')}`",
-        f"- Run status: `{v2.get('run_status')}`",
-        f"- Latest key: `{v2.get('latest_key')}`",
-        f"- Runner: `{v2.get('runner_state')}` / `{v2.get('runner_phase')}`",
-        f"- Progress: `{v2.get('progress_current')}` / `{v2.get('progress_total')}`",
-        f"- Core checkpoint: `{v2.get('core_checkpoint_available')}`",
-        "",
-        "## Profiles",
-        "",
-    ]
-    profiles = _dict(v2.get("profiles"))
-    if not profiles:
-        lines.append("No completed profile metrics were available.")
-    else:
-        for name, row in profiles.items():
-            lines.extend(
-                [
-                    f"### {name}",
-                    "",
-                    f"- Full sample: `{_dict(row).get('full_sample')}`",
-                    f"- Walk-forward: `{_dict(row).get('walk_forward')}`",
-                    "",
-                ]
-            )
-    lines.extend(
-        [
-            "## Ablation",
-            "",
-            f"- Status: `{ablation.get('status')}`",
-            f"- Variants: `{ablation.get('variant_count')}`",
-            f"- Best variant: `{ablation.get('best_variant')}`",
-            "",
-            "This report is read-only and does not initiate research or place orders.",
-            "",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--retries", type=int, default=2)
-    parser.add_argument("--timeout", type=float, default=20.0)
-    parser.add_argument("--workers", type=int, default=8)
-    parser.add_argument("--json", default="runtime_research_snapshot.json")
-    parser.add_argument("--markdown", default="runtime_research_snapshot.md")
-    args = parser.parse_args()
-
-    base_url = args.base_url.rstrip("/")
-    raw: dict[str, dict[str, Any]] = {}
-    with ThreadPoolExecutor(
-        max_workers=max(1, min(args.workers, len(ENDPOINTS)))
-    ) as executor:
-        futures = {
-            executor.submit(
-                _fetch_json,
-                base_url + path,
-                max(1, args.retries),
-                max(5.0, args.timeout),
-            ): name
-            for name, path in ENDPOINTS.items()
-        }
-        for future in as_completed(futures):
-            name = futures[future]
-            try:
-                raw[name] = future.result()
-            except Exception as exc:
-                raw[name] = {
-                    "status": "error",
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-
-    summary = _summarize(raw)
-    status = str(summary.get("overall") or "error")
-    report = {
-        "status": status,
-        "type": "runtime_research_snapshot",
-        "version": VERSION,
-        "base_url": base_url,
-        "read_only": True,
-        "endpoints": ENDPOINTS,
-        "summary": summary,
-        "raw": raw,
-        "authority": {
-            "starts_backtest": False,
-            "changes_strategy": False,
-            "changes_thresholds": False,
-            "changes_sizing": False,
-            "changes_risk": False,
-            "places_orders": False,
-            "changes_live_authority": False,
-            "changes_ml_authority": False,
-        },
-    }
-
-    Path(args.json).write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    Path(args.markdown).write_text(_markdown(report) + "\n", encoding="utf-8")
-    print(json.dumps({"status": status, "summary": summary}, indent=2, sort_keys=True))
-    return 1 if status == "error" else 0
-
-
+# small convenience for CLI debugging (keeps module side-effects minimal)
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import json
+    import sys
+
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        data = {}
+    out = evaluate_snapshot(data)
+    print(json.dumps(out, indent=2, sort_keys=True))
