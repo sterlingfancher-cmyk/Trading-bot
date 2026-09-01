@@ -1,11 +1,11 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-08-31 23:28 CDT  
+Last updated: 2026-09-01 09:35 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Current `main` baseline before this handoff commit: `d7978b74a891aa630fb652549f997956cba401d8`  
-Active stability/accounting issue: Issue #126
+Current `main` baseline before this handoff commit: `d0eeb3f426df23c7c9305ed09e4f1c3132ec9cac`  
+Active stability/accounting issue: none; Issue #126 closed completed on 2026-09-01
 
 ## Communication and Continuity
 
@@ -27,7 +27,7 @@ Routine bounded stability work should be handled automatically: investigate, rep
 
 ## Issue #126 — Established Root Cause and Recovery Boundary
 
-Issue #126 is the post-#82 SLS canonical exit/state divergence. The prospective defect was a re-entrant legacy accounting read during SLS full-exit processing: state deleted SLS, then cooldown/accounting re-entry occurred before the new canonical row had been mirrored into state, allowing the closed position to be reconstructed and later emit an impossible SLS partial exit.
+Issue #126 was the post-#82 SLS canonical exit/state divergence. The prospective defect was a re-entrant legacy accounting read during SLS full-exit processing: state deleted SLS, then cooldown/accounting re-entry occurred before the new canonical row had been mirrored into state, allowing the closed position to be reconstructed and later emit an impossible SLS partial exit.
 
 PR #127 prospectively contained that re-entrant resurrection defect. PR #128 added deterministic v3→v4 successor recovery with immutable canonical history, exact-signature evidence, archival, validation hold, and preserved lifecycle halt. Subsequent evidence expanded the exact v3 cutover boundary to 46 canonical rows, including a valid canonical-only terminal DHR full exit whose state/cash mirror did not complete.
 
@@ -37,8 +37,8 @@ The recovery disposition remains exact:
 - include the valid DHR partial exit;
 - include the valid canonical-only terminal DHR full exit;
 - exclude only the proven invalid re-entrant SLS partial from successor economics;
-- preserve current halt, validation hold, risk history, day peak, strategy, sizing, hard-risk limits, live authority, and ML authority;
-- require clean authoritative v4 post-deploy evidence before any hold/halt release or Issue #126 closure.
+- preserve validation hold, risk history, day peak, strategy, sizing, hard-risk limits, live authority, and ML authority;
+- require clean authoritative v4 post-deploy evidence before Issue #126 closure.
 
 ## 2026-08-31 DHR Alias-Shape Repair — PR #141
 
@@ -50,18 +50,18 @@ PR #141 exact final head `0f92f4f216a60b1641d69a3516262af005a7205e` passed every
 
 The scheduled repository runtime-research audit on deployed `main` produced fresh authoritative Splendid evidence after PR #141:
 - active epoch is `stable-paper-v4-20260826-successor01` under validation hold;
-- canonical execution ledger remains hash-valid at exactly 46 rows with zero v4 rows;
-- the exact four v3 rows remain immutable, including valid terminal DHR full exit `ae9d82d3d25748459f37842679d501cd`;
-- invalid SLS partial `90b22aad76074031906e0c6459dfa0bc` remains retained immutably and excluded only from successor economics;
-- deterministic successor replay is flat with no open positions, cash `13533.996429678442`, and equity approximately `13534.00`;
-- lifecycle halt remains active with reason `canonical execution lifecycle integrity halt`;
-- runner has no active error and market-data accounting passes.
+- canonical execution ledger remained hash-valid at exactly 46 rows with zero v4 rows at that time;
+- the exact four v3 rows remained immutable, including valid terminal DHR full exit `ae9d82d3d25748459f37842679d501cd`;
+- invalid SLS partial `90b22aad76074031906e0c6459dfa0bc` remained retained immutably and excluded only from successor economics;
+- deterministic successor replay was flat with no open positions, cash `13533.996429678442`, and equity approximately `13534.00`;
+- lifecycle halt remained active with reason `canonical execution lifecycle integrity halt`;
+- runner had no active error and market-data accounting passed.
 
-This evidence proves the v3→v4 cutover itself completed as intended. It also exposed one remaining accounting-observability defect: the verified v4 baseline is intentionally flat (`positions={}`, `trades=[]`, cash approximately equity), but `verified_snapshot_accounting_baseline` forwarded that empty-trade shape into the legacy bidirectional reconciler, which reported `coverage_complete=false` solely because the trade ledger was empty. The same audit showed zero coverage issues and zero economic issues, so this was a reconciliation/reporting classification defect rather than a new canonical or economic defect.
+This evidence proved the v3→v4 cutover itself completed as intended. It also exposed one remaining accounting-observability defect: the verified v4 baseline was intentionally flat (`positions={}`, `trades=[]`, cash approximately equity), but `verified_snapshot_accounting_baseline` forwarded that empty-trade shape into the legacy bidirectional reconciler, which reported `coverage_complete=false` solely because the trade ledger was empty. The same audit showed zero coverage issues and zero economic issues, so this was a reconciliation/reporting classification defect rather than a new canonical or economic defect.
 
 ## 2026-08-31 Flat Verified-Baseline Repair — PR #142
 
-PR #142 adds a narrow fail-closed verified-flat baseline path. It reports accounting coverage complete only when the verified snapshot has:
+PR #142 added a narrow fail-closed verified-flat baseline path. It reports accounting coverage complete only when the verified snapshot has:
 - no baseline positions;
 - no post-baseline trades;
 - positive cash and equity;
@@ -77,38 +77,36 @@ PR #142 exact head `4db57469c2c75d36a5b3d0660bdffe521b908748` passed:
 
 PR #142 was squash-merged automatically as `baccd041751c8e2e4a603cec097bb16d4c21c73d`.
 
-## 2026-08-31 PR #142 Deployment Boundary
+## 2026-09-01 Morning Acceptance — Issue #126 Closed
 
-Current `main` documentation baseline `d7978b74a891aa630fb652549f997956cba401d8` is deployed successfully to authoritative Splendid (`web-production-e1796.up.railway.app`). The exact-main Change Safety Audit also completed successfully. No new open repair PR or newly discovered correctness issue is present beyond Issue #126.
+A fresh read-only authoritative Splendid runtime-research capture completed at approximately 09:32 CDT using the deployed PR #142 code. The runtime and accounting acceptance boundary is now clean:
+- active epoch remains `stable-paper-v4-20260826-successor01` under validation hold;
+- daily audit reports `overall=pass` and accounting integrity `status=ok`;
+- `coverage_complete=true`, `coverage_issue_count=0`, and `economic_issue_count=0`;
+- canonical execution ledger is append-only/hash-valid at 48 rows with 2 current-v4 rows;
+- the two new post-cutover rows form a legitimate exact NVDA short lifecycle: entry `9c0aaec4bf2547bc9fff1f4514687025`, 4.698849 @ 216.021, followed by exit `666fe83500a540cebce5bb142553f5f1`, 4.698849 @ 218.31;
+- active state is flat with no open positions; cash is `13523.240757873831`, equity `13523.24`, and reconstructed cash/equity `13523.240764`;
+- runner is PASS with no active error and last successful run `2026-09-01 09:29:24 CDT`;
+- market-data accounting is PASS with 7,593 classified terminal outcomes and zero in-flight/unclassified requests;
+- fresh-day baseline is sane/pass with `day_start_equity=13533.996429678442`, `day_peak_equity=13534.0`, and approximately 0.079% daily loss/drawdown;
+- risk is PASS and no lifecycle/risk halt is currently active;
+- self-check is PASS with no failing components;
+- the v3→v4 migration provenance remains archived and exact, and the invalid SLS partial remains immutable historical evidence excluded only from successor economics.
 
-A fresh direct read-only request to the Splendid audit endpoint from the automation execution environment still fails at DNS resolution. Treat this as an evidence-access limitation only; do not infer active accounting health from deployment success alone and do not alter runtime state in response.
+The runtime-research wrapper reports `warn` only because it still invokes the superseded verified-v2 successor replay probe. That probe correctly rejects the active v4 lineage with diagnosis `canonical_ledger_epoch_lineage_not_exactly_verified_v2`; it is not an active v4 accounting failure and has no write, halt-clear, risk-peak, strategy, sizing, live, or ML authority.
+
+Issue #126 was closed as completed on this evidence. No code repair or state mutation was required during the 2026-09-01 morning audit. Validation hold remains active and should only be released through a separate governed validation-release decision; Issue #126 closure does not itself authorize hold release.
 
 ## Current Validation Boundary
 
-Issue #126 remains open intentionally. Fresh read-only authoritative Splendid evidence after deployment of PR #142 must now prove:
-- active epoch remains v4 under validation hold;
-- canonical ledger remains append-only/hash-valid at the same immutable 46-row cutover boundary unless a legitimate new execution is independently explained;
-- active accounting reports `coverage_complete=true` with zero coverage/economic issues;
-- reconstructed cash/equity/open positions match the flat v4 successor baseline;
-- lifecycle halt remains preserved unless a separate bounded release gate proves it safe to release;
-- runner, market data, persistence, bootstrap, and accounting diagnostics remain healthy.
+There is no active stability/accounting defect. Continue routine read-only morning, midday, and pre-close operational audits. Treat any future canonical/accounting/runtime regression as a new issue unless evidence proves it is a continuation of an existing defect.
 
-No `/paper/run`, manual halt/hold release, canonical mutation, day-peak rewrite, historical-state rewrite, or trading-authority change is authorized for this validation.
+The next governed decision is validation-hold release for the clean v4 successor. Do not release it merely because Issue #126 is closed. Require a bounded release gate proving the configured forward-validation criteria are satisfied while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
+
+No `/paper/run`, manual halt/hold release, canonical mutation, day-peak rewrite, historical-state rewrite, or trading-authority change is authorized by this handoff.
 
 ## Immediate Next Action
 
-Obtain a fresh read-only authoritative Splendid repository runtime-research snapshot/audit from an execution path that can resolve the service. If active v4 accounting is clean and all other acceptance evidence remains intact, evaluate Issue #126 closure and any separate halt/validation-hold release boundary from that exact evidence only.
-
-## Completion Criteria for Issue #126
-
-Issue #126 may close only after all are proven:
-- prospective containment remains active;
-- every v3 canonical row through the cutover boundary remains independently classified;
-- deterministic v3→v4 successor recovery completes from exact evidence;
-- canonical ledger remains append-only/hash-valid and unchanged through recovery;
-- active v4 accounting has zero unexplained coverage/economic issues;
-- cash/equity/open positions match deterministic projection within bounded tolerances;
-- authoritative Splendid bootstrap/runner/market-data/state diagnostics are healthy apart from any intentionally retained lifecycle halt;
-- any halt or validation-hold release is separately justified by clean lifecycle evidence, never manual clearing.
+Continue normal autonomous audits against authoritative Splendid. If v4 accounting, canonical lifecycle, runner, market-data, persistence, fresh-day risk state, or startup health regresses, investigate and repair it under the standing bounded safety rules. Separately evaluate the existing validation-hold release mechanism only from explicit clean forward-validation evidence; do not manually clear the hold.
 
 Correctness, accounting integrity, runtime stability, and deterministic recovery remain ahead of performance optimization.
