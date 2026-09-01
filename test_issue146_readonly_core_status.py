@@ -121,6 +121,19 @@ class Issue146ReadonlyCoreStatusTests(unittest.TestCase):
         self.assertIn(override.VERSION, text)
         self.assertEqual(self.forbidden_calls, [])
 
+    def test_root_returns_json_for_collector_accept_header(self) -> None:
+        override.install(self.core)
+        with self.app.test_request_context(
+            "/", method="GET", headers={"Accept": "application/json"}
+        ):
+            response = self._handler()()
+            payload = response.get_json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["runtime_status"], "running")
+        self.assertEqual(payload["position_symbols"], ["BBAI", "DELL"])
+        self.assertTrue(payload["authority"]["read_only"])
+        self.assertEqual(self.forbidden_calls, [])
+
     def test_full_query_does_not_reenable_expensive_legacy_status(self) -> None:
         override.install(self.core)
         with self.app.test_request_context("/paper/status?full=1", method="GET"):
