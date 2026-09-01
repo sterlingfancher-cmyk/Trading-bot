@@ -10,15 +10,16 @@ import readonly_core_status_override as override
 
 class Issue146ReadonlyCoreStatusTests(unittest.TestCase):
     def setUp(self) -> None:
+        override._INSTALLED_APP_IDS.clear()
         self.app = Flask(__name__)
 
         @self.app.route("/", endpoint="home")
         def legacy_home():
-            raise AssertionError("legacy root handler must be replaced")
+            raise AssertionError("legacy root handler must be bypassed")
 
         @self.app.route("/paper/status", endpoint="paper_status")
         def legacy_status():
-            raise AssertionError("legacy status handler must be replaced")
+            raise AssertionError("legacy status handler must be bypassed")
 
         self.forbidden_calls: list[str] = []
 
@@ -100,7 +101,8 @@ class Issue146ReadonlyCoreStatusTests(unittest.TestCase):
     def test_status_is_in_memory_read_only_and_fast_path(self) -> None:
         result = override.install(self.core)
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(set(result["replaced_endpoints"]), {"home", "paper_status"})
+        self.assertEqual(set(result["intercepted_paths"]), {"/", "/paper/status"})
+        self.assertFalse(result["replaces_route_ownership"])
 
         response = self.app.test_client().get("/paper/status")
         self.assertEqual(response.status_code, 200)
@@ -132,16 +134,27 @@ class Issue146ReadonlyCoreStatusTests(unittest.TestCase):
         self.assertEqual(payload["version"], override.VERSION)
         self.assertEqual(self.forbidden_calls, [])
 
-    def test_reinstall_reasserts_endpoint_ownership(self) -> None:
+    def test_non_core_path_is_not_intercepted(self) -> None:
+        @self.app.route("/health")
+        def health():
+            return "health-ok"
+
         override.install(self.core)
-        self.app.view_functions["paper_status"] = lambda: "stale"
-        result = override.install(self.core)
-        self.assertEqual(result["status"], "ok")
-        view = self.app.view_functions["paper_status"]
-        self.assertEqual(
-            getattr(view, "_readonly_core_status_override_version", None),
-            override.VERSION,
-        )
+        response = self.app.test_client().get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(as_text=True), "health-ok")
+        self.assertEqual(self.forbidden_calls, [])
+
+    def test_reinstall_is_idempotent_and_does_not_replace_routes(self) -> None:
+        original_home = self.app.view_functions["home"]
+        original_status = self.app.view_functions["paper_status"]
+        first = override.install(self.core)
+        second = override.install(self.core)
+        self.assertEqual(first["status"], "ok")
+        self.assertEqual(second["status"], "ok")
+        self.assertIs(self.app.view_functions["home"], original_home)
+        self.assertIs(self.app.view_functions["paper_status"], original_status)
+        self.assertEqual(len(self.app.before_request_funcs.get(None, [])), 1)
         response = self.app.test_client().get("/paper/status")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["version"], override.VERSION)
