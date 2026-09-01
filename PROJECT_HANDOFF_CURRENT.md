@@ -1,11 +1,11 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-01 09:35 CDT  
+Last updated: 2026-09-01 09:37 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Current `main` baseline before this handoff commit: `d0eeb3f426df23c7c9305ed09e4f1c3132ec9cac`  
-Active stability/accounting issue: none; Issue #126 closed completed on 2026-09-01
+Current `main` baseline before this handoff commit: `842c249b53c7c604fdc89679715d5a07712a7f0d`  
+Active stability/accounting issue: none; active diagnostics-only follow-up: Issue #143
 
 ## Communication and Continuity
 
@@ -93,20 +93,26 @@ A fresh read-only authoritative Splendid runtime-research capture completed at a
 - self-check is PASS with no failing components;
 - the v3→v4 migration provenance remains archived and exact, and the invalid SLS partial remains immutable historical evidence excluded only from successor economics.
 
-The runtime-research wrapper reports `warn` only because it still invokes the superseded verified-v2 successor replay probe. That probe correctly rejects the active v4 lineage with diagnosis `canonical_ledger_epoch_lineage_not_exactly_verified_v2`; it is not an active v4 accounting failure and has no write, halt-clear, risk-peak, strategy, sizing, live, or ML authority.
-
 Issue #126 was closed as completed on this evidence. No code repair or state mutation was required during the 2026-09-01 morning audit. Validation hold remains active and should only be released through a separate governed validation-release decision; Issue #126 closure does not itself authorize hold release.
+
+## Issue #143 — Diagnostics-Only Snapshot Classification Follow-up
+
+The same clean 2026-09-01 capture exposed a non-authoritative observability defect in `runtime_research_snapshot.py`. The wrapper reports `overall=warn` even though active v4 runtime/accounting is healthy because:
+- it still treats the superseded verified-v2 recovery probe as an active health gate; that probe correctly returns `canonical_ledger_epoch_lineage_not_exactly_verified_v2` on a v4 lineage;
+- it treats failure of the optional root `/` JSON endpoint as a warning even when bootstrap, paper status, self-check, fresh-day, and daily-audit endpoints prove the application ready.
+
+Issue #143 tracks this diagnostics-only false-WARN classification. An autonomous `/agent` repair request has been issued with a strict boundary: continue collecting the legacy v2 probe as historical evidence, but make it non-applicable to v4+ overall health; preserve v2 fail/warn behavior; treat root as optional only when required readiness endpoints are healthy; keep all genuine self-check/fresh-day/daily-audit/required-endpoint failures fail-closed; add focused regressions; do not touch state, execution, risk, strategy, sizing, live, ML, or order authority. No PR exists yet at this handoff point.
 
 ## Current Validation Boundary
 
-There is no active stability/accounting defect. Continue routine read-only morning, midday, and pre-close operational audits. Treat any future canonical/accounting/runtime regression as a new issue unless evidence proves it is a continuation of an existing defect.
+There is no active trading stability/accounting defect. Continue routine read-only morning, midday, and pre-close operational audits. Treat any future canonical/accounting/runtime regression as a new issue unless evidence proves it is a continuation of an existing defect.
 
-The next governed decision is validation-hold release for the clean v4 successor. Do not release it merely because Issue #126 is closed. Require a bounded release gate proving the configured forward-validation criteria are satisfied while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
+The next governed trading-state decision is validation-hold release for the clean v4 successor. Do not release it merely because Issue #126 is closed. Require a bounded release gate proving the configured forward-validation criteria are satisfied while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
 
 No `/paper/run`, manual halt/hold release, canonical mutation, day-peak rewrite, historical-state rewrite, or trading-authority change is authorized by this handoff.
 
 ## Immediate Next Action
 
-Continue normal autonomous audits against authoritative Splendid. If v4 accounting, canonical lifecycle, runner, market-data, persistence, fresh-day risk state, or startup health regresses, investigate and repair it under the standing bounded safety rules. Separately evaluate the existing validation-hold release mechanism only from explicit clean forward-validation evidence; do not manually clear the hold.
+Complete Issue #143 only as a diagnostics/read-only repair with mandatory exact-head safety gates. Continue normal autonomous audits against authoritative Splendid. If v4 accounting, canonical lifecycle, runner, market-data, persistence, fresh-day risk state, or startup health regresses, investigate and repair it under the standing bounded safety rules. Separately evaluate the existing validation-hold release mechanism only from explicit clean forward-validation evidence; do not manually clear the hold.
 
 Correctness, accounting integrity, runtime stability, and deterministic recovery remain ahead of performance optimization.
