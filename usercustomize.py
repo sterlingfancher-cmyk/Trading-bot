@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Any
 
-VERSION = "usercustomize-entry-pipeline-composition-2026-08-05-v52-yfinance-hygiene"
+VERSION = "usercustomize-entry-pipeline-composition-2026-09-01-v53-readonly-core-status"
 _REGISTERED_APP_IDS: set[int] = set()
 _ONE_SHOT_APPLIED: set[tuple[int, str]] = set()
 
@@ -165,6 +165,7 @@ MODULES = (
     ("cycle_alignment_overlay", "app_and_module"),
     ("fast_self_check_override", "app_and_module"),
     ("daily_operational_audit", "app_and_module"),
+    ("readonly_core_status_override", "app_and_module"),
 )
 
 
@@ -209,10 +210,11 @@ def _watchdog() -> None:
                     "ml_pre3a_shadow_validation", "ml_phase3a_early_paper_gate",
                     "ml_vs_rules_shadow_log", "entry_pipeline_ownership_guard",
                     "daily_self_check_compactor", "missing_reason_trace_overlay", "runtime_reliability_overlay", "cycle_alignment_overlay",
-                    "fast_self_check_override", "daily_operational_audit",
+                    "fast_self_check_override", "daily_operational_audit", "readonly_core_status_override",
                 ):
                     _register_module(flask_app, core, name, route_args="app_and_module")
                 _register_module(flask_app, core, "bear_recovery_stack_contract", route_args="app_and_module")
+                _register_module(flask_app, core, "readonly_core_status_override", route_args="app_and_module")
         except Exception:
             pass
         time.sleep(0.5 if iteration < 60 else 30.0)
