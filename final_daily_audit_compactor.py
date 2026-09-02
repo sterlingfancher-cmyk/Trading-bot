@@ -80,8 +80,12 @@ def _active_epoch_status(core: Any = None) -> Dict[str, Any]:
 
 def _release_status(core: Any = None) -> Dict[str, Any]:
     try:
-        import clean_epoch_validation_release as module
-        return module.status_payload(core)
+        import verified_v4_validation_release as v4_module
+        v4 = v4_module.status_payload(core)
+        if v4.get("validation_hold") is not None:
+            return v4
+        import clean_epoch_validation_release as legacy_module
+        return legacy_module.status_payload(core)
     except Exception as exc:
         return {"status": "warn", "error": f"{type(exc).__name__}: {exc}"}
 
