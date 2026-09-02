@@ -51,7 +51,13 @@ def _successor_epoch(core: Any) -> str | None:
         and str(epoch.get("prior_epoch_id") or "") == ISSUE82_V3_EPOCH_ID
         and str(epoch.get("historical_recovery_decision") or "") == ISSUE126_V4_DECISION
         and bool(epoch.get("historical_evidence_archived", False))
-        and bool(epoch.get("validation_hold", False))
+        and (
+            bool(epoch.get("validation_hold", False))
+            or (
+                epoch.get("validation_released") is True
+                and str(epoch.get("validation_release_status") or "") == "released"
+            )
+        )
     ):
         return ISSUE126_V4_EPOCH_ID
     return None
