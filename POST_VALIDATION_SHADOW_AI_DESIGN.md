@@ -1,6 +1,6 @@
 # Post-Validation Shadow-AI Research Design
 
-Status: Stage 2 provider-neutral client implemented; runtime integration disabled
+Status: Stage 3 asynchronous adversarial reviewer implemented; disabled by default
 Issue: #157  
 Runtime authority: unchanged; rules remain the sole execution authority
 
@@ -222,6 +222,18 @@ cost remains `null` unless configured per-token-category pricing is sufficient.
 Bounded nonblocking queue, one explicitly started research worker, immutable
 request snapshots from the existing observer owner, stale-result rejection, and
 no execution-thread provider calls.
+
+Implemented in shadow_ai_adversarial_reviewer.py. The existing
+run_report_guard.py observer enqueues immutable candidate snapshots after the
+authoritative cycle result is complete; it does not wait for a response or
+alter the returned result. runtime_worker_registration.py registers the
+reviewer after callable composition and before starting the existing auto
+runner. With the default disabled client and no provider transport, no research
+worker starts and observation is a bounded no-op. When a later approved
+configuration supplies both, exactly one daemon worker may consume at most 128
+queued items, with at most 10 requests per cycle; a full queue drops new
+research work with telemetry. Late, mismatched, or unavailable results remain
+invalid telemetry only and are not eligible for canonical outcome joins.
 
 ### Stage 4 — canonical outcome memory and scorecards
 
