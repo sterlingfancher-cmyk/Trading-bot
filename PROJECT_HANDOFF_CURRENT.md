@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-02 14:08 CDT  
+Last updated: 2026-09-02 14:32 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `439c7b1d9675f233ca9d0eff2a54aa04b1780ad9` (PR #159).  
+Validated runtime-code `main`: `4b0475e68cc05d3b9b1b763cd313c423a33d2942` (PR #160).  
 Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
 
 ## Communication and Continuity
@@ -12,7 +12,6 @@ Active stability/accounting/runtime issue: none. Active improvement issue: #157 
 Keep all Trading-bot progress, blockers, merge notices, runtime findings, and issue-status updates in the currently active main ChatGPT Trading conversation. Do not branch individual issue updates into separate chats unless the user explicitly requests a transition.
 
 Routine bounded stability work should be handled automatically: investigate, repair, test, merge when every required exact-head gate is green, then validate authoritative Splendid deployment evidence. Escalate only genuinely blocked or authority-changing decisions.
-
 
 ## Standing Continuous-Improvement Authorization
 
@@ -203,10 +202,7 @@ hard-risk controls, and rules-only execution authority remain unchanged.
 
 ## Immediate Next Action
 
-Resume Issue #157 with the completed repository-wide review and a
-provider-neutral shadow-AI design/contract. Keep implementation strictly
-shadow-only and proceed through bounded PR stages. Continue the scheduled
-read-only operational audits.
+Continue Issue #157 from completed Stage 1. PR #160 merged the provider-neutral shadow-AI research design and machine-readable authority contract with no runtime or trading behavior change. Proceed through bounded shadow-only implementation stages while preserving rules-only execution authority. Continue the scheduled read-only operational audits.
 
 If a demonstrated bug or higher-priority reliability issue appears, repair it
 automatically within the standing boundary, require every exact-head gate,
@@ -259,3 +255,22 @@ Implement the previously approved AI research/adversarial improvements strictly
 shadow-only: fail-closed structured AI client, adversarial reviewer, canonical
 outcome memory, source/citation and inference-cost telemetry, and AI-vs-rules
 counterfactual scorecards. Rules remain sole execution authority.
+
+## 2026-09-02 Pre-Close Operational Audit — WARN / structurally healthy
+
+A fresh settled read-only runtime snapshot at approximately 14:30 CDT, rerun after PR #160 deployment finished registering, proved the authoritative Splendid application ready and delegating with all `11/11` monitored endpoints reachable and no classification failures. The initial automatic artifact captured during registration was rejected as transient deployment evidence and was not treated as a runtime defect.
+
+Settled pre-close evidence:
+- self-check `pass`, 9 components checked, no failing components;
+- cash/equity `13475.004291 / 13475.0`, no open positions, unrealized P/L `0.0`;
+- active epoch `stable-paper-v4-20260826-successor01`, validation hold remains released (`false`);
+- accounting `ok`, coverage complete, `coverage_issue_count=0`, `economic_issue_count=0`, reconstructed open positions `[]`;
+- canonical ledger append-only/hash-valid at 55 rows, 9 current-v4 rows; latest execution remains BBAI exit `300a83cb7ec14b69884f701ca847ec01`;
+- market-data accounting `pass`, `1542/1542` requests classified, zero in-flight/unclassified requests, provider circuit closed;
+- runner `pass`, no active error, latest successful automatic run `14:26:21 CDT`, completed cycle `14:26:26 CDT`;
+- fresh-day baseline `pass`, no halt, no pending reset;
+- risk status `warn` only for elevated intraday drawdown approximately `2.43%`; net daily loss approximately `0.568%`; self-defense inactive;
+- profit guard is active because the configured day-profit hard lock had been reached earlier; the current rules result blocks new entries with `entry_block_reason=profit_guard_active` and this is expected configured behavior, not a correctness failure;
+- the legacy verified-v2 recovery endpoint still reports raw `fail`, but classification is explicitly non-applicable because the active lineage is v4+ (`superseded_by_active_v4_plus_lineage`); it is nonblocking and does not indicate an active v4 defect.
+
+No new canonical, accounting, runtime, market-data, runner, state, risk-halt, or execution-safety regression was demonstrated. No bug repair or authority change was required. PR #160 Stage 1 is contract/design-only; all four main-branch required workflows passed after merge, including exact Gunicorn startup smoke. Continue Issue #157 Stage 2 shadow-only work under the standing boundary.
