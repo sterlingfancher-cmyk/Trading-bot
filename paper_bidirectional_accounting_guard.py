@@ -21,7 +21,7 @@ import copy
 import datetime as dt
 from typing import Any, Dict, List, Tuple
 
-VERSION = "paper-bidirectional-accounting-2026-08-25-v2-state-trade-qty-tolerance"
+VERSION = "paper-bidirectional-accounting-2026-09-02-v3-open-residue-tolerance"
 # state.trades serializes execution quantities to six decimals. Accept only the
 # bounded sub-five-micro-share residue already proven safe by canonical replay;
 # material quantity gaps remain coverage failures and cannot create cash.
@@ -192,8 +192,6 @@ def analyze_ledger(pf: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
                     "overspend": round(notional - cash, 6),
                 })
             cash -= notional
-            # [remaining qty, entry price].  For shorts, entry notional is also
-            # the reserved margin released pro-rata on exits.
             book.append([qty, price])
             if cash < -max(2.0, initial * 0.0025):
                 economic_issues.append({
@@ -252,7 +250,11 @@ def analyze_ledger(pf: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
     position_value_total = 0.0
     unrealized = 0.0
     for symbol, side_books in books.items():
-        open_sides = [side for side in ("long", "short") if sum(row[0] for row in side_books[side]) > 1e-9]
+        open_sides = [
+            side
+            for side in ("long", "short")
+            if sum(row[0] for row in side_books[side]) > STATE_TRADE_QTY_SERIALIZATION_TOLERANCE
+        ]
         if len(open_sides) > 1:
             economic_issues.append({"reason": "opposing_open_books_same_symbol", "symbol": symbol, "open_sides": open_sides})
         for side in open_sides:
