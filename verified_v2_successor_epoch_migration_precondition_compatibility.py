@@ -119,7 +119,13 @@ def _exact_issue126_v4_successor(migration: Any, core: Any) -> bool:
         and str(epoch.get("prior_epoch_id") or "") == migration.TARGET_EPOCH_ID
         and str(epoch.get("historical_recovery_decision") or "") == ISSUE126_V4_DECISION
         and bool(epoch.get("historical_evidence_archived", False))
-        and bool(epoch.get("validation_hold", False))
+        and (
+            bool(epoch.get("validation_hold", False))
+            or (
+                epoch.get("validation_released") is True
+                and str(epoch.get("validation_release_status") or "") == "released"
+            )
+        )
         and bool(epoch.get("canonical_history_retained_immutably", False))
     )
 

@@ -221,15 +221,22 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
     epoch = _d(state.get("paper_accounting_epoch"))
     active = str(epoch.get("id") or state.get("accounting_epoch_id") or "") == TARGET_EPOCH_ID
     released = bool(active and not epoch.get("validation_hold") and epoch.get("validation_released"))
+    attempted_but_not_persisted = bool(
+        active
+        and not released
+        and _LAST.get("status") == "released"
+        and _LAST.get("already_released") is False
+    )
     return {
-        "status": "released" if released else _LAST.get("status", "pending"),
-        "overall": "pass" if released else _LAST.get("overall", "warn"),
+        "status": "released" if released else "blocked" if attempted_but_not_persisted else _LAST.get("status", "pending"),
+        "overall": "pass" if released else "fail" if attempted_but_not_persisted else _LAST.get("overall", "warn"),
         "type": "verified_v4_validation_release_status",
         "version": VERSION,
         "epoch_id": TARGET_EPOCH_ID,
         "released": released,
         "validation_hold": bool(epoch.get("validation_hold")) if active else None,
         "released_local": epoch.get("validation_released_local") if active else None,
+        "reason": "release_attempt_not_reflected_in_authoritative_state" if attempted_but_not_persisted else None,
         "last_result": dict(_LAST),
         "authority": {
             "paper_only": True,
