@@ -1,11 +1,11 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-01 15:08 CDT  
+Last updated: 2026-09-02 12:05 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Current runtime-code `main`: `2782873ba68399c8071fc079ca03cbf3a259c074` (PR #149); this handoff update is documentation-only and follows that validated runtime code.  
-Active stability/accounting issue: none; active runtime-observability/performance issue: none; active repair PR: none.
+Validated runtime-code `main`: `cc5f6b6c2ed0b155a4a20b6ebd2210633b981e03` (PR #153).  
+Active stability/accounting issue: none. Active runtime-observability/performance issue: none. Active repair PR: none.
 
 ## Communication and Continuity
 
@@ -25,147 +25,92 @@ Routine bounded stability work should be handled automatically: investigate, rep
 - Historical accounting correction must use exact-evidence successor accounting with archived evidence and validation hold, never immutable-history edits.
 - Relevant repairs require exact-head Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit, exact Gunicorn startup smoke, and affected focused invariant suites before automatic merge.
 
-## Issue #126 — Established Root Cause and Recovery Boundary
+## Established v4 Successor Boundary
 
-Issue #126 was the post-#82 SLS canonical exit/state divergence. The prospective defect was a re-entrant legacy accounting read during SLS full-exit processing: state deleted SLS, then cooldown/accounting re-entry occurred before the new canonical row had been mirrored into state, allowing the closed position to be reconstructed and later emit an impossible SLS partial exit.
+Issue #126 was the post-#82 SLS canonical exit/state divergence caused by re-entrant legacy accounting during full-exit processing. PR #127 prospectively contained the resurrection defect. PR #128 and subsequent bounded verifier repairs established deterministic v3→v4 successor recovery without rewriting immutable history.
 
-PR #127 prospectively contained that re-entrant resurrection defect. PR #128 added deterministic v3→v4 successor recovery with immutable canonical history, exact-signature evidence, archival, validation hold, and preserved lifecycle halt. Subsequent evidence expanded the exact v3 cutover boundary to 46 canonical rows, including a valid canonical-only terminal DHR full exit whose state/cash mirror did not complete.
-
-The recovery disposition remains exact:
+The exact recovery disposition remains:
 - retain all canonical rows immutably;
 - include the valid SLS full exit;
 - include the valid DHR partial exit;
 - include the valid canonical-only terminal DHR full exit;
 - exclude only the proven invalid re-entrant SLS partial from successor economics;
-- preserve validation hold, risk history, day peak, strategy, sizing, hard-risk limits, live authority, and ML authority;
-- require clean authoritative v4 post-deploy evidence before Issue #126 closure.
+- preserve validation hold, risk/day-peak history, strategy, sizing, hard-risk limits, live authority, and ML authority.
 
-## 2026-08-31 DHR Alias-Shape Repair — PR #141
+The authoritative active epoch is `stable-paper-v4-20260826-successor01`. Issue #126 is closed. Validation hold remains intentionally active and must only be released through a separate governed validation-release gate.
 
-Fresh forensic evidence showed the remaining v3→v4 verifier blocker was the persisted DHR alias shape, not a new economic or canonical-ledger defect. PR #141 made the DHR terminal-state verifier require the exact proven alias divergence: `qty` approximately the verified baseline DHR quantity and `shares` approximately the post-partial remainder, with both aliases required and no fallback.
+## Recently Closed Runtime/Observability Issues
 
-PR #141 exact final head `0f92f4f216a60b1641d69a3516262af005a7205e` passed every required exact-head gate and was squash-merged as `39511bd53fe599a8e3a1564b7d3887af3021b29f`.
+### Issue #143 — legacy v2 diagnostic false WARN
 
-## 2026-08-31 Authoritative v4 Post-Deploy Evidence
+PR #145 made the legacy verified-v2 recovery gate non-applicable when an active v4+ lineage is proven while retaining the raw forensic evidence. It also made optional root-route failures nonblocking only when required core runtime health is independently proven. Issue #143 is closed.
 
-The scheduled repository runtime-research audit on deployed `main` produced fresh authoritative Splendid evidence after PR #141:
-- active epoch is `stable-paper-v4-20260826-successor01` under validation hold;
-- canonical execution ledger remained hash-valid at exactly 46 rows with zero v4 rows at that time;
-- the exact four v3 rows remained immutable, including valid terminal DHR full exit `ae9d82d3d25748459f37842679d501cd`;
-- invalid SLS partial `90b22aad76074031906e0c6459dfa0bc` remained retained immutably and excluded only from successor economics;
-- deterministic successor replay was flat with no open positions, cash `13533.996429678442`, and equity approximately `13534.00`;
-- lifecycle halt remained active with reason `canonical execution lifecycle integrity halt`;
-- runner had no active error and market-data accounting passed.
+### Issue #146 — `/paper/status` and root latency
 
-This evidence proved the v3→v4 cutover itself completed as intended. It also exposed one remaining accounting-observability defect: the verified v4 baseline was intentionally flat (`positions={}`, `trades=[]`, cash approximately equity), but `verified_snapshot_accounting_baseline` forwarded that empty-trade shape into the legacy bidirectional reconciler, which reported `coverage_complete=false` solely because the trade ledger was empty. The same audit showed zero coverage issues and zero economic issues, so this was a reconciliation/reporting classification defect rather than a new canonical or economic defect.
+PRs #147–#149 progressively removed expensive read-only status persistence/reconciliation, added lightweight in-memory core status views, and fixed root JSON content negotiation. Final settled Splendid acceptance proved `/paper/status` and root respond normally while preserving all trading/state authority boundaries. Issue #146 is closed.
 
-## 2026-08-31 Flat Verified-Baseline Repair — PR #142
+## 2026-09-02 Issue #150 — DELL Serialized Micro-Share Residue — CLOSED
 
-PR #142 added a narrow fail-closed verified-flat baseline path. It reports accounting coverage complete only when the verified snapshot has:
-- no baseline positions;
-- no post-baseline trades;
-- positive cash and equity;
-- cash and equity within `$0.05`.
+### Morning finding
 
-A flat snapshot with a material cash/equity mismatch remains a coverage failure. Existing verified-open-position behavior is unchanged. The repair does not mutate portfolio state, canonical history, risk state, halt/validation hold, strategy, signals, sizing, hard-risk thresholds, live authority, ML authority, or order authority.
+The morning audit found a read-only accounting classification defect, not a canonical or persisted-state defect. Authoritative Splendid was flat with cash approximately `13475.004711`, equity approximately `13475.00`, and no persisted positions, while deterministic accounting reconstruction incorrectly reported DELL as open.
 
-PR #142 exact head `4db57469c2c75d36a5b3d0660bdffe521b908748` passed Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, the full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit, and exact Gunicorn startup smoke. PR #142 was squash-merged automatically as `baccd041751c8e2e4a603cec097bb16d4c21c73d`.
+The DELL v4 lifecycle was:
+- short entry `2.323047 @ 436.96`;
+- partial exit `0.766605 @ 426.25`;
+- terminal exit `1.556441 @ 466.10`.
 
-## 2026-09-01 Morning Acceptance — Issue #126 Closed
+Six-decimal serialization leaves exactly `0.000001` share arithmetic residue. `paper_bidirectional_accounting_guard.py` already defined `STATE_TRADE_QTY_SERIALIZATION_TOLERANCE = 5e-6`, but the final reconstructed-open-position predicate still used `> 1e-9`.
 
-A fresh read-only authoritative Splendid runtime-research capture completed at approximately 09:32 CDT using the deployed PR #142 code. The runtime and accounting acceptance boundary was clean:
-- active epoch remained `stable-paper-v4-20260826-successor01` under validation hold;
-- daily audit reported `overall=pass`, accounting coverage complete, zero coverage issues, and zero economic issues;
-- canonical execution ledger remained append-only/hash-valid;
-- runner, market-data accounting, fresh-day state, risk, and self-check passed;
-- the v3→v4 migration provenance remained archived and exact, with the invalid SLS partial retained as immutable historical evidence and excluded only from successor economics.
+Two unsafe repo-agent attempts, PRs #151 and #152, were rejected and closed unmerged because they destructively rewrote unrelated production code. No unsafe change reached `main`.
 
-Issue #126 was closed as completed on this evidence. Validation hold remains active and should only be released through a separate governed validation-release decision; Issue #126 closure does not itself authorize hold release.
+### PR #153 repair
 
-## 2026-09-01 Issue #143 Resolution — PR #145
+PR #153 applied the bounded intended repair: use the existing `5e-6` serialization tolerance only for final reconstructed-open-position classification, preserving exit-overrun tolerance, cash/economic arithmetic, canonical semantics, persistence/state, strategy, signals, sizing, risk thresholds, halt/validation hold, live authority, ML authority, and order authority. Focused regressions cover the DELL `1e-6` terminal residue, a residue above `5e-6`, and existing over-exit behavior.
 
-Issue #143 tracked a diagnostics-only false WARN in `runtime_research_snapshot.py`: the collector treated the legacy verified-v2 recovery gate as active on a healthy v4 lineage and treated the optional root endpoint as blocking even when required runtime health was proven.
+PR #153 exact head `7a3933831a4c56bba6eb78a976f1a1f0b006c2b0` passed every required exact-head gate:
+- Change Safety Audit;
+- Repository Safety and Performance Audit Validation;
+- Architecture Debt Regression Gate;
+- full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit;
+- exact Gunicorn startup smoke;
+- focused accounting regressions.
 
-PR #145 implemented a surgical two-file repair:
-- preserve collection/raw evidence from the legacy verified-v2 recovery endpoint;
-- when active daily-audit epoch is `stable-paper-v4-*` or later, mark that old v2 gate superseded/non-applicable to overall classification;
-- preserve fail-closed behavior for active verified-v2 failures;
-- permit root `/` to be nonblocking only when bootstrap, paper status, application readiness, and self-check prove required health;
-- preserve warning behavior for required endpoint, self-check, fresh-day, daily-audit, accounting/risk, and research-run failures;
-- add focused regressions for v4 lineage, optional root failure, and required endpoint failures.
+It was squash-merged as runtime commit `cc5f6b6c2ed0b155a4a20b6ebd2210633b981e03`.
 
-Exact PR head `e3204ea6f3174ea2d31f0624fa110d963bb9369c` passed Change Safety Audit including impact-aware canonical invariant regressions and exact Gunicorn smoke, Repository Safety/Performance, Architecture Debt, and the full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research audit. PR #145 was squash-merged as `3421829a68d898bbb413e5638372c95f78fb1177` and authoritative Splendid deployment succeeded.
+The first automatic post-merge runtime artifact was captured while Splendid was still in deferred registration and was deliberately rejected as acceptance evidence. Issue #150 was reopened until a settled read-only capture could prove the runtime result.
 
-A fresh post-deploy retry confirmed the intended Issue #143 behavior: active `stable-paper-v4-20260826-successor01` makes the legacy verified-v2 gate nonblocking while retaining its raw evidence. Issue #143 is therefore closed as completed.
+### 2026-09-02 12:03 CDT settled Splendid acceptance
 
-## Issue #146 — Required Core Status/Root Latency — Closed 2026-09-01
+A fresh rerun against the fully settled authoritative deployment proved:
+- bootstrap ready, phase `delegating`, application ready;
+- all `11/11` runtime-research endpoints reachable; no required endpoint or classification failures;
+- self-check `pass`, no failing components;
+- active epoch `stable-paper-v4-20260826-successor01` with `validation_hold=true`;
+- persisted cash `13475.004711441643`, equity `13475.0`, positions `[]`;
+- accounting model `bidirectional_margin_v1`, coverage complete, `coverage_issue_count=0`, `economic_issue_count=0`;
+- reconstructed cash/equity `13475.004291` / `13475.004291`;
+- critically, `reconstructed_open_positions=[]`: the DELL phantom lot is gone;
+- canonical execution ledger append-only/hash-valid at 55 rows, 9 current-v4 rows, zero parse/hash errors; latest execution ID `300a83cb7ec14b69884f701ca847ec01`;
+- market-data accounting `pass`, `7782/7782` requests classified, zero in-flight/unclassified requests, provider circuit closed;
+- runner `pass`, no active error, last successful automatic run approximately `12:03:15 CDT`, last completed cycle approximately `12:03:19 CDT`;
+- fresh risk day `pass`; risk not halted; intraday drawdown approximately `2.43%`; net daily loss approximately `0.568%`; self-defense inactive with reason `feedback loop clear`;
+- the snapshot-level `WARN` is solely the explicitly non-applicable legacy verified-v2 gate (`superseded_by_active_v4_plus_lineage`), not an active v4 defect.
 
-The post-PR-145 authoritative retry exposed a distinct runtime-observability/performance defect. `/paper/status` is explicitly a required core endpoint in the self-check contract, yet both `/paper/status` and `/` exceeded the runtime research collector's 20-second read timeout on two attempts.
-
-PR #147 (`fix/issue-146-readonly-status-persistence`) removed the redundant persistence/stale-write reconciliation triggered by GET/HEAD `/paper/status`. Exact head `0e8546cf4947326566050f67344eb88a31f81962` passed all required exact-head gates and was squash-merged as `593437000b5a5ce015ae0668d468df626d7fc203`.
-
-### 2026-09-01 14:30 CDT Fresh Acceptance Retry — PR #147 Insufficient
-
-The first main-push runtime snapshot after PR #147 landed was captured while Splendid was still in deferred bootstrap and therefore was not valid acceptance evidence. A fresh read-only rerun after the application had fully settled established the actual state:
-- bootstrap was ready/delegating and application readiness was true;
-- `/paper/self-check`, `/paper/fresh-day-check`, `/paper/daily-audit`, and the research/status endpoints other than the two core views were responsive;
-- `/paper/status` still timed out after two 20-second attempts;
-- root `/` also still timed out after two 20-second attempts;
-- active epoch remained `stable-paper-v4-20260826-successor01` with `validation_hold=true`;
-- accounting coverage remained complete with `coverage_issue_count=0` and `economic_issue_count=0`;
-- canonical execution ledger remained append-only/hash-valid at 53 rows, with 7 active-v4 rows;
-- open positions were BBAI and DELL; cash was approximately `11835.98`; equity approximately `13548.40`;
-- runner was enabled with no active error and last successful automatic cycle at approximately 14:24:51 CDT;
-- market-data accounting passed and the provider circuit remained closed;
-- fresh-day baseline passed, risk was not halted, and intraday drawdown was approximately `0.011%`;
-- self-defense was active only because the runtime was inside the configured final 30 minutes before the regular close. The compact daily audit therefore reported FAIL from that intentional late-day entry-defense condition, not from account loss, canonical divergence, lifecycle corruption, runner failure, or a new accounting defect.
-
-This proved PR #147 removed one expensive save path but did not remove the remaining latency source. Static trace showed the legacy root and `/paper/status` handlers still executed status-building work that could touch equity/risk/market/scanner/state-diagnostic surfaces during a read-only request.
-
-### PR #148 — Lightweight Read-Only Core Status Views
-
-PR #148 (`fix/issue-146-lightweight-core-status`) added a bounded before-request intercept for GET/HEAD `/` and `/paper/status`, returning an already-materialized in-memory read-only status snapshot before the expensive legacy handlers execute. It does not replace trading authority, persist state, recalculate equity, fetch market data, scan journals, run cycles, place orders, or change strategy/risk/sizing/live/ML authority.
-
-PR #148 exact head `b819e7ab88b5fc1065f2301b136ca7a0fa0b5d54` passed Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, the full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit including exact Gunicorn smoke, and focused Issue #146 regressions. It was squash-merged as `17e7b816fc7b1de3f6096453fde431fffad958af`.
-
-Fresh authoritative post-PR-148 Splendid evidence proved `/paper/status` was fixed at approximately 0.201 seconds. Root `/` also returned quickly, but returned the intended lightweight HTML while `runtime_research_snapshot.py` explicitly requested `Accept: application/json` and parsed JSON. That produced a `JSONDecodeError` false failure. This was a narrow content-negotiation defect, not a trading/accounting/canonical/risk defect.
-
-### PR #149 — Root JSON Negotiation and Final Acceptance
-
-PR #149 (`fix/issue-146-root-json-negotiation`) preserved lightweight HTML for normal browser requests while returning the same bounded in-memory JSON snapshot when the client explicitly prefers `application/json`. The exact diff was surgical: only the read-only override plus one focused regression, with 16 additions and 1 deletion and no trading-state or authority change.
-
-Exact PR #149 head `4191f3fb205943ebb150e5a057ed2ae25a90936f` passed all required exact-head gates: Change Safety Audit, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit including exact Gunicorn smoke, and the focused Issue #146 regression. It was automatically squash-merged as `2782873ba68399c8071fc079ca03cbf3a259c074`.
-
-The first automatic post-merge capture hit Splendid during slow-but-live deferred registration and was not used as final acceptance. A read-only rerun after settle at approximately 15:06 CDT proved:
-- bootstrap `status=ready`, phase `delegating`, `delegate_ready=true`, and application readiness true;
-- no required endpoint failures;
-- root `/` HTTP 200 in approximately `0.274s`, returning `readonly-core-status-override-2026-09-01-v3-root-json-negotiation` JSON to the collector;
-- `/paper/status` HTTP 200 in approximately `0.425s` with the same v3 read-only snapshot;
-- active epoch `stable-paper-v4-20260826-successor01` remains under `validation_hold=true`;
-- canonical execution ledger remains append-only/hash-valid at 53 rows, 7 in the current v4 epoch;
-- accounting coverage is complete with `coverage_issue_count=0` and `economic_issue_count=0`; reconstructed open positions are exactly BBAI and DELL and reconstructed cash/equity agree with persisted values within sub-cent rounding;
-- cash approximately `11835.98`, equity approximately `13555.37`, open positions BBAI and DELL;
-- market-data accounting passes with provider circuit closed;
-- runner passes with no active error and last successful automatic run at approximately 14:58:02 CDT;
-- fresh-day baseline passes; risk is not halted; intraday drawdown is `0.0%`;
-- self-defense is active only for the intentional final-30-minute-before-close entry-defense policy. The compact daily audit therefore reports `overall=fail`/risk fail solely from that policy state, while there is no actual risk halt, canonical defect, accounting coverage/economic issue, runner failure, or market-data failure.
-
-Issue #146 was closed as completed on this evidence. No state, canonical history, halt/validation hold, strategy, sizing, hard-risk threshold, live authority, ML authority, or order authority was changed by the repair.
+Issue #150 is closed as completed on this settled evidence. No canonical/state/history/risk/strategy/sizing/live/ML/order authority was changed.
 
 ## Current Validation Boundary
 
-There is no active canonical/accounting correctness defect and no active Issue #146 endpoint-latency defect. The observed late-day self-defense condition is expected policy behavior and does not authorize any risk/halt/hold change.
+There is currently no demonstrated canonical/accounting correctness defect, no active runtime endpoint-latency defect, no runner error, no market-data accounting gap, and no risk halt. The active v4 successor remains under validation hold by design.
 
-The next governed trading-state decision remains validation-hold release for the clean v4 successor. Do not release it merely because Issues #126, #143, and #146 are closed. Require a bounded release gate proving the configured forward-validation criteria are satisfied while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
+Do not release validation hold merely because Issues #126, #143, #146, and #150 are closed. Require a bounded governed release gate proving configured forward-validation criteria while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
 
 No `/paper/run`, manual halt/hold release, canonical mutation, day-peak rewrite, historical-state rewrite, or trading-authority change is authorized by this handoff.
 
 ## Immediate Next Action
 
-Continue the scheduled morning, midday, and pre-close read-only operational audits against Splendid. Treat the final-30-minute self-defense entry block as expected policy unless it persists outside its configured window or is accompanied by a genuine halt/loss/canonical/accounting/runtime defect.
+Continue the scheduled morning, midday, and pre-close read-only operational audits against Splendid. If a new demonstrated bug appears, repair it automatically within the standing safety boundary, require all exact-head gates, merge only when green, validate authoritative Splendid deployment evidence, and record every material finding/repair/merge/runtime result in this handoff.
 
-Separately evaluate validation-hold release only from explicit clean forward-validation evidence; do not manually clear the hold. The current forward evidence is structurally healthy, but validation-release remains a separate governed decision.
-
-If a new demonstrated bug appears, repair it automatically within the standing safety boundary, require all exact-head gates, merge only when green, validate authoritative Splendid deployment evidence, and record every material finding/repair/merge/runtime result in this handoff.
+Separately evaluate validation-hold release only from explicit clean forward-validation evidence; do not manually clear the hold.
 
 Correctness, accounting integrity, runtime stability, and deterministic recovery remain ahead of performance optimization.
