@@ -138,10 +138,15 @@ class RuntimeShadowCaptureTests(unittest.TestCase):
             local_ts_text=lambda: "2026-08-03 12:05:00",
             today_key=lambda: "2026-08-03",
         )
-        with patch.dict(os.environ, {"RUN_CYCLE_INLINE_REPORTS": "false"}, clear=False):
+        with patch.dict(os.environ, {"RUN_CYCLE_INLINE_REPORTS": "false"}, clear=False), patch.object(
+            run_report_guard.shadow_ai_adversarial_reviewer,
+            "observe_cycle",
+            return_value={"status": "disabled", "execution_waited": False},
+        ) as observe:
             applied = run_report_guard.apply(core)
             self.assertTrue(applied["existing_owner_extended"])
             result = core.run_cycle(source="auto")
+            observe.assert_called_once()
 
         for key, value in original_payload.items():
             if key == "compiled_report":
@@ -153,6 +158,12 @@ class RuntimeShadowCaptureTests(unittest.TestCase):
         self.assertTrue(capture["latest"]["parity"])
         self.assertEqual(capture["latest"]["selected_symbols"], ["DELL"])
         self.assertFalse(capture["forward_evidence"]["eligible"])
+        self.assertEqual(
+            run_report_guard.status_payload(core)["last_status"]["shadow_capture"][
+                "adversarial_review"
+            ]["status"],
+            "disabled",
+        )
 
     def test_skipped_cycle_does_not_create_shadow_state(self) -> None:
         portfolio: dict = {}
