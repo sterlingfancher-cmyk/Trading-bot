@@ -14,13 +14,13 @@ class ShadowAIResearchContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
-    def test_stage_two_client_has_no_execution_authority(self):
+    def test_stage_three_reviewer_has_no_execution_authority(self):
         contract = self.contract
         policy = contract["policy"]
 
         self.assertEqual(
             contract["implementation_stage"],
-            "stage_2_provider_neutral_client",
+            "stage_3_async_adversarial_reviewer",
         )
         self.assertTrue(policy["paper_only"])
         self.assertTrue(policy["research_only"])
@@ -57,6 +57,8 @@ class ShadowAIResearchContractTests(unittest.TestCase):
         self.assertFalse(integration["import_time_provider_calls"])
         self.assertFalse(integration["import_time_worker_threads"])
         self.assertFalse(queue["execution_waits_for_result"])
+        self.assertTrue(queue["implemented"])
+        self.assertTrue(queue["runtime_registered_disabled_by_default"])
         self.assertEqual(queue["full_policy"], "drop_new_request_with_telemetry")
 
     def test_fail_closed_schema_has_only_shadow_decisions(self):
