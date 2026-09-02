@@ -1,11 +1,11 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-02 13:53 CDT  
+Last updated: 2026-09-02 14:08 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `861382ceca2d065cde7b441f19d98471c1779489` (PR #156).  
-Active stability/accounting/runtime issue: #158 (released-v4 legacy auto-reconciliation). Active improvement issue: #157, temporarily lower priority behind #158.
+Validated runtime-code `main`: `439c7b1d9675f233ca9d0eff2a54aa04b1780ad9` (PR #159).  
+Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
 
 ## Communication and Continuity
 
@@ -144,7 +144,7 @@ A fresh rerun against the fully settled authoritative deployment proved:
 
 Issue #150 is closed as completed on this settled evidence. No canonical/state/history/risk/strategy/sizing/live/ML/order authority was changed.
 
-## 2026-09-02 Issue #158 — Released-v4 Legacy Auto-Reconciliation — ACTIVE
+## 2026-09-02 Issue #158 — Released-v4 Legacy Auto-Reconciliation — CLOSED
 
 Fresh settled Splendid startup evidence after validation release proved that the
 legacy `paper_accounting_integrity_guard` temporarily auto-reconciled explicit
@@ -160,21 +160,42 @@ coverage/economic issues, the canonical ledger is hash-valid at 55 rows / 9 v4
 rows, runner and market-data accounting pass, and there is no lasting capital
 corruption.
 
-The demonstrated defect is the transient mutation path: v3+ protection in
-`paper_accounting_integrity_guard.py` is incorrectly conditional on the
-validation hold. Releasing the hold must not return successor-state ownership
-to the legacy reconciler. Issue #158 owns a bounded repair that keeps all v3+
-successor generations observational/read-only while preserving verified-v2
-legacy repair behavior. Issue #157 is temporarily lower priority until this
-accounting path is contained and settled Splendid post-deploy evidence is clean.
+The demonstrated defect was the transient mutation path: v3+ protection in
+`paper_accounting_integrity_guard.py` was incorrectly conditional on the
+validation hold. PR #159 keeps all v3+ successor generations
+observational/read-only after release while preserving verified-v2 legacy
+repair behavior. All four required exact-head workflows passed and PR #159 was
+squash-merged as `439c7b1d9675f233ca9d0eff2a54aa04b1780ad9`.
+
+Settled Splendid acceptance after a fresh automatic cycle proved:
+- startup detected the incomplete legacy reconstruction but reported
+  `successor_accounting_read_only=true`,
+  `automatic_repair_suppressed=true`, and `repaired=false`;
+- the settled read-only accounting endpoint uses version
+  `paper-accounting-integrity-2026-09-02-v3-successor-readonly`, reports
+  `overall=pass`, and reconstructs cash/equity `13475.004291`;
+- persisted cash/equity remain `13475.004291 / 13475.0`, with no positions;
+- accounting coverage/economics are clean and reconstructed open positions are
+  empty;
+- canonical ledger remains hash-valid at 55 rows / 9 v4 rows;
+- market-data accounting is complete at `1381/1381`, with zero in-flight or
+  unclassified requests;
+- the post-restart automatic cycle succeeded at approximately 14:07:18 CDT
+  with no runner error;
+- the v4 validation release remains intact;
+- the only audit WARN remains the existing elevated-drawdown advisory near
+  2.43%, with no halt or self-defense.
+
+Issue #158 is closed. No canonical/history/accounting evidence, risk/day-peak
+state, strategy, signals, thresholds, sizing, hard-risk limits, live authority,
+ML authority, or order authority changed. Issue #157 is resumed.
 
 ## Current Post-Validation Boundary
 
-Issue #158 is the active accounting-integrity defect. It is a transient startup
-mutation path; the settled authoritative state is currently clean with no
-lasting capital corruption. There is no active runtime endpoint-latency defect,
-runner error, market-data accounting gap, or risk halt. The active v4
-successor's governed validation hold remains released on settled evidence.
+There is currently no demonstrated canonical/accounting correctness defect,
+active runtime endpoint-latency defect, runner error, market-data accounting
+gap, or risk halt. The active v4 successor's governed validation hold remains
+released on settled evidence.
 
 Post-validation work may proceed under the standing continuous-improvement
 authorization. Paper-only authority, immutable canonical/accounting evidence,
@@ -182,11 +203,10 @@ hard-risk controls, and rules-only execution authority remain unchanged.
 
 ## Immediate Next Action
 
-Repair Issue #158 first with a surgical successor-read-only accounting boundary,
-focused released-v3/v4 regressions, every required exact-head gate, and settled
-Splendid post-deploy acceptance. Resume Issue #157 immediately afterward,
-beginning with the completed repository-wide review and a provider-neutral
-shadow-AI design/contract. Continue the scheduled read-only operational audits.
+Resume Issue #157 with the completed repository-wide review and a
+provider-neutral shadow-AI design/contract. Keep implementation strictly
+shadow-only and proceed through bounded PR stages. Continue the scheduled
+read-only operational audits.
 
 If a demonstrated bug or higher-priority reliability issue appears, repair it
 automatically within the standing boundary, require every exact-head gate,
