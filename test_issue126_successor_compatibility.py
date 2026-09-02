@@ -12,7 +12,7 @@ import verified_v2_successor_epoch_migration_precondition_compatibility as v2_co
 
 class Issue126SuccessorCompatibilityTests(unittest.TestCase):
     @staticmethod
-    def _v4_core(*, canonical_history_retained_immutably=True):
+    def _v4_core(*, canonical_history_retained_immutably=True, released=False):
         return types.SimpleNamespace(portfolio={
             "accounting_epoch_id": clean_compat.ISSUE126_V4_EPOCH_ID,
             "paper_accounting_epoch": {
@@ -20,7 +20,9 @@ class Issue126SuccessorCompatibilityTests(unittest.TestCase):
                 "prior_epoch_id": clean_compat.ISSUE82_V3_EPOCH_ID,
                 "historical_recovery_decision": clean_compat.ISSUE126_V4_DECISION,
                 "historical_evidence_archived": True,
-                "validation_hold": True,
+                "validation_hold": not released,
+                "validation_released": released,
+                "validation_release_status": "released" if released else "blocked",
                 "canonical_history_retained_immutably": canonical_history_retained_immutably,
             },
         })
@@ -38,6 +40,9 @@ class Issue126SuccessorCompatibilityTests(unittest.TestCase):
         ):
             changed = copy.deepcopy(core.portfolio)
             changed["paper_accounting_epoch"][field] = bad
+            if field == "validation_hold":
+                changed["paper_accounting_epoch"]["validation_released"] = False
+                changed["paper_accounting_epoch"]["validation_release_status"] = "blocked"
             self.assertFalse(clean_compat._is_verified_successor(types.SimpleNamespace(portfolio=changed)))
 
     def test_v2_migration_compatibility_treats_exact_v4_as_superseded_without_write(self):
@@ -59,6 +64,11 @@ class Issue126SuccessorCompatibilityTests(unittest.TestCase):
         self.assertEqual(calls["original"], 0)
         self.assertEqual(core.portfolio, before)
         self.assertFalse(result["writes_state"])
+
+    def test_released_v4_remains_exact_successor_for_legacy_compatibility(self):
+        core = self._v4_core(released=True)
+        self.assertEqual(clean_compat._successor_epoch(core), clean_compat.ISSUE126_V4_EPOCH_ID)
+        self.assertTrue(v2_compat._exact_issue126_v4_successor(v2_migration, core))
 
     def test_v2_migration_compatibility_fails_closed_on_v4_lineage_mismatch(self):
         core = self._v4_core(canonical_history_retained_immutably=False)
