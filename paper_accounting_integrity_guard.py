@@ -5,12 +5,13 @@ complete enough to do so, repairs malformed legacy open-position aliases/cost
 basis, and prevents contaminated paper P&L from silently driving profit-guard
 state.
 
-For stable-paper successor epochs (v3+) that are still under validation hold,
-reconstruction is observational only.  Those epochs already have an explicit
-forensic baseline and immutable canonical execution history, so an accounting
-read must never repair an in-flight execution mutation before its canonical row
-is recorded.  Genuine successor mismatches remain visible as WARN/FAIL evidence
-for the existing fail-closed lifecycle controls instead of being auto-mutated.
+For stable-paper successor epochs (v3+), reconstruction is observational only.
+Those epochs already have an explicit forensic baseline and immutable canonical
+execution history, so an accounting read must never repair an in-flight
+execution mutation before its canonical row is recorded.  Releasing a governed
+validation hold does not return state ownership to this legacy reconciler.
+Genuine successor mismatches remain visible as WARN/FAIL evidence for the
+existing fail-closed lifecycle controls instead of being auto-mutated.
 
 This module is paper-only. It does not place orders, change strategy thresholds,
 change sizing rules, enable live trading, or grant ML authority.
@@ -22,7 +23,7 @@ import datetime as dt
 import functools
 from typing import Any, Dict, List, Tuple
 
-VERSION = "paper-accounting-integrity-2026-08-26-v2-successor-validation-readonly"
+VERSION = "paper-accounting-integrity-2026-09-02-v3-successor-readonly"
 _APPLIED = False
 _PATCHED_CORE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
@@ -72,19 +73,18 @@ def _portfolio(core: Any) -> Dict[str, Any]:
     return pf if isinstance(pf, dict) else {}
 
 
-def _successor_validation_hold_read_only(pf: Dict[str, Any]) -> bool:
+def _successor_accounting_read_only(pf: Dict[str, Any]) -> bool:
     """Return True for stable-paper successor generations that must not auto-repair.
 
     Verified-v2 intentionally retains the legacy reconciler because it predates
     the bounded successor accounting disposition.  Generation v3 and later are
-    explicit successor epochs with archived baselines and validation holds; their
-    active economics must be changed only by canonical executions or a separately
-    proven successor migration, never by a risk-control read.
+    explicit successor epochs with archived baselines; their active economics
+    must be changed only by canonical executions or a separately proven successor
+    migration, never by a risk-control read.  This remains true after a governed
+    validation hold is released.
     """
     epoch = _d(pf.get("paper_accounting_epoch"))
     epoch_id = str(epoch.get("id") or epoch.get("epoch_id") or pf.get("accounting_epoch_id") or "")
-    if not bool(epoch.get("validation_hold", False)):
-        return False
     parts = epoch_id.split("-")
     if len(parts) < 3 or parts[0] != "stable" or parts[1] != "paper" or not parts[2].startswith("v"):
         return False
@@ -93,6 +93,11 @@ def _successor_validation_hold_read_only(pf: Dict[str, Any]) -> bool:
     except Exception:
         return False
     return generation >= 3
+
+
+def _successor_validation_hold_read_only(pf: Dict[str, Any]) -> bool:
+    """Compatibility alias for callers of the original private helper."""
+    return _successor_accounting_read_only(pf)
 
 
 def _trade_fields(row: Dict[str, Any]) -> Tuple[str, str, float, float, str]:
@@ -251,7 +256,7 @@ def reconcile(core: Any = None, *, persist: bool = True) -> Dict[str, Any]:
     pf = _portfolio(core)
     rebuilt = reconstruct_from_ledger(pf, core)
     discrepancies = _discrepancies(pf, rebuilt)
-    successor_read_only = _successor_validation_hold_read_only(pf)
+    successor_read_only = _successor_accounting_read_only(pf)
     before = {
         "cash": _f(pf.get("cash")),
         "equity": _f(pf.get("equity")),
@@ -331,6 +336,7 @@ def reconcile(core: Any = None, *, persist: bool = True) -> Dict[str, Any]:
         "generated_local": _now(core),
         "coverage_complete": bool(rebuilt.get("coverage_complete")),
         "repaired": repaired,
+        "successor_accounting_read_only": successor_read_only,
         "successor_validation_hold_read_only": successor_read_only,
         "automatic_repair_suppressed": bool(successor_read_only and discrepancies),
         "discrepancies_before_repair": discrepancies,
@@ -342,6 +348,7 @@ def reconcile(core: Any = None, *, persist: bool = True) -> Dict[str, Any]:
         "authority": {
             "paper_state_reconciliation_only": True,
             "legacy_epoch_auto_repair_retained": True,
+            "successor_auto_repair": False,
             "successor_validation_hold_auto_repair": False,
             "places_orders": False,
             "changes_strategy": False,
