@@ -114,3 +114,45 @@ Continue the scheduled morning, midday, and pre-close read-only operational audi
 Separately evaluate validation-hold release only from explicit clean forward-validation evidence; do not manually clear the hold.
 
 Correctness, accounting integrity, runtime stability, and deterministic recovery remain ahead of performance optimization.
+
+## 2026-09-02 v4 Governed Validation Release — COMPLETE
+
+Issue #154 and PRs #155–#156 added and corrected a separate paper-only,
+fail-closed release gate for the exact active epoch
+`stable-paper-v4-20260826-successor01`. The historical v1 release module remains
+unchanged and cannot release v4. PR #155 was squash-merged as
+`8436e73248865a003ae92e0a85aa412029941f32`; PR #156 preserved the exact released
+v4 successor shape through legacy startup compatibility and was squash-merged as
+`861382ceca2d065cde7b441f19d98471c1779489`.
+
+Both PRs passed the required exact-head Change Safety, Repository
+Safety/Performance, Architecture Debt, and full Refactor/Ownership/Configuration/
+State/Decision/Runtime/Startup/Research gates. Focused release and successor
+compatibility regressions passed locally.
+
+Settled authoritative Splendid acceptance at approximately 13:07 CDT proved:
+- bootstrap ready and delegating;
+- v4 release endpoint `status=released`, `released=true`,
+  `validation_hold=false`;
+- epoch `validation_release_status=released`, `validation_released=true`, and
+  `forward_validation_required=false`;
+- 23 valid exact lifecycle rows, including 19 post-v4 rows;
+- canonical ledger append-only/hash-valid at 55 rows / 9 current-v4 rows;
+- accounting coverage complete with zero coverage/economic issues and no
+  reconstructed open positions;
+- persisted/reconstructed cash and equity within the governed tolerance;
+- risk not halted, self-defense inactive, runner healthy, and market-data
+  accounting pass.
+
+The compact audit remains WARN only for the existing elevated-drawdown advisory
+(`intraday_drawdown_pct` approximately 2.43%); this is not a validation,
+accounting, canonical, runner, or market-data blocker. No risk state, canonical
+history, day peak/history, strategy, sizing, hard-risk limits, live authority,
+ML authority, or order authority changed.
+
+The formal Post-Validation AI gate is now open. Begin with a complete current
+repository/code/handoff/ownership/configuration/state/runtime/research review.
+Implement the previously approved AI research/adversarial improvements strictly
+shadow-only: fail-closed structured AI client, adversarial reviewer, canonical
+outcome memory, source/citation and inference-cost telemetry, and AI-vs-rules
+counterfactual scorecards. Rules remain sole execution authority.
