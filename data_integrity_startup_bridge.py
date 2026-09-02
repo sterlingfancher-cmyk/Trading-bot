@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-08-26-v39-issue126-v4-successor"
+VERSION = "data-integrity-startup-bridge-2026-09-02-v40-v4-validation-release"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -91,6 +91,10 @@ MODULES = (
     # both apply/register passes also makes the v4 cutover sticky against any
     # earlier legacy startup registration that restores a stale v3 snapshot.
     "verified_v3_successor_epoch_migration",
+    # Governed v4 release runs only after every integrity/research wrapper and
+    # the final v3->v4 state owner. It can change only v4 validation metadata
+    # after the configured forward evidence and accounting gates pass.
+    "verified_v4_validation_release",
 )
 
 
