@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-02 14:32 CDT  
+Last updated: 2026-09-02 18:05 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `4b0475e68cc05d3b9b1b763cd313c423a33d2942` (PR #160).  
+Validated runtime-code `main`: `177ba3a96b25463c01bbc7d76c39c9bd4c1cf4b7` (PR #161).
 Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
 
 ## Communication and Continuity
@@ -202,7 +202,12 @@ hard-risk controls, and rules-only execution authority remain unchanged.
 
 ## Immediate Next Action
 
-Continue Issue #157 from completed Stage 1. PR #160 merged the provider-neutral shadow-AI research design and machine-readable authority contract with no runtime or trading behavior change. Proceed through bounded shadow-only implementation stages while preserving rules-only execution authority. Continue the scheduled read-only operational audits.
+Continue Issue #157 from completed Stage 2. PR #161 merged the provider-neutral,
+disabled-by-default structured client with no bundled transport or runtime
+integration and no trading behavior change. Proceed to the bounded Stage 3
+asynchronous adversarial reviewer while preserving nonblocking execution,
+rules-only authority, and all queue/staleness boundaries in the contract.
+Continue the scheduled read-only operational audits.
 
 If a demonstrated bug or higher-priority reliability issue appears, repair it
 automatically within the standing boundary, require every exact-head gate,
@@ -274,3 +279,50 @@ Settled pre-close evidence:
 - the legacy verified-v2 recovery endpoint still reports raw `fail`, but classification is explicitly non-applicable because the active lineage is v4+ (`superseded_by_active_v4_plus_lineage`); it is nonblocking and does not indicate an active v4 defect.
 
 No new canonical, accounting, runtime, market-data, runner, state, risk-halt, or execution-safety regression was demonstrated. No bug repair or authority change was required. PR #160 Stage 1 is contract/design-only; all four main-branch required workflows passed after merge, including exact Gunicorn startup smoke. Continue Issue #157 Stage 2 shadow-only work under the standing boundary.
+
+## 2026-09-02 Issue #157 Stage 2 — Provider-Neutral Client — COMPLETE
+
+PR #161 added `shadow_ai_research_client.py`, deterministic fake-provider
+tests, and the Stage 2 contract/design update. The client is disabled by
+default and has no bundled provider SDK, network transport, route, worker,
+persistence owner, runtime registration, execution-path hook, or order action.
+
+The client enforces exact request/result cycle, candidate, and input identity;
+timezone-aware deadlines; bounded timeout and at most two attempts; retries
+only for explicitly transient transport failures; strict `agree`, `reject`, or
+`unavailable` decisions; pessimistic complete fallbacks; HTTPS-only citation
+normalization with external content marked untrusted; bounded free text and
+telemetry; and exact USD cost only when complete configured token-category
+pricing is available.
+
+Focused contract/client validation passed 15 tests. Full repository validation
+passed across 302 tracked Python files, Railway configuration validation passed,
+and the exact diff contained only five intended files. All four required
+exact-head PR workflows passed, including the full Refactor/Ownership/
+Configuration/State/Decision/Runtime/Startup/Research audit and exact Gunicorn
+smoke. PR #161 was squash-merged as
+`177ba3a96b25463c01bbc7d76c39c9bd4c1cf4b7`.
+
+Settled authoritative Splendid acceptance after the post-merge restart proved:
+- deferred startup completed and the application is ready/delegating;
+- self-check is `pass` with no failing components;
+- persisted cash/equity remain `13475.004291 / 13475.0`, flat;
+- active v4 validation remains released;
+- accounting coverage and economics remain clean with no reconstructed open
+  positions;
+- canonical ledger remains append-only and hash-valid at 55 rows / 9 current-v4
+  rows;
+- runner remains enabled with no active error and correctly skips after market
+  close;
+- market-data accounting remains complete with no provider circuit;
+- no `/paper/shadow-ai-research-status` route exists (`404`), confirming Stage
+  2 did not create a runtime surface;
+- the only operational WARN remains elevated drawdown near 2.43%, with no halt
+  or self-defense.
+
+No strategy, signal, ranking, selection, sizing, exposure, stop, target, exit,
+risk, accounting, canonical/history, state/day-peak, live, ML, or order authority
+changed. Issue #157 remains open for Stage 3: a bounded asynchronous adversarial
+reviewer extending the existing observer owner, with a single explicitly
+started off-thread worker, immutable request snapshots, nonblocking bounded
+queue/drop telemetry, and stale-result rejection.
