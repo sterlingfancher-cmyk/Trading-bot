@@ -1,6 +1,6 @@
 {
-  "version": "shadow-ai-research-contract-2026-09-02-v2-client",
-  "implementation_stage": "stage_2_provider_neutral_client",
+  "version": "shadow-ai-research-contract-2026-09-02-v3-reviewer",
+  "implementation_stage": "stage_3_async_adversarial_reviewer",
   "policy": {
     "paper_only": true,
     "research_only": true,
@@ -33,6 +33,8 @@
   },
   "queue": {
     "enabled_in_stage_1": false,
+    "implemented": true,
+    "runtime_registered_disabled_by_default": true,
     "explicit_start_after_runtime_composition": true,
     "worker_count": 1,
     "max_items": 128,
