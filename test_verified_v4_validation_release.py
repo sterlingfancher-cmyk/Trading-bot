@@ -121,3 +121,16 @@ def test_fails_closed_on_canonical_or_accounting_defect(monkeypatch):
         assert out["status"] == "blocked"
         assert state["paper_accounting_epoch"]["validation_hold"] is True
         assert not core.saved
+
+
+def test_status_fails_closed_if_release_attempt_is_not_authoritative(monkeypatch):
+    state = _state()
+    core = _core(state)
+    monkeypatch.setattr(release, "_LAST", {"status": "released", "already_released": False})
+
+    out = release.status_payload(core)
+
+    assert out["status"] == "blocked"
+    assert out["overall"] == "fail"
+    assert out["released"] is False
+    assert out["reason"] == "release_attempt_not_reflected_in_authoritative_state"
