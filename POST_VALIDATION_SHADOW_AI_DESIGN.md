@@ -1,6 +1,6 @@
 # Post-Validation Shadow-AI Research Design
 
-Status: Stage 1 design and authority contract  
+Status: Stage 2 provider-neutral client implemented; runtime integration disabled
 Issue: #157  
 Runtime authority: unchanged; rules remain the sole execution authority
 
@@ -11,9 +11,9 @@ retain source-aware research evidence, learn from canonical completed outcomes,
 and measure whether its disagreements would have improved expectancy net of
 inference cost. The system is an experiment, not a trading-policy owner.
 
-This stage changes no runtime behavior. It records the reviewed ownership
-boundary and the machine-readable contract that every later implementation
-stage must satisfy.
+Stages 1 and 2 change no runtime behavior. They record the reviewed ownership
+boundary and implement a provider-neutral, disabled-by-default structured client
+that every later runtime stage must satisfy.
 
 ## Repository-wide review findings
 
@@ -207,6 +207,15 @@ runtime code or configuration.
 Strict schemas, typed disabled-by-default configuration, timeouts, bounded
 retries, pessimistic fallbacks, citation normalization, untrusted-source
 controls, and cost telemetry. Unit tests use deterministic fake providers.
+
+Implemented in `shadow_ai_research_client.py` without a bundled network
+transport, provider SDK, route, worker, persistence owner, import-time action, or
+runtime registration. The injected provider callable receives the configured
+timeout; only explicitly transient transport failures are retried, and the
+client independently rejects elapsed-time or request-deadline violations.
+Malformed output, identity mismatch, unsafe citations, invalid telemetry, and
+missing configuration all produce a complete `unavailable` result. Exact USD
+cost remains `null` unless configured per-token-category pricing is sufficient.
 
 ### Stage 3 — asynchronous adversarial reviewer
 

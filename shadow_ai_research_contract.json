@@ -1,6 +1,6 @@
 {
-  "version": "shadow-ai-research-contract-2026-09-02-v1",
-  "implementation_stage": "stage_1_contract_only",
+  "version": "shadow-ai-research-contract-2026-09-02-v2-client",
+  "implementation_stage": "stage_2_provider_neutral_client",
   "policy": {
     "paper_only": true,
     "research_only": true,
@@ -42,6 +42,10 @@
     "execution_waits_for_result": false
   },
   "client": {
+    "module": "shadow_ai_research_client.py",
+    "implemented": true,
+    "runtime_integrated": false,
+    "bundled_network_transport": false,
     "provider_neutral": true,
     "disabled_by_default": true,
     "strict_json_schema": true,
