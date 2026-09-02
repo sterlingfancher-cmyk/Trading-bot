@@ -1,11 +1,11 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-02 13:22 CDT  
+Last updated: 2026-09-02 13:53 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
 Validated runtime-code `main`: `861382ceca2d065cde7b441f19d98471c1779489` (PR #156).  
-Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
+Active stability/accounting/runtime issue: #158 (released-v4 legacy auto-reconciliation). Active improvement issue: #157, temporarily lower priority behind #158.
 
 ## Communication and Continuity
 
@@ -144,12 +144,37 @@ A fresh rerun against the fully settled authoritative deployment proved:
 
 Issue #150 is closed as completed on this settled evidence. No canonical/state/history/risk/strategy/sizing/live/ML/order authority was changed.
 
+## 2026-09-02 Issue #158 — Released-v4 Legacy Auto-Reconciliation — ACTIVE
+
+Fresh settled Splendid startup evidence after validation release proved that the
+legacy `paper_accounting_integrity_guard` temporarily auto-reconciled explicit
+v4 successor economics during registration. It observed persisted cash/equity
+near `13475.004291 / 13475.0`, rebuilt from an incomplete legacy baseline near
+`9941.007861`, reported a roughly `3533.9964` discrepancy, and set
+`repaired=true` because `validation_hold=false`.
+
+The final successor owner restored the authoritative v4 state. Subsequent
+self-check and compact daily audit are clean: cash/equity remain approximately
+`13475.004291 / 13475.0`, positions are flat, accounting has zero
+coverage/economic issues, the canonical ledger is hash-valid at 55 rows / 9 v4
+rows, runner and market-data accounting pass, and there is no lasting capital
+corruption.
+
+The demonstrated defect is the transient mutation path: v3+ protection in
+`paper_accounting_integrity_guard.py` is incorrectly conditional on the
+validation hold. Releasing the hold must not return successor-state ownership
+to the legacy reconciler. Issue #158 owns a bounded repair that keeps all v3+
+successor generations observational/read-only while preserving verified-v2
+legacy repair behavior. Issue #157 is temporarily lower priority until this
+accounting path is contained and settled Splendid post-deploy evidence is clean.
+
 ## Current Post-Validation Boundary
 
-There is currently no demonstrated canonical/accounting correctness defect, no
-active runtime endpoint-latency defect, no runner error, no market-data
-accounting gap, and no risk halt. The active v4 successor's governed validation
-hold is released on settled authoritative evidence.
+Issue #158 is the active accounting-integrity defect. It is a transient startup
+mutation path; the settled authoritative state is currently clean with no
+lasting capital corruption. There is no active runtime endpoint-latency defect,
+runner error, market-data accounting gap, or risk halt. The active v4
+successor's governed validation hold remains released on settled evidence.
 
 Post-validation work may proceed under the standing continuous-improvement
 authorization. Paper-only authority, immutable canonical/accounting evidence,
@@ -157,10 +182,11 @@ hard-risk controls, and rules-only execution authority remain unchanged.
 
 ## Immediate Next Action
 
-Drive Issue #157 through bounded stages, beginning with the complete
-repository/code/handoff/ownership/configuration/state/runtime/research review
-and a provider-neutral shadow-AI design/contract. Continue the scheduled
-read-only operational audits.
+Repair Issue #158 first with a surgical successor-read-only accounting boundary,
+focused released-v3/v4 regressions, every required exact-head gate, and settled
+Splendid post-deploy acceptance. Resume Issue #157 immediately afterward,
+beginning with the completed repository-wide review and a provider-neutral
+shadow-AI design/contract. Continue the scheduled read-only operational audits.
 
 If a demonstrated bug or higher-priority reliability issue appears, repair it
 automatically within the standing boundary, require every exact-head gate,
