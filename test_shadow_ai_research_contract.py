@@ -14,11 +14,14 @@ class ShadowAIResearchContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
-    def test_stage_one_is_contract_only_and_has_no_execution_authority(self):
+    def test_stage_two_client_has_no_execution_authority(self):
         contract = self.contract
         policy = contract["policy"]
 
-        self.assertEqual(contract["implementation_stage"], "stage_1_contract_only")
+        self.assertEqual(
+            contract["implementation_stage"],
+            "stage_2_provider_neutral_client",
+        )
         self.assertTrue(policy["paper_only"])
         self.assertTrue(policy["research_only"])
         self.assertTrue(policy["rules_engine_sole_execution_authority"])
@@ -61,6 +64,9 @@ class ShadowAIResearchContractTests(unittest.TestCase):
         result = self.contract["result_schema"]
 
         self.assertTrue(client["strict_json_schema"])
+        self.assertTrue(client["implemented"])
+        self.assertFalse(client["runtime_integrated"])
+        self.assertFalse(client["bundled_network_transport"])
         self.assertEqual(client["pessimistic_fallback_decision"], "unavailable")
         self.assertEqual(
             set(result["decision_values"]),
