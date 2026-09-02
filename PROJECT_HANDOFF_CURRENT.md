@@ -1,17 +1,62 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-02 12:05 CDT  
+Last updated: 2026-09-02 13:22 CDT  
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `cc5f6b6c2ed0b155a4a20b6ebd2210633b981e03` (PR #153).  
-Active stability/accounting issue: none. Active runtime-observability/performance issue: none. Active repair PR: none.
+Validated runtime-code `main`: `861382ceca2d065cde7b441f19d98471c1779489` (PR #156).  
+Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
 
 ## Communication and Continuity
 
 Keep all Trading-bot progress, blockers, merge notices, runtime findings, and issue-status updates in the currently active main ChatGPT Trading conversation. Do not branch individual issue updates into separate chats unless the user explicitly requests a transition.
 
 Routine bounded stability work should be handled automatically: investigate, repair, test, merge when every required exact-head gate is green, then validate authoritative Splendid deployment evidence. Escalate only genuinely blocked or authority-changing decisions.
+
+
+## Standing Continuous-Improvement Authorization
+
+The user has authorized one canonical hourly `Trading Continuous Improvement`
+task to continue across all current and future demonstrated bug fixes,
+reliability/accounting/runtime work, approved shadow-AI upgrades, and
+evidence-backed performance improvements. It must not stop or pause merely
+because one issue, PR, or upgrade program finishes. The older overlapping
+`Trading Issue Watch` task is paused to prevent concurrent automations from
+racing on the same repository.
+
+Within paper authority, routine bounded work is pre-authorized and must not wait
+for user review or approval:
+- investigate demonstrated defects and create/update issues, branches, tests,
+  contracts, and PRs;
+- inspect exact diffs and repair only demonstrated failures;
+- merge automatically only when every required exact-head gate is green;
+- validate settled authoritative Splendid evidence after deployment;
+- update this handoff after every material finding, design decision, PR, merge,
+  runtime result, blocker, or completed stage;
+- continue to the next highest-priority safe item.
+
+Performance changes are also pre-authorized only when they satisfy
+`VALIDATION_POLICY.md`: baseline-versus-candidate evidence, untouched holdout or
+walk-forward testing, realistic costs/slippage, regime and calendar
+segmentation, trade-count/turnover/exposure/concentration review, one-variable
+ablation, forward shadow or bounded paper canary, all required exact-head CI,
+and post-deploy self-check/runtime acceptance. Favorable evidence may be merged
+without waiting for routine user approval; unfavorable or inconclusive changes
+must not be promoted.
+
+Reserved boundaries still require separate explicit user authorization:
+- enabling live trading or changing broker credentials;
+- granting AI/ML order, sizing, stop/target, exit, or capital-allocation
+  authority;
+- relaxing hard daily-loss/drawdown or other hard-risk limits;
+- destructive or irreversible canonical, accounting, state, history, day-peak,
+  or recovery-evidence changes;
+- any expansion beyond the established paper-only authority.
+
+Rules remain sole execution authority and AI/ML remains shadow-only. Escalate
+only genuine blockers, missing credentials/authority, destructive actions, or a
+proposal that crosses one of the reserved boundaries. Keep all material
+user-facing updates in the current main Trading conversation.
 
 ## Standing Safety / Authority Boundaries
 
@@ -37,7 +82,7 @@ The exact recovery disposition remains:
 - exclude only the proven invalid re-entrant SLS partial from successor economics;
 - preserve validation hold, risk/day-peak history, strategy, sizing, hard-risk limits, live authority, and ML authority.
 
-The authoritative active epoch is `stable-paper-v4-20260826-successor01`. Issue #126 is closed. Validation hold remains intentionally active and must only be released through a separate governed validation-release gate.
+The authoritative active epoch is `stable-paper-v4-20260826-successor01`. Issue #126 is closed. Its validation hold was formally released on 2026-09-02 through the separate governed gate in Issue #154 and PRs #155–#156; see the release record below.
 
 ## Recently Closed Runtime/Observability Issues
 
@@ -99,21 +144,33 @@ A fresh rerun against the fully settled authoritative deployment proved:
 
 Issue #150 is closed as completed on this settled evidence. No canonical/state/history/risk/strategy/sizing/live/ML/order authority was changed.
 
-## Current Validation Boundary
+## Current Post-Validation Boundary
 
-There is currently no demonstrated canonical/accounting correctness defect, no active runtime endpoint-latency defect, no runner error, no market-data accounting gap, and no risk halt. The active v4 successor remains under validation hold by design.
+There is currently no demonstrated canonical/accounting correctness defect, no
+active runtime endpoint-latency defect, no runner error, no market-data
+accounting gap, and no risk halt. The active v4 successor's governed validation
+hold is released on settled authoritative evidence.
 
-Do not release validation hold merely because Issues #126, #143, #146, and #150 are closed. Require a bounded governed release gate proving configured forward-validation criteria while preserving canonical history, risk/day-peak history, strategy, sizing, hard-risk thresholds, live authority, and ML authority.
-
-No `/paper/run`, manual halt/hold release, canonical mutation, day-peak rewrite, historical-state rewrite, or trading-authority change is authorized by this handoff.
+Post-validation work may proceed under the standing continuous-improvement
+authorization. Paper-only authority, immutable canonical/accounting evidence,
+hard-risk controls, and rules-only execution authority remain unchanged.
 
 ## Immediate Next Action
 
-Continue the scheduled morning, midday, and pre-close read-only operational audits against Splendid. If a new demonstrated bug appears, repair it automatically within the standing safety boundary, require all exact-head gates, merge only when green, validate authoritative Splendid deployment evidence, and record every material finding/repair/merge/runtime result in this handoff.
+Drive Issue #157 through bounded stages, beginning with the complete
+repository/code/handoff/ownership/configuration/state/runtime/research review
+and a provider-neutral shadow-AI design/contract. Continue the scheduled
+read-only operational audits.
 
-Separately evaluate validation-hold release only from explicit clean forward-validation evidence; do not manually clear the hold.
+If a demonstrated bug or higher-priority reliability issue appears, repair it
+automatically within the standing boundary, require every exact-head gate,
+merge only when green, validate settled authoritative Splendid evidence, and
+record the result here. Evaluate performance changes only through
+`VALIDATION_POLICY.md`; promote only favorable, reproducible, forward-validated
+paper evidence.
 
-Correctness, accounting integrity, runtime stability, and deterministic recovery remain ahead of performance optimization.
+Correctness, accounting integrity, runtime stability, and deterministic
+recovery remain ahead of performance optimization.
 
 ## 2026-09-02 v4 Governed Validation Release — COMPLETE
 
