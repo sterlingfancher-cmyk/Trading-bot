@@ -1,0 +1,224 @@
+{
+  "version": "shadow-ai-research-contract-2026-09-02-v1",
+  "implementation_stage": "stage_1_contract_only",
+  "policy": {
+    "paper_only": true,
+    "research_only": true,
+    "rules_engine_sole_execution_authority": true,
+    "automatic_promotion": false,
+    "changes_strategy": false,
+    "changes_thresholds": false,
+    "changes_ranking_or_selection": false,
+    "changes_sizing_or_exposure": false,
+    "changes_stops_or_targets": false,
+    "changes_exits_or_allocation": false,
+    "changes_risk_or_halts": false,
+    "changes_accounting_or_canonical_history": false,
+    "changes_live_or_ml_authority": false,
+    "places_or_cancels_orders": false,
+    "blocks_or_delays_execution": false
+  },
+  "integration": {
+    "existing_cycle_owner": "run_report_guard.py",
+    "existing_cycle_callable": "run_cycle",
+    "existing_observer": "runtime_shadow_capture.capture_cycle",
+    "adds_cycle_wrapper": false,
+    "adds_callable_owner": false,
+    "provider_calls_on_execution_thread": false,
+    "returned_trading_result_contains_ai_payload": false,
+    "state_persistence_owner_unchanged": true,
+    "canonical_ledger_read_only": true,
+    "import_time_provider_calls": false,
+    "import_time_worker_threads": false
+  },
+  "queue": {
+    "enabled_in_stage_1": false,
+    "explicit_start_after_runtime_composition": true,
+    "worker_count": 1,
+    "max_items": 128,
+    "max_requests_per_cycle": 10,
+    "enqueue_timeout_ms": 5,
+    "full_policy": "drop_new_request_with_telemetry",
+    "execution_waits_for_result": false
+  },
+  "client": {
+    "provider_neutral": true,
+    "disabled_by_default": true,
+    "strict_json_schema": true,
+    "provider_timeout_seconds": 20,
+    "max_attempts": 2,
+    "pessimistic_fallback_decision": "unavailable",
+    "missing_configuration_behavior": "disabled_research_only",
+    "malformed_output_behavior": "unavailable",
+    "rate_limit_behavior": "unavailable_with_bounded_backoff",
+    "exact_cost_required_for_non_null_usd": true
+  },
+  "untrusted_sources": {
+    "retrieved_content_is_instructions": false,
+    "system_prompt_isolated_from_sources": true,
+    "source_scheme_allowlist": [
+      "https"
+    ],
+    "embedded_tool_directives_ignored": true,
+    "citation_required_for_external_claims": true,
+    "raw_source_bodies_persisted": false,
+    "full_prompts_persisted": false,
+    "secrets_persisted": false,
+    "stored_citation_fields": [
+      "url",
+      "title",
+      "accessed_at",
+      "provider_source_id",
+      "content_hash",
+      "untrusted"
+    ]
+  },
+  "request_schema": {
+    "required": [
+      "schema_version",
+      "cycle_id",
+      "candidate_id",
+      "input_fingerprint",
+      "rules_decision",
+      "rules_decision_at",
+      "symbol",
+      "side",
+      "strategy",
+      "setup",
+      "regime",
+      "features",
+      "deadline_at"
+    ],
+    "rules_decision_values": [
+      "enter",
+      "reject",
+      "hold",
+      "exit"
+    ],
+    "read_only_context": [
+      "proposed_entry",
+      "proposed_stop",
+      "proposed_target",
+      "proposed_size",
+      "sector",
+      "bucket",
+      "volatility_state"
+    ]
+  },
+  "result_schema": {
+    "required": [
+      "schema_version",
+      "cycle_id",
+      "candidate_id",
+      "input_fingerprint",
+      "decision",
+      "confidence",
+      "risk_factors",
+      "citations",
+      "fallback_used",
+      "telemetry",
+      "completed_at"
+    ],
+    "decision_values": [
+      "agree",
+      "reject",
+      "unavailable"
+    ],
+    "confidence_range": [
+      0.0,
+      1.0
+    ],
+    "telemetry_fields": [
+      "provider",
+      "model",
+      "latency_ms",
+      "attempts",
+      "prompt_tokens",
+      "completion_tokens",
+      "reasoning_tokens",
+      "cached_tokens",
+      "source_count",
+      "cost_usd_exact"
+    ],
+    "free_text_bounded": true,
+    "free_text_drives_execution": false
+  },
+  "identity_and_staleness": {
+    "same_cycle_id_required": true,
+    "same_candidate_id_required": true,
+    "same_input_fingerprint_required": true,
+    "deadline_required": true,
+    "late_result_behavior": "invalid_telemetry_only",
+    "mismatched_result_behavior": "invalid_telemetry_only"
+  },
+  "canonical_outcome_memory": {
+    "enabled_in_stage_1": false,
+    "primary_key": "canonical_execution_id",
+    "canonical_source_read_only": true,
+    "rebuildable_derived_index": true,
+    "missing_or_contradictory_evidence_behavior": "fail_closed_no_join",
+    "comparison_dimensions": [
+      "strategy",
+      "setup_family",
+      "side",
+      "regime",
+      "sector",
+      "bucket",
+      "volatility_state",
+      "signal_characteristics",
+      "holding_period",
+      "session_phase"
+    ],
+    "outcome_fields": [
+      "mfe",
+      "mae",
+      "realized_return",
+      "exit_reason",
+      "holding_period",
+      "canonical_source_ids",
+      "derivation_version"
+    ]
+  },
+  "counterfactual_scorecard": {
+    "enabled_in_stage_1": false,
+    "execution_input": false,
+    "measures_incremental_expectancy": true,
+    "subtracts_inference_cost": true,
+    "segments": [
+      "agreement_state",
+      "confidence_bucket",
+      "strategy",
+      "setup",
+      "regime",
+      "sector",
+      "volatility_state",
+      "calendar_segment"
+    ],
+    "small_or_concentrated_samples": "inconclusive",
+    "automatic_promotion": false
+  },
+  "retention": {
+    "bounded": true,
+    "request_history_limit": 500,
+    "result_history_limit": 500,
+    "raw_reasoning_persisted": false,
+    "canonical_rows_mutated": false
+  },
+  "stages": [
+    "stage_1_design_and_contract",
+    "stage_2_provider_neutral_client",
+    "stage_3_async_adversarial_reviewer",
+    "stage_4_canonical_outcome_memory_and_scorecards",
+    "stage_5_observability_and_forward_evidence"
+  ],
+  "validation": {
+    "exact_head_change_safety": true,
+    "repository_safety_and_performance": true,
+    "architecture_debt": true,
+    "full_refactor_ownership_configuration_state_decision_runtime_startup_research": true,
+    "exact_gunicorn_smoke_for_runtime_stages": true,
+    "settled_splendid_self_check_for_runtime_stages": true,
+    "successful_automatic_paper_cycle_for_runtime_stages": true,
+    "behavior_change_requires_validation_policy": true
+  }
+}
