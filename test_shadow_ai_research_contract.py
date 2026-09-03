@@ -14,13 +14,13 @@ class ShadowAIResearchContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
-    def test_stage_four_memory_has_no_execution_authority(self):
+    def test_stage_five_observability_has_no_execution_authority(self):
         contract = self.contract
         policy = contract["policy"]
 
         self.assertEqual(
             contract["implementation_stage"],
-            "stage_4_canonical_outcome_memory_and_scorecards",
+            "stage_5_observability_and_forward_evidence",
         )
         self.assertTrue(policy["paper_only"])
         self.assertTrue(policy["research_only"])
@@ -131,6 +131,23 @@ class ShadowAIResearchContractTests(unittest.TestCase):
             "behavior_change_requires_validation_policy",
         ]
         self.assertTrue(all(validation[name] for name in required))
+
+    def test_observability_is_bounded_restart_validated_and_read_only(self):
+        status = self.contract["observability"]
+        forward = self.contract["forward_evidence"]
+
+        self.assertTrue(status["implemented"])
+        self.assertTrue(status["runtime_integrated"])
+        self.assertEqual(status["read_only_route"], "/paper/shadow-ai-research-status")
+        self.assertTrue(status["separate_from_portfolio_state"])
+        self.assertTrue(status["separate_from_canonical_ledger"])
+        self.assertTrue(status["atomic_replace"])
+        self.assertTrue(status["checksum_validated_on_restart"])
+        self.assertEqual(status["corrupt_store_behavior"], "fail_closed_no_overwrite")
+        self.assertFalse(status["execution_reads_evidence_store"])
+        self.assertFalse(status["automatic_promotion"])
+        self.assertFalse(forward["threshold_authorizes_promotion"])
+        self.assertTrue(forward["provider_transport_enablement_is_separate"])
 
 
 if __name__ == "__main__":

@@ -215,6 +215,8 @@ class ChangeSafetyAuditTests(unittest.TestCase):
             "test_shadow_ai_research_client.py",
             "test_shadow_ai_adversarial_reviewer.py",
             "test_shadow_ai_outcome_memory.py",
+            "test_shadow_ai_evidence_store.py",
+            "test_shadow_ai_observability.py",
         ):
             self.assertIn(shadow_test, tests)
 

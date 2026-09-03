@@ -50,11 +50,13 @@ class ShadowAIAdversarialReviewer:
         provider: ShadowAIProvider | None,
         config: ShadowAIReviewerConfig | None = None,
         now: Callable[[], datetime] | None = None,
+        evidence_sink: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
     ) -> None:
         self.config = config or ShadowAIReviewerConfig()
         self.client = client
         self.provider = provider
         self._now = now or (lambda: datetime.now(timezone.utc))
+        self._evidence_sink = evidence_sink
         self._queue: queue.Queue[bytes | None] = queue.Queue(
             maxsize=self.config.max_items
         )
@@ -72,6 +74,8 @@ class ShadowAIAdversarialReviewer:
             "results_join_eligible": 0,
             "results_invalid_or_unavailable": 0,
             "snapshot_errors": 0,
+            "evidence_persisted": 0,
+            "evidence_persistence_errors": 0,
         }
         self._last_drop_reason: str | None = None
 
@@ -212,6 +216,7 @@ class ShadowAIAdversarialReviewer:
                         self._counters["results_join_eligible"] += 1
                     else:
                         self._counters["results_invalid_or_unavailable"] += 1
+                self._persist_evidence(record)
             except Exception as exc:
                 with self._lock:
                     self._counters["requests_completed"] += 1
@@ -223,6 +228,27 @@ class ShadowAIAdversarialReviewer:
                     }
             finally:
                 self._queue.task_done()
+
+    def configure_evidence_sink(
+        self,
+        sink: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None,
+    ) -> None:
+        with self._lock:
+            self._evidence_sink = sink
+
+    def _persist_evidence(self, record: Mapping[str, Any]) -> None:
+        with self._lock:
+            sink = self._evidence_sink
+        if sink is None:
+            return
+        try:
+            result = sink(record)
+            persisted = result.get("status") in {"persisted", "deduplicated"}
+        except Exception:
+            persisted = False
+        with self._lock:
+            key = "evidence_persisted" if persisted else "evidence_persistence_errors"
+            self._counters[key] += 1
 
     def _classify_result(
         self,
@@ -378,6 +404,7 @@ class ShadowAIAdversarialReviewer:
 
 
 _GLOBAL_LOCK = threading.RLock()
+_EVIDENCE_SINK: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None
 _REVIEWER = ShadowAIAdversarialReviewer(
     client=ShadowAIResearchClient(),
     provider=None,
@@ -398,6 +425,7 @@ def install(
                 client=client or ShadowAIResearchClient(),
                 provider=provider,
                 config=config,
+                evidence_sink=_EVIDENCE_SINK,
             )
         return _REVIEWER.start()
 
@@ -408,3 +436,12 @@ def observe_cycle(report: Mapping[str, Any]) -> dict[str, Any]:
 
 def status_payload() -> dict[str, Any]:
     return _REVIEWER.status_payload()
+
+
+def configure_evidence_sink(
+    sink: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None,
+) -> None:
+    global _EVIDENCE_SINK
+    with _GLOBAL_LOCK:
+        _EVIDENCE_SINK = sink
+        _REVIEWER.configure_evidence_sink(sink)

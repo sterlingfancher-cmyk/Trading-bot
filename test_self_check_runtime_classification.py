@@ -246,9 +246,14 @@ class SelfCheckRuntimeClassificationTests(unittest.TestCase):
             "shadow_ai_reviewer = shadow_ai_adversarial_reviewer.install()",
             observer_index,
         )
+        observability_index = source.index(
+            "shadow_ai_observability_result = shadow_ai_observability.install(core.app)",
+            observer_index,
+        )
         runner_index = source.index("auto_runner = _start_auto_runner(core)", observer_index)
         self.assertLess(diagnostics_index, observer_index)
-        self.assertLess(observer_index, reviewer_index)
+        self.assertLess(observer_index, observability_index)
+        self.assertLess(observability_index, reviewer_index)
         self.assertLess(reviewer_index, runner_index)
 
 

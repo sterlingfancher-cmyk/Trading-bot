@@ -9,6 +9,7 @@ from shadow_ai_adversarial_reviewer import (
     ShadowAIAdversarialReviewer,
     ShadowAIReviewerConfig,
 )
+import shadow_ai_adversarial_reviewer as reviewer_module
 from shadow_ai_research_client import (
     SCHEMA_VERSION,
     ShadowAIClientConfig,
@@ -215,6 +216,56 @@ class ShadowAIAdversarialReviewerTests(unittest.TestCase):
             ShadowAIReviewerConfig(max_requests_per_cycle=11)
         with self.assertRaises(ValueError):
             ShadowAIReviewerConfig(result_history_limit=501)
+
+    def test_completed_record_is_persisted_without_execution_wait(self):
+        persisted = []
+        reviewer = self.enabled_reviewer(lambda payload, _timeout: provider_response(payload))
+        reviewer.configure_evidence_sink(
+            lambda value: persisted.append(dict(value)) or {"status": "persisted"}
+        )
+        try:
+            reviewer.start()
+            reviewer.enqueue_report(report())
+            self.wait_completed(reviewer)
+            self.assertEqual(len(persisted), 1)
+            self.assertEqual(reviewer.status_payload()["counters"]["evidence_persisted"], 1)
+            self.assertFalse(persisted[0]["authority"]["execution_input"])
+        finally:
+            reviewer.stop()
+
+    def test_evidence_sink_failure_does_not_stop_worker(self):
+        def broken_sink(_value):
+            raise OSError("simulated persistence failure")
+
+        reviewer = self.enabled_reviewer(lambda payload, _timeout: provider_response(payload))
+        reviewer.configure_evidence_sink(broken_sink)
+        try:
+            reviewer.start()
+            reviewer.enqueue_report(report())
+            self.wait_completed(reviewer)
+            status = reviewer.status_payload()
+            self.assertEqual(status["counters"]["evidence_persistence_errors"], 1)
+            self.assertTrue(status["worker_alive"])
+            self.assertEqual(status["counters"]["results_join_eligible"], 1)
+        finally:
+            reviewer.stop()
+
+    def test_module_sink_survives_later_reconfiguration(self):
+        sink = lambda _value: {"status": "persisted"}
+        prior_reviewer = reviewer_module._REVIEWER
+        prior_sink = reviewer_module._EVIDENCE_SINK
+        try:
+            reviewer_module.configure_evidence_sink(sink)
+            reviewer_module.install(
+                client=ShadowAIResearchClient(),
+                provider=None,
+                config=ShadowAIReviewerConfig(enabled=False),
+            )
+            self.assertIs(reviewer_module._REVIEWER._evidence_sink, sink)
+        finally:
+            reviewer_module._REVIEWER.stop()
+            reviewer_module._REVIEWER = prior_reviewer
+            reviewer_module._EVIDENCE_SINK = prior_sink
 
 
 if __name__ == "__main__":

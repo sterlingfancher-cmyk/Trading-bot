@@ -1,6 +1,6 @@
 # Post-Validation Shadow-AI Research Design
 
-Status: Stage 4 canonical outcome memory and scorecards implemented; runtime-disconnected
+Status: Stage 5 bounded observability implemented; reviewer/provider remain disabled
 Issue: #157  
 Runtime authority: unchanged; rules remain the sole execution authority
 
@@ -262,6 +262,28 @@ samples remain inconclusive. Even sufficient diverse evidence is labeled
 Read-only status/audit surfaces, source/cost/fallback telemetry, state-size and
 restart checks, settled Splendid acceptance, and a forward shadow evidence
 period. Any later authority discussion remains a separately authorized project.
+
+Implemented in `shadow_ai_observability.py` and
+`shadow_ai_evidence_store.py`. Runtime registration loads a separate research-
+evidence snapshot and exposes `/paper/shadow-ai-research-status` before the
+existing auto runner starts. The endpoint reports reviewer/worker state,
+decision and provider/model counts, source/citation coverage, fallbacks, token
+categories, exact inference cost coverage, and forward-evidence readiness.
+
+The evidence snapshot is capped at 500 records, 32 KB per record, and 8 MB
+overall. It uses canonical JSON, a SHA-256 checksum, atomic replacement, exact
+cycle/candidate/input identities, idempotent duplicate handling, and restart
+validation. Corruption or contradictory identity fails closed and is never
+overwritten automatically. Full prompts, raw reasoning/source bodies, secrets,
+and authorization values are rejected recursively. This file is neither
+portfolio state nor canonical execution evidence, and trading never reads it.
+
+The reviewer remains disabled by default with no bundled provider transport.
+Accordingly a clean disabled deployment writes no research records. Forward
+readiness requires an explicitly enabled/live worker, restart-valid evidence,
+at least 100 exact join-eligible records, no more than 20% unavailable results,
+and complete exact-cost coverage. Meeting those diagnostics still authorizes
+no promotion or execution behavior.
 
 ## Validation requirements
 
