@@ -234,6 +234,12 @@ class ChangeSafetyAuditTests(unittest.TestCase):
                 planned_regressions((path,)),
             )
 
+    def test_system_sentinel_change_selects_complete_sentinel_regression_set(self) -> None:
+        for path in ("system_sentinel.py", "system_sentinel_runtime.py"):
+            tests = planned_regressions((path,))
+            self.assertIn("test_system_sentinel.py", tests)
+            self.assertIn("test_system_sentinel_runtime.py", tests)
+
 
 if __name__ == "__main__":
     unittest.main()
