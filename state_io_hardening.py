@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
-VERSION = "state-io-hardening-2026-05-13"
+VERSION = "state-io-hardening-2026-09-03-v2-stable-serialization"
 
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 STATE_FILENAME = os.environ.get("STATE_FILENAME", os.environ.get("STATE_FILE", "state.json"))
@@ -34,6 +34,8 @@ STATE_IO_STATUS_FILE = os.path.join(STATE_DIR or ".", "state_io_status.json")
 
 READ_RETRIES = int(os.environ.get("STATE_IO_READ_RETRIES", "4"))
 READ_RETRY_SLEEP = float(os.environ.get("STATE_IO_READ_RETRY_SLEEP", "0.05"))
+SERIALIZE_RETRIES = 5
+SERIALIZE_RETRY_SLEEP = 0.01
 
 _THREAD_LOCK = threading.RLock()
 _RUN_LOCK = threading.Lock()
@@ -214,13 +216,35 @@ def backup_current_state() -> Dict[str, Any]:
         }
 
 
+def _stable_json_text(payload: Dict[str, Any]) -> str:
+    for attempt in range(SERIALIZE_RETRIES):
+        try:
+            return json.dumps(
+                payload,
+                default=_json_default,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        except RuntimeError as exc:
+            message = str(exc).lower()
+            concurrent_mutation = (
+                "dictionary changed size during iteration" in message
+                or "dictionary keys changed during iteration" in message
+            )
+            if not concurrent_mutation or attempt + 1 >= SERIALIZE_RETRIES:
+                raise
+            time.sleep(SERIALIZE_RETRY_SLEEP * (attempt + 1))
+    raise RuntimeError("state serialization retry bound exhausted")
+
+
 def atomic_json_write(path: str, payload: Dict[str, Any]) -> bool:
     _ensure_parent(path)
     folder = _folder(path)
     base = os.path.basename(path)
     tmp = os.path.join(folder, f".{base}.{os.getpid()}.{threading.get_ident()}.tmp")
+    serialized = _stable_json_text(payload)
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(payload, f, default=_json_default, ensure_ascii=False, separators=(",", ":"))
+        f.write(serialized)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
@@ -312,6 +336,8 @@ def status_payload(module: Any | None = None) -> Dict[str, Any]:
         },
         "protections": {
             "atomic_save_state": True,
+            "stable_pre_serialization": True,
+            "bounded_concurrent_mutation_retries": SERIALIZE_RETRIES,
             "retrying_json_reads": True,
             "backup_fallback_reads": True,
             "thread_and_file_locking": True,

@@ -53,6 +53,7 @@ SHADOW_AI_TESTS = (
     "test_shadow_ai_evidence_store.py",
     "test_shadow_ai_observability.py",
 )
+STATE_SERIALIZATION_TESTS = ("test_issue165_state_serialization.py",)
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,14 @@ def _is_legacy_external_paper_runner_path(path: str) -> bool:
 
 def _is_shadow_ai_path(path: str) -> bool:
     return Path(path.lower()).name.startswith(("shadow_ai_", "test_shadow_ai_"))
+
+
+def _is_state_serialization_path(path: str) -> bool:
+    return Path(path.lower()).name in {
+        "state_io_hardening.py",
+        "cycle_completion_contract.py",
+        "test_issue165_state_serialization.py",
+    }
 
 
 def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -205,6 +214,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(LEGACY_EXTERNAL_PAPER_RUNNER_TESTS)
     if any(_is_shadow_ai_path(path) for path in path_tuple):
         tests.extend(SHADOW_AI_TESTS)
+    if any(_is_state_serialization_path(path) for path in path_tuple):
+        tests.extend(STATE_SERIALIZATION_TESTS)
     existing: list[str] = []
     seen: set[str] = set()
     for test in tests:

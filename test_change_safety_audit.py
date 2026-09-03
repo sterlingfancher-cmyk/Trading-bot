@@ -220,6 +220,13 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         ):
             self.assertIn(shadow_test, tests)
 
+    def test_state_serialization_change_selects_issue165_regression(self) -> None:
+        for path in ("state_io_hardening.py", "cycle_completion_contract.py"):
+            self.assertIn(
+                "test_issue165_state_serialization.py",
+                planned_regressions((path,)),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
