@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-02 18:05 CDT
+Last updated: 2026-09-02 19:09 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `177ba3a96b25463c01bbc7d76c39c9bd4c1cf4b7` (PR #161).
+Validated runtime-code `main`: `5c4ecdb631c318ecb05dfaf8b8cc29f6d0147e24` (PR #162).
 Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
 
 ## Communication and Continuity
@@ -202,12 +202,13 @@ hard-risk controls, and rules-only execution authority remain unchanged.
 
 ## Immediate Next Action
 
-Continue Issue #157 from completed Stage 2. PR #161 merged the provider-neutral,
-disabled-by-default structured client with no bundled transport or runtime
-integration and no trading behavior change. Proceed to the bounded Stage 3
-asynchronous adversarial reviewer while preserving nonblocking execution,
-rules-only authority, and all queue/staleness boundaries in the contract.
-Continue the scheduled read-only operational audits.
+Continue Issue #157 from completed Stage 3. PR #162 merged the bounded
+asynchronous adversarial reviewer, registered but disabled by default with no
+provider transport. Proceed to Stage 4 canonical outcome memory and
+counterfactual scorecards using read-only immutable execution evidence. Preserve
+rules-only authority, exact identity joins, and inconclusive classification for
+missing, contradictory, small, or concentrated samples. Continue the scheduled
+read-only operational audits.
 
 If a demonstrated bug or higher-priority reliability issue appears, repair it
 automatically within the standing boundary, require every exact-head gate,
@@ -326,3 +327,52 @@ changed. Issue #157 remains open for Stage 3: a bounded asynchronous adversarial
 reviewer extending the existing observer owner, with a single explicitly
 started off-thread worker, immutable request snapshots, nonblocking bounded
 queue/drop telemetry, and stale-result rejection.
+
+## 2026-09-02 Issue #157 Stage 3 — Asynchronous Reviewer — COMPLETE
+
+PR #162 added shadow_ai_adversarial_reviewer.py and integrated it only through
+the existing completed-cycle observer and post-composition runtime registration
+owners. It adds no run_cycle wrapper, callable owner, provider transport,
+persistence owner, execution route, order callable, or automatic promotion.
+
+The reviewer freezes each bounded candidate request as canonical JSON before
+queueing, permits at most 128 queued items and 10 requests per cycle, drops new
+research immediately when full, and permits exactly one explicitly started
+daemon worker only when reviewer/client/provider configuration is complete.
+Provider work cannot run on the execution thread. Late, mismatched, malformed,
+or unavailable output is retained only as invalid telemetry and cannot join a
+canonical outcome.
+
+Focused client/reviewer/observer/registration validation passed 38 tests.
+Repository validation passed across 304 Python files and Railway configuration
+validation passed. The first PR head was correctly blocked because a local
+timestamp parser duplicated the Stage 2 client helper. The implementation was
+narrowed to reuse the existing helper; the architecture-debt delta returned to
+zero, all focused tests remained green, and every required exact-head workflow
+passed, including Change Safety, Repository Safety/Performance, Architecture
+Debt, the full ownership/configuration/state/decision/runtime/startup/research
+audit, and exact Gunicorn smoke. PR #162 was squash-merged as
+5c4ecdb631c318ecb05dfaf8b8cc29f6d0147e24.
+
+Settled authoritative Splendid evidence after the new process completed
+deferred registration proved:
+- bootstrap ready/delegating and research isolation active;
+- run-report guard v4 installed as the sole final observer owner;
+- adversarial reviewer registered with enabled=false, worker_started=false,
+  worker_count=0, empty queue/history, and zero provider/request activity;
+- execution_waits_for_result=false and every authority mutation flag false;
+- self-check pass with no failing components;
+- cash/equity 13475.004291 / 13475.0, flat;
+- accounting coverage/economics clean, no reconstructed positions;
+- canonical ledger append-only/hash-valid at 55 rows / 9 current-v4 rows;
+- v4 validation release intact;
+- runner enabled with no active error and correct after-close skip behavior;
+- market-data accounting complete with zero unclassified requests and provider
+  circuit closed;
+- the only audit WARN remains the existing 2.43% drawdown advisory, with no
+  halt or self-defense.
+
+No strategy, signal, ranking, selection, sizing, exposure, stop, target, exit,
+risk, accounting, canonical/history, state/day-peak, live, ML, or order
+authority changed. Issue #157 remains open for Stage 4 canonical outcome memory
+and AI-vs-rules counterfactual scorecards.
