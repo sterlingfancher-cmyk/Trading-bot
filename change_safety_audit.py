@@ -45,6 +45,12 @@ SUCCESSOR_REPLAY_TESTS = ("test_verified_v2_successor_replay_status.py",)
 SUCCESSOR_EPOCH_MIGRATION_TESTS = ("test_verified_v2_successor_epoch_migration.py",)
 RUNTIME_RESEARCH_SNAPSHOT_TESTS = ("test_runtime_research_snapshot.py",)
 LEGACY_EXTERNAL_PAPER_RUNNER_TESTS = ("test_legacy_external_paper_runner_retired.py",)
+SHADOW_AI_TESTS = (
+    "test_shadow_ai_research_contract.py",
+    "test_shadow_ai_research_client.py",
+    "test_shadow_ai_adversarial_reviewer.py",
+    "test_shadow_ai_outcome_memory.py",
+)
 
 
 @dataclass(frozen=True)
@@ -103,6 +109,10 @@ def _is_runtime_research_snapshot_path(path: str) -> bool:
 
 def _is_legacy_external_paper_runner_path(path: str) -> bool:
     return path.lower() == ".github/workflows/paper-run.yml"
+
+
+def _is_shadow_ai_path(path: str) -> bool:
+    return Path(path.lower()).name.startswith(("shadow_ai_", "test_shadow_ai_"))
 
 
 def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -191,6 +201,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(RUNTIME_RESEARCH_SNAPSHOT_TESTS)
     if any(_is_legacy_external_paper_runner_path(path) for path in path_tuple):
         tests.extend(LEGACY_EXTERNAL_PAPER_RUNNER_TESTS)
+    if any(_is_shadow_ai_path(path) for path in path_tuple):
+        tests.extend(SHADOW_AI_TESTS)
     existing: list[str] = []
     seen: set[str] = set()
     for test in tests:

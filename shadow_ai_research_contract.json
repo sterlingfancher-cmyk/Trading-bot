@@ -1,6 +1,6 @@
 {
-  "version": "shadow-ai-research-contract-2026-09-02-v3-reviewer",
-  "implementation_stage": "stage_3_async_adversarial_reviewer",
+  "version": "shadow-ai-research-contract-2026-09-02-v4-outcome-memory",
+  "implementation_stage": "stage_4_canonical_outcome_memory_and_scorecards",
   "policy": {
     "paper_only": true,
     "research_only": true,
@@ -159,9 +159,15 @@
   },
   "canonical_outcome_memory": {
     "enabled_in_stage_1": false,
+    "implemented": true,
+    "runtime_integrated": false,
+    "module": "shadow_ai_outcome_memory.py",
     "primary_key": "canonical_execution_id",
     "canonical_source_read_only": true,
     "rebuildable_derived_index": true,
+    "symbol_or_time_inferred_join_allowed": false,
+    "exact_review_execution_binding_required": true,
+    "integrity_qualified_path_evidence_required": true,
     "missing_or_contradictory_evidence_behavior": "fail_closed_no_join",
     "comparison_dimensions": [
       "strategy",
@@ -179,6 +185,7 @@
       "mfe",
       "mae",
       "realized_return",
+      "entry_notional_usd",
       "exit_reason",
       "holding_period",
       "canonical_source_ids",
@@ -187,6 +194,8 @@
   },
   "counterfactual_scorecard": {
     "enabled_in_stage_1": false,
+    "implemented": true,
+    "runtime_integrated": false,
     "execution_input": false,
     "measures_incremental_expectancy": true,
     "subtracts_inference_cost": true,
@@ -201,6 +210,8 @@
       "calendar_segment"
     ],
     "small_or_concentrated_samples": "inconclusive",
+    "missing_exact_cost_behavior": "net_metrics_null_and_inconclusive",
+    "sufficient_result_behavior": "observational_only",
     "automatic_promotion": false
   },
   "retention": {
