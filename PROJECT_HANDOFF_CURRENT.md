@@ -430,3 +430,61 @@ changed. Issue #157 remains open for Stage 5: bounded read-only observability,
 source/cost/fallback evidence, state-size/restart checks, and forward shadow
 validation. A provider transport and any reviewer enablement remain separate,
 explicit configuration work; rules remain sole execution authority.
+
+## 2026-09-03 Issue #157 Stage 5 — Bounded Observability — COMPLETE
+
+PR #164 added a separate, bounded research-evidence store and the read-only
+`/paper/shadow-ai-research-status` surface. The store is not portfolio state or
+canonical execution evidence. It retains at most 500 records, 32 KB per record,
+and 8 MB overall; uses canonical JSON, SHA-256 checksum validation, atomic
+replacement, exact cycle/candidate/input identities, and idempotent duplicate
+handling; and fails closed without overwriting corrupt or contradictory data.
+Full prompts, raw reasoning/source bodies, secrets, authorization, credentials,
+and token values are rejected recursively.
+
+Completed reviewer records can be persisted from the existing asynchronous
+worker, never from the execution thread. Persistence failure is telemetry-only
+and cannot stop the worker or affect the rules result. The status surface reports
+decision/provider/model counts, sources and citations, fallbacks, token
+categories, exact inference cost coverage, store size/integrity/restart state,
+and forward-evidence readiness. Readiness requires an enabled/live reviewer,
+restart-valid evidence, at least 100 exact join-eligible results, no more than
+20% unavailable results, and complete exact-cost coverage. Meeting those
+diagnostics never authorizes promotion or any execution behavior.
+
+The client and reviewer remain disabled by default and no provider transport was
+added. The impact-aware Change Safety gate now automatically runs the complete
+contract/client/reviewer/outcome-memory/evidence-store/observability regression
+set for every future `shadow_ai_*` change. Local validation passed 74 focused
+tests, repository/Railway validation across 312 Python files, and structural,
+ownership, typed-configuration, and debt checks with zero new critical findings
+or warnings. All four required exact-head workflows passed on
+`e8dd69e845e363d26a1b854b0b343fe4b8473605`. PR #164 was squash-merged as
+`492ccd0136b4499a1f85b77ef0ba52944fe826ae`.
+
+Settled authoritative Splendid evidence on the exact deployed merge proved:
+- bootstrap `ready` and delegating;
+- deployment commit exactly `492ccd0136b4499a1f85b77ef0ba52944fe826ae`;
+- self-check `pass` with 9 passed components, 1 deferred research component,
+  zero warnings/failures, and no next action;
+- Stage 5 route `pass`, restart-loadable store with valid integrity, zero bytes/
+  records/writes, and no rejected evidence;
+- reviewer disabled with zero workers, cycles, candidates, requests, provider
+  calls, results, persistence attempts, fallbacks, tokens, or inference cost;
+- cash/equity `13475.004291 / 13475.0`, no positions;
+- bidirectional accounting coverage complete with zero coverage/economic issues
+  and reconstructed cash/equity `13475.004291 / 13475.004291`;
+- canonical ledger append-only/hash-valid at 55 rows / 9 current-v4 rows;
+- v4 validation remains released with `validation_hold=false`;
+- auto runner enabled, thread active, no current error, and normal premarket
+  closed-session skips;
+- risk not halted, self-defense inactive, and daily audit `pass` (11/11).
+
+No strategy, signal, ranking, selection, sizing, exposure, stop, target, exit,
+risk, accounting, canonical/history, state/day-peak, live, ML, or order authority
+changed. Issue #157's five implementation stages are complete. Beginning paid
+forward evidence still requires a separately selected provider/model, exact
+pricing, credentials, and an explicit bounded enablement/configuration change;
+it remains shadow-only and can never self-promote. Continuous improvement should
+otherwise proceed to demonstrated correctness defects first, then the highest-
+value evidence-backed performance work under `VALIDATION_POLICY.md`.
