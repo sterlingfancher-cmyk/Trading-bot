@@ -1,6 +1,6 @@
 {
-  "version": "shadow-ai-research-contract-2026-09-02-v4-outcome-memory",
-  "implementation_stage": "stage_4_canonical_outcome_memory_and_scorecards",
+  "version": "shadow-ai-research-contract-2026-09-03-v5-observability",
+  "implementation_stage": "stage_5_observability_and_forward_evidence",
   "policy": {
     "paper_only": true,
     "research_only": true,
@@ -213,6 +213,34 @@
     "missing_exact_cost_behavior": "net_metrics_null_and_inconclusive",
     "sufficient_result_behavior": "observational_only",
     "automatic_promotion": false
+  },
+  "observability": {
+    "implemented": true,
+    "runtime_integrated": true,
+    "module": "shadow_ai_observability.py",
+    "read_only_route": "/paper/shadow-ai-research-status",
+    "evidence_store_module": "shadow_ai_evidence_store.py",
+    "separate_from_portfolio_state": true,
+    "separate_from_canonical_ledger": true,
+    "atomic_replace": true,
+    "checksum_validated_on_restart": true,
+    "corrupt_store_behavior": "fail_closed_no_overwrite",
+    "max_records": 500,
+    "max_record_bytes": 32000,
+    "max_store_bytes": 8000000,
+    "disabled_reviewer_writes_records": false,
+    "execution_reads_evidence_store": false,
+    "automatic_promotion": false
+  },
+  "forward_evidence": {
+    "minimum_join_eligible_results": 100,
+    "maximum_unavailable_rate": 0.2,
+    "exact_cost_coverage_required": true,
+    "restart_durability_required": true,
+    "reviewer_enabled_required": true,
+    "worker_alive_required": true,
+    "threshold_authorizes_promotion": false,
+    "provider_transport_enablement_is_separate": true
   },
   "retention": {
     "bounded": true,
