@@ -205,7 +205,18 @@ class ChangeSafetyAuditTests(unittest.TestCase):
             "test_architecture_stage_e_accounting.py",
             "test_architecture_stage_f_canary.py",
         ):
-            self.assertIn(core_test, tests)
+                self.assertIn(core_test, tests)
+
+    def test_shadow_ai_change_selects_complete_shadow_ai_regression_set(self) -> None:
+        tests = planned_regressions(("shadow_ai_outcome_memory.py",))
+
+        for shadow_test in (
+            "test_shadow_ai_research_contract.py",
+            "test_shadow_ai_research_client.py",
+            "test_shadow_ai_adversarial_reviewer.py",
+            "test_shadow_ai_outcome_memory.py",
+        ):
+            self.assertIn(shadow_test, tests)
 
 
 if __name__ == "__main__":
