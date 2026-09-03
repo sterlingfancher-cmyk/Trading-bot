@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-09-02-v40-v4-validation-release"
+VERSION = "data-integrity-startup-bridge-2026-09-03-v41-issue172-reconciliation"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -95,6 +95,10 @@ MODULES = (
     # the final v3->v4 state owner. It can change only v4 validation metadata
     # after the configured forward evidence and accounting gates pass.
     "verified_v4_validation_release",
+    # Exact Issue #172 write-ahead-ledger recovery.  It runs last, accepts only
+    # the demonstrated v4 two-exit divergence, archives evidence, reconciles
+    # state from immutable canonical rows, and preserves the lifecycle halt.
+    "v4_canonical_state_reconciliation",
 )
 
 

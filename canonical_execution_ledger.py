@@ -20,13 +20,14 @@ import threading
 import uuid
 from typing import Any, Dict, List, Tuple
 
-VERSION = "canonical-execution-ledger-2026-08-10-v1"
+VERSION = "canonical-execution-ledger-2026-09-03-v2-state-commit"
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 LEDGER_FILE = os.path.join(STATE_DIR, "canonical_execution_ledger.jsonl")
 
 _LOCK = threading.RLock()
 _APPLIED_CORE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
+_LAST_PROJECTION_COMMIT: Dict[str, Any] = {}
 
 
 def _d(value: Any) -> Dict[str, Any]:
@@ -177,6 +178,51 @@ def _mark_ledger_failure(core: Any, error: Exception) -> None:
     pf["risk_controls"] = risk
 
 
+def _mark_projection_failure(core: Any, event: Dict[str, Any], error: Exception) -> None:
+    pf = _portfolio(core)
+    risk = _d(pf.setdefault("risk_controls", {}))
+    risk["canonical_state_projection_error"] = f"{type(error).__name__}: {error}"
+    risk["canonical_state_projection_error_local"] = _now(core)
+    risk["canonical_state_projection_execution_id"] = event.get("execution_id")
+    if not bool(risk.get("halted", False)):
+        risk["halted"] = True
+        risk["halt_reason"] = "canonical execution state projection commit failed"
+    pf["risk_controls"] = risk
+
+
+def _persist_projection(core: Any, event: Dict[str, Any]) -> None:
+    """Durably mirror a canonical execution before execution flow continues."""
+    global _LAST_PROJECTION_COMMIT
+    save = getattr(core, "save_state", None)
+    if not callable(save):
+        _LAST_PROJECTION_COMMIT = {
+            "status": "not_available",
+            "execution_id": event.get("execution_id"),
+            "recorded_local": _now(core),
+        }
+        return
+    try:
+        try:
+            save(_portfolio(core))
+        except TypeError:
+            save()
+    except Exception as exc:
+        _mark_projection_failure(core, event, exc)
+        _LAST_PROJECTION_COMMIT = {
+            "status": "fail",
+            "execution_id": event.get("execution_id"),
+            "recorded_local": _now(core),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+        raise
+    _LAST_PROJECTION_COMMIT = {
+        "status": "committed",
+        "execution_id": event.get("execution_id"),
+        "event_hash": event.get("event_hash"),
+        "recorded_local": _now(core),
+    }
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     if core is None:
         return {"status": "pending", "overall": "warn", "version": VERSION, "reason": "runtime_missing"}
@@ -193,6 +239,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
     @functools.wraps(prior)
     def wrapped(action, symbol, side, px, shares, extra=None):
         linked_extra = dict(extra) if isinstance(extra, dict) else {}
+        event: Dict[str, Any] = {}
         try:
             event = append_execution(action, symbol, side, px, shares, linked_extra, core)
             linked_extra["execution_id"] = event.get("execution_id")
@@ -202,7 +249,9 @@ def apply(core: Any = None) -> Dict[str, Any]:
         except Exception as exc:
             _mark_ledger_failure(core, exc)
             linked_extra["canonical_execution_ledger_error"] = f"{type(exc).__name__}: {exc}"
-        return prior(action, symbol, side, px, shares, linked_extra)
+        result = prior(action, symbol, side, px, shares, linked_extra)
+        _persist_projection(core, event)
+        return result
 
     wrapped._canonical_execution_ledger_version = VERSION  # type: ignore[attr-defined]
     wrapped._canonical_execution_ledger_prior = prior  # type: ignore[attr-defined]
@@ -237,6 +286,8 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "errors": (parse_errors + chain_errors)[:5],
         "historical_recovery_source": False,
         "authoritative_for_new_executions": bool(hooked and healthy),
+        "state_projection_commit_immediate": True,
+        "last_state_projection_commit": dict(_LAST_PROJECTION_COMMIT),
         "authority": {
             "records_execution_events": True,
             "repairs_historical_state": False,
