@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-02 19:09 CDT
+Last updated: 2026-09-03 00:41 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `5c4ecdb631c318ecb05dfaf8b8cc29f6d0147e24` (PR #162).
+Validated runtime-code `main`: `1efd939c8906aefa1e19b7d8df1a6047357094e2` (PR #166).
 Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
 
 ## Communication and Continuity
@@ -202,20 +202,19 @@ hard-risk controls, and rules-only execution authority remain unchanged.
 
 ## Immediate Next Action
 
-Continue Issue #157 from completed Stage 3. PR #162 merged the bounded
-asynchronous adversarial reviewer, registered but disabled by default with no
-provider transport. Proceed to Stage 4 canonical outcome memory and
-counterfactual scorecards using read-only immutable execution evidence. Preserve
-rules-only authority, exact identity joins, and inconclusive classification for
-missing, contradictory, small, or concentrated samples. Continue the scheduled
-read-only operational audits.
+Issue #157's five implementation stages are complete. Keep its reviewer/client
+disabled until provider/model selection, exact token-category pricing,
+credentials, and a bounded shadow-only activation/configuration change are
+available. Rules remain sole execution authority; forward evidence cannot
+self-promote.
 
-If a demonstrated bug or higher-priority reliability issue appears, repair it
-automatically within the standing boundary, require every exact-head gate,
-merge only when green, validate settled authoritative Splendid evidence, and
-record the result here. Evaluate performance changes only through
-`VALIDATION_POLICY.md`; promote only favorable, reproducible, forward-validated
-paper evidence.
+Continue the scheduled read-only operational audits. If a demonstrated bug or
+higher-priority reliability issue appears, repair it automatically within the
+standing boundary, require every exact-head gate, merge only when green,
+validate settled authoritative Splendid evidence, and record the result here.
+Otherwise select the highest-value evidence-backed performance experiment and
+apply `VALIDATION_POLICY.md`; promote only favorable, reproducible,
+forward-validated paper evidence.
 
 Correctness, accounting integrity, runtime stability, and deterministic
 recovery remain ahead of performance optimization.
@@ -488,3 +487,52 @@ pricing, credentials, and an explicit bounded enablement/configuration change;
 it remains shadow-only and can never self-promote. Continuous improvement should
 otherwise proceed to demonstrated correctness defects first, then the highest-
 value evidence-backed performance work under `VALIDATION_POLICY.md`.
+
+
+## 2026-09-03 Issue #165 — Concurrent State Serialization / Stale Runner Error — CLOSED
+
+A handoff-only restart after Stage 5 exposed a real, previously observed runner
+failure: the first automatic cycle raised `dictionary changed size during
+iteration`. Later premarket closed-session cycles completed, but the old error
+remained classified as active, causing self-check WARN and compact daily-audit
+FAIL despite successful recovery.
+
+The bounded root cause had two parts. `atomic_json_write` streamed a live nested
+state dictionary directly through `json.dump`, so concurrent watchdog mutation
+could invalidate iteration. Separately, the cycle-completion owner did not clear
+an active runner error after a later cycle returned successfully or completed an
+expected closed-market skip.
+
+PR #166 now pre-serializes a stable JSON snapshot before opening/replacing the
+state file, retries only the two recognized concurrent-dictionary mutation
+errors up to five bounded attempts, and otherwise fails closed. A successfully
+completed cycle preserves the prior failure as recovered forensic evidence and
+then clears only the active runner-error fields; a failed cycle never clears an
+error. Four focused regressions cover retry/success, bounded failure, successful
+recovery, and failure retention. Repository/Railway/structural/ownership/
+configuration/debt validation passed, and all four required exact-head workflows
+passed on `ac0ae3012b8af6f78fec020a15825604b02dea85`. PR #166 was squash-merged
+as `1efd939c8906aefa1e19b7d8df1a6047357094e2`.
+
+Settled authoritative Splendid acceptance after a fresh startup and automatic
+premarket closed-session cycle proved:
+- exact deployed commit `1efd939c8906aefa1e19b7d8df1a6047357094e2`;
+- bootstrap ready/delegating;
+- runner enabled with a completed automatic cycle, `last_error=null`, and the
+  historical dictionary-mutation failure retained as `last_recovered_error`;
+- state I/O version
+  `state-io-hardening-2026-09-03-v2-stable-serialization`, valid state,
+  stable pre-serialization, five bounded mutation retries, atomic save, and no
+  overlapping run cycle;
+- self-check `pass` and compact daily audit `pass` at 11/11;
+- cash/equity `13475.004291 / 13475.0`, no positions;
+- bidirectional accounting coverage complete with zero coverage/economic issues;
+- canonical ledger append-only/hash-valid at 55 rows / 9 current-v4 rows;
+- v4 validation release intact with `validation_hold=false`;
+- risk not halted, self-defense inactive, and market-data accounting complete;
+- Stage 5 research status `pass`, with the reviewer still disabled, zero
+  workers/provider calls/results/cost, and a valid restart-loadable empty store.
+
+No canonical/accounting/history/day-peak evidence, strategy, signals, ranking,
+sizing, exposure, hard-risk limit, live authority, ML authority, or order
+authority changed. Issue #165 is closed.
