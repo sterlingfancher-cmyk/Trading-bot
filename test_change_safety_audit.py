@@ -227,12 +227,16 @@ class ChangeSafetyAuditTests(unittest.TestCase):
                 planned_regressions((path,)),
             )
 
-    def test_performance_evidence_change_selects_issue167_regression(self) -> None:
-        for path in ("performance_audit_lab.py", "test_issue167_forward_evidence_integrity.py"):
-            self.assertIn(
-                "test_issue167_forward_evidence_integrity.py",
-                planned_regressions((path,)),
-            )
+    def test_performance_evidence_change_selects_complete_integrity_regressions(self) -> None:
+        for path in (
+            "performance_audit_lab.py",
+            "performance_audit_lab_v2.py",
+            "test_issue167_forward_evidence_integrity.py",
+            "test_issue170_performance_atr_integrity.py",
+        ):
+            tests = planned_regressions((path,))
+            self.assertIn("test_issue167_forward_evidence_integrity.py", tests)
+            self.assertIn("test_issue170_performance_atr_integrity.py", tests)
 
     def test_system_sentinel_change_selects_complete_sentinel_regression_set(self) -> None:
         for path in ("system_sentinel.py", "system_sentinel_runtime.py"):
