@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 import runtime_diagnostics as diagnostics
 
-VERSION = "runtime-worker-registration-2026-08-04-v6-entry-time-guard"
+VERSION = "runtime-worker-registration-2026-09-02-v7-shadow-ai-reviewer"
 _LOCK = threading.RLock()
 _REGISTERED_CORE_IDS: set[int] = set()
 _KICKOFF_STARTED: set[int] = set()
@@ -163,6 +163,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             import cycle_completion_contract
             import daily_audit_repair_overlay
             import run_report_guard
+            import shadow_ai_adversarial_reviewer
             import performance_risk_activation_guard
             import regime_integrity_underdeployment
             import regime_integrity_cache_guard
@@ -264,6 +265,8 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                     + str(run_report_guard_apply)
                 )
 
+            shadow_ai_reviewer = shadow_ai_adversarial_reviewer.install()
+
             auto_runner = _start_auto_runner(core)
             if auto_runner.get("status") != "ok":
                 raise RuntimeError(
@@ -295,6 +298,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 performance_audit_lab_v2.VERSION,
                 performance_audit_composition_guard.VERSION,
                 run_report_guard.VERSION,
+                shadow_ai_adversarial_reviewer.VERSION,
             ]
             _REGISTERED_CORE_IDS.add(id(core))
             _LAST = {
@@ -310,6 +314,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 "daily_audit_repair_overlay": daily_overlay_result,
                 "paper_underdeployment_time_guard": entry_time_guard_result,
                 "run_cycle_observer": run_report_guard_apply,
+                "shadow_ai_adversarial_reviewer": shadow_ai_reviewer,
                 "auto_runner": auto_runner,
             }
             diagnostics.record_module_event(

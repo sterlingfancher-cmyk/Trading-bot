@@ -7,8 +7,9 @@ import threading
 from typing import Any, Dict, List
 
 import runtime_shadow_capture
+import shadow_ai_adversarial_reviewer
 
-VERSION = "run-report-guard-2026-08-03-v3-shadow-observer"
+VERSION = "run-report-guard-2026-09-02-v4-shadow-ai-observer"
 _APPLIED: set[int] = set()
 _LOCK = threading.RLock()
 _LAST: Dict[str, Any] = {}
@@ -127,6 +128,7 @@ def _capture_shadow(core: Any, result: Any) -> Dict[str, Any]:
         portfolio.get("shadow_decision_comparison"),
         report,
     )
+    adversarial_review = shadow_ai_adversarial_reviewer.observe_cycle(report)
     return {
         "status": report.get("status"),
         "version": report.get("version"),
@@ -135,6 +137,7 @@ def _capture_shadow(core: Any, result: Any) -> Dict[str, Any]:
         "candidate_count": report.get("candidate_count"),
         "independent_policy_active": False,
         "forward_evidence_eligible": False,
+        "adversarial_review": adversarial_review,
     }
 
 
@@ -242,6 +245,9 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "recent_deferred_reports": list(_RECENT),
         "last_status": _LAST,
         "shadow_capture": runtime_shadow_capture.status_payload(portfolio),
+        "shadow_ai_adversarial_reviewer": (
+            shadow_ai_adversarial_reviewer.status_payload()
+        ),
         "authority": {
             "existing_run_cycle_owner_only": True,
             "new_callable_owner_added": False,

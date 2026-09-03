@@ -242,9 +242,14 @@ class SelfCheckRuntimeClassificationTests(unittest.TestCase):
         self.assertEqual(source.count(observer_call), 1)
         diagnostics_index = source.index("diagnostics.register_routes(core.app, core)")
         observer_index = source.index(observer_call)
+        reviewer_index = source.index(
+            "shadow_ai_reviewer = shadow_ai_adversarial_reviewer.install()",
+            observer_index,
+        )
         runner_index = source.index("auto_runner = _start_auto_runner(core)", observer_index)
         self.assertLess(diagnostics_index, observer_index)
-        self.assertLess(observer_index, runner_index)
+        self.assertLess(observer_index, reviewer_index)
+        self.assertLess(reviewer_index, runner_index)
 
 
 if __name__ == "__main__":
