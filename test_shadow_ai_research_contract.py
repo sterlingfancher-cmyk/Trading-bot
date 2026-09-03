@@ -14,13 +14,13 @@ class ShadowAIResearchContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
-    def test_stage_three_reviewer_has_no_execution_authority(self):
+    def test_stage_four_memory_has_no_execution_authority(self):
         contract = self.contract
         policy = contract["policy"]
 
         self.assertEqual(
             contract["implementation_stage"],
-            "stage_3_async_adversarial_reviewer",
+            "stage_4_canonical_outcome_memory_and_scorecards",
         )
         self.assertTrue(policy["paper_only"])
         self.assertTrue(policy["research_only"])
@@ -96,14 +96,26 @@ class ShadowAIResearchContractTests(unittest.TestCase):
         scorecard = self.contract["counterfactual_scorecard"]
 
         self.assertEqual(memory["primary_key"], "canonical_execution_id")
+        self.assertTrue(memory["implemented"])
+        self.assertFalse(memory["runtime_integrated"])
         self.assertTrue(memory["canonical_source_read_only"])
         self.assertTrue(memory["rebuildable_derived_index"])
+        self.assertFalse(memory["symbol_or_time_inferred_join_allowed"])
+        self.assertTrue(memory["exact_review_execution_binding_required"])
+        self.assertTrue(memory["integrity_qualified_path_evidence_required"])
         self.assertEqual(
             memory["missing_or_contradictory_evidence_behavior"],
             "fail_closed_no_join",
         )
         self.assertFalse(scorecard["execution_input"])
+        self.assertTrue(scorecard["implemented"])
+        self.assertFalse(scorecard["runtime_integrated"])
         self.assertTrue(scorecard["subtracts_inference_cost"])
+        self.assertEqual(
+            scorecard["missing_exact_cost_behavior"],
+            "net_metrics_null_and_inconclusive",
+        )
+        self.assertEqual(scorecard["sufficient_result_behavior"], "observational_only")
         self.assertFalse(scorecard["automatic_promotion"])
 
     def test_runtime_stages_require_every_governed_gate(self):
