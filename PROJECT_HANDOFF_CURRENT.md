@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-03 05:15 CDT
+Last updated: 2026-09-03 06:08 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `3660942dd9e04024f0080bfdc58df9ee077fec3a` (PR #168).
+Validated runtime-code `main`: `6986f00fd2c38ab9be898eded5b5cb6e47904d84` (PR #169).
 Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
 
 ## Communication and Continuity
@@ -586,3 +586,52 @@ No strategy, signal, ranking, selection, sizing, exposure, stop, target, exit,
 risk, accounting, canonical/history, state/day-peak, live, ML, or order authority
 changed. Issue #167 is closed. Future performance work must use only integrity-
 eligible evidence and continue to satisfy `VALIDATION_POLICY.md` before promotion.
+
+## 2026-09-03 Issue #96 — Read-Only Runtime Sentinel Stage — COMPLETE
+
+The repository already contained a deterministic offline `system_sentinel`
+classifier, but it was not connected to authoritative runtime diagnostics. PR
+#169 added the on-demand read-only `/paper/system-sentinel-status` route. It
+composes existing valuation, bidirectional-accounting, canonical-ledger, risk,
+startup, runner, and market-data diagnostics into deterministic advisory
+incidents with evidence, suspected cause, confidence, bounded repair guidance,
+and a test plan that always retains the mandatory core invariant suite.
+Configuration and architecture remain CI-observed rather than runtime-derived,
+and that coverage split is explicit in the response.
+
+The sentinel starts no worker and is outside the run-cycle and execution paths.
+It performs no repair, persistence, state/canonical/accounting/history mutation,
+halt clearing, GitHub issue/PR write, or automatic merge. A bounded collector
+failure is reported as advisory WARN without affecting the application. The
+runtime adapter also preserves the established provider-accounting rule that one
+concurrent in-flight request is not a false incident when aggregate market-data
+status passes. Future sentinel changes automatically select both sentinel
+regression suites through Change Safety.
+
+The first PR head `c85d81a6afe37a6867401973aa69e383f06bca28` was correctly
+blocked because Architecture Debt detected a two-module import cycle. Nothing
+merged. The revised implementation removed that cycle through an adapter-owned
+installation-status record. Local validation passed 99 focused/core tests,
+repository/Railway validation, and structural/ownership/configuration/debt checks
+with zero new critical findings or warnings. All four required exact-head gates
+passed on `bff6b8b34b48997240b182a82fe1d313a5034169`; PR #169 was
+squash-merged as `6986f00fd2c38ab9be898eded5b5cb6e47904d84`.
+
+Settled authoritative Splendid evidence on the exact merge proved:
+- bootstrap ready/delegating and exact deployment commit `6986f00fd2c38ab9be898eded5b5cb6e47904d84`;
+- sentinel `quiet/pass`, zero incidents, zero collector errors, valid positive
+  valuation, clean accounting, valid ledger, ready startup, healthy runner/risk,
+  and complete market-data accounting;
+- self-check `pass` with 9 passed components, only performance evidence deferred,
+  zero warnings/failures, and no next action;
+- compact daily audit `pass` at 11/11;
+- bidirectional accounting complete with zero coverage/economic issues and
+  reconstructed cash/equity `13475.004291 / 13475.004291`;
+- canonical ledger append-only/hash-valid at 55 rows / 9 current-v4 rows;
+- v4 validation release intact with `validation_hold=false`;
+- no active runner error, risk halt, or self-defense.
+
+No strategy, signal, ranking, sizing, exposure, risk limit, accounting, canonical/
+history, state/day-peak, live, ML, or order authority changed. Issue #96 remains
+open for separately bounded future work; automated repair/self-healing remains
+disabled, and any GitHub issue/draft-PR output must remain advisory and auditable.
