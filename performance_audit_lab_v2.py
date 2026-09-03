@@ -26,7 +26,7 @@ import performance_audit_lab as base
 np = base.np
 pd = base.pd
 
-VERSION = "performance-audit-lab-v2-2026-08-03-v1"
+VERSION = "performance-audit-lab-v2-2026-09-03-v2-signal-atr-integrity"
 ENABLED = os.environ.get("PERFORMANCE_AUDIT_V2_ENABLED", "true").lower() not in {
     "0", "false", "no", "off"
 }
@@ -393,9 +393,14 @@ def _simulate_next_open(
                 if shares <= 0:
                     continue
                 cash -= allocation
+                # The entry executes at the next session's open, so its initial
+                # stop may only use information known when the order was queued.
+                # Using this execution session's completed ATR would leak its
+                # High/Low/Close into the opening decision.
+                signal_atr_pct = _f(order.get("signal_atr_pct"), stop_loss)
                 atr_stop = max(
                     stop_loss,
-                    min(0.045, _f(row.get("atr_pct"), stop_loss) * 1.25),
+                    min(0.045, signal_atr_pct * 1.25),
                 )
                 positions[symbol] = {
                     "entry": price,
@@ -417,6 +422,8 @@ def _simulate_next_open(
                         "allocation": allocation,
                         "regime": order.get("regime"),
                         "execution": "next_session_open",
+                        "signal_atr_pct": signal_atr_pct,
+                        "initial_stop_pct": atr_stop,
                     }
                 )
         pending = []
@@ -507,6 +514,10 @@ def _simulate_next_open(
                     "signal_date": date,
                     "regime": today_regime,
                     "policy": dict(policy_today),
+                    "signal_atr_pct": _f(
+                        row.get("atr_pct"),
+                        _f(policy_today.get("stop_loss"), 0.015),
+                    ),
                 }
             )
 
