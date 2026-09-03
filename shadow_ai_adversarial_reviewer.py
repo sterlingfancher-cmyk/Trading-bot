@@ -12,6 +12,8 @@ from shadow_ai_research_client import (
     SCHEMA_VERSION,
     ShadowAIProvider,
     ShadowAIResearchClient,
+    _iso_utc,
+    _parse_timestamp,
 )
 
 
@@ -373,20 +375,6 @@ class ShadowAIAdversarialReviewer:
             "execution_waited": False,
             "provider_called_on_execution_thread": False,
         }
-
-
-def _parse_timestamp(value: str) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return None
-    if parsed.tzinfo is None:
-        return None
-    return parsed.astimezone(timezone.utc)
-
-
-def _iso_utc(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 _GLOBAL_LOCK = threading.RLock()
