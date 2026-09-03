@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 import runtime_diagnostics as diagnostics
 
-VERSION = "runtime-worker-registration-2026-09-03-v8-shadow-ai-observability"
+VERSION = "runtime-worker-registration-2026-09-03-v9-system-sentinel"
 _LOCK = threading.RLock()
 _REGISTERED_CORE_IDS: set[int] = set()
 _KICKOFF_STARTED: set[int] = set()
@@ -166,6 +166,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             import shadow_ai_adversarial_reviewer
             import shadow_ai_evidence_store
             import shadow_ai_observability
+            import system_sentinel_runtime
             import performance_risk_activation_guard
             import regime_integrity_underdeployment
             import regime_integrity_cache_guard
@@ -273,6 +274,10 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             shadow_ai_observability_result = shadow_ai_observability.install(core.app)
             shadow_ai_reviewer = shadow_ai_adversarial_reviewer.install()
 
+            # Register the sentinel as an on-demand read-only route. It starts
+            # no worker and is not part of the execution or cycle path.
+            system_sentinel_result = system_sentinel_runtime.install(core.app, core)
+
             auto_runner = _start_auto_runner(core)
             if auto_runner.get("status") != "ok":
                 raise RuntimeError(
@@ -307,6 +312,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 shadow_ai_adversarial_reviewer.VERSION,
                 shadow_ai_evidence_store.VERSION,
                 shadow_ai_observability.VERSION,
+                system_sentinel_runtime.VERSION,
             ]
             _REGISTERED_CORE_IDS.add(id(core))
             _LAST = {
@@ -324,6 +330,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 "run_cycle_observer": run_report_guard_apply,
                 "shadow_ai_adversarial_reviewer": shadow_ai_reviewer,
                 "shadow_ai_observability": shadow_ai_observability_result,
+                "system_sentinel_runtime": system_sentinel_result,
                 "auto_runner": auto_runner,
             }
             diagnostics.record_module_event(

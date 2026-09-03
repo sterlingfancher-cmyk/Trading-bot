@@ -55,6 +55,10 @@ SHADOW_AI_TESTS = (
 )
 STATE_SERIALIZATION_TESTS = ("test_issue165_state_serialization.py",)
 PERFORMANCE_EVIDENCE_INTEGRITY_TESTS = ("test_issue167_forward_evidence_integrity.py",)
+SYSTEM_SENTINEL_TESTS = (
+    "test_system_sentinel.py",
+    "test_system_sentinel_runtime.py",
+)
 
 
 @dataclass(frozen=True)
@@ -132,6 +136,10 @@ def _is_performance_evidence_integrity_path(path: str) -> bool:
         "performance_audit_lab.py",
         "test_issue167_forward_evidence_integrity.py",
     }
+
+
+def _is_system_sentinel_path(path: str) -> bool:
+    return "system_sentinel" in Path(path.lower()).name
 
 
 def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -226,6 +234,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(STATE_SERIALIZATION_TESTS)
     if any(_is_performance_evidence_integrity_path(path) for path in path_tuple):
         tests.extend(PERFORMANCE_EVIDENCE_INTEGRITY_TESTS)
+    if any(_is_system_sentinel_path(path) for path in path_tuple):
+        tests.extend(SYSTEM_SENTINEL_TESTS)
     existing: list[str] = []
     seen: set[str] = set()
     for test in tests:
