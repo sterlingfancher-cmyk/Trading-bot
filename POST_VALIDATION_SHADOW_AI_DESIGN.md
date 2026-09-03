@@ -1,6 +1,6 @@
 # Post-Validation Shadow-AI Research Design
 
-Status: Stage 3 asynchronous adversarial reviewer implemented; disabled by default
+Status: Stage 4 canonical outcome memory and scorecards implemented; runtime-disconnected
 Issue: #157  
 Runtime authority: unchanged; rules remain the sole execution authority
 
@@ -239,6 +239,23 @@ invalid telemetry only and are not eligible for canonical outcome joins.
 
 Read-only canonical joins, comparable-outcome retrieval, AI-vs-rules lifecycle
 labels, MFE/MAE/return evidence, and net-of-cost counterfactual scorecards.
+
+Implemented in `shadow_ai_outcome_memory.py` as a pure library with no route,
+worker, runtime hook, state save, or provider access. It consumes copies of
+already-derived, integrity-qualified outcome rows. Every accepted row must carry
+an immutable primary canonical execution ID, canonical source IDs including that
+primary ID, valid path provenance, exact MFE/MAE/return evidence, entry notional,
+and the declared comparison dimensions. Duplicate identical rows deduplicate;
+contradictory rows sharing a canonical ID are entirely excluded.
+
+AI results join to outcomes only through an explicit binding that matches
+`cycle_id`, `candidate_id`, and `input_fingerprint` and names exactly one
+canonical execution ID. Symbol/time inference is forbidden. Scorecards compare
+the rule outcome with the shadow `agree`/`reject` counterfactual, subtract exact
+inference cost when present, and segment the evidence without promotion. Missing
+cost makes net metrics null; small, concentrated, incomplete, or contradictory
+samples remain inconclusive. Even sufficient diverse evidence is labeled
+`observational_only` and cannot change trading behavior.
 
 ### Stage 5 — observability and forward evidence
 
