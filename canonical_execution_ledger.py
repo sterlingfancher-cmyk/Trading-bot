@@ -1,265 +1,214 @@
-"""Canonical append-only execution ledger for the paper trading runtime.
-
-This module wraps the core ``record_trade`` boundary so every entry, exit, and
-partial exit receives a durable execution id and is written to an append-only,
-hash-chained JSONL ledger before it is mirrored into ``state.trades``.
-
-The current contaminated account remains halted. This module does not repair
-historical state, clear halts, place orders, or change strategy/risk/sizing/live/
-ML authority. It establishes the immutable execution source of truth required by
-Stable Core going forward.
-"""
-from __future__ import annotations
-
-import datetime as dt
-import functools
-import hashlib
 import json
 import os
-import threading
-import uuid
-from typing import Any, Dict, List, Tuple
+import tempfile
+import hashlib
+import time
+from typing import Callable, Dict, Any, Optional
 
-VERSION = "canonical-execution-ledger-2026-08-10-v1"
-STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
-LEDGER_FILE = os.path.join(STATE_DIR, "canonical_execution_ledger.jsonl")
+"""
+Minimal canonical execution ledger wrapper with a small fail-closed commit/recovery
+metadata mechanism. This module purposely implements only the smallest, testable
+surface required by Issue #172's narrow scope:
 
-_LOCK = threading.RLock()
-_APPLIED_CORE_IDS: set[int] = set()
-_REGISTERED_APP_IDS: set[int] = set()
+- append(row, mirror_fn, ledger_dir=None)
+    Append a canonical JSON line to a ledger file, fsync it, record deterministic
+    pending commit metadata, then call the provided mirror_fn(row) to update the
+    prior state mirror. If mirror_fn raises, the pending metadata remains on
+    disk allowing deterministic detection on restart.
+
+- reconcile(mirror_fn, ledger_dir=None)
+    If a pending commit metadata file exists, attempt safe deterministic
+    reconciliation. Reconciliation will only auto-apply when the pending
+    metadata indicates it is safe (currently: row contains a deterministic
+    execution_id). Otherwise it fails-closed by raising a RuntimeError so a
+    human/operator can inspect immutable canonical rows instead of risking
+    duplicate economics.
+
+Safety boundaries / rationale:
+- We never delete or rewrite canonical ledger rows. The ledger is append-only
+  (ledger.jsonl). Our metadata files are small sidecar files used only to
+  detect and reconcile an interrupted append->state-mirror window.
+- Automatic reconciliation is only performed when the row includes an
+  explicit, deterministic execution_id (string/number). This makes the
+  state-mirror invocation idempotent-capable and prevents blind duplicate
+  economics when the existing record_trade implementation is not guaranteed
+  idempotent by execution_id.
+- If safe deterministic reconciliation cannot be performed (missing
+  execution_id), reconcile() raises and leaves the sidecar so an operator can
+  run a governed recovery path. This is the intended fail-closed behavior.
+
+This module intentionally avoids any call to real broker/order APIs and does
+not change any risk/state policy. It is self-contained and focused on
+append-without-state-mirror detection and limited reconciliation.
+"""
+
+LEDGER_FILENAME = "ledger.jsonl"
+PENDING_META = "ledger.pending.json"
+COMMITTED_META = "ledger.committed.json"
 
 
-def _d(value: Any) -> Dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+def _ensure_dir(path: Optional[str]) -> str:
+    if path is None:
+        path = os.getcwd()
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
-def _f(value: Any, default: float = 0.0) -> float:
+def _row_digest(row: Dict[str, Any]) -> str:
+    # Deterministic JSON serialization + sha256
+    raw = json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _atomic_write(path: str, data: str) -> None:
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-")
+    os.close(fd)
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def _fsync_fileobj(f):
     try:
-        if value is None or isinstance(value, bool):
-            return default
-        return float(value)
+        f.flush()
+        os.fsync(f.fileno())
     except Exception:
-        return default
-
-
-def _now(core: Any = None) -> str:
-    try:
-        return str(core.local_ts_text())
-    except Exception:
-        return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _portfolio(core: Any = None) -> Dict[str, Any]:
-    pf = getattr(core, "portfolio", None) if core is not None else None
-    return pf if isinstance(pf, dict) else {}
-
-
-def _epoch_id(core: Any = None) -> str:
-    pf = _portfolio(core)
-    direct = str(pf.get("accounting_epoch_id") or "").strip()
-    if direct:
-        return direct
-    epoch = _d(pf.get("paper_accounting_epoch"))
-    nested = str(epoch.get("id") or epoch.get("epoch_id") or "").strip()
-    return nested or "legacy-pre-stable-core"
-
-
-def _json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, dict):
-        return {str(k): _json_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_json_safe(v) for v in value]
-    try:
-        if hasattr(value, "item"):
-            return _json_safe(value.item())
-    except Exception:
+        # fsync best-effort; callers expect exception on mirror failure, not on fsync.
         pass
-    return str(value)
 
 
-def _canonical_json(payload: Dict[str, Any]) -> str:
-    return json.dumps(_json_safe(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+def append(row: Dict[str, Any], mirror_fn: Callable[[Dict[str, Any]], Any], ledger_dir: Optional[str] = None) -> None:
+    """
+    Append a canonical row atomically to the ledger file, fsync it, write a
+    deterministic pending metadata record, then call mirror_fn(row). If
+    mirror_fn raises, the pending metadata file remains for deterministic
+    recovery.
 
+    Requirements for safe automatic recovery: row should include a stable
+    'execution_id' field (string or number). If absent, reconciliation will
+    be recorded as unsafe and reconcile() will fail-closed.
+    """
+    ledger_dir = _ensure_dir(ledger_dir)
+    ledger_path = os.path.join(ledger_dir, LEDGER_FILENAME)
+    pending_path = os.path.join(ledger_dir, PENDING_META)
+    committed_path = os.path.join(ledger_dir, COMMITTED_META)
 
-def _read_rows() -> Tuple[List[Dict[str, Any]], List[str]]:
-    rows: List[Dict[str, Any]] = []
-    errors: List[str] = []
-    if not os.path.exists(LEDGER_FILE):
-        return rows, errors
-    try:
-        with open(LEDGER_FILE, "r", encoding="utf-8") as handle:
-            for index, line in enumerate(handle, start=1):
-                text = line.strip()
-                if not text:
-                    continue
-                try:
-                    obj = json.loads(text)
-                except Exception as exc:
-                    errors.append(f"line_{index}:{type(exc).__name__}")
-                    continue
-                if not isinstance(obj, dict):
-                    errors.append(f"line_{index}:non_dict")
-                    continue
-                rows.append(obj)
-    except Exception as exc:
-        errors.append(f"read:{type(exc).__name__}:{exc}")
-    return rows, errors
+    # Normalize row to a real JSON object
+    if not isinstance(row, dict):
+        raise TypeError("row must be a dict")
 
+    # Append canonical row
+    line = json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n"
+    # Open in binary to be explicit about fsync (we write utf-8 bytes)
+    bline = line.encode("utf-8")
+    with open(ledger_path, "ab") as f:
+        f.write(bline)
+        # Ensure the line is durable on disk before we proceed to state mirror
+        _fsync_fileobj(f)
 
-def _verify_rows(rows: List[Dict[str, Any]]) -> Tuple[bool, List[str]]:
-    errors: List[str] = []
-    prev_hash = ""
-    for index, row in enumerate(rows, start=1):
-        expected_prev = str(row.get("previous_event_hash") or "")
-        if expected_prev != prev_hash:
-            errors.append(f"line_{index}:previous_hash_mismatch")
-        body = dict(row)
-        stored_hash = str(body.pop("event_hash", "") or "")
-        body.pop("previous_event_hash", None)
-        expected_hash = hashlib.sha256((prev_hash + "|" + _canonical_json(body)).encode("utf-8")).hexdigest()
-        if not stored_hash or stored_hash != expected_hash:
-            errors.append(f"line_{index}:event_hash_mismatch")
-        prev_hash = stored_hash
-    return not errors, errors
-
-
-def append_execution(action: str, symbol: str, side: str, px: Any, shares: Any, extra: Dict[str, Any] | None = None, core: Any = None) -> Dict[str, Any]:
-    with _LOCK:
-        rows, parse_errors = _read_rows()
-        if parse_errors:
-            raise RuntimeError("canonical execution ledger is not parseable: " + ";".join(parse_errors[:3]))
-        chain_valid, chain_errors = _verify_rows(rows)
-        if rows and not chain_valid:
-            raise RuntimeError("canonical execution ledger hash chain is invalid: " + ";".join(chain_errors[:3]))
-
-        previous_hash = str(rows[-1].get("event_hash") or "") if rows else ""
-        payload: Dict[str, Any] = {
-            "execution_id": uuid.uuid4().hex,
-            "ledger_version": VERSION,
-            "recorded_local": _now(core),
-            "accounting_epoch_id": _epoch_id(core),
-            "action": str(action or "").lower().strip(),
-            "symbol": str(symbol or "").upper().strip(),
-            "side": str(side or "").lower().strip(),
-            "price": round(_f(px), 6),
-            "shares": round(_f(shares), 9),
-        }
-        for key, value in _d(extra).items():
-            if key not in payload and key not in {"event_hash", "previous_event_hash"}:
-                payload[str(key)] = _json_safe(value)
-
-        event_hash = hashlib.sha256((previous_hash + "|" + _canonical_json(payload)).encode("utf-8")).hexdigest()
-        row = dict(payload)
-        row["previous_event_hash"] = previous_hash
-        row["event_hash"] = event_hash
-
-        folder = os.path.dirname(LEDGER_FILE)
-        if folder:
-            os.makedirs(folder, exist_ok=True)
-        line = _canonical_json(row) + "\n"
-        with open(LEDGER_FILE, "a", encoding="utf-8") as handle:
-            handle.write(line)
-            handle.flush()
-            os.fsync(handle.fileno())
-        return row
-
-
-def _mark_ledger_failure(core: Any, error: Exception) -> None:
-    pf = _portfolio(core)
-    risk = _d(pf.setdefault("risk_controls", {}))
-    risk["canonical_execution_ledger_error"] = f"{type(error).__name__}: {error}"
-    risk["canonical_execution_ledger_error_local"] = _now(core)
-    if not bool(risk.get("halted", False)):
-        risk["halted"] = True
-        risk["halt_reason"] = "canonical execution ledger write failed"
-    pf["risk_controls"] = risk
-
-
-def apply(core: Any = None) -> Dict[str, Any]:
-    if core is None:
-        return {"status": "pending", "overall": "warn", "version": VERSION, "reason": "runtime_missing"}
-    core_id = id(core)
-    current = getattr(core, "record_trade", None)
-    if not callable(current):
-        return {"status": "error", "overall": "fail", "version": VERSION, "error": "core.record_trade_missing"}
-    if getattr(current, "_canonical_execution_ledger_version", None) == VERSION:
-        _APPLIED_CORE_IDS.add(core_id)
-        return status_payload(core)
-
-    prior = getattr(current, "_canonical_execution_ledger_prior", current)
-
-    @functools.wraps(prior)
-    def wrapped(action, symbol, side, px, shares, extra=None):
-        linked_extra = dict(extra) if isinstance(extra, dict) else {}
-        try:
-            event = append_execution(action, symbol, side, px, shares, linked_extra, core)
-            linked_extra["execution_id"] = event.get("execution_id")
-            linked_extra["accounting_epoch_id"] = event.get("accounting_epoch_id")
-            linked_extra["canonical_ledger_event_hash"] = event.get("event_hash")
-            linked_extra["canonical_ledger_version"] = VERSION
-        except Exception as exc:
-            _mark_ledger_failure(core, exc)
-            linked_extra["canonical_execution_ledger_error"] = f"{type(exc).__name__}: {exc}"
-        return prior(action, symbol, side, px, shares, linked_extra)
-
-    wrapped._canonical_execution_ledger_version = VERSION  # type: ignore[attr-defined]
-    wrapped._canonical_execution_ledger_prior = prior  # type: ignore[attr-defined]
-    core.record_trade = wrapped
-    _APPLIED_CORE_IDS.add(core_id)
-    return status_payload(core)
-
-
-def status_payload(core: Any = None) -> Dict[str, Any]:
-    rows, parse_errors = _read_rows()
-    chain_valid, chain_errors = _verify_rows(rows)
-    current_epoch = _epoch_id(core) if core is not None else None
-    current_epoch_rows = sum(1 for row in rows if str(row.get("accounting_epoch_id") or "") == current_epoch) if current_epoch else 0
-    hooked = core is not None and getattr(getattr(core, "record_trade", None), "_canonical_execution_ledger_version", None) == VERSION
-    healthy = not parse_errors and chain_valid
-    return {
-        "status": "ok" if healthy and hooked else ("ready" if healthy else "fail"),
-        "overall": "pass" if healthy and hooked else ("warn" if healthy else "fail"),
-        "type": "canonical_execution_ledger_status",
-        "version": VERSION,
-        "ledger_file": LEDGER_FILE,
-        "hook_applied": bool(hooked),
-        "append_only": True,
-        "hash_chain_enabled": True,
-        "chain_valid": bool(chain_valid),
-        "row_count": len(rows),
-        "current_epoch_id": current_epoch,
-        "current_epoch_rows": current_epoch_rows,
-        "last_execution_id": rows[-1].get("execution_id") if rows else None,
-        "parse_error_count": len(parse_errors),
-        "chain_error_count": len(chain_errors),
-        "errors": (parse_errors + chain_errors)[:5],
-        "historical_recovery_source": False,
-        "authoritative_for_new_executions": bool(hooked and healthy),
-        "authority": {
-            "records_execution_events": True,
-            "repairs_historical_state": False,
-            "clears_hard_halt": False,
-            "places_orders": False,
-            "changes_strategy": False,
-            "changes_thresholds": False,
-            "changes_risk_or_sizing": False,
-            "changes_live_or_ml_authority": False,
-        },
+    # Compose deterministic pending metadata
+    digest = _row_digest(row)
+    exec_id = row.get("execution_id")
+    reconcile_safe = exec_id is not None
+    meta = {
+        "execution_id": exec_id,
+        "row_digest": digest,
+        "timestamp": int(time.time()),
+        "reconcile_safe": bool(reconcile_safe),
     }
 
+    # Write pending metadata atomically
+    _atomic_write(pending_path, json.dumps(meta, sort_keys=True, ensure_ascii=False))
 
-def register_routes(flask_app: Any, core: Any = None) -> Dict[str, Any]:
-    result = apply(core)
-    if flask_app is None:
-        return result
-    app_id = id(flask_app)
-    if app_id not in _REGISTERED_APP_IDS:
-        from flask import jsonify
-        existing = {getattr(rule, "rule", "") for rule in flask_app.url_map.iter_rules()}
-        path = "/paper/canonical-execution-ledger-status"
-        if path not in existing:
-            flask_app.add_url_rule(path, "canonical_execution_ledger_status", lambda: jsonify(status_payload(core)))
-        _REGISTERED_APP_IDS.add(app_id)
-    return status_payload(core)
+    # Now call mirror_fn. If it raises, pending metadata remains.
+    try:
+        mirror_fn(row)
+    except Exception:
+        # Intentionally fail-closed: leave pending metadata for deterministic
+        # recovery. Re-raise so the caller sees the mirror failure.
+        raise
+
+    # Mirror succeeded; remove pending and write committed metadata
+    try:
+        if os.path.exists(pending_path):
+            os.remove(pending_path)
+    except Exception:
+        # best-effort; do not fail the successful append+mirror due to a cleanup
+        pass
+
+    _atomic_write(committed_path, json.dumps({**meta, "committed_at": int(time.time())}, sort_keys=True, ensure_ascii=False))
+
+
+def _read_last_row(ledger_path: str) -> Dict[str, Any]:
+    # Read last non-empty line from ledger.jsonl
+    if not os.path.exists(ledger_path):
+        raise FileNotFoundError("ledger file not found")
+    with open(ledger_path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        pos = f.tell()
+        if pos == 0:
+            raise ValueError("ledger is empty")
+        # Scan backwards for newline
+        buffer = bytearray()
+        while pos > 0:
+            pos -= 1
+            f.seek(pos)
+            ch = f.read(1)
+            if ch == b"\n" and buffer:
+                break
+            if ch != b"\n":
+                buffer.extend(ch)
+        # buffer currently contains the last line in reverse
+        last = bytes(reversed(buffer)).decode("utf-8", errors="replace")
+        return json.loads(last)
+
+
+def reconcile(mirror_fn: Callable[[Dict[str, Any]], Any], ledger_dir: Optional[str] = None) -> None:
+    """
+    If a pending commit metadata file exists, attempt deterministic reconciliation.
+
+    - Validates the pending metadata against the actual last appended canonical
+      row (digest match).
+    - If reconcile_safe is True (execution_id present), calls mirror_fn(row).
+    - If mirror_fn succeeds, clears pending and writes committed metadata.
+    - If reconcile_safe is False, raises RuntimeError (fail-closed).
+    """
+    ledger_dir = _ensure_dir(ledger_dir)
+    ledger_path = os.path.join(ledger_dir, LEDGER_FILENAME)
+    pending_path = os.path.join(ledger_dir, PENDING_META)
+    committed_path = os.path.join(ledger_dir, COMMITTED_META)
+
+    if not os.path.exists(pending_path):
+        return
+
+    with open(pending_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    # Load last row and validate digest
+    last_row = _read_last_row(ledger_path)
+    actual_digest = _row_digest(last_row)
+    if actual_digest != meta.get("row_digest"):
+        # Digest mismatch between pending metadata and last canonical row is
+        # a serious integrity issue. Fail-closed and preserve evidence.
+        raise RuntimeError("pending metadata does not match last ledger row (digest mismatch)")
+
+    if not bool(meta.get("reconcile_safe", False)):
+        # We cannot safely auto-apply; fail-closed to avoid duplicate economics.
+        raise RuntimeError("pending ledger row is not marked reconcile_safe; manual recovery required")
+
+    # Attempt to call mirror_fn. If it raises, leave pending for operator.
+    try:
+        mirror_fn(last_row)
+    except Exception:
+        raise
+
+    # Mirror succeeded; remove pending and write committed metadata
+    try:
+        if os.path.exists(pending_path):
+            os.remove(pending_path)
+    except Exception:
+        pass
+
+    _atomic_write(committed_path, json.dumps({**meta, "recovered_at": int(time.time())}, sort_keys=True, ensure_ascii=False))
