@@ -14,7 +14,7 @@ import time
 import uuid
 from typing import Any, Dict
 
-VERSION = "cycle-completion-contract-2026-08-04-v2-rebind-safe"
+VERSION = "cycle-completion-contract-2026-09-03-v3-error-lifecycle"
 STALE_SECONDS = float(os.environ.get("AUTO_CYCLE_STALE_SECONDS", "720"))
 _LOCK = threading.RLock()
 _APPLIED: set[int] = set()
@@ -120,6 +120,7 @@ def _complete(
         current_auto = _auto(core)
         same_current_cycle = current_auto.get("cycle_id") == cycle_id
         no_other_active_cycle = not active
+        previous_error = current_auto.get("last_error")
         current_auto.update({
             "last_completed_cycle_id": cycle_id,
             "last_completed_cycle_status": status,
@@ -144,6 +145,15 @@ def _complete(
                 current_auto["cycle_error"] = error
             else:
                 current_auto.pop("cycle_error", None)
+                if previous_error:
+                    current_auto["last_recovered_error"] = previous_error
+                    current_auto["last_recovered_error_trace"] = current_auto.get(
+                        "last_error_trace"
+                    )
+                    current_auto["last_recovered_error_local"] = completed_local
+                    current_auto["last_recovered_error_cycle_id"] = cycle_id
+                    current_auto["last_error"] = None
+                    current_auto["last_error_trace"] = None
         _LAST = {
             "status": "error" if error else "ok",
             "overall": "warn" if error else "pass",
