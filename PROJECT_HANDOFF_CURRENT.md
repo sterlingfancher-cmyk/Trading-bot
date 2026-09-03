@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-03 06:08 CDT
+Last updated: 2026-09-03 07:13 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `6986f00fd2c38ab9be898eded5b5cb6e47904d84` (PR #169).
+Validated runtime-code `main`: `e7bdced96ac17b781b6c76df9c34ab159c5498ea` (PR #171).
 Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
 
 ## Communication and Continuity
@@ -632,6 +632,49 @@ Settled authoritative Splendid evidence on the exact merge proved:
 - no active runner error, risk halt, or self-defense.
 
 No strategy, signal, ranking, sizing, exposure, risk limit, accounting, canonical/
-history, state/day-peak, live, ML, or order authority changed. Issue #96 remains
-open for separately bounded future work; automated repair/self-healing remains
-disabled, and any GitHub issue/draft-PR output must remain advisory and auditable.
+history, state/day-peak, live, ML, or order authority changed. Issue #96 is closed;
+automated repair/self-healing remains disabled, and any future GitHub issue or
+draft-PR output must remain advisory and auditable.
+
+## 2026-09-03 Issue #170 — Performance Audit V2 Signal-ATR Integrity — COMPLETE
+
+The continuous performance-evidence review found that Performance Audit V2
+correctly queued entry signals at the session close and filled them at the next
+session open, but derived the initial stop from the execution session's completed
+ATR. That ATR includes the execution day's High/Low/Close, which is unavailable
+at its opening print and therefore introduced forward-looking information into
+the simulated stop path.
+
+PR #171 binds ATR when the signal is queued and derives the next-open initial stop
+only from that signal-time value. Missing or invalid signal ATR falls back to the
+configured policy stop, and each simulated entry records both `signal_atr_pct`
+and `initial_stop_pct` for evidence auditability. Three focused regressions prove
+that execution-day range cannot widen the stop, signal-time ATR controls it, and
+missing signal ATR fails closed. Change Safety now automatically runs both
+performance-evidence integrity suites for changes to either audit lab.
+
+Local exact-head Change Safety passed 69 selected core/integrity tests with zero
+failures or new critical findings. All four required GitHub exact-head gates
+passed on `f23631d2693696b9984dacecbaacfc27a4360557`; PR #171 was
+squash-merged as `e7bdced96ac17b781b6c76df9c34ab159c5498ea`, and Issue #170
+closed automatically.
+
+Settled authoritative Splendid evidence on the exact merge proved:
+- bootstrap ready/delegating and exact deployed commit `e7bdced96ac17b781b6c76df9c34ab159c5498ea`;
+- sentinel `quiet/pass` with zero incidents and collection errors;
+- self-check `pass` with 9 passed components, one deferred performance-evidence
+  component, and no warning, failure, or next action;
+- compact daily audit `pass` at 11/11;
+- bidirectional accounting complete with zero coverage/economic issues and
+  reconstructed cash/equity `13475.004291 / 13475.004291`;
+- canonical ledger append-only/hash-valid at 55 rows / 9 current-v4 rows;
+- v4 validation remains released with `validation_hold=false`;
+- runner, market-data accounting, valuation, and risk remain healthy with no
+  active error, halt, or self-defense.
+
+No historical evidence was rewritten and no prior result is automatically
+promoted. Future Performance Audit V2 runs will use the corrected signal-time ATR
+semantics, and any performance change remains subject to the complete validation
+and forward-shadow policy. No strategy, signal, ranking, sizing, exposure, risk
+limit, canonical/accounting/history, state/day-peak, live, ML, or order authority
+changed.
