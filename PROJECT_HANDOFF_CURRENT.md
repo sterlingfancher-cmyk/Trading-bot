@@ -376,3 +376,57 @@ No strategy, signal, ranking, selection, sizing, exposure, stop, target, exit,
 risk, accounting, canonical/history, state/day-peak, live, ML, or order
 authority changed. Issue #157 remains open for Stage 4 canonical outcome memory
 and AI-vs-rules counterfactual scorecards.
+
+## 2026-09-02 Issue #157 Stage 4 — Canonical Outcome Memory — COMPLETE
+
+PR #163 added `shadow_ai_outcome_memory.py`, focused invariants, and a bounded
+change-safety regression selector for the complete shadow-AI subsystem. The
+module is a pure read-only research library: it adds no runtime hook, route,
+worker, provider transport, persistence owner, state save, canonical-ledger
+reader/writer, execution input, or automatic promotion mechanism.
+
+The memory accepts only already-derived, integrity-qualified outcomes keyed by
+an immutable canonical execution ID. Canonical source IDs must include the
+primary ID; path evidence must be valid and training-eligible; MFE, MAE,
+realized return, entry notional, holding period, and declared comparison
+dimensions must be complete and finite. Identical duplicates deduplicate, while
+contradictory rows sharing an execution ID are entirely excluded. Comparable
+retrieval requires the same side and uses deterministic strategy/setup/regime/
+sector/bucket/volatility/session/signal similarity.
+
+Counterfactual scorecards require an explicit one-to-one binding across exact
+`cycle_id`, `candidate_id`, `input_fingerprint`, and canonical execution ID;
+symbol/time inference is forbidden. They compare the realized rules P&L with
+the shadow agree/reject outcome and subtract exact inference cost. Missing cost
+leaves net metrics null. Small, concentrated, incomplete, duplicate, missing,
+or contradictory samples remain inconclusive; sufficient diverse evidence is
+still labeled observational-only and can never self-promote.
+
+The impact-aware gate now automatically runs the research contract, client,
+reviewer, and outcome-memory tests whenever any `shadow_ai_*` implementation or
+test changes. Local exact-head validation passed 97 core and shadow regressions,
+repository/Railway validation, and all structural ownership/configuration/debt
+checks with zero new critical findings or warnings. All four required PR gates
+then passed on remote head `7e5f538b6c29c433787b6106b4c34600fa7db2df`.
+PR #163 was squash-merged as
+`a191af92b9e52ab4e8324911e1b9dac563452518`.
+
+Settled authoritative Splendid evidence on that exact deployed commit proved:
+- bootstrap ready and delegating;
+- deployment commit exactly `a191af92b9e52ab4e8324911e1b9dac563452518`;
+- self-check `pass`;
+- cash/equity `13475.004291 / 13475.0`, no positions;
+- accounting coverage complete with zero coverage/economic issues and no
+  reconstructed open positions;
+- canonical ledger append-only/hash-valid at 55 rows / 9 current-v4 rows;
+- v4 validation release remains intact with `validation_hold=false`;
+- runner enabled with no active error and correct after-close skips;
+- risk not halted and self-defense inactive;
+- compact audit WARN remains only the existing 2.43% drawdown advisory.
+
+No strategy, signal, ranking, selection, sizing, exposure, stop, target, exit,
+risk, accounting, canonical/history, state/day-peak, live, ML, or order authority
+changed. Issue #157 remains open for Stage 5: bounded read-only observability,
+source/cost/fallback evidence, state-size/restart checks, and forward shadow
+validation. A provider transport and any reviewer enablement remain separate,
+explicit configuration work; rules remain sole execution authority.
