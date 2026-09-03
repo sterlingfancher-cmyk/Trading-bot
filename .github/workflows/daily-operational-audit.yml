@@ -18,6 +18,7 @@ on:
       - "test_daily_operational_audit.py"
       - "test_runtime_repair_contracts.py"
       - "test_daily_data_integrity_overlay_v2.py"
+      - "test_daily_operational_audit_workflow.py"
       - "usercustomize.py"
       - ".github/workflows/daily-operational-audit.yml"
   workflow_dispatch:
@@ -45,13 +46,18 @@ jobs:
           python -m unittest -v \
             test_daily_operational_audit.py \
             test_runtime_repair_contracts.py \
-            test_daily_data_integrity_overlay_v2.py
+            test_daily_data_integrity_overlay_v2.py \
+            test_daily_operational_audit_workflow.py
 
       - name: Wait for the repaired Railway runtime
         id: deployment_ready
         run: |
           base=https://web-production-e1796.up.railway.app
-          expected=cycle-completion-contract-2026-08-04-v2-rebind-safe
+          expected=$(python - <<'PY'
+          import cycle_completion_contract as contract
+          print(contract.VERSION)
+          PY
+          )
           ready=false
           for attempt in $(seq 1 60); do
             if curl --silent --show-error --fail --max-time 20 \
@@ -104,6 +110,7 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
+          import cycle_completion_contract as cycle_contract
 
           bootstrap = json.loads(Path("bootstrap_status_live.json").read_text(encoding="utf-8"))
           daily = json.loads(Path("daily_operational_audit_live.json").read_text(encoding="utf-8"))
@@ -141,7 +148,7 @@ jobs:
           assert sections.get("12_next_action", {}).get("status") in {"none", "required"}
 
           assert cycle.get("status") == "ok" and cycle.get("installed") is True, cycle
-          assert cycle.get("version") == "cycle-completion-contract-2026-08-04-v2-rebind-safe", cycle
+          assert cycle.get("version") == cycle_contract.VERSION, cycle
           assert cycle.get("cycle_stale") is False, cycle
           assert provider.get("status") == "ok" and provider.get("installed") is True, provider
           assert state.get("status") == "ok", state
