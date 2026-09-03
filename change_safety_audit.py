@@ -54,6 +54,7 @@ SHADOW_AI_TESTS = (
     "test_shadow_ai_observability.py",
 )
 STATE_SERIALIZATION_TESTS = ("test_issue165_state_serialization.py",)
+PERFORMANCE_EVIDENCE_INTEGRITY_TESTS = ("test_issue167_forward_evidence_integrity.py",)
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,13 @@ def _is_state_serialization_path(path: str) -> bool:
         "state_io_hardening.py",
         "cycle_completion_contract.py",
         "test_issue165_state_serialization.py",
+    }
+
+
+def _is_performance_evidence_integrity_path(path: str) -> bool:
+    return Path(path.lower()).name in {
+        "performance_audit_lab.py",
+        "test_issue167_forward_evidence_integrity.py",
     }
 
 
@@ -216,6 +224,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(SHADOW_AI_TESTS)
     if any(_is_state_serialization_path(path) for path in path_tuple):
         tests.extend(STATE_SERIALIZATION_TESTS)
+    if any(_is_performance_evidence_integrity_path(path) for path in path_tuple):
+        tests.extend(PERFORMANCE_EVIDENCE_INTEGRITY_TESTS)
     existing: list[str] = []
     seen: set[str] = set()
     for test in tests:
