@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-03 00:41 CDT
+Last updated: 2026-09-03 05:15 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `1efd939c8906aefa1e19b7d8df1a6047357094e2` (PR #166).
+Validated runtime-code `main`: `3660942dd9e04024f0080bfdc58df9ee077fec3a` (PR #168).
 Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
 
 ## Communication and Continuity
@@ -536,3 +536,53 @@ premarket closed-session cycle proved:
 No canonical/accounting/history/day-peak evidence, strategy, signals, ranking,
 sizing, exposure, hard-risk limit, live authority, ML authority, or order
 authority changed. Issue #165 is closed.
+
+## 2026-09-03 Issue #167 — Forward Performance Evidence Integrity — CLOSED
+
+Fresh authoritative forward-shadow research exposed catastrophic transient marks
+that had been retained as durable MFE/MAE evidence. Although current prices and
+horizon returns were near entry, VZLA reported MFE above 10,800%, SRPT above
+6,700%, and the balanced aggregate reported average MFE/MAE of +329.2547% /
+-64.4054%. Trading, accounting, canonical, runner, market-data, and risk state
+remained healthy; the demonstrated defect was confined to research-evidence
+integrity and blocked any performance promotion.
+
+PR #168 reuses the established symmetric 0.40x..2.50x source-integrity envelope
+against the immutable shadow entry price before updating excursions or resolving
+horizons. Catastrophic marks can no longer overwrite the last trusted mark or
+outcomes; only bounded rejection reason/ratio telemetry is retained. Existing
+contaminated rows are classified read-only and excluded from aggregates, actual-
+entry counts, and missed-candidate comparisons without rewriting historical
+evidence. Forward summaries now expose eligible/excluded counts, exclusion
+reasons, and `historical_rows_rewritten=false`; evidence remains explicitly
+`inconclusive` and `promotion_eligible=false` whenever contamination is present.
+Four focused regressions cover long and short rejection, valid resolution, and
+read-only legacy exclusion, and the Change Safety gate now selects them for every
+future performance-evidence integrity change.
+
+Local focused and canonical validation passed 80 tests plus repository/Railway/
+structural/ownership/configuration/debt validation with zero new critical findings
+or warnings. The exact four-file diff passed all four required exact-head
+workflows on `cc4c9e6f863d2261ed99301748536c5e0b9bc829`. PR #168 was squash-
+merged as `3660942dd9e04024f0080bfdc58df9ee077fec3a`.
+
+Settled authoritative Splendid evidence on the exact deployed merge proved:
+- bootstrap ready/delegating and deployment commit exactly `3660942dd9e04024f0080bfdc58df9ee077fec3a`;
+- forward evidence v2 retained all 1,200 rows, classified 998 eligible and 202
+  excluded as `stored_excursion_outside_source_envelope`, and rewrote none;
+- the eligible balanced aggregate is bounded at average MFE +2.8618% and MAE
+  -3.0585%, while promotion remains false and evidence remains inconclusive;
+- self-check `pass` with 9 passed components, only performance evidence deferred,
+  zero warnings/failures, and no next action;
+- compact daily audit `pass` at 11/11 and market-data accounting complete;
+- bidirectional accounting coverage complete with zero coverage/economic issues
+  and reconstructed cash/equity `13475.004291 / 13475.004291`;
+- canonical ledger append-only/hash-valid at 55 rows / 9 current-v4 rows;
+- v4 validation release intact with `validation_hold=false`;
+- runner enabled with fresh automatic premarket skips and no active error;
+- risk not halted, self-defense inactive, and intraday/daily loss metrics zero.
+
+No strategy, signal, ranking, selection, sizing, exposure, stop, target, exit,
+risk, accounting, canonical/history, state/day-peak, live, ML, or order authority
+changed. Issue #167 is closed. Future performance work must use only integrity-
+eligible evidence and continue to satisfy `VALIDATION_POLICY.md` before promotion.
