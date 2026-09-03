@@ -33,13 +33,14 @@ def _collectors(*, accounting=None, ledger=None, active_error=False):
         "execution_ledger": lambda core: ledger or {
             "chain_valid": True, "row_count": 3,
         },
-        "runtime_registration": lambda core: {"last": {"status": "ok"}},
+        "startup": lambda core: {"status": "ok"},
     }
 
 
 class SystemSentinelRuntimeTests(unittest.TestCase):
     def setUp(self):
         runtime._REGISTERED_APP_IDS.clear()
+        runtime._INSTALL_STATUS_BY_CORE.clear()
         self.core = SimpleNamespace(
             portfolio={
                 "equity": 12_000.0,

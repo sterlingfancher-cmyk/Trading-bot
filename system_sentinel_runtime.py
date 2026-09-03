@@ -14,6 +14,7 @@ import system_sentinel
 
 VERSION = "system-sentinel-runtime-2026-09-03-v1"
 _REGISTERED_APP_IDS: set[int] = set()
+_INSTALL_STATUS_BY_CORE: dict[int, dict[str, Any]] = {}
 
 
 def _d(value: Any) -> dict[str, Any]:
@@ -26,7 +27,6 @@ def _default_collectors() -> dict[str, Callable[[Any], Mapping[str, Any]]]:
     import fast_self_check_override
     import final_daily_audit_compactor
     import paper_bidirectional_accounting_guard
-    import runtime_worker_registration
 
     def daily(core: Any) -> Mapping[str, Any]:
         full = daily_operational_audit.build_payload(core)
@@ -37,7 +37,7 @@ def _default_collectors() -> dict[str, Callable[[Any], Mapping[str, Any]]]:
         "daily_audit": daily,
         "accounting": paper_bidirectional_accounting_guard.status_payload,
         "execution_ledger": canonical_execution_ledger.status_payload,
-        "runtime_registration": lambda _core: runtime_worker_registration.status(),
+        "startup": lambda observed_core: _INSTALL_STATUS_BY_CORE.get(id(observed_core), {}),
     }
 
 
@@ -73,8 +73,8 @@ def collect_snapshot(
     except (TypeError, ValueError, OverflowError):
         equity_eligible = False
 
-    registration = _d(rows.get("runtime_registration", {}).get("last"))
-    startup_status = "ready" if registration.get("status") == "ok" else "fail"
+    startup = rows.get("startup", {})
+    startup_status = "ready" if startup.get("status") == "ok" else "fail"
     market_data = dict(_d(daily.get("market_data")))
     observed_gap = market_data.get("in_flight_or_unclassified_requests")
     try:
@@ -104,7 +104,7 @@ def collect_snapshot(
         "startup": {
             "status": startup_status,
             "phase": "runtime_worker_registration",
-            "error": registration.get("error"),
+            "error": startup.get("error"),
         },
         "runner": {
             "active_error": runner.get("last_error_active") is True,
@@ -167,7 +167,7 @@ def install(flask_app: Any = None, core: Any = None) -> dict[str, Any]:
                 lambda: jsonify(build_payload(core)),
             )
         _REGISTERED_APP_IDS.add(id(flask_app))
-    return {
+    result = {
         "status": "ok" if flask_app is not None and core is not None else "pending",
         "overall": "pass" if flask_app is not None and core is not None else "warn",
         "version": VERSION,
@@ -176,3 +176,6 @@ def install(flask_app: Any = None, core: Any = None) -> dict[str, Any]:
         "worker_started": False,
         "authority": "advisory_only",
     }
+    if core is not None:
+        _INSTALL_STATUS_BY_CORE[id(core)] = dict(result)
+    return result
