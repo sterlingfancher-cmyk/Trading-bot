@@ -227,6 +227,13 @@ class ChangeSafetyAuditTests(unittest.TestCase):
                 planned_regressions((path,)),
             )
 
+    def test_performance_evidence_change_selects_issue167_regression(self) -> None:
+        for path in ("performance_audit_lab.py", "test_issue167_forward_evidence_integrity.py"):
+            self.assertIn(
+                "test_issue167_forward_evidence_integrity.py",
+                planned_regressions((path,)),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

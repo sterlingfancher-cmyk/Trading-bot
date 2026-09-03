@@ -35,7 +35,7 @@ except Exception:  # pragma: no cover
     pd = None
     yf = None
 
-VERSION = "performance-audit-lab-2026-08-03-v1"
+VERSION = "performance-audit-lab-2026-09-03-v2-forward-integrity"
 ENABLED = os.environ.get("PERFORMANCE_AUDIT_LAB_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 AUTO_BACKTEST = os.environ.get("PERFORMANCE_AUDIT_AUTO_BACKTEST_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 AUTO_BACKTEST_STALE_HOURS = float(os.environ.get("PERFORMANCE_AUDIT_BACKTEST_STALE_HOURS", "24"))
@@ -47,6 +47,15 @@ FORWARD_RESOLVE_PER_CYCLE = int(os.environ.get("PERFORMANCE_AUDIT_FORWARD_RESOLV
 WATCHDOG_SECONDS = int(os.environ.get("PERFORMANCE_AUDIT_WATCHDOG_SECONDS", "300"))
 TRANSACTION_COST_BPS = float(os.environ.get("PERFORMANCE_AUDIT_TRANSACTION_COST_BPS", "8"))
 INITIAL_CAPITAL = float(os.environ.get("PERFORMANCE_AUDIT_INITIAL_CAPITAL", "10000"))
+
+try:
+    from paper_exit_price_integrity_guard import (
+        SOURCE_MAX_PRICE_RATIO as FORWARD_MAX_PRICE_RATIO,
+        SOURCE_MIN_PRICE_RATIO as FORWARD_MIN_PRICE_RATIO,
+    )
+except Exception:  # pragma: no cover - the runtime guard is a required dependency
+    FORWARD_MIN_PRICE_RATIO = 0.40
+    FORWARD_MAX_PRICE_RATIO = 2.50
 
 _LOCK = threading.RLock()
 _BACKTEST_LOCK = threading.Lock()
@@ -1039,6 +1048,56 @@ def _dedupe_key(row: Dict[str, Any]) -> str:
     return f"{row.get('symbol')}:{bucket}"
 
 
+def _forward_mark_issue(entry: Any, price: Any) -> Dict[str, Any] | None:
+    """Reject catastrophic shadow marks before they can become durable evidence."""
+    try:
+        entry_value = float(entry)
+        price_value = float(price)
+    except Exception:
+        return {"reason": "nonfinite_or_nonpositive_forward_mark"}
+    if not math.isfinite(entry_value) or not math.isfinite(price_value) or entry_value <= 0.0 or price_value <= 0.0:
+        return {"reason": "nonfinite_or_nonpositive_forward_mark"}
+    ratio = price_value / entry_value
+    if ratio <= FORWARD_MIN_PRICE_RATIO or ratio >= FORWARD_MAX_PRICE_RATIO:
+        return {
+            "reason": "catastrophic_forward_mark_outlier",
+            "entry_price": round(entry_value, 6),
+            "rejected_mark_price": round(price_value, 6),
+            "price_to_entry_ratio": round(ratio, 6),
+        }
+    return None
+
+
+def _forward_row_integrity(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Classify stored evidence without rewriting historical forward rows."""
+    side = str(row.get("side") or "long").lower().strip()
+    if side not in {"long", "short"}:
+        return {"eligible": False, "reason": "invalid_side"}
+    try:
+        entry = float(row.get("entry_price"))
+        mfe = float(row.get("mfe_pct", 0.0))
+        mae = float(row.get("mae_pct", 0.0))
+    except Exception:
+        return {"eligible": False, "reason": "nonfinite_or_incomplete_excursion"}
+    if not all(math.isfinite(value) for value in (entry, mfe, mae)) or entry <= 0.0:
+        return {"eligible": False, "reason": "nonfinite_or_incomplete_excursion"}
+
+    maximum_favorable = ((FORWARD_MAX_PRICE_RATIO - 1.0) * 100.0 if side == "long"
+                          else (1.0 - FORWARD_MIN_PRICE_RATIO) * 100.0)
+    minimum_adverse = ((FORWARD_MIN_PRICE_RATIO - 1.0) * 100.0 if side == "long"
+                       else (1.0 - FORWARD_MAX_PRICE_RATIO) * 100.0)
+    if mfe < 0.0 or mae > 0.0 or mfe >= maximum_favorable or mae <= minimum_adverse:
+        return {"eligible": False, "reason": "stored_excursion_outside_source_envelope"}
+
+    for name, outcome in _d(row.get("outcomes")).items():
+        if not isinstance(outcome, dict):
+            return {"eligible": False, "reason": "invalid_horizon_outcome", "horizon": str(name)}
+        issue = _forward_mark_issue(entry, outcome.get("mark_price"))
+        if issue is not None:
+            return {"eligible": False, "reason": "stored_horizon_outside_source_envelope", "horizon": str(name)}
+    return {"eligible": True, "reason": None}
+
+
 def _capture_forward(
     core: Any, candidates: Sequence[Dict[str, Any]], entries: Sequence[Dict[str, Any]],
     blocked: Sequence[Dict[str, Any]], market: Dict[str, Any],
@@ -1097,6 +1156,11 @@ def _resolve_forward(core: Any) -> Dict[str, Any]:
         entry = _f(row.get("entry_price"), 0.0)
         if price is None or entry <= 0:
             continue
+        issue = _forward_mark_issue(entry, price)
+        if issue is not None:
+            row["integrity_rejection_count"] = min(9999, _i(row.get("integrity_rejection_count")) + 1)
+            row["last_integrity_rejection"] = {**issue, "rejected_local": _now(core)}
+            continue
         ret = (price / entry - 1.0) * (1 if str(row.get("side") or "long") != "short" else -1)
         row["last_mark_price"] = round(price, 6)
         row["last_mark_local"] = _now(core)
@@ -1119,9 +1183,12 @@ def forward_summary(core: Any = None) -> Dict[str, Any]:
     if core is None:
         return {"status": "pending", "type": "performance_forward_test", "version": VERSION, "reason": "core_missing"}
     rows = [row for row in _forward_rows(core) if isinstance(row, dict)]
+    classified = [(row, _forward_row_integrity(row)) for row in rows]
+    eligible_rows = [row for row, integrity in classified if integrity["eligible"]]
+    excluded = [(row, integrity) for row, integrity in classified if not integrity["eligible"]]
     summary: Dict[str, Any] = {}
     for profile in PROFILES:
-        profile_rows = [row for row in rows if _d(row.get("shadow_policy_acceptance")).get(profile)]
+        profile_rows = [row for row in eligible_rows if _d(row.get("shadow_policy_acceptance")).get(profile)]
         horizons: Dict[str, Any] = {}
         for horizon in HORIZONS:
             values = [
@@ -1141,14 +1208,24 @@ def forward_summary(core: Any = None) -> Dict[str, Any]:
             "average_mfe_pct": round(sum(_f(row.get("mfe_pct")) for row in profile_rows) / max(1, len(profile_rows)), 4),
             "average_mae_pct": round(sum(_f(row.get("mae_pct")) for row in profile_rows) / max(1, len(profile_rows)), 4),
         }
-    actual = [row for row in rows if row.get("actual_entered")]
-    missed = [row for row in rows if not row.get("actual_entered") and _d(row.get("shadow_policy_acceptance")).get("balanced")]
+    actual = [row for row in eligible_rows if row.get("actual_entered")]
+    missed = [row for row in eligible_rows if not row.get("actual_entered") and _d(row.get("shadow_policy_acceptance")).get("balanced")]
     top_missed = sorted(
         missed, key=lambda row: _f(_d(_d(row.get("outcomes")).get("one_day")).get("return_pct")), reverse=True,
     )[:15]
     return {
         "status": "ok", "type": "performance_forward_test", "version": VERSION,
+        "evidence_status": "inconclusive" if excluded else "eligible",
+        "promotion_eligible": False,
         "generated_local": _now(core), "rows_total": len(rows), "actual_entries_captured": len(actual),
+        "integrity": {
+            "status": "warn" if excluded else "pass",
+            "eligible_rows": len(eligible_rows),
+            "excluded_rows": len(excluded),
+            "exclusion_reasons": dict(Counter(integrity["reason"] for _, integrity in excluded)),
+            "source_price_ratio_envelope": [FORWARD_MIN_PRICE_RATIO, FORWARD_MAX_PRICE_RATIO],
+            "historical_rows_rewritten": False,
+        },
         "policy_summary": summary,
         "balanced_candidates_blocked_by_current": len(missed),
         "top_missed_balanced_candidates": [
@@ -1159,7 +1236,10 @@ def forward_summary(core: Any = None) -> Dict[str, Any]:
              "mfe_pct": row.get("mfe_pct"), "mae_pct": row.get("mae_pct")}
             for row in top_missed
         ],
-        "recent_rows": rows[-30:],
+        "recent_rows": [
+            {**row, "research_integrity": integrity}
+            for row, integrity in classified[-30:]
+        ],
         "authority": {"shadow_only": True, "places_orders": False, "changes_thresholds": False},
     }
 
