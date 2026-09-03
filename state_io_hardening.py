@@ -39,6 +39,7 @@ SERIALIZE_RETRY_SLEEP = 0.01
 
 _THREAD_LOCK = threading.RLock()
 _RUN_LOCK = threading.RLock()
+_STATUS_LOCK = threading.Lock()
 _RUN_STATE: Dict[str, Any] = {
     "active": False,
     "started_ts": None,
@@ -303,15 +304,16 @@ def _record_status(event: str, extra: Optional[Dict[str, Any]] = None) -> None:
     }
     if extra:
         payload.update(extra)
-    _LAST_STATUS = payload
-    try:
-        _ensure_parent(STATE_IO_STATUS_FILE)
-        tmp = STATE_IO_STATUS_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, sort_keys=True, default=_json_default)
-        os.replace(tmp, STATE_IO_STATUS_FILE)
-    except Exception:
-        pass
+    with _STATUS_LOCK:
+        _LAST_STATUS = payload
+        try:
+            _ensure_parent(STATE_IO_STATUS_FILE)
+            tmp = STATE_IO_STATUS_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, sort_keys=True, default=_json_default)
+            os.replace(tmp, STATE_IO_STATUS_FILE)
+        except Exception:
+            pass
 
 
 def status_payload(module: Any | None = None) -> Dict[str, Any]:
