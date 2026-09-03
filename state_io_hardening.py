@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
-VERSION = "state-io-hardening-2026-09-03-v2-stable-serialization"
+VERSION = "state-io-hardening-2026-09-03-v3-mutation-lock"
 
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 STATE_FILENAME = os.environ.get("STATE_FILENAME", os.environ.get("STATE_FILE", "state.json"))
@@ -38,7 +38,8 @@ SERIALIZE_RETRIES = 5
 SERIALIZE_RETRY_SLEEP = 0.01
 
 _THREAD_LOCK = threading.RLock()
-_RUN_LOCK = threading.Lock()
+_RUN_LOCK = threading.RLock()
+_STATUS_LOCK = threading.Lock()
 _RUN_STATE: Dict[str, Any] = {
     "active": False,
     "started_ts": None,
@@ -303,15 +304,16 @@ def _record_status(event: str, extra: Optional[Dict[str, Any]] = None) -> None:
     }
     if extra:
         payload.update(extra)
-    _LAST_STATUS = payload
-    try:
-        _ensure_parent(STATE_IO_STATUS_FILE)
-        tmp = STATE_IO_STATUS_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, sort_keys=True, default=_json_default)
-        os.replace(tmp, STATE_IO_STATUS_FILE)
-    except Exception:
-        pass
+    with _STATUS_LOCK:
+        _LAST_STATUS = payload
+        try:
+            _ensure_parent(STATE_IO_STATUS_FILE)
+            tmp = STATE_IO_STATUS_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, sort_keys=True, default=_json_default)
+            os.replace(tmp, STATE_IO_STATUS_FILE)
+        except Exception:
+            pass
 
 
 def status_payload(module: Any | None = None) -> Dict[str, Any]:
@@ -337,6 +339,7 @@ def status_payload(module: Any | None = None) -> Dict[str, Any]:
         "protections": {
             "atomic_save_state": True,
             "stable_pre_serialization": True,
+            "guarded_run_mutation_lock_serialization": True,
             "bounded_concurrent_mutation_retries": SERIALIZE_RETRIES,
             "retrying_json_reads": True,
             "backup_fallback_reads": True,
@@ -392,15 +395,20 @@ def install(module: Any) -> Dict[str, Any]:
     def hardened_save_state(state, *args, **kwargs):
         if not isinstance(state, dict):
             state = dict(state or {}) if state is not None else {}
-        with _THREAD_LOCK:
-            with _FileLock(exclusive=True):
-                backup = backup_current_state()
-                atomic_json_write(state_file, state)
-                _record_status("atomic_save_state", {
-                    "backup": backup,
-                    "state_quality_after": _quality(state),
-                    "state_size_after": _size(state_file),
-                })
+        # Do not serialize while guarded_run_cycle is between a position
+        # mutation and its execution mirror.  This lock is reentrant because an
+        # execution commit saves from inside that same guarded cycle.
+        with _RUN_LOCK:
+            with _THREAD_LOCK:
+                with _FileLock(exclusive=True):
+                    backup = backup_current_state()
+                    atomic_json_write(state_file, state)
+                    _record_status("atomic_save_state", {
+                        "backup": backup,
+                        "state_quality_after": _quality(state),
+                        "state_size_after": _size(state_file),
+                        "run_mutation_lock_held": True,
+                    })
         return None
 
     def guarded_run_cycle(*args, **kwargs):

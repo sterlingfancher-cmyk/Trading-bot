@@ -12,6 +12,22 @@ import state_io_hardening as state_io
 
 
 class Issue165StateSerializationTests(unittest.TestCase):
+    def test_save_waits_inside_core_mutation_lock(self):
+        events = []
+
+        core = types.SimpleNamespace(
+            STATE_FILE="unused.json",
+            load_state=lambda: {},
+            save_state=lambda _state: None,
+        )
+        with mock.patch.object(state_io, "backup_current_state", return_value={}), mock.patch.object(
+            state_io, "atomic_json_write", side_effect=lambda _path, _state: events.append("write") or True
+        ), mock.patch.object(state_io, "_record_status"):
+            state_io.install(core)
+            core.save_state({"cash": 100.0})
+
+        self.assertEqual(events, ["write"])
+
     def test_atomic_write_retries_transient_dictionary_mutation(self):
         real_dumps = json.dumps
         attempts = []

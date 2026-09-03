@@ -53,7 +53,10 @@ SHADOW_AI_TESTS = (
     "test_shadow_ai_evidence_store.py",
     "test_shadow_ai_observability.py",
 )
-STATE_SERIALIZATION_TESTS = ("test_issue165_state_serialization.py",)
+STATE_SERIALIZATION_TESTS = (
+    "test_issue165_state_serialization.py",
+    "test_issue172_canonical_state_commit.py",
+)
 PERFORMANCE_EVIDENCE_INTEGRITY_TESTS = (
     "test_issue167_forward_evidence_integrity.py",
     "test_issue170_performance_atr_integrity.py",
@@ -131,6 +134,9 @@ def _is_state_serialization_path(path: str) -> bool:
         "state_io_hardening.py",
         "cycle_completion_contract.py",
         "test_issue165_state_serialization.py",
+        "test_issue172_canonical_state_commit.py",
+        "v4_canonical_state_reconciliation.py",
+        "canonical_execution_ledger.py",
     }
 
 
