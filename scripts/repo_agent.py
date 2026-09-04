@@ -24,11 +24,12 @@ MAX_INSTRUCTION = 4000
 MAX_CONTEXT_CHARS = 120000
 MAX_FILES = 8
 MAX_FILE_CHARS = 120000
+MAX_HANDOFF_APPEND_CHARS = 12000
 HANDOFF_PATH = "PROJECT_HANDOFF_CURRENT.md"
 
 # Repository workflows remain unconditionally protected. The authoritative
-# handoff may be updated only by an explicit handoff-only instruction and only
-# through the append-only guard below.
+# handoff may be updated only by an explicit handoff-only instruction through
+# the bounded append mode below.
 PROTECTED_PREFIXES = (
     ".github/",
     ".git/",
@@ -46,14 +47,28 @@ Non-negotiable boundaries:
 - Never bypass the canonical execution ledger/accounting pipeline.
 - Prefer regression tests for correctness defects.
 - Do not edit GitHub workflows.
-- PROJECT_HANDOFF_CURRENT.md may be edited only when the instruction explicitly requests a handoff-only update; such edits must preserve the entire existing file byte-for-byte and append new continuity text only.
+- PROJECT_HANDOFF_CURRENT.md is protected from general file replacement. Explicit handoff-only continuity tasks use a separate append-only response contract enforced by the runner.
 - Produce reviewable changes only. A human and CI decide whether to merge.
 
-Return exactly one JSON object with:
+For normal repository tasks, return exactly one JSON object with:
 {
   "files": [{"path": "relative/path", "content": "complete replacement file contents"}],
   "pr_title": "short title",
   "pr_body": "what changed, why, tests, and safety boundaries",
+  "summary": "one-paragraph summary"
+}
+Return JSON only, with no markdown fences.
+"""
+
+HANDOFF_SYSTEM_POLICY = """You are performing an explicit documentation-only continuity update for a PAPER-ONLY automated trading repository.
+The runner, not you, owns the existing PROJECT_HANDOFF_CURRENT.md bytes. Do not reproduce, rewrite, truncate, reorganize, or replace the existing handoff and do not propose any other file.
+Using only the supplied instruction and context, draft one concise Markdown section containing the requested durable continuation facts.
+Do not invent evidence or authority changes.
+Return exactly one JSON object with these keys and no others:
+{
+  "handoff_append": "Markdown section to append, beginning with a level-2 heading",
+  "pr_title": "short documentation title",
+  "pr_body": "what continuity evidence is being appended and why",
   "summary": "one-paragraph summary"
 }
 Return JSON only, with no markdown fences.
@@ -111,6 +126,13 @@ def keywords(instruction: str) -> list[str]:
     return list(dict.fromkeys(w for w in words if w not in stop))[:30]
 
 
+def handoff_only_requested(instruction: str) -> bool:
+    lowered = instruction.lower()
+    return HANDOFF_PATH.lower() in lowered and any(
+        token in lowered for token in ("handoff", "append", "continuity", "documentation-only", "documentation only")
+    )
+
+
 def build_context(instruction: str) -> str:
     pieces: list[str] = []
     total = 0
@@ -118,9 +140,19 @@ def build_context(instruction: str) -> str:
     handoff = ROOT / HANDOFF_PATH
     if handoff.exists():
         text = handoff.read_text(encoding="utf-8", errors="replace")
-        text = text[:30000]
-        pieces.append(f"\n===== {HANDOFF_PATH} =====\n{text}")
+        if handoff_only_requested(instruction):
+            # Continuity append mode never asks the model to reproduce the large
+            # authoritative handoff. A small tail provides style/current context
+            # while the runner preserves all pre-existing bytes itself.
+            text = text[-12000:]
+            pieces.append(f"\n===== {HANDOFF_PATH} tail (read-only) =====\n{text}")
+        else:
+            text = text[:30000]
+            pieces.append(f"\n===== {HANDOFF_PATH} =====\n{text}")
         total += len(text)
+
+    if handoff_only_requested(instruction):
+        return "".join(pieces)
 
     keys = keywords(instruction)
     ranked: list[tuple[int, str, str]] = []
@@ -173,16 +205,17 @@ def call_openai(instruction: str, context: str) -> dict[str, Any]:
     if not key:
         raise RuntimeError("OPENAI_API_KEY GitHub Actions secret is missing.")
 
+    handoff_mode = handoff_only_requested(instruction)
     body = {
         "model": MODEL,
         "input": [
-            {"role": "system", "content": SYSTEM_POLICY},
+            {"role": "system", "content": HANDOFF_SYSTEM_POLICY if handoff_mode else SYSTEM_POLICY},
             {
                 "role": "user",
                 "content": f"Instruction:\n{instruction}\n\nRepository context:\n{context}",
             },
         ],
-        "max_output_tokens": 24000,
+        "max_output_tokens": 6000 if handoff_mode else 24000,
     }
     request = urllib.request.Request(
         "https://api.openai.com/v1/responses",
@@ -212,20 +245,11 @@ def call_openai(instruction: str, context: str) -> dict[str, Any]:
     return result
 
 
-def handoff_only_requested(instruction: str) -> bool:
-    lowered = instruction.lower()
-    return HANDOFF_PATH.lower() in lowered and any(
-        token in lowered for token in ("handoff", "append", "continuity", "documentation-only", "documentation only")
-    )
-
-
-def validate_path(raw: str, *, allow_handoff: bool = False) -> Path:
+def validate_path(raw: str) -> Path:
     raw = raw.replace("\\", "/").strip()
     if not raw or raw.startswith("/") or ".." in Path(raw).parts:
         raise RuntimeError(f"Unsafe path from agent: {raw!r}")
-    if raw == HANDOFF_PATH and not allow_handoff:
-        raise RuntimeError(f"Agent attempted to modify protected path: {raw}")
-    if raw.startswith(PROTECTED_PREFIXES):
+    if raw == HANDOFF_PATH or raw.startswith(PROTECTED_PREFIXES):
         raise RuntimeError(f"Agent attempted to modify protected path: {raw}")
     path = (ROOT / raw).resolve()
     if ROOT not in path.parents and path != ROOT:
@@ -233,27 +257,51 @@ def validate_path(raw: str, *, allow_handoff: bool = False) -> Path:
     return path
 
 
-def validate_handoff_append(path: Path, content: str) -> None:
-    original = path.read_text(encoding="utf-8") if path.exists() else ""
-    if not original:
-        raise RuntimeError("Authoritative handoff is missing or empty; append-only update refused.")
-    if not content.startswith(original):
-        raise RuntimeError("Handoff update must preserve the entire existing file byte-for-byte and append only.")
-    if len(content) <= len(original):
-        raise RuntimeError("Handoff update did not append new continuity content.")
+def apply_handoff_append(result: dict[str, Any]) -> list[str]:
+    if result.get("files"):
+        raise RuntimeError("Handoff append mode does not permit file replacement proposals.")
+    allowed_keys = {"handoff_append", "pr_title", "pr_body", "summary"}
+    extra_keys = set(result) - allowed_keys
+    if extra_keys:
+        raise RuntimeError(f"Handoff append mode returned unexpected keys: {sorted(extra_keys)}")
+
+    append_text = result.get("handoff_append")
+    if not isinstance(append_text, str) or not append_text.strip():
+        raise RuntimeError("Handoff append mode returned no append text.")
+    append_text = append_text.strip()
+    if len(append_text) > MAX_HANDOFF_APPEND_CHARS:
+        raise RuntimeError("Handoff append exceeds the bounded append size limit.")
+    if not append_text.startswith("## "):
+        raise RuntimeError("Handoff append must begin with a level-2 Markdown heading.")
+
+    path = ROOT / HANDOFF_PATH
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise RuntimeError("Authoritative handoff is missing or empty; append refused.")
+
+    original_size = path.stat().st_size
+    prefix = b""
+    with path.open("rb") as handle:
+        if original_size:
+            handle.seek(max(0, original_size - 1))
+            prefix = handle.read(1)
+    separator = b"\n\n" if prefix != b"\n" else b"\n"
+    payload = separator + append_text.encode("utf-8") + b"\n"
+    with path.open("ab") as handle:
+        handle.write(payload)
+    if path.stat().st_size <= original_size:
+        raise RuntimeError("Handoff append did not increase the authoritative file size.")
+    return [HANDOFF_PATH]
 
 
 def apply_files(result: dict[str, Any], instruction: str) -> list[str]:
+    if handoff_only_requested(instruction):
+        return apply_handoff_append(result)
+
     files = result.get("files") or []
     if not isinstance(files, list) or not files:
         raise RuntimeError("Agent proposed no files.")
     if len(files) > MAX_FILES:
         raise RuntimeError(f"Agent proposed {len(files)} files; maximum is {MAX_FILES}.")
-
-    allow_handoff = handoff_only_requested(instruction)
-    proposed_paths = [str(item.get("path") or "") for item in files if isinstance(item, dict)]
-    if HANDOFF_PATH in proposed_paths and (not allow_handoff or proposed_paths != [HANDOFF_PATH]):
-        raise RuntimeError("Authoritative handoff updates must be explicitly requested and handoff-only.")
 
     changed: list[str] = []
     for item in files:
@@ -265,9 +313,7 @@ def apply_files(result: dict[str, Any], instruction: str) -> list[str]:
             raise RuntimeError(f"Agent did not provide string content for {rel!r}.")
         if len(content) > MAX_FILE_CHARS:
             raise RuntimeError(f"Agent output for {rel} exceeds size limit.")
-        path = validate_path(rel, allow_handoff=allow_handoff)
-        if rel == HANDOFF_PATH:
-            validate_handoff_append(path, content)
+        path = validate_path(rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         changed.append(path.relative_to(ROOT).as_posix())
