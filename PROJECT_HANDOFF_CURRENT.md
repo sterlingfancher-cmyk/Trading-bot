@@ -697,3 +697,23 @@ Fresh evidence proves:
 - system/runtime state presents no new canonical, accounting, market-data, runner, valuation, or risk-safety regression.
 
 Issue #170 remains fixed/closed and its signal-time ATR research-evidence correction is deployed. No bug repair, state mutation, authority change, or user action was required by this audit. Continue normal scheduled audits and evidence-backed performance/shadow-AI work under the standing boundaries.
+
+## 2026-09-04 Pre-Close Operational Audit — PAPER-ONLY Continuity Append
+
+Append-only record for the pre-close operational audit captured around 2026-09-04 14:35–14:36 CDT. Continuity facts appended here (paper-only tooling changes visible in repository main):
+
+- repository main current head: commit eb78ee88d3365bd8988addf0e967b6af48f83d46 (merged PR #178). PR #177 fixed the original protected-path contradiction; PR #178 replaced large-file reproduction with a bounded byte-preserving append mode. Both changes are paper-only continuity tooling.
+- PR #178 exact-head Change Safety, Repository Safety and Performance Audit Validation, Architecture Debt Regression Gate, and full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research Audit (including exact Gunicorn startup smoke) all passed.
+- Settled authoritative Splendid evidence (capture ~2026-09-04 14:35–14:36 CDT):
+  - application ready, phase `delegating`, all 11/11 monitored endpoints reachable;
+  - account cash/equity approximately 13412.285098 / 13412.29, no open positions; realized-today ≈ -29.94, unrealized 0;
+  - canonical execution ledger append-only at 71 rows, hash chain valid, active epoch `stable-paper-v4-20260826-successor01`;
+  - active bidirectional accounting coverage complete: coverage_issue_count=0, economic_issue_count=0, reconstructed cash/equity ≈ 13412.285089 and flat positions;
+  - runner enabled with no active error; latest successful cycle ≈ 14:31:41 CDT;
+  - provider accounting complete: 41,117 requests, 41,116 successes, 1 empty/failure, 0 timeouts, 0 unclassified, circuit closed;
+  - risk not halted; intraday drawdown ≈ 0.243% and net daily loss ≈ 0.223%; the compact daily audit overall `FAIL` is solely the intentional final-30-minute self-defense entry block (this is not a loss/canonical/accounting/runtime failure);
+  - fresh-day baseline `pass`; legacy v2 recovery diagnostic non-applicable under active v4 lineage;
+  - recent morning positions GEV / NVDA / ORCL / OKTA / CRDO exited via `market_regime_protection` and are represented in canonical/state evidence; no canonical/state divergence observed.
+- No strategy, signal, sizing, hard-risk, account-state, canonical-history, live-authority, or ML-authority change occurred.
+
+After this append-only handoff PR is verified and merged, Issue #176 will be complete.
