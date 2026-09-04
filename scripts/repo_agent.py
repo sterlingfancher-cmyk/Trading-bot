@@ -24,12 +24,11 @@ MAX_INSTRUCTION = 4000
 MAX_CONTEXT_CHARS = 120000
 MAX_FILES = 8
 MAX_FILE_CHARS = 120000
+HANDOFF_PATH = "PROJECT_HANDOFF_CURRENT.md"
 
-# The first version is deliberately unable to rewrite its own authority,
-# repository workflows, or the authoritative project handoff.
-PROTECTED_EXACT = {
-    "PROJECT_HANDOFF_CURRENT.md",
-}
+# Repository workflows remain unconditionally protected. The authoritative
+# handoff may be updated only by an explicit handoff-only instruction and only
+# through the append-only guard below.
 PROTECTED_PREFIXES = (
     ".github/",
     ".git/",
@@ -46,7 +45,8 @@ Non-negotiable boundaries:
 - Never fabricate trades, execution-ledger rows, accounting history, prices, fills, or test evidence.
 - Never bypass the canonical execution ledger/accounting pipeline.
 - Prefer regression tests for correctness defects.
-- Do not edit GitHub workflows or PROJECT_HANDOFF_CURRENT.md; those are protected by the runner too.
+- Do not edit GitHub workflows.
+- PROJECT_HANDOFF_CURRENT.md may be edited only when the instruction explicitly requests a handoff-only update; such edits must preserve the entire existing file byte-for-byte and append new continuity text only.
 - Produce reviewable changes only. A human and CI decide whether to merge.
 
 Return exactly one JSON object with:
@@ -115,11 +115,11 @@ def build_context(instruction: str) -> str:
     pieces: list[str] = []
     total = 0
 
-    handoff = ROOT / "PROJECT_HANDOFF_CURRENT.md"
+    handoff = ROOT / HANDOFF_PATH
     if handoff.exists():
         text = handoff.read_text(encoding="utf-8", errors="replace")
         text = text[:30000]
-        pieces.append(f"\n===== PROJECT_HANDOFF_CURRENT.md =====\n{text}")
+        pieces.append(f"\n===== {HANDOFF_PATH} =====\n{text}")
         total += len(text)
 
     keys = keywords(instruction)
@@ -128,7 +128,7 @@ def build_context(instruction: str) -> str:
         if not safe_text_file(path):
             continue
         rel = path.relative_to(ROOT).as_posix()
-        if rel == "PROJECT_HANDOFF_CURRENT.md":
+        if rel == HANDOFF_PATH:
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -212,11 +212,20 @@ def call_openai(instruction: str, context: str) -> dict[str, Any]:
     return result
 
 
-def validate_path(raw: str) -> Path:
+def handoff_only_requested(instruction: str) -> bool:
+    lowered = instruction.lower()
+    return HANDOFF_PATH.lower() in lowered and any(
+        token in lowered for token in ("handoff", "append", "continuity", "documentation-only", "documentation only")
+    )
+
+
+def validate_path(raw: str, *, allow_handoff: bool = False) -> Path:
     raw = raw.replace("\\", "/").strip()
     if not raw or raw.startswith("/") or ".." in Path(raw).parts:
         raise RuntimeError(f"Unsafe path from agent: {raw!r}")
-    if raw in PROTECTED_EXACT or raw.startswith(PROTECTED_PREFIXES):
+    if raw == HANDOFF_PATH and not allow_handoff:
+        raise RuntimeError(f"Agent attempted to modify protected path: {raw}")
+    if raw.startswith(PROTECTED_PREFIXES):
         raise RuntimeError(f"Agent attempted to modify protected path: {raw}")
     path = (ROOT / raw).resolve()
     if ROOT not in path.parents and path != ROOT:
@@ -224,12 +233,27 @@ def validate_path(raw: str) -> Path:
     return path
 
 
-def apply_files(result: dict[str, Any]) -> list[str]:
+def validate_handoff_append(path: Path, content: str) -> None:
+    original = path.read_text(encoding="utf-8") if path.exists() else ""
+    if not original:
+        raise RuntimeError("Authoritative handoff is missing or empty; append-only update refused.")
+    if not content.startswith(original):
+        raise RuntimeError("Handoff update must preserve the entire existing file byte-for-byte and append only.")
+    if len(content) <= len(original):
+        raise RuntimeError("Handoff update did not append new continuity content.")
+
+
+def apply_files(result: dict[str, Any], instruction: str) -> list[str]:
     files = result.get("files") or []
     if not isinstance(files, list) or not files:
         raise RuntimeError("Agent proposed no files.")
     if len(files) > MAX_FILES:
         raise RuntimeError(f"Agent proposed {len(files)} files; maximum is {MAX_FILES}.")
+
+    allow_handoff = handoff_only_requested(instruction)
+    proposed_paths = [str(item.get("path") or "") for item in files if isinstance(item, dict)]
+    if HANDOFF_PATH in proposed_paths and (not allow_handoff or proposed_paths != [HANDOFF_PATH]):
+        raise RuntimeError("Authoritative handoff updates must be explicitly requested and handoff-only.")
 
     changed: list[str] = []
     for item in files:
@@ -241,7 +265,9 @@ def apply_files(result: dict[str, Any]) -> list[str]:
             raise RuntimeError(f"Agent did not provide string content for {rel!r}.")
         if len(content) > MAX_FILE_CHARS:
             raise RuntimeError(f"Agent output for {rel} exceeds size limit.")
-        path = validate_path(rel)
+        path = validate_path(rel, allow_handoff=allow_handoff)
+        if rel == HANDOFF_PATH:
+            validate_handoff_append(path, content)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         changed.append(path.relative_to(ROOT).as_posix())
@@ -300,7 +326,7 @@ def main() -> None:
     context = build_context(instruction)
     print(f"Grounded context size: {len(context)} characters")
     result = call_openai(instruction, context)
-    changed = apply_files(result)
+    changed = apply_files(result, instruction)
     print("Agent proposed:", ", ".join(changed))
     validate_changes()
     create_pr(result, changed, instruction)
