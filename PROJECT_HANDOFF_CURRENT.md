@@ -717,3 +717,20 @@ Append-only record for the pre-close operational audit captured around 2026-09-0
 - No strategy, signal, sizing, hard-risk, account-state, canonical-history, live-authority, or ML-authority change occurred.
 
 After this append-only handoff PR is verified and merged, Issue #176 will be complete.
+
+## 2026-09-07 Pre-Close Audit — Holiday-Session Guardfinding
+
+- Fresh Splendid audit: PASS on accounting / canonical / runtime health:
+  - reconstructed cash/equity ≈ 13412.29 and no open positions;
+  - canonical execution ledger append-only / hash-valid at 71 rows / 25 current-v4 rows;
+  - bidirectional accounting coverage: coverage_issue_count=0, economic_issue_count=0;
+  - risk not halted.
+
+- Holiday-session defect observed (Labor Day 2026): the runner executed scheduled cycles at approximately 14:24 CDT and 14:29 CDT during a holiday session. Root cause triage shows app.py's canonical market_clock only checked weekday/time and omitted an authoritative holiday guard, allowing runs during the intended holiday skip window.
+
+- Governance and remediation history:
+  - Issue #181 opened to track the defect, evidence, and remediation plan.
+  - PRs #182, #183, and #184 were created to address the problem but were rejected/closed unmerged because the generated patches either performed destructive byte changes or missed the true canonical market_clock gate.
+  - No account, canonical, risk, strategy, live, or ML authority was changed during discovery or triage.
+
+- Next actions (planned): implement a surgical, byte-preserving holiday guard in app.py to enforce the canonical market_clock holiday semantics without rewriting persisted bytes; then run full exact-head gates (Change Safety, Repository Safety, Architecture Debt, Refactor/Ownership/Configuration/Runtime/Startup audits) and perform a Splendid post-deploy validation before declaring the fix settled.
