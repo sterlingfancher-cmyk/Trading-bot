@@ -1,0 +1,7 @@
+{
+  "request_id": "baseline-2026-09-08-v1",
+  "period": "5y",
+  "max_symbols": 45,
+  "include_ablation": true,
+  "resume_run_id": ""
+}
