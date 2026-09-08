@@ -717,3 +717,17 @@ Append-only record for the pre-close operational audit captured around 2026-09-0
 - No strategy, signal, sizing, hard-risk, account-state, canonical-history, live-authority, or ML-authority change occurred.
 
 After this append-only handoff PR is verified and merged, Issue #176 will be complete.
+
+## 2026-09-08 Morning Audit
+
+- repository main current head: commit 70aaaec992f0ca160ac603f8e70aabcc6614eef2
+- fresh Splendid capture ~09:41 CDT — PASS:
+  - cash 13412.285098055443, equity 13412.29, flat positions
+  - canonical ledger chain valid: 71 rows / 25 current-v4 rows
+  - coverage/economic issues: 0
+  - market-data classified: 67855/67855
+  - runner healthy; last successful automatic run 09:40:26 CDT
+  - risk not halted (unhalted)
+- Issue #181 (holiday-session defect) remains open because app.py market_clock still lacks exchange-holiday gating
+- Fourth bounded repair was attempted twice; both repo-agent calls timed out at 180 seconds before any edits or PR, so no repository mutation occurred
+- Next action: follow a safe repair path avoiding oversized repo-agent context, then apply a surgical holiday guard change with focused regressions, run all mandatory exact-head gates, and perform Splendid post-deploy validation
