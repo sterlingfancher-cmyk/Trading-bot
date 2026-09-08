@@ -26,7 +26,7 @@ import performance_audit_lab as base
 np = base.np
 pd = base.pd
 
-VERSION = "performance-audit-lab-v2-2026-09-03-v2-signal-atr-integrity"
+VERSION = "performance-audit-lab-v2-2026-09-08-v3-symbol-atr-binding"
 ENABLED = os.environ.get("PERFORMANCE_AUDIT_V2_ENABLED", "true").lower() not in {
     "0", "false", "no", "off"
 }
@@ -506,7 +506,7 @@ def _simulate_next_open(
             if _eligible(row, policy_today):
                 ranked.append((_f(row.get("score")), symbol, row))
         ranked.sort(reverse=True)
-        for score, symbol, _row_data in ranked[:slots]:
+        for score, symbol, row_data in ranked[:slots]:
             pending.append(
                 {
                     "symbol": symbol,
@@ -515,7 +515,7 @@ def _simulate_next_open(
                     "regime": today_regime,
                     "policy": dict(policy_today),
                     "signal_atr_pct": _f(
-                        row.get("atr_pct"),
+                        row_data.get("atr_pct"),
                         _f(policy_today.get("stop_loss"), 0.015),
                     ),
                 }
