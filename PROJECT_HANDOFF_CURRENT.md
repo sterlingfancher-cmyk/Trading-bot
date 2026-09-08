@@ -731,3 +731,16 @@ After this append-only handoff PR is verified and merged, Issue #176 will be com
 - Issue #181 (holiday-session defect) remains open because app.py market_clock still lacks exchange-holiday gating
 - Fourth bounded repair was attempted twice; both repo-agent calls timed out at 180 seconds before any edits or PR, so no repository mutation occurred
 - Next action: follow a safe repair path avoiding oversized repo-agent context, then apply a surgical holiday guard change with focused regressions, run all mandatory exact-head gates, and perform Splendid post-deploy validation
+
+## 2026-09-08 Midday Audit — Issue #181 Holiday-Session Fix Deployed
+
+- Resolution: Issue #181 (holiday-session defect) fixed by PR #189 and squash-merged as commit cf61d5c5ce15f75b0d19c7969169426277ce6c78.
+- Exact repo paths changed: app.py, us_holidays.py, tests/test_market_holidays.py.
+- Behavioral change: a deterministic full-day holiday guard now precedes weekend/session-time logic in the market-clock path, preventing session-open during full-day holidays.
+- Focused regressions and observed test coverage: tests prove Labor Day 2026 is treated as closed; 2026-09-08 10:00 CDT is treated as open; weekend, before-close, and after-close behaviors are validated; observed Independence Day behavior confirmed by tests.
+- Validation gates and runtime checks: all four exact-head PR gates passed (including canonical regressions and Gunicorn startup smoke); both Railway deployments succeeded; post-deploy Splendid capture at 2026-09-08 12:19:43 CDT = PASS.
+- Post-deploy runtime snapshot (2026-09-08 12:19:43 CDT): application ready, 11/11 monitored endpoints reachable, self-check PASS; cash/equity 13412.285098055443 / 13412.29; no open positions; canonical ledger append-only/hash-valid at 71 rows with active v4 rows; coverage_issue_count=0 and economic_issue_count=0; market-data accounting PASS; runner PASS with no active error and last successful automatic run 12:15:31 CDT; risk unhalted with 0 drawdown; validation_hold=false; superseded v2 recovery probe remains non-applicable/nonblocking.
+- Related tooling fix: PR #187 (repo-agent exact-patch tooling fix) merged as 7c4bf118aa52e563dce1e9010ac081160453a082 to prevent destructive large-file replacement.
+- Scope note: no strategy, signals, sizing, risk thresholds, canonical history, live authority, ML, or order authority changes were introduced by these commits.
+
+This section is a paper-only continuity append recording the fix, exact changed paths, test coverage, gate/deployment outcomes, and settled post-deploy runtime evidence for repository continuity and auditability.
