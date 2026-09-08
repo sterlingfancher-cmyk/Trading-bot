@@ -89,6 +89,55 @@ class PerformanceAtrIntegrityTests(unittest.TestCase):
         self.assertEqual(entry["initial_stop_pct"], 0.0125)
         self.assertEqual(exit_row["reason"], "stop_loss")
 
+    def test_each_ranked_symbol_keeps_its_own_signal_atr(self):
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06"])
+        features = {}
+        for symbol, score, signal_atr in (
+            ("ALPHA", 0.03, 0.01),
+            ("BETA", 0.02, 0.03),
+        ):
+            features[symbol] = pd.DataFrame(
+                [
+                    {
+                        "Open": 100.0,
+                        "High": 101.0,
+                        "Low": 99.0,
+                        "Close": 100.0,
+                        "score": score,
+                        "atr_pct": signal_atr,
+                    },
+                    {
+                        "Open": 100.0,
+                        "High": 101.0,
+                        "Low": 99.0,
+                        "Close": 100.0,
+                        "score": score,
+                        "atr_pct": 0.50,
+                    },
+                ],
+                index=dates,
+            )
+        policy = _policy()
+        policy.update({"max_positions": 2, "max_exposure": 0.30})
+        with patch.object(lab, "np", np), patch.object(
+            lab.base, "np", np
+        ), patch.object(lab, "_regime", return_value="neutral"), patch.object(
+            lab, "_eligible", return_value=True
+        ):
+            result = lab._simulate_next_open(
+                features, {"neutral": policy}, list(dates)
+            )
+
+        entries = {
+            row["symbol"]: row
+            for row in result["trades"]
+            if row["action"] == "entry"
+        }
+        self.assertEqual(entries["ALPHA"]["signal_atr_pct"], 0.01)
+        self.assertEqual(entries["ALPHA"]["initial_stop_pct"], 0.0125)
+        self.assertEqual(entries["BETA"]["signal_atr_pct"], 0.03)
+        self.assertEqual(entries["BETA"]["initial_stop_pct"], 0.0375)
+
 
 if __name__ == "__main__":
     unittest.main()
