@@ -11,6 +11,20 @@ import performance_audit_v2_offline as offline
 
 
 class PerformanceAuditV2IsolationTests(unittest.TestCase):
+    def test_repository_request_is_bounded_and_push_trigger_is_narrow(self):
+        request = json.loads(
+            Path(".github/performance-audit-v2-request.json").read_text()
+        )
+        workflow = Path(
+            ".github/workflows/performance-audit-v2-research.yml"
+        ).read_text()
+        self.assertEqual(request["period"], "5y")
+        self.assertEqual(request["max_symbols"], 45)
+        self.assertTrue(request["include_ablation"])
+        self.assertIn('branches: [main]', workflow)
+        self.assertIn('".github/performance-audit-v2-request.json"', workflow)
+        self.assertNotIn("schedule:", workflow)
+
     def test_offline_execution_persists_result_without_runtime_authority(self):
         with tempfile.TemporaryDirectory() as directory:
             checkpoint = Path(directory) / "checkpoint.json"
