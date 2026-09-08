@@ -1,6 +1,10 @@
 name: Performance Audit V2 Isolated Research
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/performance-audit-v2-request.json"
   workflow_dispatch:
     inputs:
       period:
@@ -44,25 +48,71 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Install research dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Resolve and validate bounded request
+        id: request
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PERIOD: ${{ inputs.period }}
+          INPUT_MAX_SYMBOLS: ${{ inputs.max_symbols }}
+          INPUT_INCLUDE_ABLATION: ${{ inputs.include_ablation }}
+          INPUT_RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          if os.environ["EVENT_NAME"] == "workflow_dispatch":
+              request = {
+                  "period": os.environ.get("INPUT_PERIOD") or "5y",
+                  "max_symbols": os.environ.get("INPUT_MAX_SYMBOLS") or "45",
+                  "include_ablation": os.environ.get("INPUT_INCLUDE_ABLATION") or "true",
+                  "resume_run_id": os.environ.get("INPUT_RESUME_RUN_ID") or "",
+              }
+          else:
+              request = json.loads(
+                  Path(".github/performance-audit-v2-request.json").read_text()
+              )
+
+          period = str(request.get("period", ""))
+          max_symbols = int(request.get("max_symbols", 0))
+          include_ablation = str(request.get("include_ablation", True)).lower()
+          resume_run_id = str(request.get("resume_run_id") or "")
+          if period not in {"2y", "3y", "5y", "10y"}:
+              raise SystemExit("invalid period")
+          if not 20 <= max_symbols <= 75:
+              raise SystemExit("max_symbols must be between 20 and 75")
+          if include_ablation not in {"true", "false"}:
+              raise SystemExit("include_ablation must be boolean")
+          if resume_run_id and not resume_run_id.isdigit():
+              raise SystemExit("resume_run_id must be a numeric workflow run ID")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"period={period}\n")
+              output.write(f"max_symbols={max_symbols}\n")
+              output.write(f"include_ablation={include_ablation}\n")
+              output.write(f"resume_run_id={resume_run_id}\n")
+          PY
+
       - name: Restore resumable checkpoint
-        if: inputs.resume_run_id != ''
+        if: steps.request.outputs.resume_run_id != ''
         uses: actions/download-artifact@v4
         with:
           name: performance-audit-v2-evidence
           path: performance-audit-v2-evidence
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.resume_run_id }}
-
-      - name: Install research dependencies
-        run: python -m pip install -r requirements.txt
+          run-id: ${{ steps.request.outputs.resume_run_id }}
 
       - name: Run isolated V2 baseline
         env:
           PERFORMANCE_AUDIT_V2_AUTO_BACKTEST_ENABLED: "false"
           PERFORMANCE_AUDIT_V2_ENABLED: "true"
-          RESEARCH_PERIOD: ${{ inputs.period }}
-          RESEARCH_MAX_SYMBOLS: ${{ inputs.max_symbols }}
-          RESEARCH_INCLUDE_ABLATION: ${{ inputs.include_ablation }}
+          RESEARCH_PERIOD: ${{ steps.request.outputs.period }}
+          RESEARCH_MAX_SYMBOLS: ${{ steps.request.outputs.max_symbols }}
+          RESEARCH_INCLUDE_ABLATION: ${{ steps.request.outputs.include_ablation }}
         run: |
           args=(
             --period "$RESEARCH_PERIOD"
