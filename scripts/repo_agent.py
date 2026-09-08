@@ -21,7 +21,7 @@ from typing import Any
 ROOT = Path.cwd().resolve()
 MODEL = os.getenv("REPO_AGENT_MODEL", "gpt-5-mini")
 MAX_INSTRUCTION = 4000
-MAX_CONTEXT_CHARS = 120000
+MAX_CONTEXT_CHARS = 70000
 MAX_FILES = 8
 MAX_FILE_CHARS = 120000
 MAX_HANDOFF_APPEND_CHARS = 12000
@@ -50,13 +50,15 @@ Non-negotiable boundaries:
 - PROJECT_HANDOFF_CURRENT.md is protected from general file replacement. Explicit handoff-only continuity tasks use a separate append-only response contract enforced by the runner.
 - Produce reviewable changes only. A human and CI decide whether to merge.
 
-For normal repository tasks, return exactly one JSON object with:
+For normal repository tasks, return exactly one JSON object using either or both of these bounded edit forms:
 {
-  "files": [{"path": "relative/path", "content": "complete replacement file contents"}],
+  "patches": [{"path": "relative/path", "old": "exact existing text", "new": "replacement text"}],
+  "files": [{"path": "relative/path", "content": "complete contents for a new or safely small replacement file"}],
   "pr_title": "short title",
   "pr_body": "what changed, why, tests, and safety boundaries",
   "summary": "one-paragraph summary"
 }
+Prefer `patches` for large existing files. Each patch must match exactly once; the runner rejects zero-match or multi-match patches. Do not reproduce a large existing file when an exact patch is sufficient.
 Return JSON only, with no markdown fences.
 """
 
@@ -147,8 +149,11 @@ def build_context(instruction: str) -> str:
             text = text[-12000:]
             pieces.append(f"\n===== {HANDOFF_PATH} tail (read-only) =====\n{text}")
         else:
-            text = text[:30000]
-            pieces.append(f"\n===== {HANDOFF_PATH} =====\n{text}")
+            # Normal implementation tasks need the standing authority boundary,
+            # not the full historical handoff. Keeping this bounded avoids model
+            # timeout and encourages exact patches instead of full-file rewrites.
+            text = text[-12000:]
+            pieces.append(f"\n===== {HANDOFF_PATH} tail (read-only) =====\n{text}")
         total += len(text)
 
     if handoff_only_requested(instruction):
@@ -176,7 +181,7 @@ def build_context(instruction: str) -> str:
         remaining = MAX_CONTEXT_CHARS - total
         if remaining <= 1000:
             break
-        clipped = text[: min(remaining, 60000)]
+        clipped = text[: min(remaining, 50000)]
         pieces.append(f"\n===== {rel} =====\n{clipped}")
         total += len(clipped)
 
@@ -215,7 +220,7 @@ def call_openai(instruction: str, context: str) -> dict[str, Any]:
                 "content": f"Instruction:\n{instruction}\n\nRepository context:\n{context}",
             },
         ],
-        "max_output_tokens": 6000 if handoff_mode else 24000,
+        "max_output_tokens": 6000 if handoff_mode else 12000,
     }
     request = urllib.request.Request(
         "https://api.openai.com/v1/responses",
@@ -227,7 +232,7 @@ def call_openai(instruction: str, context: str) -> dict[str, Any]:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=180) as response:
+        with urllib.request.urlopen(request, timeout=240) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -258,8 +263,8 @@ def validate_path(raw: str) -> Path:
 
 
 def apply_handoff_append(result: dict[str, Any]) -> list[str]:
-    if result.get("files"):
-        raise RuntimeError("Handoff append mode does not permit file replacement proposals.")
+    if result.get("files") or result.get("patches"):
+        raise RuntimeError("Handoff append mode does not permit code/file edit proposals.")
     allowed_keys = {"handoff_append", "pr_title", "pr_body", "summary"}
     extra_keys = set(result) - allowed_keys
     if extra_keys:
@@ -293,17 +298,49 @@ def apply_handoff_append(result: dict[str, Any]) -> list[str]:
     return [HANDOFF_PATH]
 
 
+def apply_exact_patches(result: dict[str, Any]) -> list[str]:
+    patches = result.get("patches") or []
+    if not isinstance(patches, list):
+        raise RuntimeError("Agent patches must be a list.")
+    if len(patches) > MAX_FILES:
+        raise RuntimeError(f"Agent proposed {len(patches)} patches; maximum is {MAX_FILES}.")
+
+    changed: list[str] = []
+    for item in patches:
+        if not isinstance(item, dict):
+            raise RuntimeError("Invalid patch item in agent response.")
+        rel = str(item.get("path") or "")
+        old = item.get("old")
+        new = item.get("new")
+        if not isinstance(old, str) or not old:
+            raise RuntimeError(f"Agent patch for {rel!r} did not provide non-empty exact old text.")
+        if not isinstance(new, str):
+            raise RuntimeError(f"Agent patch for {rel!r} did not provide string new text.")
+        path = validate_path(rel)
+        if not path.is_file():
+            raise RuntimeError(f"Exact patch target does not exist: {rel}")
+        original = path.read_text(encoding="utf-8")
+        count = original.count(old)
+        if count != 1:
+            raise RuntimeError(f"Exact patch for {rel} matched {count} times; expected exactly one match.")
+        updated = original.replace(old, new, 1)
+        path.write_text(updated, encoding="utf-8")
+        if rel not in changed:
+            changed.append(rel)
+    return changed
+
+
 def apply_files(result: dict[str, Any], instruction: str) -> list[str]:
     if handoff_only_requested(instruction):
         return apply_handoff_append(result)
 
+    changed = apply_exact_patches(result)
     files = result.get("files") or []
-    if not isinstance(files, list) or not files:
-        raise RuntimeError("Agent proposed no files.")
+    if not isinstance(files, list):
+        raise RuntimeError("Agent files must be a list.")
     if len(files) > MAX_FILES:
         raise RuntimeError(f"Agent proposed {len(files)} files; maximum is {MAX_FILES}.")
 
-    changed: list[str] = []
     for item in files:
         if not isinstance(item, dict):
             raise RuntimeError("Invalid file item in agent response.")
@@ -316,7 +353,12 @@ def apply_files(result: dict[str, Any], instruction: str) -> list[str]:
         path = validate_path(rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        changed.append(path.relative_to(ROOT).as_posix())
+        normalized = path.relative_to(ROOT).as_posix()
+        if normalized not in changed:
+            changed.append(normalized)
+
+    if not changed:
+        raise RuntimeError("Agent proposed no files or patches.")
     return changed
 
 
