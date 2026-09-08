@@ -731,3 +731,70 @@ After this append-only handoff PR is verified and merged, Issue #176 will be com
 - Issue #181 (holiday-session defect) remains open because app.py market_clock still lacks exchange-holiday gating
 - Fourth bounded repair was attempted twice; both repo-agent calls timed out at 180 seconds before any edits or PR, so no repository mutation occurred
 - Next action: follow a safe repair path avoiding oversized repo-agent context, then apply a surgical holiday guard change with focused regressions, run all mandatory exact-head gates, and perform Splendid post-deploy validation
+
+## 2026-09-08 Issue #193 — Isolated Performance Audit V2 Baseline — COMPLETE
+
+Issue #181's holiday-session defect was subsequently repaired and closed by PR
+#189 before this performance stage began. Fresh repository and authoritative
+runtime inspection then confirmed that Performance Audit V2 had never run and
+that the existing async launcher was intentionally not registered because it
+would execute heavy research inside the production Splendid process.
+
+PR #194 added a standalone research-process adapter with atomic JSON state,
+durable core and per-ablation checkpoints, explicit resume, bounded inputs, and
+no Flask, paper-runner, broker, production-state, or order surface. It also added
+a concurrency-guarded GitHub Actions workflow and focused isolation, resume, and
+fail-closed regressions to mandatory Change Safety selection. All four exact-head
+gates passed on `4b7dc7e4ec4b2542c12e2fb8ac516425d657e5fc`; the PR was
+squash-merged as `0bcf724e51b4ded3e0f58896ac2cef1e2a189df3`.
+
+PR #195 added a narrowly scoped, repository-tracked request that launches one
+isolated research job only when that request changes on `main`. Request fields
+are validated before use, fixed concurrency prevents overlapping duplicate jobs,
+and manual dispatch/resume remains available. All four exact-head gates passed
+on `6a3b87cf6da73884284611418233cb9194d8d6e8`; the PR was squash-merged
+as `a91250d8d749fa150d8d6a05e0c2a9786159f201`.
+
+Isolated workflow run `34288938589` completed successfully and produced artifact
+`performance-audit-v2-evidence` with digest
+`sha256:a3c6ee812672c142bf3f00eb1083f7b725eb4404f824e18a6f332b1a8142bb3a`.
+The result is bound to source commit `a91250d8d749fa150d8d6a05e0c2a9786159f201`
+and covers 1,254 sessions from 2021-09-09 through 2026-09-08, all 45 requested
+symbols, 15 rolling test folds per profile, 8 bps modeled transaction cost, and
+18 one-variable ablations. Signal-time ATR integrity from Issue #170 remains in
+force.
+
+Material baseline results:
+- current-policy proxy: +67.52% total return, 10.92% CAGR, 21.13% maximum
+  drawdown, 0.671 Sharpe, 467 trades, and 25.44% average exposure;
+- SPY buy-and-hold: +82.53%, 12.85% CAGR, 24.50% maximum drawdown, and 0.789
+  Sharpe;
+- permissive profile: +249.55% with 31.10% maximum drawdown, but -49.82% in
+  the defensive regime with 52.72% regime drawdown;
+- adaptive profile: +74.37% with 20.33% maximum drawdown and 0.643 Sharpe,
+  including a -16.66% worst rolling test fold and -34.38% defensive-regime
+  return;
+- the highest full-sample ablation objective was `max_positions_2`, at +63.46%
+  return, 13.46% maximum drawdown, 0.756 Sharpe, and 441 trades. This is an
+  adaptive research-proxy result, not authority to alter the runtime policy.
+
+No candidate was promoted. The baseline exposes only one cost assumption and
+does not yet report turnover, gross traded notional, contribution concentration,
+capacity/liquidity stress, or delayed-execution sensitivity. Issue #196 tracks
+those required evidence-integrity additions and a new versioned baseline before
+one candidate may be selected for separate forward shadow evaluation.
+
+Fresh settled Splendid evidence after both merges remained clean: application
+ready/delegating with 11/11 endpoints reachable; self-check and compact daily
+audit pass; cash/equity approximately `13412.285098 / 13412.29`, flat positions;
+bidirectional accounting coverage complete with zero coverage/economic issues;
+canonical ledger append-only/hash-valid at 71 rows / 25 current-v4 rows; v4
+validation released; runner, market-data accounting, valuation, and risk healthy
+with no active error, halt, or self-defense. V2 remains disabled/not-run inside
+Splendid, as required; its completed evidence exists only in the isolated
+research artifact.
+
+No strategy, signal, ranking, selection, sizing, exposure, stop, exit, hard-risk
+limit, canonical/accounting/history, state/day-peak, live, ML, AI, or order
+authority changed. Issue #193 is closed; Issue #196 is the active bounded
+performance-research item.
