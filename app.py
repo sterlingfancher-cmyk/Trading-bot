@@ -7,6 +7,7 @@ import traceback
 
 import numpy as np
 import pytz
+from us_holidays import is_us_equity_holiday
 import yfinance as yf
 from flask import Flask, jsonify, request, render_template_string
 
@@ -567,7 +568,10 @@ def market_clock():
         microsecond=0
     )
 
-    if now.weekday() >= 5:
+    if is_us_equity_holiday(now):
+        reason = "holiday"
+        is_open = False
+    elif now.weekday() >= 5:
         reason = "weekend"
         is_open = False
     elif now < open_dt:
