@@ -51,7 +51,7 @@ def test_repo_agent_handoff_mode_rejects_file_replacement(tmp_path, monkeypatch)
     handoff = tmp_path / repo_agent.HANDOFF_PATH
     handoff.write_text("existing handoff\n", encoding="utf-8")
 
-    with pytest.raises(RuntimeError, match="does not permit file replacement"):
+    with pytest.raises(RuntimeError, match="does not permit code/file edit"):
         repo_agent.apply_files(
             {
                 "handoff_append": "## New audit\nPASS",
@@ -93,3 +93,53 @@ def test_repo_agent_handoff_mode_requires_existing_handoff(tmp_path, monkeypatch
             {"handoff_append": "## New audit\nPASS"},
             "Append a documentation-only continuity update to PROJECT_HANDOFF_CURRENT.md.",
         )
+
+
+def test_repo_agent_exact_patch_updates_existing_file_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(repo_agent, "ROOT", tmp_path.resolve())
+    target = tmp_path / "large_runtime.py"
+    target.write_text("before\nneedle\nafter\n", encoding="utf-8")
+
+    changed = repo_agent.apply_files(
+        {"patches": [{"path": "large_runtime.py", "old": "needle", "new": "replacement"}]},
+        "Apply a surgical runtime fix.",
+    )
+
+    assert changed == ["large_runtime.py"]
+    assert target.read_text(encoding="utf-8") == "before\nreplacement\nafter\n"
+
+
+def test_repo_agent_exact_patch_rejects_zero_or_multiple_matches(tmp_path, monkeypatch):
+    monkeypatch.setattr(repo_agent, "ROOT", tmp_path.resolve())
+    target = tmp_path / "runtime.py"
+    target.write_text("same\nsame\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="matched 2 times"):
+        repo_agent.apply_files(
+            {"patches": [{"path": "runtime.py", "old": "same", "new": "different"}]},
+            "Apply a surgical runtime fix.",
+        )
+
+    with pytest.raises(RuntimeError, match="matched 0 times"):
+        repo_agent.apply_files(
+            {"patches": [{"path": "runtime.py", "old": "missing", "new": "different"}]},
+            "Apply a surgical runtime fix.",
+        )
+
+
+def test_repo_agent_exact_patch_can_add_small_new_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(repo_agent, "ROOT", tmp_path.resolve())
+    target = tmp_path / "runtime.py"
+    target.write_text("old\n", encoding="utf-8")
+
+    changed = repo_agent.apply_files(
+        {
+            "patches": [{"path": "runtime.py", "old": "old", "new": "new"}],
+            "files": [{"path": "helper.py", "content": "VALUE = 1\n"}],
+        },
+        "Apply a surgical runtime fix and add helper.",
+    )
+
+    assert changed == ["runtime.py", "helper.py"]
+    assert target.read_text(encoding="utf-8") == "new\n"
+    assert (tmp_path / "helper.py").read_text(encoding="utf-8") == "VALUE = 1\n"
