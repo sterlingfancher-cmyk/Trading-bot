@@ -88,7 +88,12 @@ def execute(
         section.pop("resilient_ablation_partial", None)
     prior_checkpoint = resumable._matching_checkpoint(section, period, max_symbols)
     prior_partial = section.get("resilient_ablation_partial")
-    can_resume = bool(prior_checkpoint or isinstance(prior_partial, dict))
+    partial_matches = bool(
+        isinstance(prior_partial, dict)
+        and resumable._request_matches(prior_partial, period, max_symbols)
+        and prior_partial.get("engine_version") == lab.VERSION
+    )
+    can_resume = bool(prior_checkpoint or partial_matches)
     section["queued_request"] = {
         "period": period,
         "max_symbols": max_symbols,

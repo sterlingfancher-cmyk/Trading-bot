@@ -63,7 +63,7 @@ class PerformanceAuditV2IsolationTests(unittest.TestCase):
             section["resilient_core_checkpoint"] = {
                 "period": "5y",
                 "max_symbols": 45,
-                "result": {"status": "ok", "profiles": {}},
+                "result": {"status": "ok", "version": lab.VERSION, "profiles": {}},
             }
             core.save_state(core.portfolio)
 
@@ -83,6 +83,16 @@ class PerformanceAuditV2IsolationTests(unittest.TestCase):
                     output=output,
                 )
             self.assertTrue(artifact["request"]["resumed"])
+
+    def test_prior_engine_checkpoint_is_not_resumed(self):
+        section = {
+            "resilient_core_checkpoint": {
+                "period": "5y",
+                "max_symbols": 45,
+                "result": {"status": "ok", "version": "obsolete-engine"},
+            }
+        }
+        self.assertIsNone(resumable._matching_checkpoint(section, "5y", 45))
 
     def test_failure_is_durable_and_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:

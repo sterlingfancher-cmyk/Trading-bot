@@ -61,6 +61,7 @@ PERFORMANCE_EVIDENCE_INTEGRITY_TESTS = (
     "test_issue167_forward_evidence_integrity.py",
     "test_issue170_performance_atr_integrity.py",
     "test_issue193_performance_v2_isolation.py",
+    "test_issue196_performance_validation_evidence.py",
 )
 SYSTEM_SENTINEL_TESTS = (
     "test_system_sentinel.py",
@@ -145,10 +146,12 @@ def _is_performance_evidence_integrity_path(path: str) -> bool:
     return Path(path.lower()).name in {
         "performance_audit_lab.py",
         "performance_audit_lab_v2.py",
+        "performance_validation_evidence.py",
         "performance_audit_v2_offline.py",
         "test_issue167_forward_evidence_integrity.py",
         "test_issue170_performance_atr_integrity.py",
         "test_issue193_performance_v2_isolation.py",
+        "test_issue196_performance_validation_evidence.py",
     }
 
 

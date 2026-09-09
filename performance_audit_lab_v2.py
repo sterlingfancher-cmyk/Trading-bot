@@ -22,11 +22,12 @@ import time
 from typing import Any, Dict, List, Sequence, Tuple
 
 import performance_audit_lab as base
+import performance_validation_evidence as evidence
 
 np = base.np
 pd = base.pd
 
-VERSION = "performance-audit-lab-v2-2026-09-08-v3-symbol-atr-binding"
+VERSION = "performance-audit-lab-v2-2026-09-09-v4-validation-evidence"
 ENABLED = os.environ.get("PERFORMANCE_AUDIT_V2_ENABLED", "true").lower() not in {
     "0", "false", "no", "off"
 }
@@ -39,6 +40,10 @@ STALE_HOURS = float(os.environ.get("PERFORMANCE_AUDIT_V2_STALE_HOURS", "24"))
 WATCHDOG_SECONDS = max(60, int(os.environ.get("PERFORMANCE_AUDIT_V2_WATCHDOG_SECONDS", "600")))
 INITIAL_CAPITAL = float(os.environ.get("PERFORMANCE_AUDIT_INITIAL_CAPITAL", "10000"))
 TRANSACTION_COST_BPS = float(os.environ.get("PERFORMANCE_AUDIT_TRANSACTION_COST_BPS", "8"))
+COST_SENSITIVITY_BPS = evidence.COST_SENSITIVITY_BPS
+DELAY_SENSITIVITY_SESSIONS = evidence.DELAY_SENSITIVITY_SESSIONS
+CAPACITY_PARTICIPATION_LIMIT_PCT = evidence.CAPACITY_PARTICIPATION_LIMIT_PCT
+CAPACITY_STRESS_CAPITALS = evidence.CAPACITY_STRESS_CAPITALS
 
 _LOCK = threading.RLock()
 _RUN_LOCK = threading.Lock()
@@ -329,11 +334,40 @@ def _mark_value(features: Dict[str, Any], symbol: str, date: Any, fallback: floa
     return _f((row or {}).get(field), fallback)
 
 
+def _add_liquidity_features(features: Dict[str, Any]) -> None:
+    evidence.add_liquidity_features(features, pd)
+
+
+def _close_positions_at_end(
+    features: Dict[str, Any],
+    positions: Dict[str, Dict[str, Any]],
+    trades: List[Dict[str, Any]],
+    final_date: Any,
+    cash: float,
+    cost_rate: float,
+) -> float:
+    for symbol, pos in list(positions.items()):
+        close = _mark_value(features, symbol, final_date, _f(pos.get("entry")), "Close")
+        gross = _f(pos.get("shares")) * close
+        fee = gross * cost_rate
+        cash += gross - fee
+        trades.append({
+            "action": "exit", "symbol": symbol, "date": str(final_date)[:10],
+            "price": close, "shares": _f(pos.get("shares")), "gross_notional": gross,
+            "fee": fee, "pnl": gross - fee - _f(pos.get("cost")),
+            "reason": "end_of_test", "entry_regime": pos.get("entry_regime"),
+            "entry_date": pos.get("entry_date"),
+        })
+    return cash
+
+
 def _simulate_next_open(
     features: Dict[str, Any],
     regime_map: Dict[str, Dict[str, Any]],
     dates: Sequence[Any],
     start: float = INITIAL_CAPITAL,
+    transaction_cost_bps: float | None = None,
+    execution_delay_sessions: int = 1,
 ) -> Dict[str, Any]:
     if np is None or len(dates) == 0:
         return {"metrics": {"status": "insufficient_data"}, "trades": [], "equity_curve": []}
@@ -346,15 +380,21 @@ def _simulate_next_open(
     exposure_curve: List[float] = []
     curve_dates: List[Any] = []
     regimes: List[str] = []
-    cost_rate = TRANSACTION_COST_BPS / 10000.0
+    cost_bps = TRANSACTION_COST_BPS if transaction_cost_bps is None else max(
+        0.0, _f(transaction_cost_bps)
+    )
+    cost_rate = cost_bps / 10000.0
+    delay_sessions = max(1, _i(execution_delay_sessions, 1))
 
     for index, date in enumerate(dates):
         today_regime = _regime(features, date)
         policy_today = regime_map.get(today_regime, regime_map.get("neutral", {}))
 
         if pending:
-            pending.sort(key=lambda row: _f(row.get("score")), reverse=True)
-            for order in pending:
+            ready = [order for order in pending if _i(order.get("execute_index"), index) <= index]
+            pending = [order for order in pending if _i(order.get("execute_index"), index) > index]
+            ready.sort(key=lambda row: _f(row.get("score")), reverse=True)
+            for order in ready:
                 order_policy = _d(order.get("policy"))
                 max_positions = _i(order_policy.get("max_positions"), 2)
                 if len(positions) >= max_positions:
@@ -406,11 +446,17 @@ def _simulate_next_open(
                     "entry": price,
                     "shares": shares,
                     "cost": allocation,
+                    "entry_notional": shares * price,
+                    "entry_fee": fee,
+                    "entry_date": str(date)[:10],
                     "stop": price * (1.0 - atr_stop),
                     "age": 0,
                     "policy": order_policy,
                     "entry_regime": order.get("regime"),
+                    "signal_adv20_dollars": _f(order.get("signal_adv20_dollars")),
                 }
+                entry_notional = shares * price
+                signal_adv = _f(order.get("signal_adv20_dollars"))
                 trades.append(
                     {
                         "action": "entry",
@@ -418,15 +464,22 @@ def _simulate_next_open(
                         "signal_date": str(order.get("signal_date"))[:10],
                         "date": str(date)[:10],
                         "price": price,
+                        "shares": shares,
                         "score": order.get("score"),
                         "allocation": allocation,
+                        "gross_notional": entry_notional,
+                        "fee": fee,
                         "regime": order.get("regime"),
                         "execution": "next_session_open",
+                        "execution_delay_sessions": delay_sessions,
                         "signal_atr_pct": signal_atr_pct,
                         "initial_stop_pct": atr_stop,
+                        "signal_adv20_dollars": signal_adv,
+                        "adv_participation_pct": (
+                            entry_notional / signal_adv * 100.0 if signal_adv > 0 else None
+                        ),
                     }
                 )
-        pending = []
 
         for symbol in list(positions):
             pos = positions[symbol]
@@ -462,9 +515,13 @@ def _simulate_next_open(
                         "symbol": symbol,
                         "date": str(date)[:10],
                         "price": exit_price,
+                        "shares": _f(pos.get("shares")),
+                        "gross_notional": gross,
+                        "fee": fee,
                         "pnl": pnl,
                         "reason": reason,
                         "entry_regime": pos.get("entry_regime"),
+                        "entry_date": pos.get("entry_date"),
                     }
                 )
                 del positions[symbol]
@@ -492,9 +549,10 @@ def _simulate_next_open(
         if slots <= 0:
             continue
         allowed = set(policy_today.get("allowed_symbols") or [])
+        pending_symbols = {str(order.get("symbol") or "") for order in pending}
         ranked: List[Tuple[float, str, Dict[str, float]]] = []
         for symbol in features:
-            if symbol in positions or symbol in {"SPY", "QQQ"}:
+            if symbol in positions or symbol in pending_symbols or symbol in {"SPY", "QQQ"}:
                 continue
             if allowed and symbol not in allowed:
                 continue
@@ -512,33 +570,21 @@ def _simulate_next_open(
                     "symbol": symbol,
                     "score": score,
                     "signal_date": date,
+                    "execute_index": index + delay_sessions,
                     "regime": today_regime,
                     "policy": dict(policy_today),
                     "signal_atr_pct": _f(
                         row_data.get("atr_pct"),
                         _f(policy_today.get("stop_loss"), 0.015),
                     ),
+                    "signal_adv20_dollars": _f(row_data.get("adv20_dollars")),
                 }
             )
 
     if dates:
-        final_date = dates[-1]
-        for symbol, pos in list(positions.items()):
-            close = _mark_value(features, symbol, final_date, _f(pos.get("entry")), "Close")
-            gross = _f(pos.get("shares")) * close
-            fee = gross * cost_rate
-            cash += gross - fee
-            trades.append(
-                {
-                    "action": "exit",
-                    "symbol": symbol,
-                    "date": str(final_date)[:10],
-                    "price": close,
-                    "pnl": gross - fee - _f(pos.get("cost")),
-                    "reason": "end_of_test",
-                    "entry_regime": pos.get("entry_regime"),
-                }
-            )
+        cash = _close_positions_at_end(
+            features, positions, trades, dates[-1], cash, cost_rate
+        )
         if curve:
             curve[-1] = cash
 
@@ -557,7 +603,35 @@ def _simulate_next_open(
         "exposure_curve": exposure_curve,
         "regimes": regimes,
         "daily_returns": [float(x) for x in daily_returns],
+        "assumptions": {
+            "transaction_cost_bps_per_side": cost_bps,
+            "execution_delay_sessions": delay_sessions,
+        },
     }
+
+
+def _execution_diagnostics(sim: Dict[str, Any]) -> Dict[str, Any]:
+    return evidence.execution_diagnostics(
+        sim,
+        np=np,
+        initial_capital=INITIAL_CAPITAL,
+    )
+
+
+def _sensitivity_report(
+    features: Dict[str, Any],
+    dates: Sequence[Any],
+    regime_map: Dict[str, Dict[str, Any]],
+    baseline_sim: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    return evidence.sensitivity_report(
+        _simulate_next_open,
+        features,
+        dates,
+        regime_map,
+        baseline_cost_bps=TRANSACTION_COST_BPS,
+        baseline_sim=baseline_sim,
+    )
 
 
 def _slice_metrics(
@@ -838,6 +912,7 @@ def _run_ablation(
             {
                 "variant": name,
                 **metrics,
+                "execution_diagnostics": _execution_diagnostics(sim),
                 "delta_total_return_pct": round(
                     _f(metrics.get("total_return_pct")) - baseline_return, 2
                 ),
@@ -849,12 +924,16 @@ def _run_ablation(
             }
         )
     results.sort(key=lambda row: _f(row.get("objective"), -9999.0), reverse=True)
+    best_name = str(_d(results[0] if results else {}).get("variant") or "")
+    best_map = _ablation_maps().get(best_name)
     return {
         "status": "ok",
         "baseline": "adaptive_baseline",
         "variant_count": len(results),
         "ranking": results,
         "best_variant": results[0] if results else None,
+        "best_variant_sensitivity": _sensitivity_report(features, dates, best_map)
+        if best_map else {"status": "not_available"},
         "interpretation": (
             "Each variant changes one parameter family from the adaptive baseline. "
             "Results remain daily-bar proxies and should be confirmed by forward shadow data."
@@ -871,6 +950,8 @@ def _profile_payload(
     sim = _simulate_next_open(features, regime_map, dates)
     return {
         "full_sample": sim["metrics"],
+        "execution_diagnostics": _execution_diagnostics(sim),
+        "sensitivity": _sensitivity_report(features, dates, regime_map, sim),
         "calendar_years": _calendar_years(sim),
         "regime_report": _regime_report(sim),
         "walk_forward": _walk_forward(
@@ -881,6 +962,13 @@ def _profile_payload(
         ),
         "trade_sample": _l(sim.get("trades"))[-30:],
     }
+
+
+def _validation_verdict(result: Dict[str, Any]) -> Dict[str, Any]:
+    return evidence.validation_verdict(
+        result,
+        profile_names=(*STATIC_PROFILES.keys(), "adaptive_balanced"),
+    )
 
 
 def run(
@@ -926,6 +1014,7 @@ def run(
         symbols = _universe(core, max_symbols)
         frames, provider = base._download(symbols, period)
         features = base._feature_frames(frames)
+        _add_liquidity_features(features)
         dates = base._calendar(features)
         if len(dates) < 315 or len(features) < 10:
             result = {
@@ -1049,7 +1138,11 @@ def run(
             },
             "methodology": {
                 "execution_assumption": "signals_at_close_entries_next_session_open",
-                "transaction_cost_bps": TRANSACTION_COST_BPS,
+                "transaction_cost_bps_per_side": TRANSACTION_COST_BPS,
+                "transaction_cost_sensitivity_bps_per_side": list(COST_SENSITIVITY_BPS),
+                "execution_delay_sensitivity_sessions": list(DELAY_SENSITIVITY_SESSIONS),
+                "capacity_participation_limit_pct_of_signal_adv20": CAPACITY_PARTICIPATION_LIMIT_PCT,
+                "capacity_stress_account_capitals": list(CAPACITY_STRESS_CAPITALS),
                 "full_history_walk_forward": True,
                 "walk_forward_train_days": 252,
                 "walk_forward_test_days": 63,
@@ -1090,6 +1183,7 @@ def run(
                 "places_orders": False,
             },
         }
+        result["validation_evidence"] = _validation_verdict(result)
         runs[key] = result
         section["latest_key"] = key
         section["latest"] = result
