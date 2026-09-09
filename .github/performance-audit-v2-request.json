@@ -1,5 +1,5 @@
 {
-  "request_id": "baseline-2026-09-09-v4-issue202-stage1",
+  "request_id": "baseline-2026-09-09-v5-issue202-stage2-forward-shadow",
   "period": "5y",
   "max_symbols": 45,
   "include_ablation": true,
