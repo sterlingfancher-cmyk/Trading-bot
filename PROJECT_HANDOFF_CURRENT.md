@@ -798,3 +798,54 @@ No strategy, signal, ranking, selection, sizing, exposure, stop, exit, hard-risk
 limit, canonical/accounting/history, state/day-peak, live, ML, AI, or order
 authority changed. Issue #193 is closed; Issue #196 is the active bounded
 performance-research item.
+
+## 2026-09-08 Issue #198 — V2 Per-Symbol ATR Binding — COMPLETE
+
+Post-baseline code review found that `_simulate_next_open()` queued each selected
+candidate with `signal_atr_pct` from the final universe-scan row rather than the
+selected candidate's own row. The first Issue #193 artifact remains immutable,
+but its results are quarantined from candidate selection because per-symbol stop
+distances were therefore not trustworthy.
+
+PR #199 changed only that binding, added a two-symbol regression proving distinct
+signal ATR values survive ranking and next-open stop construction, and advanced
+the bounded isolated-research request. All four required exact-head gates passed
+on `bb5d0181d5af152e246fe34399f827cf19c5294a`; the PR was squash-merged as
+`0d38d4590cfee0e16bd15acd031991e053322bc6`. Post-merge main gates also passed.
+
+Isolated workflow run `34290415322` completed successfully and produced corrected
+artifact `performance-audit-v2-evidence` (`10081194751`) with digest
+`sha256:4333b2783d3348d4cb093080aa466ccd56f40f836a75704b044d6c1606e179ef`.
+It is bound to the merge commit and covers the same 1,254 sessions, 2021-09-09
+through 2026-09-08, and all 45 requested symbols with no provider errors.
+
+The correction materially changed the research conclusions:
+- current-policy proxy: +65.03% total return, 10.59% CAGR, 25.40% maximum
+  drawdown, 0.618 Sharpe, and 479 trades; rolling out-of-sample return +146.00%,
+  OOS Sharpe 1.288, and 73.33% positive folds;
+- adaptive-balanced: +95.90% total return, 14.47% CAGR, 25.49% maximum drawdown,
+  0.726 Sharpe, and 650 trades; rolling OOS return +213.91%, OOS Sharpe 1.399,
+  and 73.33% positive folds;
+- balanced-static: +194.58% total return, 24.25% CAGR, 25.35% maximum drawdown,
+  0.955 Sharpe, and 773 trades;
+- permissive: +319.71% total return, 33.41% CAGR, 31.56% maximum drawdown,
+  1.086 Sharpe, and 1,160 trades.
+
+The best full-sample one-variable ablation changed from `max_positions_2` to
+`hold_10d`: +136.28% total return, 20.89% maximum drawdown, 0.887 Sharpe,
+626 trades, and 31.22% average exposure. This is not a promotion decision.
+Issue #196 still requires multi-cost/slippage, turnover and traded-notional,
+concentration, capacity/liquidity, and delayed-execution evidence before a single
+candidate can advance to forward shadow testing.
+
+Fresh settled Splendid evidence after deployment remains clean: ready/delegating,
+11/11 endpoints reachable, self-check pass, daily audit pass, flat account at
+approximately `13412.285098 / 13412.29` cash/equity, zero accounting coverage or
+economic issues, 71-row hash-valid canonical ledger, released v4 validation,
+healthy runner and market data, and no halt or self-defense. Production V2 remains
+disabled/not-run as required; only the isolated artifact holds this research.
+
+No production strategy, signal, selection, sizing, exposure, stop, exit, risk
+limit, canonical/accounting/history, state/day-peak, live, AI/ML, broker, or order
+authority changed. Issue #198 is closed; Issue #196 remains the active performance
+evidence-integrity stage.
