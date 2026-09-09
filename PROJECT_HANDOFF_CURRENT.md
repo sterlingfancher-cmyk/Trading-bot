@@ -1,11 +1,13 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-03 09:34 CDT
+Last updated: 2026-09-09 03:45 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `e7bdced96ac17b781b6c76df9c34ab159c5498ea` (PR #171).
-Active stability/accounting/runtime issue: none. Active improvement issue: #157 (shadow-only AI research/adversarial subsystem).
+Validated runtime-code `main`: `7c79bbf15e6d7a2b7de15919b101caf8a0a24ccc` (PR #206).
+Active stability/accounting/runtime issue: none. Active improvement issue: #202
+(`hold_10d` read-only forward-shadow validation). Issue #157 infrastructure is
+complete; external AI provider activation remains a separate bounded decision.
 
 ## Communication and Continuity
 
@@ -944,3 +946,41 @@ No production strategy, signal, ranking, selection, sizing, exposure, stop, exit
 hold period, hard-risk limit, canonical/accounting/history, state/day-peak, live,
 AI/ML, broker, or order authority changed. Issue #202 remains open for Stage 2:
 a read-only forward-shadow exit comparator with predeclared promotion criteria.
+
+## 2026-09-09 Issue #202 Stage 2 — Frozen Forward-Shadow Comparator — ACTIVE
+
+PR #206 added the isolated forward-shadow comparator for the already-selected
+`hold_10d` candidate. The candidate, observation boundary, costs, matching rules,
+and all acceptance criteria were frozen before any forward observation could
+influence them. All four required exact-head gates passed on
+`207f40278ac14960c7252e9af7205c3e2a223a28`; PR #206 was squash-merged as
+`7c79bbf15e6d7a2b7de15919b101caf8a0a24ccc`.
+
+The frozen contract requires at least 100 exact matched completed lifecycles, 30
+genuine exit divergences, 60 forward sessions across three calendar months, 20
+neutral entries, 20 defensive/risk-off entries, at least 60% exact pairing
+coverage, no symbol above 25%, positive mean net delta at 8 bps per side,
+nonnegative mean net delta at 25 bps, and nonnegative neutral and
+defensive/risk-off deltas. Malformed, ambiguous, contradictory, overlapping, or
+concentrated evidence fails closed. Automatic promotion is impossible.
+
+The comparator fully recomputes evidence from preserved V2 simulation rows. It
+has no production import, worker, provider call, state/file write, broker/order
+path, exit blocker, risk/strategy authority, AI/ML authority, or automatic
+promotion path. The production holding period remains unchanged.
+
+Settled authoritative Splendid acceptance on the merge commit passes: sentinel
+`quiet/pass` with zero incidents or collection errors; self-check and daily audit
+pass; the account is flat at approximately `13412.285098 / 13412.29`
+cash/equity; accounting has zero coverage/economic issues; the canonical ledger
+is append-only and hash-valid at 71 rows / 25 current-v4 rows; v4 validation is
+released; startup, runner, market data, valuation, and risk are healthy with no
+halt or active runner error.
+
+The engine-version change correctly invalidated stale persisted V2 results on
+Splendid, whose read-only status is now `not_run`. Do not use the production web
+route to rebuild them. The next bounded step is a fresh five-year, 45-symbol
+isolated workflow run, then collection of forward observations under the frozen
+contract. Until the sample, duration, regime, coverage, concentration, and
+economic gates all pass, Issue #202 remains open and the candidate remains
+research-only.
