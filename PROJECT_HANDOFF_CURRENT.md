@@ -849,3 +849,55 @@ No production strategy, signal, selection, sizing, exposure, stop, exit, risk
 limit, canonical/accounting/history, state/day-peak, live, AI/ML, broker, or order
 authority changed. Issue #198 is closed; Issue #196 remains the active performance
 evidence-integrity stage.
+
+## 2026-09-08 Issue #196 — V2 Validation Evidence and Candidate Selection — COMPLETE
+
+PR #201 added the previously missing offline validation evidence: per-side cost
+sensitivity at 4/8/15/25 bps, one/two/three-session delayed-open execution,
+turnover and gross traded notional, signal-time 20-session average-dollar-volume
+capacity stress, symbol and sector-group contribution concentration, and a
+fail-closed evidence-completeness verdict. It also rejects stale-engine resumable
+checkpoints and makes the focused Issue #196 suite mandatory in Change Safety.
+The work has no broker, order, paper-runner, production-worker, state, or trading
+authority. All four exact-head gates passed on
+`258f8dab5e65627ebeef13861afaa301c17442a1`; PR #201 was squash-merged as
+`8df2deb420df58e505408f45942b89ca4b01b7f1`.
+
+Isolated workflow run `34309177709` completed successfully and produced artifact
+`performance-audit-v2-evidence` (`10087800214`), locally verified as
+`sha256:0f354314f1fde9456ce98be79c3c0e79dbc8f45c97d1b2f6073599e32ec5a795`.
+It is bound to the merge commit and covers all 45 requested symbols and 1,254
+sessions from 2021-09-09 through 2026-09-08. The evidence verdict is complete,
+its missing list is empty, and automatic promotion remains false.
+
+The adaptive baseline remains +95.89% total return, 14.47% CAGR, 25.49% maximum
+drawdown, 0.726 Sharpe, and 650 trades. Its modeled 8-bps-per-side fees are
+`$1,707.16` and annualized turnover is `35.318x`. The highest-value one-variable
+candidate remains `hold_10d`: +136.28% return, 18.86% CAGR, 20.89% maximum
+drawdown, 0.887 Sharpe, 626 trades, `$1,761.19` modeled fees, and `34.191x`
+annualized turnover.
+
+The candidate remains profitable under the bounded stresses: at 25 bps per side
+it reports +78.21% return, 12.31% CAGR, 22.45% maximum drawdown, and 0.630
+Sharpe; two- and three-session delayed execution report +231.55% and +158.29%
+respectively. At `$10,000`, no entry exceeds the 1% ADV participation limit.
+The worst historical entry estimates capacity near `$38,384.59` before crossing
+that limit; three of 626 entries exceed it at `$100,000` and 30 at `$1,000,000`.
+
+Concentration is material and prevents casual promotion: MU contributes 19.55%
+of absolute symbol P&L; semiconductors contribute 37.58% of absolute sector-group
+P&L; semiconductors plus crypto equities contribute 61.82%. `hold_10d` is selected
+only as the next research candidate. Issue #202 owns candidate-specific rolling
+walk-forward/untouched-holdout, calendar, regime, concentration/capacity, and
+forward-shadow exit-counterfactual validation. No runtime hold period changed.
+
+Fresh settled Splendid evidence after deployment passes: ready/delegating,
+self-check and daily audit pass, flat cash/equity approximately
+`13412.285098 / 13412.29`, zero accounting coverage/economic issues, 71-row
+hash-valid canonical ledger, released v4 validation, healthy runner/market data/
+risk, and no halt or self-defense. Production V2 remains disabled/not-run.
+
+No production strategy, signal, ranking, selection, sizing, exposure, stop, exit,
+hard-risk limit, canonical/accounting/history, state/day-peak, live, AI/ML,
+broker, or order authority changed. Issue #196 is complete; Issue #202 is the
+active bounded performance-validation stage.
