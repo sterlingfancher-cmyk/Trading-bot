@@ -1033,3 +1033,33 @@ No production holding period, exit, signal, sizing, risk, state, canonical
 history, broker, live, AI/ML, or order authority changed. Issue #208 is closed;
 Issue #202 remains open while genuine forward observations accumulate.
 
+## 2026-09-09 Issues #212/#214 — Runner-Liveness Observability Repair — COMPLETE
+
+Intraday read-only checks demonstrated that compact self-check and daily audit
+could trust persisted `thread_started=true` after automatic-attempt telemetry
+became stale. PR #213 made both surfaces fail closed after the configured
+freshness window and added them to the mandatory Change Safety regression
+selection. All four exact-head gates passed; it was squash-merged as
+`7eeaa3208b5297216a5f98c917bc4324aa1aa489`.
+
+Settled validation then showed a distinct telemetry path: the canonical cycle
+completion contract continued recording healthy automatic completions while the
+older attempt/run fields lagged. PRs #215 and #216 made the newest causally
+automatic attempt, run, success, skip, or cycle-completion timestamp the bounded
+liveness evidence, while retaining the stale/no-evidence failure. Focused
+regressions cover both read-only audit surfaces. Every required exact-head gate
+passed on both repairs; the final merge is
+`eeedc4655e780a438704b88e4ea8fea5944427e7`.
+
+Settled Splendid acceptance on the final commit passes: sentinel `quiet/pass`
+with zero incidents or collection errors; self-check `pass` with
+`liveness_evidence=cycle_completion`; daily audit 11/11; a fresh completed
+automatic cycle; zero accounting coverage/economic issues; 71-row hash-valid
+canonical ledger / 25 current-v4 rows; released v4 validation; healthy startup,
+market data, valuation, and risk; and no halt or self-defense.
+
+The frozen `hold_10d` forward-shadow program remains research-only and unchanged.
+AI review remains disabled with zero observations. No strategy, signal, ranking,
+selection, sizing, exposure, stop, exit, hold period, hard-risk limit,
+canonical/accounting/history, state/day-peak, broker, live, AI/ML, or order
+authority changed.
