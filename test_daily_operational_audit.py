@@ -100,6 +100,23 @@ class DailyOperationalAuditTests(unittest.TestCase):
         self.assertTrue(row["reported_started"])
         self.assertEqual(row["state"], "stale_auto_attempt")
 
+    def test_fresh_auto_completion_proves_liveness_after_stale_attempt(self) -> None:
+        row = audit._runner_liveness(
+            {
+                "thread_started": True,
+                "interval_seconds": 300,
+                "last_attempt_ts": 1_000.0,
+                "last_attempt_source": "auto",
+                "last_successful_run_ts": 1_950.0,
+                "last_successful_run_source": "auto",
+            },
+            now_epoch=2_000.0,
+        )
+        self.assertTrue(row["active"])
+        self.assertTrue(row["recent_auto_completion"])
+        self.assertEqual(row["liveness_evidence"], "success")
+        self.assertEqual(row["state"], "inferred_from_recent_auto_completion")
+
     def test_curated_audit_has_exactly_thirteen_bounded_sections_after_integrity_overlay(self) -> None:
         core = self._core()
         composition = {
