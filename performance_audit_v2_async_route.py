@@ -18,7 +18,7 @@ from typing import Any, Dict
 
 import performance_audit_lab_v2 as lab
 
-VERSION = "performance-audit-v2-resumable-route-2026-08-03-v2"
+VERSION = "performance-audit-v2-resumable-route-2026-09-09-v3-evidence"
 
 _LOCK = threading.RLock()
 _REGISTERED: set[int] = set()
@@ -160,6 +160,7 @@ def _ablation_row(
     return {
         "variant": name,
         **metrics,
+        "execution_diagnostics": lab._execution_diagnostics(sim),
         "delta_total_return_pct": round(
             _f(metrics.get("total_return_pct"))
             - _f(baseline_metrics.get("total_return_pct")),
@@ -190,6 +191,7 @@ def _run_resumable_ablation(
     symbols = lab._universe(core, max_symbols)
     frames, provider = lab.base._download(symbols, period)
     features = lab.base._feature_frames(frames)
+    lab._add_liquidity_features(features)
     dates = list(lab.base._calendar(features))
     if len(dates) < 315 or len(features) < 10:
         return {
@@ -205,10 +207,14 @@ def _run_resumable_ablation(
     variants = lab._ablation_maps()
 
     partial = _d(section.get("resilient_ablation_partial"))
-    if not _request_matches(partial, period, max_symbols):
+    if (
+        not _request_matches(partial, period, max_symbols)
+        or partial.get("engine_version") != lab.VERSION
+    ):
         partial = {
             "period": period,
             "max_symbols": max_symbols,
+            "engine_version": lab.VERSION,
             "results": {},
             "started_local": _now(core),
         }
@@ -249,12 +255,17 @@ def _run_resumable_ablation(
 
     ranking = list(completed.values())
     ranking.sort(key=lambda row: _f(_d(row).get("objective"), -9999.0), reverse=True)
+    best_name = str(_d(ranking[0] if ranking else {}).get("variant") or "")
+    best_map = variants.get(best_name)
     return {
         "status": "ok",
         "baseline": "adaptive_baseline",
         "variant_count": len(ranking),
         "ranking": ranking,
         "best_variant": ranking[0] if ranking else None,
+        "best_variant_sensitivity": lab._sensitivity_report(
+            features, dates, best_map
+        ) if best_map else {"status": "not_available"},
         "interpretation": (
             "Each variant changes one parameter family from the adaptive baseline. "
             "Results remain daily-bar proxies and require forward-shadow confirmation."
@@ -270,6 +281,7 @@ def _matching_checkpoint(
     if (
         _request_matches(checkpoint, period, max_symbols)
         and result.get("status") == "ok"
+        and result.get("version") == lab.VERSION
     ):
         return copy.deepcopy(result)
     return None
@@ -350,6 +362,7 @@ def _background_run(
         final_result["generated_local"] = _now(core)
         final_result["generated_epoch"] = time.time()
         final_result["resumable_runner_version"] = VERSION
+        final_result["validation_evidence"] = lab._validation_verdict(final_result)
 
         section = lab._section(core)
         runs = section.setdefault("runs", {})
