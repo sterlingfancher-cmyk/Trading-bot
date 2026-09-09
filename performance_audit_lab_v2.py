@@ -28,7 +28,7 @@ import hold_period_forward_shadow as hold_shadow
 np = base.np
 pd = base.pd
 
-VERSION = "performance-audit-lab-v2-2026-09-09-v6-hold-forward-shadow"
+VERSION = "performance-audit-lab-v2-2026-09-09-v7-frozen-candidate-binding"
 ENABLED = os.environ.get("PERFORMANCE_AUDIT_V2_ENABLED", "true").lower() not in {
     "0", "false", "no", "off"
 }
