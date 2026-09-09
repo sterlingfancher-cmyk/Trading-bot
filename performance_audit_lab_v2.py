@@ -27,7 +27,7 @@ import performance_validation_evidence as evidence
 np = base.np
 pd = base.pd
 
-VERSION = "performance-audit-lab-v2-2026-09-09-v4-validation-evidence"
+VERSION = "performance-audit-lab-v2-2026-09-09-v5-candidate-validation"
 ENABLED = os.environ.get("PERFORMANCE_AUDIT_V2_ENABLED", "true").lower() not in {
     "0", "false", "no", "off"
 }
@@ -926,17 +926,57 @@ def _run_ablation(
     results.sort(key=lambda row: _f(row.get("objective"), -9999.0), reverse=True)
     best_name = str(_d(results[0] if results else {}).get("variant") or "")
     best_map = _ablation_maps().get(best_name)
+    candidate_validation = _candidate_validation(features, dates, best_map)
     return {
         "status": "ok",
         "baseline": "adaptive_baseline",
         "variant_count": len(results),
         "ranking": results,
         "best_variant": results[0] if results else None,
-        "best_variant_sensitivity": _sensitivity_report(features, dates, best_map)
-        if best_map else {"status": "not_available"},
+        "best_variant_sensitivity": _d(candidate_validation.get("sensitivity")),
+        "best_variant_validation": candidate_validation,
         "interpretation": (
             "Each variant changes one parameter family from the adaptive baseline. "
             "Results remain daily-bar proxies and should be confirmed by forward shadow data."
+        ),
+    }
+
+
+def _candidate_validation(
+    features: Dict[str, Any],
+    dates: Sequence[Any],
+    regime_map: Dict[str, Dict[str, Any]] | None,
+) -> Dict[str, Any]:
+    if not regime_map:
+        return {"status": "not_available", "automatic_promotion": False}
+    sim = _simulate_next_open(features, regime_map, dates)
+    walk_forward = _walk_forward(features, regime_map, dates, optimize=False)
+    calendar = _calendar_years(sim)
+    regimes = _regime_report(sim)
+    diagnostics = _execution_diagnostics(sim)
+    sensitivity = _sensitivity_report(features, dates, regime_map, sim)
+    complete = (
+        diagnostics.get("status") == "complete"
+        and sensitivity.get("status") == "complete"
+        and walk_forward.get("status") == "complete"
+        and bool(calendar)
+        and bool(regimes)
+    )
+    return {
+        "status": "complete" if complete else "incomplete",
+        "full_sample": sim.get("metrics"),
+        "execution_diagnostics": diagnostics,
+        "sensitivity": sensitivity,
+        "calendar_years": calendar,
+        "regime_report": regimes,
+        "walk_forward": walk_forward,
+        "candidate_selected_on_full_sample": True,
+        "untouched_holdout_after_selection": False,
+        "requires_forward_shadow_confirmation": True,
+        "automatic_promotion": False,
+        "warning": (
+            "Rolling folds test temporal robustness, but the candidate was selected "
+            "after inspecting this history. Forward shadow evidence remains required."
         ),
     }
 
