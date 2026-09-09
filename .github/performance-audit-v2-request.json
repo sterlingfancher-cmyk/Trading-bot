@@ -1,5 +1,5 @@
 {
-  "request_id": "baseline-2026-09-09-v5-issue202-stage2-forward-shadow",
+  "request_id": "baseline-2026-09-09-v6-issue208-frozen-binding-repair",
   "period": "5y",
   "max_symbols": 45,
   "include_ablation": true,
