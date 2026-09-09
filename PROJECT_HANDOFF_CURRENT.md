@@ -901,3 +901,46 @@ No production strategy, signal, ranking, selection, sizing, exposure, stop, exit
 hard-risk limit, canonical/accounting/history, state/day-peak, live, AI/ML,
 broker, or order authority changed. Issue #196 is complete; Issue #202 is the
 active bounded performance-validation stage.
+
+## 2026-09-08 Issue #202 Stage 1 — Candidate-Specific Historical Validation — COMPLETE
+
+PR #204 added dedicated historical validation for the selected `hold_10d`
+candidate: fixed-policy rolling walk-forward, calendar-year and regime reports,
+plus its existing cost/delay, turnover, capacity, and concentration diagnostics.
+The evidence explicitly records that the candidate was selected after inspecting
+the full history, so there is no untouched post-selection holdout. Forward shadow
+confirmation remains mandatory and automatic promotion remains impossible. Two
+focused regressions were added to the mandatory performance-evidence suite.
+
+All four exact-head gates passed on
+`afa885a11a31ae4625a9025804a9f8e06a9d95a0`; PR #204 was squash-merged as
+`99299c0b00f6baba2a5d0d2b5a06a0d6073e3a47`. Isolated workflow run
+`34310508489` completed successfully and produced artifact
+`performance-audit-v2-evidence` (`10088262578`), locally verified as
+`sha256:b48f8a8983065154186510c2a1f7243cafc5888c2358b96ed4cf75b50229cbc6`.
+It covers all 45 requested symbols and 1,254 sessions from 2021-09-09 through
+2026-09-08 with a complete candidate-historical-validation verdict and empty
+missing list.
+
+The candidate's full-sample result remains +136.28% total return, 18.86% CAGR,
+20.89% maximum drawdown, 0.887 Sharpe, and 626 trades. Its fixed-policy rolling
+walk-forward report formally passes: 15 folds, 10 positive folds (66.67%),
++236.32% combined OOS return, 1.486 OOS Sharpe, 23.20% combined OOS drawdown,
+and 16.20% worst-fold drawdown. Calendar results are negative in partial 2021
+and 2022, then positive in 2023-2026.
+
+Regime weakness remains material: constructive -4.87%, defensive -35.13%, and
+neutral -24.29%, versus risk-off +2.67%, risk-on +233.05%, and strong-risk-on
++47.90%. This reinforces the need for representative forward evidence and bars
+any direct promotion from the historical result.
+
+Fresh settled Splendid evidence after deployment passes: ready/delegating,
+self-check and daily audit pass, flat cash/equity approximately
+`13412.285098 / 13412.29`, zero accounting coverage/economic issues, 71-row
+hash-valid canonical ledger, released v4 validation, healthy runner/market data/
+risk, and no halt or self-defense. Production V2 remains disabled/not-run.
+
+No production strategy, signal, ranking, selection, sizing, exposure, stop, exit,
+hold period, hard-risk limit, canonical/accounting/history, state/day-peak, live,
+AI/ML, broker, or order authority changed. Issue #202 remains open for Stage 2:
+a read-only forward-shadow exit comparator with predeclared promotion criteria.
