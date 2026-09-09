@@ -86,6 +86,23 @@ class SelfCheckRuntimeClassificationTests(unittest.TestCase):
         self.assertEqual(row["liveness_evidence"], "success")
         self.assertEqual(row["state"], "inferred_from_recent_auto_completion")
 
+    def test_cycle_contract_completion_proves_liveness(self) -> None:
+        row = self_check._runner_liveness(
+            {
+                "thread_started": True,
+                "interval_seconds": 300,
+                "last_attempt_ts": 100.0,
+                "last_attempt_source": "auto",
+                "last_completed_cycle_ts": 990.0,
+                "last_completed_cycle_source": "auto",
+            },
+            now_epoch=1000.0,
+        )
+        self.assertTrue(row["active"])
+        self.assertTrue(row["recent_auto_completion"])
+        self.assertEqual(row["liveness_evidence"], "cycle_completion")
+        self.assertEqual(row["state"], "inferred_from_recent_auto_completion")
+
     def test_isolated_not_run_research_is_deferred_not_failed(self) -> None:
         components, deferred = self_check._normalize_advisory_components(
             {
