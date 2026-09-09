@@ -18,7 +18,7 @@ from typing import Any, Dict
 
 import performance_audit_lab_v2 as lab
 
-VERSION = "performance-audit-v2-resumable-route-2026-09-09-v5-hold-forward-shadow"
+VERSION = "performance-audit-v2-resumable-route-2026-09-09-v6-frozen-candidate-binding"
 
 _LOCK = threading.RLock()
 _REGISTERED: set[int] = set()
@@ -256,16 +256,40 @@ def _run_resumable_ablation(
     ranking = list(completed.values())
     ranking.sort(key=lambda row: _f(_d(row).get("objective"), -9999.0), reverse=True)
     best_name = str(_d(ranking[0] if ranking else {}).get("variant") or "")
-    best_map = variants.get(best_name)
-    candidate_validation = lab._candidate_validation(features, dates, best_map)
+    candidate_name = lab.hold_shadow.CANDIDATE_ID
+    candidate_map = variants.get(candidate_name)
+    if candidate_map is None:
+        return {
+            "status": "error",
+            "reason": "frozen_candidate_map_missing",
+            "candidate_id": candidate_name,
+            "automatic_promotion": False,
+        }
+    baseline_simulation = lab._simulate_next_open(
+        features,
+        copy.deepcopy(lab.ADAPTIVE_REGIMES),
+        dates,
+    )
+    candidate_validation = lab._candidate_validation(
+        features,
+        dates,
+        candidate_map,
+        baseline_simulation=baseline_simulation,
+    )
     return {
         "status": "ok",
         "baseline": "adaptive_baseline",
         "variant_count": len(ranking),
         "ranking": ranking,
         "best_variant": ranking[0] if ranking else None,
+        "selected_candidate": candidate_name,
+        "selection_frozen_date": lab.hold_shadow.FREEZE_DATE,
+        "selected_candidate_sensitivity": _d(candidate_validation.get("sensitivity")),
+        "selected_candidate_validation": candidate_validation,
+        # Backward-compatible aliases retained for existing evidence readers.
         "best_variant_sensitivity": _d(candidate_validation.get("sensitivity")),
         "best_variant_validation": candidate_validation,
+        "current_full_sample_best_variant": best_name,
         "interpretation": (
             "Each variant changes one parameter family from the adaptive baseline. "
             "Results remain daily-bar proxies and require forward-shadow confirmation."
