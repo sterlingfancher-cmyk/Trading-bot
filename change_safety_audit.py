@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-08-25-v11-issue82-successor-epoch"
+VERSION = "change-safety-audit-2026-09-09-v12-runner-liveness"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -26,6 +26,7 @@ CORE_TESTS = (
 RUNTIME_TESTS = (
     "test_runtime_shadow_capture.py",
     "test_self_check_runtime_classification.py",
+    "test_daily_operational_audit.py",
 )
 STATE_TESTS = ("test_state_store_stage_c.py",)
 DECISION_TESTS = ("test_shadow_decision_stage_d.py",)
@@ -203,6 +204,9 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
         if _is_runtime_research_snapshot_path(path):
             categories.add("runtime_observability")
             boundaries.add("runtime_observability")
+        if "self_check" in path or "operational_audit" in path:
+            categories.add("runtime_observability")
+            boundaries.add("runtime_observability")
         if "risk" in path:
             categories.add("risk")
             boundaries.add("risk")
@@ -224,7 +228,11 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
     path_tuple = tuple(paths)
     categories, _ = classify_paths(path_tuple)
     tests: list[str] = list(CORE_TESTS)
-    if "runtime_composition" in categories or "workflow" in categories:
+    if (
+        "runtime_composition" in categories
+        or "runtime_observability" in categories
+        or "workflow" in categories
+    ):
         tests.extend(RUNTIME_TESTS)
     if "state_persistence" in categories:
         tests.extend(STATE_TESTS)

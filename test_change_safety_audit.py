@@ -6,6 +6,11 @@ from change_safety_audit import classify_paths, evaluate_gate, planned_regressio
 
 
 class ChangeSafetyAuditTests(unittest.TestCase):
+    def test_runner_observability_change_selects_runtime_audits(self) -> None:
+        tests = planned_regressions(("fast_self_check_override.py",))
+        self.assertIn("test_self_check_runtime_classification.py", tests)
+        self.assertIn("test_daily_operational_audit.py", tests)
+
     def test_seeded_breaking_regression_is_blocked(self) -> None:
         decision = evaluate_gate(
             expected_head="abc123",

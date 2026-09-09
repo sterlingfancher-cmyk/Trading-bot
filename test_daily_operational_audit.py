@@ -86,6 +86,20 @@ class DailyOperationalAuditTests(unittest.TestCase):
             },
         }
 
+    def test_persisted_started_flag_cannot_override_stale_attempt(self) -> None:
+        row = audit._runner_liveness(
+            {
+                "thread_started": True,
+                "interval_seconds": 300,
+                "last_attempt_ts": 1_000.0,
+                "last_attempt_source": "auto",
+            },
+            now_epoch=2_000.0,
+        )
+        self.assertFalse(row["active"])
+        self.assertTrue(row["reported_started"])
+        self.assertEqual(row["state"], "stale_auto_attempt")
+
     def test_curated_audit_has_exactly_thirteen_bounded_sections_after_integrity_overlay(self) -> None:
         core = self._core()
         composition = {

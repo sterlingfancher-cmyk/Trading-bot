@@ -93,17 +93,23 @@ def _runner_liveness(auto: Dict[str, Any], now_epoch: float | None = None) -> Di
         and age <= freshness_window
     )
     reported_started = auto.get("thread_started") is True
-    active = bool(reported_started or recent_auto_attempt)
-    if reported_started:
-        state = "reported_started"
-    elif recent_auto_attempt:
+    attempt_observed = attempt_epoch > 0.0
+    startup_report_only = bool(reported_started and not attempt_observed)
+    active = bool(recent_auto_attempt or startup_report_only)
+    if recent_auto_attempt:
         state = "inferred_from_recent_auto_attempt"
+    elif startup_report_only:
+        state = "reported_started_before_first_attempt"
+    elif attempt_observed:
+        state = "stale_auto_attempt"
     else:
         state = "not_observed"
     return {
         "active": active,
         "state": state,
         "reported_started": reported_started,
+        "attempt_observed": attempt_observed,
+        "startup_report_only": startup_report_only,
         "recent_auto_attempt": recent_auto_attempt,
         "last_attempt_age_seconds": round(age, 1) if age is not None else None,
         "freshness_window_seconds": round(freshness_window, 1),
