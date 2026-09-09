@@ -1063,3 +1063,30 @@ AI review remains disabled with zero observations. No strategy, signal, ranking,
 selection, sizing, exposure, stop, exit, hold period, hard-risk limit,
 canonical/accounting/history, state/day-peak, broker, live, AI/ML, or order
 authority changed.
+
+## 2026-09-09 Issue #202 Stage 2 — First Forward Session Captured
+
+After the first complete post-freeze market session, PR #218 advanced only the
+isolated resumable request from verified workflow \`34333382201\`. Its exact-head
+Change Safety gate passed and it was squash-merged as
+\`545cb7d137adbecb357756461ace40d28fef2958\`. No duplicate research job was
+active and production V2 remained disabled/not-run.
+
+Isolated workflow \`34406640570\` completed successfully. Artifact
+\`performance-audit-v2-evidence\` (\`10125603352\`), digest
+\`sha256:72444be86f5199be94004819793f3fa8d972e36d047ff567b68953722e2debb7\`,
+is bound to that main commit and preserves the isolated boundary: no production
+web worker, paper runner, broker access, or order authority.
+
+The frozen \`hold_10d\` report now records one available forward session
+(\`2026-09-09\`), zero exact matched completed lifecycles, zero exit divergences,
+and no integrity errors. This is expected before any frozen-policy lifecycle can
+complete. Status remains \`collecting\`; every sample, duration, regime, pairing,
+concentration, cost, and stress promotion gate remains unsatisfied, and automatic
+promotion remains disabled.
+
+Settled Splendid acceptance on the request merge passes: sentinel \`quiet/pass\`,
+self-check pass, daily audit 11/11, healthy automatic after-hours skip evidence,
+zero accounting issues, 71-row hash-valid canonical ledger / 25 current-v4 rows,
+released v4 validation, healthy market data and risk, and no halt or self-defense.
+No production trading behavior or authority changed.
