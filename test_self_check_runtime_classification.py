@@ -40,7 +40,33 @@ class SelfCheckRuntimeClassificationTests(unittest.TestCase):
             now_epoch=2_000.0,
         )
         self.assertFalse(row["active"])
-        self.assertEqual(row["state"], "not_observed")
+        self.assertEqual(row["state"], "stale_auto_attempt")
+
+    def test_persisted_started_flag_cannot_override_stale_attempt(self) -> None:
+        row = self_check._runner_liveness(
+            {
+                "thread_started": True,
+                "interval_seconds": 300,
+                "last_attempt_ts": 1_000.0,
+                "last_attempt_source": "auto",
+            },
+            now_epoch=2_000.0,
+        )
+        self.assertFalse(row["active"])
+        self.assertTrue(row["reported_started"])
+        self.assertTrue(row["attempt_observed"])
+        self.assertFalse(row["startup_report_only"])
+        self.assertEqual(row["state"], "stale_auto_attempt")
+
+    def test_reported_started_covers_only_pre_attempt_startup(self) -> None:
+        row = self_check._runner_liveness(
+            {"thread_started": True, "interval_seconds": 300},
+            now_epoch=2_000.0,
+        )
+        self.assertTrue(row["active"])
+        self.assertFalse(row["attempt_observed"])
+        self.assertTrue(row["startup_report_only"])
+        self.assertEqual(row["state"], "reported_started_before_first_attempt")
 
     def test_isolated_not_run_research_is_deferred_not_failed(self) -> None:
         components, deferred = self_check._normalize_advisory_components(
