@@ -1,0 +1,34 @@
+{
+  "version": "hold-period-forward-shadow-2026-09-09-v1-frozen-contract",
+  "candidate_id": "hold_10d",
+  "baseline_id": "adaptive_baseline",
+  "freeze_date": "2026-09-09",
+  "candidate_frozen_before_observation": true,
+  "transaction_cost_bps_per_side": 8.0,
+  "stress_cost_bps_per_side": 25.0,
+  "criteria": {
+    "minimum_exact_matched_completed_lifecycles": 100,
+    "minimum_exit_divergences": 30,
+    "minimum_forward_sessions": 60,
+    "minimum_calendar_months": 3,
+    "minimum_neutral_entries": 20,
+    "minimum_defensive_or_risk_off_entries": 20,
+    "minimum_exact_pairing_coverage_pct": 60.0,
+    "maximum_single_symbol_share_pct": 25.0,
+    "minimum_mean_return_delta_pct_at_8bps": 0.0,
+    "minimum_mean_return_delta_pct_at_25bps": 0.0,
+    "require_nonnegative_neutral_delta": true,
+    "require_nonnegative_defensive_or_risk_off_delta": true,
+    "automatic_promotion": false
+  },
+  "authority": {
+    "isolated_research_only": true,
+    "read_only_comparator": true,
+    "writes_production_state": false,
+    "changes_runtime_exits": false,
+    "changes_strategy_or_thresholds": false,
+    "changes_risk_or_sizing": false,
+    "places_or_cancels_orders": false,
+    "changes_live_or_ml_authority": false
+  }
+}
