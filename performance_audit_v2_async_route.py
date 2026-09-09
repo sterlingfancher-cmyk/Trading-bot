@@ -18,7 +18,7 @@ from typing import Any, Dict
 
 import performance_audit_lab_v2 as lab
 
-VERSION = "performance-audit-v2-resumable-route-2026-09-09-v4-candidate-validation"
+VERSION = "performance-audit-v2-resumable-route-2026-09-09-v5-hold-forward-shadow"
 
 _LOCK = threading.RLock()
 _REGISTERED: set[int] = set()

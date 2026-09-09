@@ -63,6 +63,7 @@ PERFORMANCE_EVIDENCE_INTEGRITY_TESTS = (
     "test_issue193_performance_v2_isolation.py",
     "test_issue196_performance_validation_evidence.py",
     "test_issue202_hold_candidate_validation.py",
+    "test_issue202_hold_forward_shadow.py",
 )
 SYSTEM_SENTINEL_TESTS = (
     "test_system_sentinel.py",

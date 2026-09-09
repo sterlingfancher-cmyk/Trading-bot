@@ -23,11 +23,12 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 import performance_audit_lab as base
 import performance_validation_evidence as evidence
+import hold_period_forward_shadow as hold_shadow
 
 np = base.np
 pd = base.pd
 
-VERSION = "performance-audit-lab-v2-2026-09-09-v5-candidate-validation"
+VERSION = "performance-audit-lab-v2-2026-09-09-v6-hold-forward-shadow"
 ENABLED = os.environ.get("PERFORMANCE_AUDIT_V2_ENABLED", "true").lower() not in {
     "0", "false", "no", "off"
 }
@@ -925,16 +926,29 @@ def _run_ablation(
         )
     results.sort(key=lambda row: _f(row.get("objective"), -9999.0), reverse=True)
     best_name = str(_d(results[0] if results else {}).get("variant") or "")
-    best_map = _ablation_maps().get(best_name)
-    candidate_validation = _candidate_validation(features, dates, best_map)
+    candidate_name = hold_shadow.CANDIDATE_ID
+    candidate_map = _ablation_maps().get(candidate_name)
+    baseline_simulation = _simulate_next_open(features, baseline, dates)
+    candidate_validation = _candidate_validation(
+        features,
+        dates,
+        candidate_map,
+        baseline_simulation=baseline_simulation,
+    )
     return {
         "status": "ok",
         "baseline": "adaptive_baseline",
         "variant_count": len(results),
         "ranking": results,
         "best_variant": results[0] if results else None,
+        "selected_candidate": candidate_name,
+        "selection_frozen_date": hold_shadow.FREEZE_DATE,
+        "selected_candidate_sensitivity": _d(candidate_validation.get("sensitivity")),
+        "selected_candidate_validation": candidate_validation,
+        # Backward-compatible aliases retained for existing evidence readers.
         "best_variant_sensitivity": _d(candidate_validation.get("sensitivity")),
         "best_variant_validation": candidate_validation,
+        "current_full_sample_best_variant": best_name,
         "interpretation": (
             "Each variant changes one parameter family from the adaptive baseline. "
             "Results remain daily-bar proxies and should be confirmed by forward shadow data."
@@ -946,6 +960,7 @@ def _candidate_validation(
     features: Dict[str, Any],
     dates: Sequence[Any],
     regime_map: Dict[str, Dict[str, Any]] | None,
+    baseline_simulation: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     if not regime_map:
         return {"status": "not_available", "automatic_promotion": False}
@@ -955,6 +970,28 @@ def _candidate_validation(
     regimes = _regime_report(sim)
     diagnostics = _execution_diagnostics(sim)
     sensitivity = _sensitivity_report(features, dates, regime_map, sim)
+    baseline_simulation = baseline_simulation or _simulate_next_open(
+        features, copy.deepcopy(ADAPTIVE_REGIMES), dates
+    )
+    stress_baseline = _simulate_next_open(
+        features,
+        copy.deepcopy(ADAPTIVE_REGIMES),
+        dates,
+        transaction_cost_bps=hold_shadow.STRESS_COST_BPS_PER_SIDE,
+    )
+    stress_candidate = _simulate_next_open(
+        features,
+        regime_map,
+        dates,
+        transaction_cost_bps=hold_shadow.STRESS_COST_BPS_PER_SIDE,
+    )
+    forward_shadow = hold_shadow.build_report(
+        baseline_simulation,
+        sim,
+        dates,
+        stress_baseline_simulation=stress_baseline,
+        stress_candidate_simulation=stress_candidate,
+    )
     complete = (
         diagnostics.get("status") == "complete"
         and sensitivity.get("status") == "complete"
@@ -964,12 +1001,14 @@ def _candidate_validation(
     )
     return {
         "status": "complete" if complete else "incomplete",
+        "candidate_id": hold_shadow.CANDIDATE_ID,
         "full_sample": sim.get("metrics"),
         "execution_diagnostics": diagnostics,
         "sensitivity": sensitivity,
         "calendar_years": calendar,
         "regime_report": regimes,
         "walk_forward": walk_forward,
+        "forward_shadow": forward_shadow,
         "candidate_selected_on_full_sample": True,
         "untouched_holdout_after_selection": False,
         "requires_forward_shadow_confirmation": True,
