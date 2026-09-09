@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-09 03:45 CDT
+Last updated: 2026-09-09 04:10 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `7c79bbf15e6d7a2b7de15919b101caf8a0a24ccc` (PR #206).
+Validated runtime-code `main`: `5e7f8bdb7901985dbb4c62d38cc139eb353bda41` (PR #209).
 Active stability/accounting/runtime issue: none. Active improvement issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #157 infrastructure is
 complete; external AI provider activation remains a separate bounded decision.
@@ -984,3 +984,36 @@ isolated workflow run, then collection of forward observations under the frozen
 contract. Until the sample, duration, regime, coverage, concentration, and
 economic gates all pass, Issue #202 remains open and the candidate remains
 research-only.
+
+## 2026-09-09 Issue #208 — Isolated Frozen-Candidate Binding — CLOSED
+
+The first Stage 2 isolated artifact (workflow `34331189684`, artifact
+`10095961318`, digest
+`sha256:968a75a9fb3cc1f50d157f03d32736304f12f3fa284118b5f7afcdb2afa0a137`)
+correctly started at zero post-freeze observations, but inspection found that the
+resumable runner still passed the dynamically top-ranked ablation map into the
+candidate validator. The current ranking happened to select `hold_10d`, so its
+numbers were unchanged, but a future ranking change could have mislabeled a
+different policy as the frozen candidate. The artifact is preserved but
+quarantined from forward eligibility.
+
+PR #209 separated dynamic ranking from frozen selection. The resumable/offline
+path now always retrieves `hold_shadow.CANDIDATE_ID`, passes that exact policy
+map and an explicit adaptive-baseline simulation to candidate validation, emits
+explicit frozen-selection fields plus backward-compatible aliases, and fails
+closed if the frozen map is absent. Focused regressions prove that a different
+dynamic winner cannot alter the selected candidate.
+
+All four required exact-head gates passed on
+`74ce0d63230d032fd3e8433f684aae5ad2684b5b`; PR #209 was squash-merged as
+`5e7f8bdb7901985dbb4c62d38cc139eb353bda41`. Settled Splendid acceptance on
+the repair commit passes: sentinel `quiet/pass`, zero incidents or collection
+errors, self-check pass, daily audit 11/11, zero accounting issues, 71-row
+hash-valid ledger / 25 current-v4 rows, released v4 validation, healthy runner,
+market data, valuation, and risk, and no halt. V2 correctly reports `not_run`
+under engine version `performance-audit-lab-v2-2026-09-09-v7-frozen-candidate-binding`.
+
+No production holding period, exit, signal, sizing, risk, state, canonical
+history, broker, live, AI/ML, or order authority changed. The next required step
+is a replacement isolated five-year/45-symbol artifact under the corrected
+binding; only that replacement may begin the frozen forward-observation record.
