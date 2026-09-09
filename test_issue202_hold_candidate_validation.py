@@ -23,10 +23,12 @@ class HoldCandidateValidationTests(unittest.TestCase):
             result = lab._candidate_validation({}, [], {"neutral": {}})
 
         self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["candidate_id"], "hold_10d")
         self.assertTrue(result["candidate_selected_on_full_sample"])
         self.assertFalse(result["untouched_holdout_after_selection"])
         self.assertTrue(result["requires_forward_shadow_confirmation"])
         self.assertFalse(result["automatic_promotion"])
+        self.assertIn("forward_shadow", result)
         walk_forward.assert_called_once_with({}, {"neutral": {}}, [], optimize=False)
 
     def test_missing_candidate_validation_fails_closed(self):
