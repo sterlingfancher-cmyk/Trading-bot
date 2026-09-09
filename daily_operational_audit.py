@@ -131,26 +131,51 @@ def _runner_liveness(auto: Dict[str, Any], now_epoch: float | None = None) -> Di
         and age >= -5.0
         and age <= freshness_window
     )
+    observations = [("attempt", attempt_epoch)] if source == "auto" and attempt_epoch > 0.0 else []
+    for label, value, source_key in (
+        ("success", auto.get("last_successful_run_ts") or auto.get("last_successful_run_local"), "last_successful_run_source"),
+        ("run", auto.get("last_run_ts") or auto.get("last_run_local"), "last_run_source"),
+    ):
+        observed_epoch = _time_key(value)
+        if str(auto.get(source_key) or "").strip().lower() == "auto" and observed_epoch > 0.0:
+            observations.append((label, observed_epoch))
+    skip_epoch = _time_key(auto.get("last_skip_ts") or auto.get("last_skip_local"))
+    if source == "auto" and skip_epoch >= attempt_epoch > 0.0:
+        observations.append(("skip", skip_epoch))
+    evidence, activity_epoch = max(observations, key=lambda row: row[1], default=(None, 0.0))
+    activity_age = now_epoch - activity_epoch if activity_epoch > 0.0 else None
+    recent_auto_activity = bool(
+        activity_age is not None
+        and activity_age >= -5.0
+        and activity_age <= freshness_window
+    )
+    recent_auto_completion = bool(recent_auto_activity and evidence != "attempt")
     reported_started = auto.get("thread_started") is True
-    attempt_observed = attempt_epoch > 0.0
-    startup_report_only = bool(reported_started and not attempt_observed)
-    active = bool(recent_auto_attempt or startup_report_only)
+    activity_observed = bool(observations)
+    startup_report_only = bool(reported_started and not activity_observed)
+    active = bool(recent_auto_activity or startup_report_only)
     return {
         "active": active,
         "state": (
-            "inferred_from_recent_auto_attempt"
+            "inferred_from_recent_auto_completion"
+            if recent_auto_completion
+            else "inferred_from_recent_auto_attempt"
             if recent_auto_attempt
             else "reported_started_before_first_attempt"
             if startup_report_only
             else "stale_auto_attempt"
-            if attempt_observed
+            if activity_observed
             else "not_observed"
         ),
         "reported_started": reported_started,
-        "attempt_observed": attempt_observed,
+        "attempt_observed": attempt_epoch > 0.0,
+        "activity_observed": activity_observed,
         "startup_report_only": startup_report_only,
         "recent_auto_attempt": recent_auto_attempt,
+        "recent_auto_completion": recent_auto_completion,
+        "liveness_evidence": evidence,
         "last_attempt_age_seconds": round(age, 1) if age is not None else None,
+        "last_activity_age_seconds": round(activity_age, 1) if activity_age is not None else None,
         "freshness_window_seconds": round(freshness_window, 1),
     }
 
