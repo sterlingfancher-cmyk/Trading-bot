@@ -133,6 +133,11 @@ def _runner_liveness(auto: Dict[str, Any], now_epoch: float | None = None) -> Di
     )
     observations = [("attempt", attempt_epoch)] if source == "auto" and attempt_epoch > 0.0 else []
     for label, value, source_key in (
+        (
+            "cycle_completion",
+            auto.get("last_completed_cycle_ts") or auto.get("last_completed_cycle_local"),
+            "last_completed_cycle_source",
+        ),
         ("success", auto.get("last_successful_run_ts") or auto.get("last_successful_run_local"), "last_successful_run_source"),
         ("run", auto.get("last_run_ts") or auto.get("last_run_local"), "last_run_source"),
     ):
@@ -575,6 +580,8 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
             "thread_started_reported": liveness["reported_started"],
             "thread_active_observed": liveness["active"],
             "liveness_state": liveness["state"],
+            "liveness_evidence": liveness["liveness_evidence"],
+            "last_activity_age_seconds": liveness["last_activity_age_seconds"],
             "interval_seconds": auto.get("interval_seconds"),
             "last_attempt": last_attempt,
             "last_attempt_source": auto.get("last_attempt_source"),
