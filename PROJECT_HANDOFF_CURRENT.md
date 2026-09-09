@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-09 04:10 CDT
+Last updated: 2026-09-09 04:20 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -1013,7 +1013,23 @@ hash-valid ledger / 25 current-v4 rows, released v4 validation, healthy runner,
 market data, valuation, and risk, and no halt. V2 correctly reports `not_run`
 under engine version `performance-audit-lab-v2-2026-09-09-v7-frozen-candidate-binding`.
 
+Replacement isolated workflow `34333382201` completed successfully on main
+`8636a918e7871b84f5265f13a63ef6f315e820bf`. Artifact `10096867856`, digest
+`sha256:a2be1b42f79f261d2de0d6920a2a2aebaced700e90a95db5ad5337321ed56c93`,
+is bound to the corrected v7 engine, loads 45/45 symbols with no provider errors,
+and explicitly reports `current_full_sample_best_variant=hold_10d`,
+`selected_candidate=hold_10d`, `candidate_id=hold_10d`, frozen date
+`2026-09-09`, and identical selected/compatibility validation payloads. The
+execution boundary confirms isolated process, no production web worker or paper
+runner, no broker access, and no order authority.
+
+The corrected forward report is clean and `collecting`: zero exact matched
+completed lifecycles, zero exit divergences, zero available post-freeze sessions,
+no integrity errors, all criteria not yet met, and automatic promotion false.
+This is the expected initial state before the first post-freeze market session;
+do not fabricate or backfill observations from pre-freeze history.
+
 No production holding period, exit, signal, sizing, risk, state, canonical
-history, broker, live, AI/ML, or order authority changed. The next required step
-is a replacement isolated five-year/45-symbol artifact under the corrected
-binding; only that replacement may begin the frozen forward-observation record.
+history, broker, live, AI/ML, or order authority changed. Issue #208 is closed;
+Issue #202 remains open while genuine forward observations accumulate.
+
