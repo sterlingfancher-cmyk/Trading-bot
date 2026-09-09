@@ -109,6 +109,12 @@ class PerformanceValidationEvidenceTests(unittest.TestCase):
                 "status": "ok",
                 "best_variant": {"execution_diagnostics": {"status": "complete"}},
                 "best_variant_sensitivity": {"status": "complete"},
+                "best_variant_validation": {
+                    "status": "complete",
+                    "walk_forward": {"status": "complete"},
+                    "calendar_years": {"2026": {}},
+                    "regime_report": {"risk_on": {}},
+                },
             },
         }
         verdict = lab._validation_verdict(result)

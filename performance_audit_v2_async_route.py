@@ -18,7 +18,7 @@ from typing import Any, Dict
 
 import performance_audit_lab_v2 as lab
 
-VERSION = "performance-audit-v2-resumable-route-2026-09-09-v3-evidence"
+VERSION = "performance-audit-v2-resumable-route-2026-09-09-v4-candidate-validation"
 
 _LOCK = threading.RLock()
 _REGISTERED: set[int] = set()
@@ -257,15 +257,15 @@ def _run_resumable_ablation(
     ranking.sort(key=lambda row: _f(_d(row).get("objective"), -9999.0), reverse=True)
     best_name = str(_d(ranking[0] if ranking else {}).get("variant") or "")
     best_map = variants.get(best_name)
+    candidate_validation = lab._candidate_validation(features, dates, best_map)
     return {
         "status": "ok",
         "baseline": "adaptive_baseline",
         "variant_count": len(ranking),
         "ranking": ranking,
         "best_variant": ranking[0] if ranking else None,
-        "best_variant_sensitivity": lab._sensitivity_report(
-            features, dates, best_map
-        ) if best_map else {"status": "not_available"},
+        "best_variant_sensitivity": _d(candidate_validation.get("sensitivity")),
+        "best_variant_validation": candidate_validation,
         "interpretation": (
             "Each variant changes one parameter family from the adaptive baseline. "
             "Results remain daily-bar proxies and require forward-shadow confirmation."

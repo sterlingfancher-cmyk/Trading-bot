@@ -257,10 +257,20 @@ def validation_verdict(
         missing.append("ablation.best_variant.execution_diagnostics")
     if _d(ablation.get("best_variant_sensitivity")).get("status") != "complete":
         missing.append("ablation.best_variant_sensitivity")
+    candidate = _d(ablation.get("best_variant_validation"))
+    if candidate.get("status") != "complete":
+        missing.append("ablation.best_variant_validation")
+    if _d(candidate.get("walk_forward")).get("status") != "complete":
+        missing.append("ablation.best_variant_validation.walk_forward")
+    if not _d(candidate.get("calendar_years")):
+        missing.append("ablation.best_variant_validation.calendar_years")
+    if not _d(candidate.get("regime_report")):
+        missing.append("ablation.best_variant_validation.regime_report")
     complete = not missing
     return {
         "status": "complete" if complete else "incomplete",
         "candidate_selection_evidence_complete": complete,
+        "candidate_historical_validation_complete": complete,
         "automatic_strategy_promotion": False,
         "requires_forward_shadow_confirmation": True,
         "missing_or_incomplete": missing,

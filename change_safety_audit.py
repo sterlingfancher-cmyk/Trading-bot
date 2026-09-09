@@ -62,6 +62,7 @@ PERFORMANCE_EVIDENCE_INTEGRITY_TESTS = (
     "test_issue170_performance_atr_integrity.py",
     "test_issue193_performance_v2_isolation.py",
     "test_issue196_performance_validation_evidence.py",
+    "test_issue202_hold_candidate_validation.py",
 )
 SYSTEM_SENTINEL_TESTS = (
     "test_system_sentinel.py",
@@ -152,6 +153,7 @@ def _is_performance_evidence_integrity_path(path: str) -> bool:
         "test_issue170_performance_atr_integrity.py",
         "test_issue193_performance_v2_isolation.py",
         "test_issue196_performance_validation_evidence.py",
+        "test_issue202_hold_candidate_validation.py",
     }
 
 
