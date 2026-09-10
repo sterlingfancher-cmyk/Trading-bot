@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 import runtime_diagnostics as diagnostics
 
-VERSION = "runtime-worker-registration-2026-09-03-v9-system-sentinel"
+VERSION = "runtime-worker-registration-2026-09-10-v10-shadow-openai"
 _LOCK = threading.RLock()
 _REGISTERED_CORE_IDS: set[int] = set()
 _KICKOFF_STARTED: set[int] = set()
@@ -166,6 +166,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             import shadow_ai_adversarial_reviewer
             import shadow_ai_evidence_store
             import shadow_ai_observability
+            import shadow_ai_openai_transport
             import system_sentinel_runtime
             import performance_risk_activation_guard
             import regime_integrity_underdeployment
@@ -272,7 +273,16 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
             # route before the disabled-by-default reviewer is installed.  This
             # store is not portfolio state or canonical execution evidence.
             shadow_ai_observability_result = shadow_ai_observability.install(core.app)
-            shadow_ai_reviewer = shadow_ai_adversarial_reviewer.install()
+            shadow_client, shadow_provider, shadow_reviewer_config = (
+                shadow_ai_openai_transport.build_runtime_components(
+                    usage_supplier=shadow_ai_observability.inference_usage_windows,
+                )
+            )
+            shadow_ai_reviewer = shadow_ai_adversarial_reviewer.install(
+                client=shadow_client,
+                provider=shadow_provider,
+                config=shadow_reviewer_config,
+            )
 
             # Register the sentinel as an on-demand read-only route. It starts
             # no worker and is not part of the execution or cycle path.
@@ -312,6 +322,7 @@ def register(core: Any, *, research_isolated: bool = True) -> Dict[str, Any]:
                 shadow_ai_adversarial_reviewer.VERSION,
                 shadow_ai_evidence_store.VERSION,
                 shadow_ai_observability.VERSION,
+                shadow_ai_openai_transport.VERSION,
                 system_sentinel_runtime.VERSION,
             ]
             _REGISTERED_CORE_IDS.add(id(core))

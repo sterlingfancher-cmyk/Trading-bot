@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 import shadow_ai_adversarial_reviewer as reviewer
@@ -13,7 +14,7 @@ from shadow_ai_evidence_store import (
 )
 
 
-VERSION = "shadow-ai-observability-2026-09-03-v1"
+VERSION = "shadow-ai-observability-2026-09-10-v2-budget-usage"
 MIN_FORWARD_RESULTS = 100
 MAX_UNAVAILABLE_RATE = 0.20
 _REGISTERED_APP_IDS: set[int] = set()
@@ -158,6 +159,47 @@ def build_payload() -> dict[str, Any]:
             "places_or_cancels_orders": False,
             "automatic_promotion": False,
         },
+    }
+
+
+def inference_usage_windows(now: datetime | None = None) -> dict[str, int | float | bool]:
+    """Return durable request/cost totals for transport budget enforcement."""
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if _STORE.status_payload().get("integrity_valid") is not True:
+        return {
+            "evidence_integrity_valid": False,
+            "day_requests": 0,
+            "month_requests": 0,
+            "day_cost_usd": 0.0,
+            "month_cost_usd": 0.0,
+        }
+    day_requests = month_requests = 0
+    day_cost = month_cost = 0.0
+    for record in _STORE.records_snapshot():
+        result = record.get("result") if isinstance(record.get("result"), Mapping) else {}
+        completed_raw = result.get("completed_at")
+        try:
+            completed = datetime.fromisoformat(str(completed_raw).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        if completed.tzinfo is None:
+            continue
+        completed = completed.astimezone(timezone.utc)
+        telemetry = result.get("telemetry") if isinstance(result.get("telemetry"), Mapping) else {}
+        cost_raw = telemetry.get("cost_usd_exact")
+        cost = float(cost_raw) if isinstance(cost_raw, (int, float)) and not isinstance(cost_raw, bool) else 0.0
+        if completed.year == current.year and completed.month == current.month:
+            month_requests += 1
+            month_cost += max(0.0, cost)
+            if completed.date() == current.date():
+                day_requests += 1
+                day_cost += max(0.0, cost)
+    return {
+        "evidence_integrity_valid": True,
+        "day_requests": day_requests,
+        "month_requests": month_requests,
+        "day_cost_usd": round(day_cost, 12),
+        "month_cost_usd": round(month_cost, 12),
     }
 
 
