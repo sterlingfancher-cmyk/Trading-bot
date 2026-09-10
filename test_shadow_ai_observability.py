@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -18,6 +19,7 @@ def evidence(index: int, *, decision: str = "agree", cost=0.01) -> dict:
         "join_eligible": decision != "unavailable",
         "result": {
             "decision": decision,
+            "completed_at": "2026-09-10T15:00:00Z",
             "fallback_used": decision == "unavailable",
             "citations": [{"url": "https://example.com"}],
             "telemetry": {
@@ -130,6 +132,24 @@ class ShadowAIObservabilityTests(unittest.TestCase):
         self.assertTrue(result["route_registered"])
         configure.assert_called_once()
         self.assertFalse(response["authority"]["places_or_cancels_orders"])
+
+    def test_durable_usage_windows_segment_day_and_month(self):
+        self.store.append(evidence(1, cost=0.01))
+        older = evidence(2, cost=0.02)
+        older["result"]["completed_at"] = "2026-09-09T15:00:00Z"
+        self.store.append(older)
+        prior_month = evidence(3, cost=0.03)
+        prior_month["result"]["completed_at"] = "2026-08-31T15:00:00Z"
+        self.store.append(prior_month)
+
+        usage = observability.inference_usage_windows(
+            datetime(2026, 9, 10, 16, 0, tzinfo=timezone.utc)
+        )
+        self.assertEqual(usage["day_requests"], 1)
+        self.assertEqual(usage["month_requests"], 2)
+        self.assertTrue(usage["evidence_integrity_valid"])
+        self.assertAlmostEqual(usage["day_cost_usd"], 0.01)
+        self.assertAlmostEqual(usage["month_cost_usd"], 0.03)
 
 
 if __name__ == "__main__":

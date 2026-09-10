@@ -1090,3 +1090,29 @@ self-check pass, daily audit 11/11, healthy automatic after-hours skip evidence,
 zero accounting issues, 71-row hash-valid canonical ledger / 25 current-v4 rows,
 released v4 validation, healthy market data and risk, and no halt or self-defense.
 No production trading behavior or authority changed.
+
+## 2026-09-10 Issue #220 — Bounded OpenAI Shadow Transport — IN PROGRESS
+
+The user reported creating a dedicated restricted OpenAI API key, adding it to
+Railway as `SHADOW_AI_OPENAI_API_KEY`, and completing the resulting deployment.
+The secret value was not retrieved, logged, committed, or otherwise exposed.
+Key presence alone remains inert because `SHADOW_AI_ENABLED` defaults false.
+
+Branch `feat/issue-220-openai-shadow-transport` adds a standard-library OpenAI
+Responses transport fixed to `gpt-5.6-terra`, strict structured output, no
+tools, `store=false`, bounded input/output, 20-second maximum timeout, two
+attempts, one request per cycle, 25 requests per UTC day, $0.50 per UTC day,
+and $10 per UTC month. The dollar checks reserve the maximum accepted request
+cost before network access and use the restart-durable evidence store for
+day/month usage. Missing or corrupt budget evidence, invalid provider/model
+configuration, missing credentials, transport failures, malformed output, and
+identity/schema failures all stay unavailable or disabled without blocking the
+paper runner. Provider status exposes readiness and usage but never the secret.
+
+Focused transport, reviewer, observability, runtime-ordering, and complete
+shadow-AI regressions pass locally. No live request has been made and the
+reviewer is not yet enabled. Before any merge or activation, inspect the exact
+diff and require every exact-head repository gate. After merge, first accept the
+disabled deployment on Splendid; activation is a separate bounded Railway
+configuration step and remains shadow-only. Issue #202 performance evidence is
+independent and unchanged.

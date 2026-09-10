@@ -17,7 +17,7 @@ from shadow_ai_research_client import (
 )
 
 
-VERSION = "shadow-ai-adversarial-reviewer-2026-09-02-v1"
+VERSION = "shadow-ai-adversarial-reviewer-2026-09-10-v2-provider-status"
 MAX_SNAPSHOT_BYTES = 32_000
 
 
@@ -158,6 +158,11 @@ class ShadowAIAdversarialReviewer:
     def status_payload(self) -> dict[str, Any]:
         with self._lock:
             thread = self._thread
+            provider_status = getattr(self.provider, "status_payload", None)
+            try:
+                provider_payload = provider_status() if callable(provider_status) else None
+            except Exception:
+                provider_payload = {"status": "unavailable"}
             return {
                 "status": "ok",
                 "overall": "pass",
@@ -177,6 +182,7 @@ class ShadowAIAdversarialReviewer:
                 "counters": dict(self._counters),
                 "latest_result": dict(self._latest),
                 "result_history_count": len(self._results),
+                "provider_transport": provider_payload,
                 "authority": {
                     "observer_only": True,
                     "rules_engine_sole_execution_authority": True,

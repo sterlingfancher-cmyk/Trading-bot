@@ -53,6 +53,7 @@ SHADOW_AI_TESTS = (
     "test_shadow_ai_outcome_memory.py",
     "test_shadow_ai_evidence_store.py",
     "test_shadow_ai_observability.py",
+    "test_shadow_ai_openai_transport.py",
 )
 STATE_SERIALIZATION_TESTS = (
     "test_issue165_state_serialization.py",

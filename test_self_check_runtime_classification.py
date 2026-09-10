@@ -304,7 +304,7 @@ class SelfCheckRuntimeClassificationTests(unittest.TestCase):
         diagnostics_index = source.index("diagnostics.register_routes(core.app, core)")
         observer_index = source.index(observer_call)
         reviewer_index = source.index(
-            "shadow_ai_reviewer = shadow_ai_adversarial_reviewer.install()",
+            "shadow_ai_reviewer = shadow_ai_adversarial_reviewer.install(",
             observer_index,
         )
         sentinel_index = source.index(
