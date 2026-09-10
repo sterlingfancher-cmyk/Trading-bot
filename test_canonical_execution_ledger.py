@@ -19,7 +19,7 @@ def _core():
             **(extra or {}),
         }
         calls.append(row)
-        portfolio["trades"].append(row)
+        portfolio["trades"] = [*portfolio["trades"], row]
 
     core = types.SimpleNamespace(
         portfolio=portfolio,
