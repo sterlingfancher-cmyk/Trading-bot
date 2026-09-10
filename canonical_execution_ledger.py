@@ -20,7 +20,7 @@ import threading
 import uuid
 from typing import Any, Dict, List, Tuple
 
-VERSION = "canonical-execution-ledger-2026-09-03-v2-state-commit"
+VERSION = "canonical-execution-ledger-2026-09-10-v3-state-parity"
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 LEDGER_FILE = os.path.join(STATE_DIR, "canonical_execution_ledger.jsonl")
 
@@ -264,9 +264,28 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
     rows, parse_errors = _read_rows()
     chain_valid, chain_errors = _verify_rows(rows)
     current_epoch = _epoch_id(core) if core is not None else None
-    current_epoch_rows = sum(1 for row in rows if str(row.get("accounting_epoch_id") or "") == current_epoch) if current_epoch else 0
+    epoch_rows = [row for row in rows if str(row.get("accounting_epoch_id") or "") == current_epoch] if current_epoch else []
+    current_epoch_rows = len(epoch_rows)
+    ledger_ids = {
+        str(row.get("execution_id") or "").strip()
+        for row in epoch_rows
+        if str(row.get("execution_id") or "").strip()
+    }
+    state_rows = _portfolio(core).get("trades") if core is not None else []
+    state_rows = state_rows if isinstance(state_rows, list) else []
+    state_ids = {
+        str(row.get("execution_id") or "").strip()
+        for row in state_rows
+        if isinstance(row, dict)
+        and str(row.get("accounting_epoch_id") or "") == current_epoch
+        and str(row.get("execution_id") or "").strip()
+    }
+    missing_from_state = sorted(ledger_ids - state_ids)
+    missing_from_ledger = sorted(state_ids - ledger_ids)
+    parity_checked = bool(core is not None and current_epoch)
+    state_projection_parity = bool(parity_checked and not missing_from_state and not missing_from_ledger)
     hooked = core is not None and getattr(getattr(core, "record_trade", None), "_canonical_execution_ledger_version", None) == VERSION
-    healthy = not parse_errors and chain_valid
+    healthy = not parse_errors and chain_valid and (not parity_checked or state_projection_parity)
     return {
         "status": "ok" if healthy and hooked else ("ready" if healthy else "fail"),
         "overall": "pass" if healthy and hooked else ("warn" if healthy else "fail"),
@@ -280,10 +299,21 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "row_count": len(rows),
         "current_epoch_id": current_epoch,
         "current_epoch_rows": current_epoch_rows,
+        "state_current_epoch_rows": len(state_ids),
+        "state_projection_parity_checked": parity_checked,
+        "state_projection_parity": state_projection_parity if parity_checked else None,
+        "missing_from_state_count": len(missing_from_state),
+        "missing_from_state_execution_ids": missing_from_state[:10],
+        "missing_from_ledger_count": len(missing_from_ledger),
+        "missing_from_ledger_execution_ids": missing_from_ledger[:10],
         "last_execution_id": rows[-1].get("execution_id") if rows else None,
         "parse_error_count": len(parse_errors),
         "chain_error_count": len(chain_errors),
-        "errors": (parse_errors + chain_errors)[:5],
+        "errors": (
+            parse_errors
+            + chain_errors
+            + (["canonical_state_projection_parity_failed"] if parity_checked and not state_projection_parity else [])
+        )[:5],
         "historical_recovery_source": False,
         "authoritative_for_new_executions": bool(hooked and healthy),
         "state_projection_commit_immediate": True,
