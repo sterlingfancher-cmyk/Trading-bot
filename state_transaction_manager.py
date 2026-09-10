@@ -128,10 +128,7 @@ def install(core: Any = None) -> Dict[str, Any]:
 
         regression = io._execution_regression(current, next_state)
         if regression.get("blocked"):
-            try:
-                core.portfolio = current
-            except Exception:
-                pass
+            core.portfolio = current
             raise RuntimeError(
                 "transaction blocked: candidate would remove committed same-epoch execution ids"
             )
