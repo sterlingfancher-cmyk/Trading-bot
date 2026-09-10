@@ -55,6 +55,7 @@ FIX_LIBRARY = {
     "invalid_protected_valuation": "Trace the protected-mark/valuation input that violated the canonical invariant; repair only the proven source path and keep risk baseline initialization fail-closed.",
     "accounting_integrity_failure": "Trace the exact execution lifecycle producing the unmatched/duplicate/economic issue; preserve the append-only ledger and repair the prospective execution/accounting boundary only.",
     "execution_chain_invalid": "Stop promotion/cutover, verify append-only ledger ordering and integrity provenance, and repair the prospective ledger writer without rewriting historical rows.",
+    "execution_projection_divergence": "Stop promotion/cutover, preserve both canonical and state evidence, block regressive state writes, and reconcile history only through a separately validated successor process.",
     "invalid_risk_baseline": "Trace the protected valuation used to seed day_start/day_peak; keep the halt/risk state unchanged and repair only the fresh-day initialization path.",
     "startup_failure": "Reproduce the exact bootstrap/Gunicorn failure and repair the smallest startup ownership or dependency defect without adding a second runtime owner.",
     "configuration_drift": "Reconcile the drift to the canonical typed-configuration owner; do not add another environment/default owner.",
@@ -122,6 +123,8 @@ def diagnose(snapshot: Mapping[str, Any]) -> tuple[Incident, ...]:
     ledger = _d(s.get("execution_ledger"))
     if ledger and ledger.get("chain_valid") is False:
         incidents.append(_incident(boundary="execution", severity="critical", reason="execution_chain_invalid", evidence={"chain_valid": False, "row_count": ledger.get("row_count"), "epoch_id": ledger.get("current_epoch_id")}, cause="Canonical append-only execution chain integrity failed.", confidence=1.0, full=True))
+    elif ledger and ledger.get("state_projection_parity") is False:
+        incidents.append(_incident(boundary="execution", severity="critical", reason="execution_projection_divergence", evidence={"state_projection_parity": False, "ledger_current_epoch_rows": ledger.get("current_epoch_rows"), "state_current_epoch_rows": ledger.get("state_current_epoch_rows"), "missing_from_state_count": ledger.get("missing_from_state_count"), "missing_from_state_execution_ids": ledger.get("missing_from_state_execution_ids")}, cause="The mutable state projection no longer contains every canonical current-epoch execution.", confidence=1.0, full=True))
 
     risk = _d(s.get("risk"))
     start = risk.get("day_start_equity")

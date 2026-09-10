@@ -1116,3 +1116,42 @@ diff and require every exact-head repository gate. After merge, first accept the
 disabled deployment on Splendid; activation is a separate bounded Railway
 configuration step and remains shadow-only. Issue #202 performance evidence is
 independent and unchanged.
+
+## 2026-09-10 Issue #220 — Bounded OpenAI Shadow Transport — COMPLETE
+
+PR #221 passed all four mandatory exact-head workflows and was squash-merged as
+`6184302dc3f227014c8032268e1445346c0d5289`. Settled Splendid evidence confirms
+the bounded OpenAI reviewer is enabled and healthy in shadow-only, rules-only
+mode with model `gpt-5.6-terra`, no tools, no execution wait, no order authority,
+and exact accepted-request cost coverage. At the 13:05 CDT audit it had 13
+accepted observations, zero unavailable/fallback observations, and $0.061658 in
+exact covered cost against the 25-request/$0.50 daily and $10 monthly caps. The
+dedicated secret value was never retrieved or exposed.
+
+Issue #202 remains independent: production V2 is disabled/not-run and the frozen
+`hold_10d` candidate remains research-only with one forward session and zero
+matched completed lifecycles or divergences.
+
+## 2026-09-10 Issue #222 — Canonical/State Execution Divergence — ACTIVE
+
+Intraday evidence demonstrated that the valid GEV short entry
+`9cad03cbec994e29a9b65293d573f54b` (1.091006 shares at 920.93, recorded 11:25
+CDT) was durably appended to the hash-valid canonical ledger and immediately
+projected to state, but a later stale state replacement removed it without a
+canonical exit. The immutable ledger and trade journal preserve the row. State
+and its derived accounting remained one current-v4 execution behind, while the
+existing ledger-chain, accounting, self-check, daily-audit, and sentinel checks
+incorrectly passed. No historical file was altered or repaired.
+
+The bounded prospective repair makes composition-guard telemetry use the
+transaction manager, serializes all transactional read/modify/write work behind
+the canonical cycle mutation lock, and blocks any same-epoch save or transaction
+that would remove an already persisted execution ID. Canonical ledger status now
+checks bidirectional current-epoch execution-ID parity, and a mismatch fails the
+routine self-check and daily audit and raises a critical sentinel incident. Tests
+cover stale-save rejection, append and successor-epoch compatibility,
+transaction/cycle serialization, non-destructive telemetry persistence, and
+audit/sentinel propagation. Historical reconciliation remains explicitly out of
+scope and may occur only through a separate exact-evidence successor process
+with validation hold; do not rewrite the canonical ledger or silently backfill
+state.

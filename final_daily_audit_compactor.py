@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "final-daily-audit-compactor-2026-08-13-v5-active-epoch-runner-diagnostics"
+VERSION = "final-daily-audit-compactor-2026-09-10-v6-canonical-state-parity"
 _REGISTERED = set()
 
 
@@ -144,6 +144,7 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
     next_action = _d(sections.get("12_next_action"))
     journal = _journal_status(core)
     ledger = _ledger_status(core)
+    ledger_failed = ledger.get("overall") == "fail" or ledger.get("state_projection_parity") is False
     epoch = _active_epoch_status(core)
     release = _release_status(core)
     bidirectional = _bidirectional_status(core)
@@ -153,6 +154,8 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
     for value in _l(risk.get("reasons")) + _l(integrity.get("reasons")):
         if value and value not in reasons:
             reasons.append(value)
+    if ledger_failed and "canonical_state_projection_parity_failed" not in reasons:
+        reasons.insert(0, "canonical_state_projection_parity_failed")
 
     next_reason = next_action.get("reason")
     next_action_text = next_action.get("action")
@@ -160,6 +163,10 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
     if next_reason == "clean_accounting_epoch_forward_validation_required":
         next_action_text = "Continue normal paper operation and collect the first clean exact lifecycle before any ML/MAE-MFE promotion."
         next_priority = "normal"
+    if ledger_failed:
+        next_reason = "canonical_state_projection_parity_failed"
+        next_action_text = "Preserve canonical and state evidence; keep promotion blocked and perform only a separately validated successor reconciliation."
+        next_priority = "critical"
 
     requests = _i(provider.get("requests"))
     classified = _i(provider.get("classified_terminal_outcomes"))
@@ -168,8 +175,8 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
         gap = requests - classified
 
     return {
-        "status": payload.get("status"),
-        "overall": payload.get("overall"),
+        "status": "fail" if ledger_failed else payload.get("status"),
+        "overall": "fail" if ledger_failed else payload.get("overall"),
         "type": "daily_operational_audit_compact_final",
         "version": payload.get("version"),
         "generated_local": payload.get("generated_local"),
@@ -261,6 +268,11 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
             "current_epoch_id": ledger.get("current_epoch_id"),
             "current_epoch_rows": ledger.get("current_epoch_rows"),
             "authoritative_for_new_executions": ledger.get("authoritative_for_new_executions"),
+            "state_current_epoch_rows": ledger.get("state_current_epoch_rows"),
+            "state_projection_parity": ledger.get("state_projection_parity"),
+            "missing_from_state_count": ledger.get("missing_from_state_count"),
+            "missing_from_state_execution_ids": ledger.get("missing_from_state_execution_ids"),
+            "missing_from_ledger_count": ledger.get("missing_from_ledger_count"),
         },
         "market_data": {
             "status": _market_data_status(integrity, provider),

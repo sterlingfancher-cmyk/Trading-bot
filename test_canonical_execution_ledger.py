@@ -7,19 +7,22 @@ import final_daily_audit_compactor as compact
 
 def _core():
     calls = []
+    portfolio = {"risk_controls": {"halted": False}, "accounting_epoch_id": "epoch-test", "trades": []}
 
     def record_trade(action, symbol, side, px, shares, extra=None):
-        calls.append({
+        row = {
             "action": action,
             "symbol": symbol,
             "side": side,
             "price": px,
             "shares": shares,
             **(extra or {}),
-        })
+        }
+        calls.append(row)
+        portfolio["trades"] = [*portfolio["trades"], row]
 
     core = types.SimpleNamespace(
-        portfolio={"risk_controls": {"halted": False}, "accounting_epoch_id": "epoch-test"},
+        portfolio=portfolio,
         record_trade=record_trade,
         local_ts_text=lambda: "2026-08-10 13:00:00 CDT",
     )

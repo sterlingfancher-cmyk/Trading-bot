@@ -225,12 +225,11 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         ):
             self.assertIn(shadow_test, tests)
 
-    def test_state_serialization_change_selects_issue165_regression(self) -> None:
+    def test_state_serialization_change_selects_execution_regressions(self) -> None:
         for path in ("state_io_hardening.py", "cycle_completion_contract.py"):
-            self.assertIn(
-                "test_issue165_state_serialization.py",
-                planned_regressions((path,)),
-            )
+            tests = planned_regressions((path,))
+            self.assertIn("test_issue165_state_serialization.py", tests)
+            self.assertIn("test_issue222_canonical_state_parity.py", tests)
 
     def test_performance_evidence_change_selects_complete_integrity_regressions(self) -> None:
         for path in (

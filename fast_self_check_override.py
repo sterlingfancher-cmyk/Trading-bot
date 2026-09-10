@@ -6,7 +6,7 @@ import sys
 import time
 from typing import Any, Dict
 
-VERSION = "fast-self-check-override-2026-08-04-v7-runtime-classification"
+VERSION = "fast-self-check-override-2026-09-10-v8-canonical-state-parity"
 _PATCHED_APP_IDS: set[int] = set()
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
@@ -197,6 +197,32 @@ def _component_error(name: str, exc: Exception) -> Dict[str, Any]:
 
 def _component_checks(core: Any) -> Dict[str, Dict[str, Any]]:
     checks: Dict[str, Dict[str, Any]] = {}
+
+    try:
+        import canonical_execution_ledger as canonical_ledger
+
+        row = _dict(canonical_ledger.status_payload(core))
+        passed = bool(
+            row.get("overall") == "pass"
+            and row.get("chain_valid")
+            and row.get("state_projection_parity")
+        )
+        checks["canonical_state_parity"] = _check_result(
+            "canonical_state_parity",
+            row,
+            passed,
+            {
+                "chain_valid": bool(row.get("chain_valid")),
+                "current_epoch_rows": row.get("current_epoch_rows"),
+                "state_current_epoch_rows": row.get("state_current_epoch_rows"),
+                "state_projection_parity": row.get("state_projection_parity"),
+                "missing_from_state_count": row.get("missing_from_state_count"),
+                "missing_from_state_execution_ids": row.get("missing_from_state_execution_ids"),
+                "missing_from_ledger_count": row.get("missing_from_ledger_count"),
+            },
+        )
+    except Exception as exc:
+        checks["canonical_state_parity"] = _component_error("canonical_state_parity", exc)
 
     try:
         import scanner_runtime_contract as scanner_contract
@@ -394,6 +420,7 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
     raw_components = _component_checks(core) if core is not None else {}
     components, deferred_components = _normalize_advisory_components(raw_components)
     failing_components = [name for name, row in components.items() if row.get("overall") != "pass"]
+    canonical_parity_failed = "canonical_state_parity" in failing_components
     component_pass_count = sum(1 for row in components.values() if row.get("overall") == "pass")
 
     base_failures = []
@@ -413,8 +440,8 @@ def build_payload(core: Any = None) -> Dict[str, Any]:
     all_passed = bool(core is not None and not base_failures and not failing_components)
 
     return {
-        "status": "ok" if core is not None else "pending",
-        "overall": "pass" if all_passed else "warn" if core is not None else "pending",
+        "status": "fail" if canonical_parity_failed else "ok" if core is not None else "pending",
+        "overall": "pass" if all_passed else "fail" if canonical_parity_failed else "warn" if core is not None else "pending",
         "type": "all_in_one_self_check",
         "version": VERSION,
         "generated_local": _now(core),

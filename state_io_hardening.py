@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
-VERSION = "state-io-hardening-2026-09-03-v3-mutation-lock"
+VERSION = "state-io-hardening-2026-09-10-v4-execution-regression-guard"
 
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 STATE_FILENAME = os.environ.get("STATE_FILENAME", os.environ.get("STATE_FILE", "state.json"))
@@ -137,6 +137,49 @@ def _quality(obj: Any) -> Dict[str, Any]:
         "positions_count": len(positions),
         "reports_present": bool(reports),
         "has_account_fields": bool(has_account),
+    }
+
+
+def _epoch_id(state: Dict[str, Any]) -> str:
+    direct = str(state.get("accounting_epoch_id") or "").strip()
+    if direct:
+        return direct
+    nested = state.get("paper_accounting_epoch")
+    if isinstance(nested, dict):
+        return str(nested.get("id") or nested.get("epoch_id") or "").strip()
+    return ""
+
+
+def _execution_ids(state: Dict[str, Any], epoch_id: str) -> set[str]:
+    rows = state.get("trades") if isinstance(state.get("trades"), list) else []
+    result: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row_epoch = str(row.get("accounting_epoch_id") or "").strip()
+        execution_id = str(row.get("execution_id") or "").strip()
+        if execution_id and row_epoch == epoch_id:
+            result.add(execution_id)
+    return result
+
+
+def _execution_regression(current: Dict[str, Any], candidate: Dict[str, Any]) -> Dict[str, Any]:
+    """Detect a same-epoch save that would remove committed execution rows."""
+    current_epoch = _epoch_id(current)
+    candidate_epoch = _epoch_id(candidate)
+    if not current_epoch or current_epoch != candidate_epoch:
+        return {"blocked": False, "reason": "different_or_missing_epoch"}
+    current_ids = _execution_ids(current, current_epoch)
+    candidate_ids = _execution_ids(candidate, candidate_epoch)
+    missing = sorted(current_ids - candidate_ids)
+    return {
+        "blocked": bool(missing),
+        "reason": "candidate_missing_persisted_execution_ids" if missing else "no_regression",
+        "accounting_epoch_id": current_epoch,
+        "persisted_execution_count": len(current_ids),
+        "candidate_execution_count": len(candidate_ids),
+        "missing_execution_count": len(missing),
+        "missing_execution_ids": missing[:10],
     }
 
 
@@ -345,6 +388,7 @@ def status_payload(module: Any | None = None) -> Dict[str, Any]:
             "backup_fallback_reads": True,
             "thread_and_file_locking": True,
             "non_overlapping_run_cycle": True,
+            "same_epoch_execution_regression_guard": True,
         },
         "run_state": dict(_RUN_STATE),
         "last_status_event": _LAST_STATUS.get("event"),
@@ -401,6 +445,20 @@ def install(module: Any) -> Dict[str, Any]:
         with _RUN_LOCK:
             with _THREAD_LOCK:
                 with _FileLock(exclusive=True):
+                    try:
+                        current = _read_once(state_file) if os.path.exists(state_file) and _size(state_file) > 0 else {}
+                    except Exception:
+                        current = {}
+                    regression = _execution_regression(current, state)
+                    if regression.get("blocked"):
+                        portfolio = getattr(module, "portfolio", None)
+                        if isinstance(portfolio, dict):
+                            portfolio.clear()
+                            portfolio.update(current)
+                        _record_status("execution_regression_blocked", regression)
+                        raise RuntimeError(
+                            "state save blocked: candidate would remove committed same-epoch execution ids"
+                        )
                     backup = backup_current_state()
                     atomic_json_write(state_file, state)
                     _record_status("atomic_save_state", {
