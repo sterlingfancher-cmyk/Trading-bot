@@ -143,7 +143,6 @@ def test_ledger_parity_fails_audit_and_sentinel(monkeypatch):
     monkeypatch.setattr(ledger, "_read_rows", lambda: ([row], []))
     monkeypatch.setattr(ledger, "_verify_rows", lambda rows: (True, []))
     ledger._APPLIED_CORE_IDS.add(id(core))
-    core.record_trade._canonical_execution_ledger_version = ledger.VERSION
 
     status = ledger.status_payload(core)
     assert status["overall"] == "fail"
