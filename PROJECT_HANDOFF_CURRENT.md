@@ -1176,3 +1176,33 @@ entries, the bounded follow-up latches and persists a risk halt during canonical
 ledger startup whenever current-epoch parity is broken, without overwriting an
 existing halt reason or changing any execution/history evidence. Issue #222
 remains open until that halt containment is deployed and accepted.
+
+## 2026-09-10 Issue #222 — Prospective Halt Containment — MERGED / RUNTIME ACCEPTANCE PENDING
+
+PR #224 added the bounded fail-closed containment for the demonstrated
+canonical/state execution divergence. On current main it was squash-merged at
+exact head as `4889789643af6b82ec3316c171929fe01be1844e`. The repair latches and
+persists a paper risk halt during canonical-ledger startup when current-epoch
+canonical/state execution-ID parity is false, preserves any existing halt
+reason, and does not rewrite canonical rows, state/history, accounting,
+day-peak, recovery evidence, strategy, thresholds, hard-risk limits, live,
+AI/ML, broker, or order authority.
+
+All post-merge repository and deployment contexts are green: Change Safety,
+Repository Safety and Performance, Architecture Debt, the full
+Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research audit,
+and both Railway deployment checks. These checks establish that the intended
+containment is built and deployed, but they are not a substitute for the
+settled authoritative runtime endpoints.
+
+The current execution environment could not reach the authoritative Splendid
+endpoint (browser returned `ERR_BLOCKED_BY_CLIENT`), so no live sentinel,
+self-check, daily-audit, accounting, ledger, runner, market-data, or risk result
+was inferred and no halt was cleared. Issue #222 remains open pending a fresh
+authoritative post-deploy capture and any separately governed successor
+reconciliation of the four already-missing current-v4 state IDs. The immutable
+ledger/history evidence remains untouched.
+
+Issue #202 and the frozen `hold_10d` forward-shadow program remain unchanged
+and research-only; no performance candidate was adjusted or promoted while this
+correctness containment awaits settled runtime acceptance.
