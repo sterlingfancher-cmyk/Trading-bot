@@ -15,7 +15,7 @@ import os
 import sys
 from typing import Any, Callable, Dict
 
-VERSION = "state-transaction-manager-2026-07-21-v1"
+VERSION = "state-transaction-manager-2026-09-10-v2-cycle-lock"
 _PATCHED_MODULE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
 _LAST_TRANSACTION: Dict[str, Any] = {}
@@ -75,69 +75,90 @@ def install(core: Any = None) -> Dict[str, Any]:
         if not callable(updater):
             raise TypeError("updater must be callable")
 
-        with io._THREAD_LOCK:
-            with io._FileLock(exclusive=True):
-                try:
-                    current = io._read_once(path) if os.path.exists(path) and io._size(path) > 0 else {}
-                except Exception:
-                    current = io.safe_load_json_file(path, default={}, allow_backups=True)
-                if not isinstance(current, dict):
-                    current = {}
+        # Use the same outer lock ordering as hardened_save_state. Diagnostic
+        # watchdog transactions must never replace core.portfolio while a trade
+        # cycle is between its in-memory mutation and durable execution mirror.
+        with io._RUN_LOCK:
+            with io._THREAD_LOCK:
+                with io._FileLock(exclusive=True):
+                    return _update_locked(updater, source, expected_revision)
 
-                before_revision = _revision(current)
-                if expected_revision is not None and int(expected_revision) != before_revision:
-                    result = {
-                        "status": "conflict",
-                        "version": VERSION,
-                        "source": source,
-                        "expected_revision": int(expected_revision),
-                        "actual_revision": before_revision,
-                        "written": False,
-                    }
-                    _LAST_TRANSACTION = result
-                    return result
+    def _update_locked(
+        updater: Callable[[Dict[str, Any]], Dict[str, Any] | None],
+        source: str,
+        expected_revision: int | None,
+    ) -> Dict[str, Any]:
+        try:
+            current = io._read_once(path) if os.path.exists(path) and io._size(path) > 0 else {}
+        except Exception:
+            current = io.safe_load_json_file(path, default={}, allow_backups=True)
+        if not isinstance(current, dict):
+            current = {}
 
-                working = dict(current)
-                updated = updater(working)
-                next_state = updated if isinstance(updated, dict) else working
-                if not isinstance(next_state, dict):
-                    raise TypeError("updater must return a dict or None")
+        before_revision = _revision(current)
+        if expected_revision is not None and int(expected_revision) != before_revision:
+            result = {
+                "status": "conflict",
+                "version": VERSION,
+                "source": source,
+                "expected_revision": int(expected_revision),
+                "actual_revision": before_revision,
+                "written": False,
+            }
+            _LAST_TRANSACTION = result
+            return result
 
-                if next_state == current:
-                    result = {
-                        "status": "ok",
-                        "version": VERSION,
-                        "source": source,
-                        "revision": before_revision,
-                        "written": False,
-                        "no_change": True,
-                    }
-                    _LAST_TRANSACTION = result
-                    return result
+        working = dict(current)
+        updated = updater(working)
+        next_state = updated if isinstance(updated, dict) else working
+        if not isinstance(next_state, dict):
+            raise TypeError("updater must return a dict or None")
 
-                next_revision = before_revision + 1
-                next_state["_state_revision"] = next_revision
-                next_state["_state_updated_local"] = _now()
-                next_state["_state_update_source"] = source
+        if next_state == current:
+            result = {
+                "status": "ok",
+                "version": VERSION,
+                "source": source,
+                "revision": before_revision,
+                "written": False,
+                "no_change": True,
+            }
+            _LAST_TRANSACTION = result
+            return result
 
-                backup = io.backup_current_state()
-                io.atomic_json_write(path, next_state)
-                try:
-                    core.portfolio = next_state
-                except Exception:
-                    pass
+        regression = io._execution_regression(current, next_state)
+        if regression.get("blocked"):
+            try:
+                core.portfolio = current
+            except Exception:
+                pass
+            raise RuntimeError(
+                "transaction blocked: candidate would remove committed same-epoch execution ids"
+            )
 
-                result = {
-                    "status": "ok",
-                    "version": VERSION,
-                    "source": source,
-                    "previous_revision": before_revision,
-                    "revision": next_revision,
-                    "written": True,
-                    "backup": backup,
-                }
-                _LAST_TRANSACTION = result
-                return result
+        next_revision = before_revision + 1
+        next_state["_state_revision"] = next_revision
+        next_state["_state_updated_local"] = _now()
+        next_state["_state_update_source"] = source
+
+        backup = io.backup_current_state()
+        io.atomic_json_write(path, next_state)
+        try:
+            core.portfolio = next_state
+        except Exception:
+            pass
+
+        result = {
+            "status": "ok",
+            "version": VERSION,
+            "source": source,
+            "previous_revision": before_revision,
+            "revision": next_revision,
+            "written": True,
+            "backup": backup,
+        }
+        _LAST_TRANSACTION = result
+        return result
 
     update_state._state_transaction_manager_version = VERSION  # type: ignore[attr-defined]
     core.update_state = update_state
