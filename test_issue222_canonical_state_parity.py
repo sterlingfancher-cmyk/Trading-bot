@@ -158,3 +158,54 @@ def test_ledger_parity_fails_audit_and_sentinel(monkeypatch):
     report = system_sentinel.report({"execution_ledger": status})
     assert report["status"] == "incident"
     assert report["incidents"][0]["reason_code"] == "execution_projection_divergence"
+
+
+def test_runtime_apply_latches_and_persists_parity_halt_without_rewriting_history(monkeypatch):
+    row = _trade("gev-entry")
+    saved = []
+    portfolio = {
+        "accounting_epoch_id": EPOCH,
+        "trades": [],
+        "history": [10000.0, 9999.0],
+        "risk_controls": {"halted": False},
+    }
+    before_history = copy.deepcopy(portfolio["history"])
+    core = types.SimpleNamespace(
+        portfolio=portfolio,
+        record_trade=lambda *args, **kwargs: None,
+        save_state=lambda state: saved.append(copy.deepcopy(state)),
+        local_ts_text=lambda: "2026-09-10 13:45:00 CDT",
+    )
+    monkeypatch.setattr(ledger, "_read_rows", lambda: ([row], []))
+    monkeypatch.setattr(ledger, "_verify_rows", lambda rows: (True, []))
+
+    status = ledger.apply(core)
+
+    assert status["state_projection_parity"] is False
+    assert portfolio["risk_controls"]["halted"] is True
+    assert portfolio["risk_controls"]["halt_reason"] == ledger.PARITY_HALT_REASON
+    assert saved[-1]["risk_controls"]["canonical_state_projection_parity_failed"] is True
+    assert portfolio["history"] == before_history
+    assert status["parity_halt"]["persisted"] is True
+
+
+def test_parity_halt_preserves_preexisting_halt_reason(monkeypatch):
+    row = _trade("gev-entry")
+    portfolio = {
+        "accounting_epoch_id": EPOCH,
+        "trades": [],
+        "risk_controls": {"halted": True, "halt_reason": "existing hard loss halt"},
+    }
+    core = types.SimpleNamespace(
+        portfolio=portfolio,
+        record_trade=lambda *args, **kwargs: None,
+        save_state=lambda state: None,
+        local_ts_text=lambda: "2026-09-10 13:45:00 CDT",
+    )
+    monkeypatch.setattr(ledger, "_read_rows", lambda: ([row], []))
+    monkeypatch.setattr(ledger, "_verify_rows", lambda rows: (True, []))
+
+    ledger.apply(core)
+
+    assert portfolio["risk_controls"]["halt_reason"] == "existing hard loss halt"
+    assert ledger.status_payload(core)["parity_halt"]["halt_reason_preserved"] is True
