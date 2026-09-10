@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-09-09-v12-runner-liveness"
+VERSION = "change-safety-audit-2026-09-10-v13-canonical-state-parity"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -58,6 +58,7 @@ SHADOW_AI_TESTS = (
 STATE_SERIALIZATION_TESTS = (
     "test_issue165_state_serialization.py",
     "test_issue172_canonical_state_commit.py",
+    "test_issue222_canonical_state_parity.py",
 )
 PERFORMANCE_EVIDENCE_INTEGRITY_TESTS = (
     "test_issue167_forward_evidence_integrity.py",
@@ -141,6 +142,7 @@ def _is_state_serialization_path(path: str) -> bool:
         "cycle_completion_contract.py",
         "test_issue165_state_serialization.py",
         "test_issue172_canonical_state_commit.py",
+        "test_issue222_canonical_state_parity.py",
         "v4_canonical_state_reconciliation.py",
         "canonical_execution_ledger.py",
     }
