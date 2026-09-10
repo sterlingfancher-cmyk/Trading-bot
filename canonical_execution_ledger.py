@@ -20,7 +20,7 @@ import threading
 import uuid
 from typing import Any, Dict, List, Tuple
 
-VERSION = "canonical-execution-ledger-2026-09-10-v3-state-parity"
+VERSION = "canonical-execution-ledger-2026-09-10-v4-parity-halt"
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 LEDGER_FILE = os.path.join(STATE_DIR, "canonical_execution_ledger.jsonl")
 
@@ -28,6 +28,8 @@ _LOCK = threading.RLock()
 _APPLIED_CORE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
 _LAST_PROJECTION_COMMIT: Dict[str, Any] = {}
+_LAST_PARITY_HALT: Dict[str, Any] = {}
+PARITY_HALT_REASON = "canonical execution/state projection divergence"
 
 
 def _d(value: Any) -> Dict[str, Any]:
@@ -190,6 +192,48 @@ def _mark_projection_failure(core: Any, event: Dict[str, Any], error: Exception)
     pf["risk_controls"] = risk
 
 
+def _latch_projection_divergence(core: Any) -> Dict[str, Any]:
+    """Halt new paper entries when canonical/current-state parity is broken."""
+    global _LAST_PARITY_HALT
+    status = status_payload(core)
+    if status.get("state_projection_parity") is not False:
+        return {"status": "not_required", "state_projection_parity": status.get("state_projection_parity")}
+
+    pf = _portfolio(core)
+    risk = _d(pf.setdefault("risk_controls", {}))
+    already_halted = bool(risk.get("halted"))
+    risk["canonical_state_projection_parity_failed"] = True
+    risk["canonical_state_projection_parity_failed_local"] = _now(core)
+    risk["canonical_state_projection_missing_execution_ids"] = status.get("missing_from_state_execution_ids", [])
+    if not already_halted:
+        risk["halted"] = True
+        risk["halt_reason"] = PARITY_HALT_REASON
+    pf["risk_controls"] = risk
+
+    persisted = False
+    error = None
+    save = getattr(core, "save_state", None)
+    if callable(save):
+        try:
+            save(pf)
+            persisted = True
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+    _LAST_PARITY_HALT = {
+        "status": "halted" if already_halted or persisted else "halted_in_memory",
+        "recorded_local": _now(core),
+        "already_halted": already_halted,
+        "halt_reason_preserved": already_halted,
+        "persisted": persisted,
+        "error": error,
+        "missing_from_state_count": status.get("missing_from_state_count"),
+        "missing_from_state_execution_ids": status.get("missing_from_state_execution_ids", []),
+        "changes_execution_history": False,
+        "clears_halt": False,
+    }
+    return dict(_LAST_PARITY_HALT)
+
+
 def _persist_projection(core: Any, event: Dict[str, Any]) -> None:
     """Durably mirror a canonical execution before execution flow continues."""
     global _LAST_PROJECTION_COMMIT
@@ -232,6 +276,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
         return {"status": "error", "overall": "fail", "version": VERSION, "error": "core.record_trade_missing"}
     if getattr(current, "_canonical_execution_ledger_version", None) == VERSION:
         _APPLIED_CORE_IDS.add(core_id)
+        _latch_projection_divergence(core)
         return status_payload(core)
 
     prior = getattr(current, "_canonical_execution_ledger_prior", current)
@@ -257,6 +302,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
     wrapped._canonical_execution_ledger_prior = prior  # type: ignore[attr-defined]
     core.record_trade = wrapped
     _APPLIED_CORE_IDS.add(core_id)
+    _latch_projection_divergence(core)
     return status_payload(core)
 
 
@@ -318,6 +364,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "authoritative_for_new_executions": bool(hooked and healthy),
         "state_projection_commit_immediate": True,
         "last_state_projection_commit": dict(_LAST_PROJECTION_COMMIT),
+        "parity_halt": dict(_LAST_PARITY_HALT),
         "authority": {
             "records_execution_events": True,
             "repairs_historical_state": False,
@@ -326,6 +373,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "changes_strategy": False,
             "changes_thresholds": False,
             "changes_risk_or_sizing": False,
+            "latches_risk_halt_on_projection_divergence": True,
             "changes_live_or_ml_authority": False,
         },
     }
