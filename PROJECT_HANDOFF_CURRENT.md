@@ -1155,3 +1155,24 @@ audit/sentinel propagation. Historical reconciliation remains explicitly out of
 scope and may occur only through a separate exact-evidence successor process
 with validation hold; do not rewrite the canonical ledger or silently backfill
 state.
+
+PR #223 passed all five exact-head workflows (Change Safety including Gunicorn,
+Repository Safety and Performance, Architecture Debt, System Sentinel Shadow,
+and the full Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/
+Research audit) on `153b1bc8d4f4222419d708eceae7f58913a08ba4` and was squash-merged as
+`aa7b100355be218243feab3056a9e8a22b3af143`.
+
+Settled Splendid acceptance correctly failed closed and exposed that the scope
+is larger than the first GEV row: the 78-row hash-valid ledger has 32
+current-v4 execution IDs while state has 28. Missing state IDs are the original
+GEV entry plus `9554247470c54fe9a00598da6a346f46`,
+`96cdc732bf6b475098a9b6887ac76fa7`, and
+`c90260025d4b4eed8b3a0029e0267b5f`. Self-check is `fail` with only
+`canonical_state_parity`; daily audit is `fail` with critical successor-only
+next action; and sentinel reports one critical execution-projection incident.
+The automatic runner is otherwise fresh, the ledger chain remains valid, and
+no evidence was changed. Because diagnostics alone did not stop new paper
+entries, the bounded follow-up latches and persists a risk halt during canonical
+ledger startup whenever current-epoch parity is broken, without overwriting an
+existing halt reason or changing any execution/history evidence. Issue #222
+remains open until that halt containment is deployed and accepted.
