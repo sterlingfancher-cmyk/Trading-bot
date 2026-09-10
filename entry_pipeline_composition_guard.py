@@ -25,7 +25,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, Tuple
 
-VERSION = "entry-pipeline-composition-guard-2026-07-17-v4-valve-chain"
+VERSION = "entry-pipeline-composition-guard-2026-09-10-v5-transactional-status"
 VALVE_CHAIN_VERSION = "participation-valve-chain-2026-07-17-v1"
 REGISTERED_APP_IDS: set[int] = set()
 
@@ -67,6 +67,21 @@ def _inner_callable(fn: Any) -> Any:
 
 
 def _save_payload(core: Any, payload: Dict[str, Any]) -> None:
+    update_state = getattr(core, "update_state", None)
+    if callable(update_state):
+        def updater(state: Dict[str, Any]) -> Dict[str, Any]:
+            state["entry_pipeline_composition_guard"] = payload
+            return state
+
+        try:
+            update_state(updater, source="entry_pipeline_composition_guard")
+        except Exception:
+            pass
+        return
+
+    # Compatibility fallback for runtimes that predate the transaction manager.
+    # Do not replace core.portfolio with this independently loaded snapshot: a
+    # cycle can commit an execution between this read and the eventual save.
     try:
         state = core.load_state()
         if not isinstance(state, dict):
@@ -78,12 +93,8 @@ def _save_payload(core: Any, payload: Dict[str, Any]) -> None:
     state["entry_pipeline_composition_guard"] = payload
     try:
         core.save_state(state)
-        core.portfolio = state
     except Exception:
-        try:
-            core.portfolio = state
-        except Exception:
-            pass
+        pass
 
 
 def _is_stable(fn: Any) -> bool:
