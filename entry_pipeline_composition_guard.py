@@ -76,7 +76,7 @@ def _save_payload(core: Any, payload: Dict[str, Any]) -> None:
         try:
             update_state(updater, source="entry_pipeline_composition_guard")
         except Exception:
-            pass
+            return None
         return
 
     # Compatibility fallback for runtimes that predate the transaction manager.
@@ -94,7 +94,7 @@ def _save_payload(core: Any, payload: Dict[str, Any]) -> None:
     try:
         core.save_state(state)
     except Exception:
-        pass
+        return None
 
 
 def _is_stable(fn: Any) -> bool:
