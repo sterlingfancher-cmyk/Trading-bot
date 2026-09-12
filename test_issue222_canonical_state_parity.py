@@ -148,6 +148,23 @@ def test_ledger_parity_fails_audit_and_sentinel(monkeypatch):
     assert status["overall"] == "fail"
     assert status["state_projection_parity"] is False
     assert status["missing_from_state_execution_ids"] == ["gev-entry"]
+    assert status["missing_from_state_execution_rows"] == [
+        {
+            "execution_id": "gev-entry",
+            "event_hash": None,
+            "previous_event_hash": None,
+            "accounting_epoch_id": EPOCH,
+            "ledger_version": None,
+            "recorded_local": None,
+            "action": "entry",
+            "symbol": "GEV",
+            "side": "short",
+            "price": 920.93,
+            "shares": 1.091006,
+        }
+    ]
+    assert status["authority"]["exposes_bounded_missing_row_signatures"] is True
+    assert status["authority"]["repairs_historical_state"] is False
 
     monkeypatch.setattr(compact, "_ledger_status", lambda core=None: status)
     monkeypatch.setattr(compact, "_journal_status", lambda core=None: {})

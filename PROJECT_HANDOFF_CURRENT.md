@@ -1260,3 +1260,20 @@ Issue #222 remains open for the separately governed successor reconciliation of
 the four pre-existing missing state projections; the halt must not be manually
 cleared. Issue #202 and all performance promotion remain frozen until parity is
 resolved and post-reconciliation forward/runtime acceptance passes.
+
+## 2026-09-12 Issue #222 — Successor Reconciliation Evidence — IN VALIDATION
+
+The cross-day halt is now accepted, so the next bounded stage is collecting the
+exact immutable signatures needed to design the four-row successor
+reconciliation without guessing or exposing a state-write control. Branch
+`fix/issue-222-reconciliation-evidence` adds the already-detected missing
+current-epoch rows to the existing read-only canonical-ledger status, capped at
+the same ten-row diagnostic boundary and limited to execution identity, chain
+hashes, epoch/version, timestamp, action, symbol, side, price, and quantity.
+
+This stage is observability only: it does not repair state, rewrite canonical
+history, clear the active parity halt, call the broker, place orders, or change
+strategy, sizing, thresholds, live, or AI/ML authority. After exact-head gates
+and deployment acceptance, use the four exact event hashes and lifecycle fields
+to define a separately tested, archival, restart-safe successor reconciliation.
+Issue #202 remains frozen.

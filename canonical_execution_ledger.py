@@ -20,7 +20,7 @@ import threading
 import uuid
 from typing import Any, Dict, List, Tuple
 
-VERSION = "canonical-execution-ledger-2026-09-10-v4-parity-halt"
+VERSION = "canonical-execution-ledger-2026-09-12-v5-reconciliation-signatures"
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 LEDGER_FILE = os.path.join(STATE_DIR, "canonical_execution_ledger.jsonl")
 
@@ -328,6 +328,27 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
     }
     missing_from_state = sorted(ledger_ids - state_ids)
     missing_from_ledger = sorted(state_ids - ledger_ids)
+    missing_from_state_set = set(missing_from_state[:10])
+    missing_from_state_rows = [
+        {
+            key: row.get(key)
+            for key in (
+                "execution_id",
+                "event_hash",
+                "previous_event_hash",
+                "accounting_epoch_id",
+                "ledger_version",
+                "recorded_local",
+                "action",
+                "symbol",
+                "side",
+                "price",
+                "shares",
+            )
+        }
+        for row in epoch_rows
+        if str(row.get("execution_id") or "").strip() in missing_from_state_set
+    ]
     parity_checked = bool(core is not None and current_epoch)
     state_projection_parity = bool(parity_checked and not missing_from_state and not missing_from_ledger)
     hooked = core is not None and getattr(getattr(core, "record_trade", None), "_canonical_execution_ledger_version", None) == VERSION
@@ -350,6 +371,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "state_projection_parity": state_projection_parity if parity_checked else None,
         "missing_from_state_count": len(missing_from_state),
         "missing_from_state_execution_ids": missing_from_state[:10],
+        "missing_from_state_execution_rows": missing_from_state_rows,
         "missing_from_ledger_count": len(missing_from_ledger),
         "missing_from_ledger_execution_ids": missing_from_ledger[:10],
         "last_execution_id": rows[-1].get("execution_id") if rows else None,
@@ -374,6 +396,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "changes_thresholds": False,
             "changes_risk_or_sizing": False,
             "latches_risk_halt_on_projection_divergence": True,
+            "exposes_bounded_missing_row_signatures": True,
             "changes_live_or_ml_authority": False,
         },
     }
