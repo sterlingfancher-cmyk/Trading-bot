@@ -1234,3 +1234,29 @@ live or AI/ML authority, or place orders. Focused regressions cover both legacy
 paths; the focused and affected invariant set passes 144 tests. Exact-head CI
 and settled Splendid deployment acceptance remain required before this stage is
 complete. Issue #202 remains frozen while Issue #222 is active.
+
+## 2026-09-12 Issue #222 — Cross-Day Integrity-Halt Reset — COMPLETE
+
+PR #226 passed all five exact-head workflows (Change Safety including exact
+Gunicorn smoke, Repository Safety and Performance, Architecture Debt, Fresh Day
+Compact Check, and the full Refactor/Ownership/Configuration/State/Decision/
+Runtime/Startup/Research audit) on `cdcb6b05118efd539741fa936e969e5007df8636`
+and was squash-merged as `18680cd26448bf60387d56aeb4d738661d090995`.
+Both Railway deployment contexts and all post-merge repository contexts passed.
+
+Settled authoritative Splendid acceptance is bound to the merge commit. Startup
+is ready; the 87-row ledger remains hash-chain valid; current-v4 parity remains
+correctly false at 41 canonical versus 37 state execution IDs; and the same four
+missing IDs remain visible. The intended containment is now active and persisted:
+paper risk is halted for `canonical execution/state projection divergence`, the
+ledger is not authoritative for new executions, and sentinel reports the single
+critical execution-projection incident. Accounting reconstruction remains clean
+with zero coverage or economic issues, valuation is eligible, the runner has no
+active error, and market-data request accounting is complete with no circuit
+open. No canonical row, state/history, accounting, recovery record, threshold,
+strategy, sizing, live/AI authority, or order was changed.
+
+Issue #222 remains open for the separately governed successor reconciliation of
+the four pre-existing missing state projections; the halt must not be manually
+cleared. Issue #202 and all performance promotion remain frozen until parity is
+resolved and post-reconciliation forward/runtime acceptance passes.
