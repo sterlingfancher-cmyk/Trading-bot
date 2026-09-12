@@ -15,7 +15,9 @@ This guard is intentionally prospective and fail-closed:
 * once a sane current equity reaches the normal update boundary, the ordinary
   daily reset is allowed to initialize from that value;
 * an already-initialized current day is never rewritten, so this module does not
-  clear today's halt or rewrite today's peak after the fact.
+  clear today's halt or rewrite today's peak after the fact;
+* a canonical/state projection-divergence halt survives the ordinary new-day
+  risk-metric reset until a separately governed reconciliation resolves it.
 
 No strategy, sizing, risk thresholds, accounting history, live authority, ML
 authority, or order-placement behavior is changed.
@@ -26,8 +28,9 @@ import functools
 import math
 from typing import Any, Dict
 
-VERSION = "fresh-risk-day-baseline-guard-2026-08-20-v2-compact-check"
+VERSION = "fresh-risk-day-baseline-guard-2026-09-12-v3-integrity-halt-carry-forward"
 MIN_SANE_EQUITY = 1.0
+CANONICAL_PARITY_HALT_REASON = "canonical execution/state projection divergence"
 _APPLIED_CORE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
 
@@ -72,6 +75,35 @@ def _clear_pending(rc: Dict[str, Any], source: str) -> None:
     rc["fresh_day_reset_source"] = source
 
 
+def _canonical_parity_halt_snapshot(rc: Dict[str, Any]) -> Dict[str, Any]:
+    reason = str(rc.get("halt_reason") or "").strip().lower()
+    active = bool(
+        rc.get("canonical_state_projection_parity_failed")
+        or reason == CANONICAL_PARITY_HALT_REASON
+    )
+    if not active:
+        return {}
+    return {
+        key: rc.get(key)
+        for key in (
+            "canonical_state_projection_parity_failed",
+            "canonical_state_projection_parity_failed_local",
+            "canonical_state_projection_missing_execution_ids",
+        )
+        if key in rc
+    }
+
+
+def _carry_forward_canonical_parity_halt(fresh: Dict[str, Any], snapshot: Dict[str, Any]) -> None:
+    if not snapshot:
+        return
+    fresh.update(snapshot)
+    fresh["canonical_state_projection_parity_failed"] = True
+    fresh["canonical_state_projection_parity_halt_carried_forward"] = True
+    fresh["halted"] = True
+    fresh["halt_reason"] = CANONICAL_PARITY_HALT_REASON
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     if core is None:
         return {"status": "pending", "overall": "warn", "version": VERSION, "reason": "runtime_missing"}
@@ -102,15 +134,19 @@ def apply(core: Any = None) -> Dict[str, Any]:
             rc = default_factory()
             portfolio["risk_controls"] = rc
 
+        integrity_halt = _canonical_parity_halt_snapshot(rc)
         today = _today(core)
-        if today and str(rc.get("date") or "") != today:
+        legacy_reset_required = bool(today and str(rc.get("date") or "") != today)
+        if legacy_reset_required:
             candidate = portfolio.get("equity")
             if not _sane_equity(candidate):
                 _mark_pending(rc, candidate, "portfolio.equity")
                 return rc
 
         out = prior_get()
-        if isinstance(out, dict) and today and str(out.get("date") or "") == today:
+        if isinstance(out, dict):
+            _carry_forward_canonical_parity_halt(out, integrity_halt)
+        if isinstance(out, dict) and legacy_reset_required and str(out.get("date") or "") == today:
             if _sane_equity(out.get("day_start_equity")) and _sane_equity(out.get("day_peak_equity")):
                 _clear_pending(out, "normal_get_risk_controls_reset")
         return out
@@ -123,6 +159,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
             rc = default_factory()
             portfolio["risk_controls"] = rc
 
+        integrity_halt = _canonical_parity_halt_snapshot(rc)
         today = _today(core)
         if today and str(rc.get("date") or "") != today:
             if not _sane_equity(equity):
@@ -137,6 +174,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
             fresh["day_start_equity"] = float(equity)
             fresh["day_peak_equity"] = float(equity)
             _clear_pending(fresh, "update_daily_risk_controls.argument")
+            _carry_forward_canonical_parity_halt(fresh, integrity_halt)
             portfolio["risk_controls"] = fresh
 
         return prior_update(equity)
@@ -173,6 +211,9 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "day_start_equity_sane": _sane_equity(rc.get("day_start_equity")),
         "day_peak_equity_sane": _sane_equity(rc.get("day_peak_equity")),
         "fresh_day_reset_pending": bool(rc.get("fresh_day_reset_pending", False)),
+        "canonical_parity_halt_carried_forward": bool(
+            rc.get("canonical_state_projection_parity_halt_carried_forward", False)
+        ),
         "authority": {
             "risk_correctness_only": True,
             "changes_risk_thresholds": False,

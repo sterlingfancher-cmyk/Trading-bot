@@ -1206,3 +1206,31 @@ ledger/history evidence remains untouched.
 Issue #202 and the frozen `hold_10d` forward-shadow program remain unchanged
 and research-only; no performance candidate was adjusted or promoted while this
 correctness containment awaits settled runtime acceptance.
+
+## 2026-09-12 Issue #222 — Cross-Day Integrity-Halt Reset — FIX IN VALIDATION
+
+Fresh authoritative Splendid evidence on current main `10b136ab5cf29fd0880e9c73ea337f83004de3f4`
+shows the hash-valid canonical ledger at 87 rows / 41 current-v4 execution IDs
+while state contains 37 current-v4 IDs. The same four execution IDs documented
+above remain absent from state, so canonical/state projection parity is still
+false and the ledger correctly reports that it is not authoritative for new
+executions. Despite that unresolved critical condition, the current risk state
+is unhalted with no self-defense active.
+
+The demonstrated cause is lifecycle ordering, not new ledger corruption. PR
+#224 latches the parity halt during canonical-ledger startup, but the ordinary
+new-trading-day reset subsequently replaces the risk-control dictionary with a
+fresh default and discards the parity marker, halt flag, reason, timestamp, and
+missing-ID evidence. The existing prospective save/transaction guards remain
+installed; the missing historical state projections are unchanged.
+
+Branch `fix/issue-222-runtime-parity-halt` makes the fresh-day baseline guard
+carry only the canonical/state projection-divergence halt and its evidence into
+the new day's otherwise normal risk-metric reset. Ordinary daily-loss halts
+continue to reset normally. It does not clear a halt, change thresholds,
+strategy, sizing, accounting, canonical rows, state/history, recovery evidence,
+live or AI/ML authority, or place orders. Focused regressions cover both legacy
+`get_risk_controls` and valuation-driven `update_daily_risk_controls` reset
+paths; the focused and affected invariant set passes 144 tests. Exact-head CI
+and settled Splendid deployment acceptance remain required before this stage is
+complete. Issue #202 remains frozen while Issue #222 is active.
