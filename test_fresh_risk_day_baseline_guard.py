@@ -118,6 +118,56 @@ def test_sane_portfolio_equity_allows_legacy_reset_path():
     assert rc["fresh_day_reset_source"] == "normal_get_risk_controls_reset"
 
 
+def test_canonical_parity_halt_survives_legacy_get_new_day_reset():
+    module = _fresh_module()
+    core = FakeCore()
+    core.portfolio["equity"] = 13190.5
+    core.portfolio["risk_controls"].update(
+        {
+            "canonical_state_projection_parity_failed": True,
+            "canonical_state_projection_parity_failed_local": "2026-09-11 14:59:59 CDT",
+            "canonical_state_projection_missing_execution_ids": ["missing-execution"],
+            "halt_reason": module.CANONICAL_PARITY_HALT_REASON,
+        }
+    )
+    module.apply(core)
+
+    rc = core.get_risk_controls()
+
+    assert rc["date"] == "2026-08-19"
+    assert rc["day_start_equity"] == 13190.5
+    assert rc["day_peak_equity"] == 13190.5
+    assert rc["halted"] is True
+    assert rc["halt_reason"] == module.CANONICAL_PARITY_HALT_REASON
+    assert rc["canonical_state_projection_parity_failed"] is True
+    assert rc["canonical_state_projection_missing_execution_ids"] == ["missing-execution"]
+    assert rc["canonical_state_projection_parity_halt_carried_forward"] is True
+
+
+def test_canonical_parity_halt_survives_guarded_update_new_day_reset():
+    module = _fresh_module()
+    core = FakeCore()
+    core.portfolio["risk_controls"].update(
+        {
+            "canonical_state_projection_parity_failed": True,
+            "canonical_state_projection_missing_execution_ids": ["missing-execution"],
+            "halt_reason": "daily loss limit hit (3.0%)",
+        }
+    )
+    module.apply(core)
+
+    rc = core.update_daily_risk_controls(13250.25)
+
+    assert rc["date"] == "2026-08-19"
+    assert rc["day_start_equity"] == 13250.25
+    assert rc["day_peak_equity"] == 13250.25
+    assert rc["day_pnl_pct"] == 0.0
+    assert rc["halted"] is True
+    assert rc["halt_reason"] == module.CANONICAL_PARITY_HALT_REASON
+    assert rc["canonical_state_projection_parity_failed"] is True
+    assert rc["canonical_state_projection_parity_halt_carried_forward"] is True
+
+
 def test_already_initialized_current_day_is_never_rewritten():
     module = _fresh_module()
     core = FakeCore()
