@@ -16,6 +16,8 @@ from typing import Any, Dict
 VERSION = "verified-v4-validation-release-2026-09-02-v1"
 TARGET_EPOCH_ID = "stable-paper-v4-20260826-successor01"
 MINIMUM_POST_EPOCH_VALID_ROWS = 1
+ISSUE222_V5_EPOCH_ID = "stable-paper-v5-20260914-issue222-flat-successor01"
+ISSUE222_V5_DECISION = "issue222_unresolved_v4_projection_verified_flat_successor"
 _LAST: Dict[str, Any] = {}
 
 
@@ -57,6 +59,19 @@ def _paper_only() -> bool:
 def _portfolio(core: Any) -> Dict[str, Any]:
     pf = getattr(core, "portfolio", None) if core is not None else None
     return pf if isinstance(pf, dict) else {}
+
+
+def _issue222_successor(epoch: Dict[str, Any]) -> bool:
+    return bool(
+        str(epoch.get("id") or "") == ISSUE222_V5_EPOCH_ID
+        and str(epoch.get("prior_epoch_id") or "") == TARGET_EPOCH_ID
+        and str(epoch.get("historical_recovery_decision") or "") == ISSUE222_V5_DECISION
+        and bool(epoch.get("historical_evidence_archived"))
+        and bool(epoch.get("validation_hold"))
+        and str(epoch.get("prior_epoch_discrepancy_status") or "") == "unresolved_non_promotable"
+        and epoch.get("prior_epoch_economics_promotable") is False
+        and int(epoch.get("fabricated_exit_rows") or 0) == 0
+    )
 
 
 def _evidence(core: Any) -> Dict[str, Any]:
@@ -142,6 +157,15 @@ def apply(core: Any = None) -> Dict[str, Any]:
 
     state = _portfolio(core)
     epoch = _d(state.get("paper_accounting_epoch"))
+    if _issue222_successor(epoch):
+        result = {
+            "status": "superseded", "overall": "pass", "version": VERSION,
+            "epoch_id": TARGET_EPOCH_ID,
+            "superseded_by_epoch_id": ISSUE222_V5_EPOCH_ID,
+            "issue222_validation_hold": True,
+        }
+        _LAST = result
+        return result
     active = str(epoch.get("id") or state.get("accounting_epoch_id") or "") == TARGET_EPOCH_ID
     if active and not bool(epoch.get("validation_hold")):
         result = {
@@ -220,6 +244,23 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
     state = _portfolio(core) if core is not None else {}
     epoch = _d(state.get("paper_accounting_epoch"))
     active = str(epoch.get("id") or state.get("accounting_epoch_id") or "") == TARGET_EPOCH_ID
+    if _issue222_successor(epoch):
+        return {
+            "status": "superseded", "overall": "pass",
+            "type": "verified_v4_validation_release_status", "version": VERSION,
+            "epoch_id": TARGET_EPOCH_ID, "released": True,
+            "validation_hold": False, "released_local": None,
+            "superseded_by_epoch_id": ISSUE222_V5_EPOCH_ID,
+            "issue222_validation_hold": True, "last_result": dict(_LAST),
+            "authority": {
+                "paper_only": True, "changes_only_v4_validation_metadata": True,
+                "clears_risk_halts": False, "edits_or_deletes_canonical_rows": False,
+                "rewrites_current_day_peak": False, "rewrites_history": False,
+                "places_orders": False, "changes_strategy": False,
+                "changes_thresholds": False, "changes_risk_or_sizing": False,
+                "changes_live_or_ml_authority": False,
+            },
+        }
     released = bool(active and not epoch.get("validation_hold") and epoch.get("validation_released"))
     attempted_but_not_persisted = bool(
         active

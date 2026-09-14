@@ -1392,3 +1392,37 @@ research job was launched.
 
 
 PR #234 exact head `2249662bcd90da86d75aa6c17c58c66e1d0cab07` passed its docs-only exact-head Change Safety workflow and was squash-merged as `409a28d2ae130867bc211ca684184e619ce97bc3`. This merge changes documentation only; authoritative runtime behavior and the active Issue #222 halt are unchanged.
+
+
+## 2026-09-14 Issue #222 — Authorized verified-flat successor — IN VALIDATION
+
+The user explicitly authorized a non-destructive successor after independent
+read-only evidence was exhausted. The four exact missing short entries form a
+contiguous immutable chain, but no exact later GEV/SPCX/ACHR exit or partial-exit
+evidence is present; the accepted current state and independent accounting
+reconstruction are flat. No exit will be inferred or fabricated.
+
+Branch `fix/issue-222-verified-flat-successor` adds an exact-shape, paper-only
+v4-to-v5 migration. It requires the 88-row hash-valid ledger, 42 v4 rows versus
+38 state rows, the exact four missing IDs and immutable entry signatures, their
+contiguous hash linkage, the exact ORCL tail, no later candidate exit for the
+three affected symbols, clean flat accounting, the exact flat cash/equity
+snapshot, released v4 lineage, and the active projection-divergence halt. Any
+drift blocks without a state write.
+
+On an exact match only, it archives the full prior persistence and immutable
+ledger digest, begins
+`stable-paper-v5-20260914-issue222-flat-successor01` from the verified flat
+cash/equity baseline, clears only the new epoch's active trade window, marks the
+v4 discrepancy unresolved and permanently non-promotable, records zero
+fabricated exits, and applies a validation hold. Risk controls, day peak,
+history, canonical ledger, strategy, sizing, hard-risk limits, live authority,
+AI/ML authority, and order authority remain unchanged; the existing parity halt
+is preserved. Restart, concurrent-apply, signature drift, later-exit candidate,
+non-flat/accounting, marker, lineage compatibility, and v4-release supersession
+regressions are included.
+
+No successor has been deployed or applied yet. Exact diff inspection, every
+mandatory exact-head gate including exact Gunicorn startup, and settled
+authoritative Splendid acceptance are required before completion. Issue #202
+remains frozen and no research job was launched.
