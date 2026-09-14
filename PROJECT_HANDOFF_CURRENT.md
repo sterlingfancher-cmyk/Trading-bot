@@ -1360,3 +1360,32 @@ No duplicate research job was launched and no canonical/state/history/day-peak/
 recovery evidence or trading authority was changed. The next correctness action
 remains a separately governed, archival, exact-signature successor
 reconciliation for Issue #222; do not clear the halt manually.
+
+
+## 2026-09-14 Issue #222 — Reconciliation authority boundary
+
+Read-only forensic review confirms the four absent state projections are a
+contiguous canonical-ledger entry chain: GEV event
+`1504ba26dd40438328b463af2bda4eb7d5394234d8d9bf50acf37883209450ae`,
+SPCX events `82d2b757418690153b38e66b9e447132666401daf0a85c932ffc0f4b3795fcf2`
+and `4bfc5ba82b6dd95bbc99952dbfce446cd29336ff82759458279627768c6ae598`,
+and ACHR event
+`313543e183e5a7368e57fd7d7d50a7eb45f19b4db30e2d14375109199caf0949`.
+Their exact entry notionals are approximately $1,004.740501,
+$1,004.740497, $1,004.740497, and $1,004.740508, respectively
+($4,018.962003 total). They have no matching state-projected lifecycle, while
+subsequent canonical/state executions continued and the current state book is
+flat.
+
+This makes the next step an economically material successor-state decision,
+not a routine observability fix: blindly replaying the four entries would
+resurrect three short symbols/four lots and reserve roughly $4,019 of capital;
+ignoring their later lifecycle would also leave the successor accounting open.
+The existing Issue #172 recovery is intentionally unusable for this shape and,
+when its exact preflight matches, auto-applies from the startup bridge. Therefore
+no Issue #222 recovery module may be registered or allowed to auto-apply until a
+separately authorized disposition defines the exact successor economics and
+exit treatment. The active parity halt remains the correct fail-closed state.
+No canonical row, state/history, accounting, day peak, recovery artifact, risk
+control, order, or authority was changed. Issue #202 remains frozen and no
+research job was launched.
