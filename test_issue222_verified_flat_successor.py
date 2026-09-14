@@ -34,16 +34,16 @@ def _fixture():
             row["execution_id"] = available[0]
         rows.append(row)
     used = {str(row.get("execution_id")) for row in rows}
-    for index in range(17):
+    for index in range(18):
         execution_id = f"after-{index}"
-        if index == 16:
+        if index == 17:
             execution_id = recovery.EXPECTED_LAST_EXECUTION_ID
         rows.append({
             "execution_id": execution_id, "accounting_epoch_id": recovery.OLD_EPOCH_ID,
             "event_hash": f"after-hash-{index}", "previous_event_hash": f"after-prev-{index}",
-            "action": "exit" if index == 16 else ("entry" if index % 2 == 0 else "exit"),
-            "symbol": "ORCL" if index == 16 else f"A{index}",
-            "side": "short" if index == 16 else "long",
+            "action": "exit" if index == 17 else ("entry" if index % 2 == 0 else "exit"),
+            "symbol": "ORCL" if index == 17 else f"A{index}",
+            "side": "short" if index == 17 else "long",
             "price": 142.275 if index == 17 else 20.0 + index,
             "shares": 4.383375 if index == 17 else 1.0,
         })
@@ -128,7 +128,7 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
     def test_exact_verified_flat_successor_preserves_evidence_and_halt(self):
         rows, state = _fixture()
         before_risk = copy.deepcopy(state["risk_controls"])
-        before_history = copy.deepcopy(state["history"])
+        before_history = copy.deepcopy(state["history"])\n        before_trades = copy.deepcopy(state["trades"])
         core = types.SimpleNamespace(
             portfolio=state,
             local_ts_text=lambda: "2026-09-14 13:30:00 CDT",
