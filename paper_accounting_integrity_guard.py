@@ -23,7 +23,7 @@ import datetime as dt
 import functools
 from typing import Any, Dict, List, Tuple
 
-VERSION = "paper-accounting-integrity-2026-09-02-v3-successor-readonly"
+VERSION = "paper-accounting-integrity-2026-09-14-v4-optional-position-pnl"
 _APPLIED = False
 _PATCHED_CORE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
@@ -243,10 +243,27 @@ def _discrepancies(pf: Dict[str, Any], rebuilt: Dict[str, Any]) -> List[Dict[str
             out.append({"field": f"positions.{symbol}.entry_price", "stored": round(stored_entry, 4), "expected": round(expected_entry, 4)})
         if expected_qty > 0 and (stored_qty <= 0 or abs(stored_qty - expected_qty) / expected_qty > 0.01):
             out.append({"field": f"positions.{symbol}.qty", "stored": round(stored_qty, 6), "expected": round(expected_qty, 6)})
-        stored_upnl = _f(pos.get("unrealized_pnl", pos.get("pnl_dollars")), 0.0)
-        expected_upnl = _f(expected.get("unrealized_pnl"), 0.0)
-        if abs(stored_upnl - expected_upnl) > max(2.0, abs(expected.get("market_value", 0.0)) * 0.01):
-            out.append({"field": f"positions.{symbol}.unrealized_pnl", "stored": round(stored_upnl, 4), "expected": round(expected_upnl, 4)})
+        # Minimal canonical position rows persist entry, shares, side, and the
+        # latest mark. Per-position P/L is an optional derived cache, so its
+        # absence must not be interpreted as a stored economic zero. When an
+        # alias is present, continue checking it for stale reporting data.
+        pnl_key = next((key for key in ("unrealized_pnl", "pnl_dollars") if key in pos), None)
+        if pnl_key is not None:
+            stored_upnl = _f(pos.get(pnl_key), 0.0)
+            expected_upnl = _f(expected.get("unrealized_pnl"), 0.0)
+            if abs(stored_upnl - expected_upnl) > max(2.0, abs(expected.get("market_value", 0.0)) * 0.01):
+                out.append({"field": f"positions.{symbol}.unrealized_pnl", "stored": round(stored_upnl, 4), "expected": round(expected_upnl, 4)})
+
+    performance = _d(pf.get("performance"))
+    if "unrealized_pnl" in performance:
+        stored_upnl = _f(performance.get("unrealized_pnl"), 0.0)
+        expected_upnl = _f(rebuilt.get("unrealized_pnl"), 0.0)
+        if abs(stored_upnl - expected_upnl) > max(2.0, abs(_f(rebuilt.get("market_value"))) * 0.01):
+            out.append({
+                "field": "performance.unrealized_pnl",
+                "stored": round(stored_upnl, 4),
+                "expected": round(expected_upnl, 4),
+            })
     return out
 
 
