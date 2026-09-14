@@ -128,7 +128,8 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
     def test_exact_verified_flat_successor_preserves_evidence_and_halt(self):
         rows, state = _fixture()
         before_risk = copy.deepcopy(state["risk_controls"])
-        before_history = copy.deepcopy(state["history"])\n        before_trades = copy.deepcopy(state["trades"])
+        before_history = copy.deepcopy(state["history"])
+        before_trades = copy.deepcopy(state["trades"])
         core = types.SimpleNamespace(
             portfolio=state,
             local_ts_text=lambda: "2026-09-14 13:30:00 CDT",
