@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-09-03-v41-issue172-reconciliation"
+VERSION = "data-integrity-startup-bridge-2026-09-14-v42-issue222-flat-successor"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
