@@ -99,6 +99,10 @@ MODULES = (
     # the demonstrated v4 two-exit divergence, archives evidence, reconciles
     # state from immutable canonical rows, and preserves the lifecycle halt.
     "v4_canonical_state_reconciliation",
+    # Exact authorized Issue #222 v4->v5 successor. It is deliberately last:
+    # only the demonstrated four-entry projection gap may create the archived,
+    # non-promotable verified-flat epoch, and the active parity halt is retained.
+    "issue222_verified_flat_successor",
 )
 
 
