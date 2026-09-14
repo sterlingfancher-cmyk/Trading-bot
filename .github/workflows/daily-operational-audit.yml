@@ -109,6 +109,7 @@ jobs:
             "issue222_successor_live.json:/paper/issue222-verified-flat-successor-status" \
             "canonical_ledger_live.json:/paper/canonical-execution-ledger-status" \
             "accounting_integrity_live.json:/paper/accounting-integrity-status" \
+            "trade_journal_live.json:/paper/trade-journal?full=1" \
             "daily_operational_audit_live.json:/paper/daily-audit?full=1"; do
             file=${spec%%:*}
             path=${spec#*:}
@@ -134,6 +135,23 @@ jobs:
           successor = json.loads(Path("issue222_successor_live.json").read_text(encoding="utf-8"))
           ledger = json.loads(Path("canonical_ledger_live.json").read_text(encoding="utf-8"))
           accounting_integrity = json.loads(Path("accounting_integrity_live.json").read_text(encoding="utf-8"))
+          trade_journal = json.loads(Path("trade_journal_live.json").read_text(encoding="utf-8"))
+          affected_symbols = {"GEV", "SPCX", "ACHR"}
+          affected_execution_ids = {
+              "9554247470c54fe9a00598da6a346f46",
+              "96cdc732bf6b475098a9b6887ac76fa7",
+              "9cad03cbec994e29a9b65293d573f54b",
+              "c90260025d4b4eed8b3a0029e0267b5f",
+              "10d56e9128cc4afe896df89b01df137c",
+          }
+          affected_journal_rows = [
+              row for row in trade_journal.get("trades", [])
+              if isinstance(row, dict)
+              and (
+                  str(row.get("symbol") or "").upper() in affected_symbols
+                  or str(row.get("execution_id") or "") in affected_execution_ids
+              )
+          ]
           sections = daily.get("sections")
           contract = daily.get("performance_contract", {})
           authority = daily.get("authority", {})
@@ -171,7 +189,12 @@ jobs:
           assert state.get("status") == "ok", state
           assert state.get("persistent_mount_detected") in {True, False}, state
 
-          print(json.dumps({"issue222_raw": successor}, indent=2, sort_keys=True))
+          print(json.dumps({
+              "issue222_raw": successor,
+              "issue222_trade_journal_evidence": affected_journal_rows,
+              "trade_journal_row_count": len(trade_journal.get("trades", [])),
+          }, indent=2, sort_keys=True, default=str))
+          assert trade_journal.get("status") == "ok", trade_journal
           assert successor.get("status") == "validation_hold", successor
           assert successor.get("overall") == "pass", successor
           assert successor.get("type") == "issue222_verified_flat_successor_status", successor
@@ -296,6 +319,7 @@ jobs:
             issue222_successor_live.json
             canonical_ledger_live.json
             accounting_integrity_live.json
+            trade_journal_live.json
           if-no-files-found: warn
           retention-days: 30
 
