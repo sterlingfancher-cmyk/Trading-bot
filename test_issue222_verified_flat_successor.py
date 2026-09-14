@@ -44,8 +44,8 @@ def _fixture():
             "action": "exit" if index == 16 else ("entry" if index % 2 == 0 else "exit"),
             "symbol": "ORCL" if index == 16 else f"A{index}",
             "side": "short" if index == 16 else "long",
-            "price": 142.275 if index == 16 else 20.0 + index,
-            "shares": 4.383375 if index == 16 else 1.0,
+            "price": 142.275 if index == 17 else 20.0 + index,
+            "shares": 4.383375 if index == 17 else 1.0,
         })
     missing_ids = recovery.EXPECTED_MISSING_IDS
     state_trades = []
@@ -154,7 +154,7 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
             archived = json.loads(
                 (Path(result["archive_dir"]) / "issue222_verified_flat_successor_manifest.json").read_text()
             )
-            self.assertEqual(archived["pre_cutover_account"]["trades"], state.get("trades", []))
+            self.assertEqual(archived["pre_cutover_account"]["trades"], before_trades)
             self.assertEqual(archived["unresolved_prior_discrepancy"]["status"], "unresolved_non_promotable")
             self.assertEqual(json.loads(journal.read_text())["accounting_epoch_id"], recovery.TARGET_EPOCH_ID)
 
