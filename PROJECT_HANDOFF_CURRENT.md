@@ -1426,3 +1426,14 @@ No successor has been deployed or applied yet. Exact diff inspection, every
 mandatory exact-head gate including exact Gunicorn startup, and settled
 authoritative Splendid acceptance are required before completion. Issue #202
 remains frozen and no research job was launched.
+
+
+## 2026-09-14 Issue #222 — merged; settled runtime evidence pending
+
+PR #236 exact head `7150650ae42f1cb4e9e0f6cac2a39767f0459b07` passed all four mandatory exact-head workflows: repository safety/performance, architecture-debt regression, Change Safety, and the full refactor/ownership/configuration/state/decision/runtime/startup/research audit. The full audit included the focused successor/restart/concurrency regressions and exact Gunicorn startup smoke. Exact-diff inspection remained bounded to the Issue #222 successor, startup and lineage compatibility, v4-release supersession, focused tests, classification, and this handoff. The initial architecture duplicate-owner finding was corrected by reusing the established successor primitives and the corrected exact head passed.
+
+The PR squash-merged to main as `beef6e24a548efafe7d1edfe7ae866b9b9e546f1`. The authoritative `splendid-creativity / web` deployment context reached success, as did post-merge repository validation and daily operational audit. The unrelated legacy Railway context is not authoritative and was not used.
+
+This run could not obtain a read-only response from the authoritative runtime URL because the available network reader rejected the Railway domain before making a request. Therefore neither successor application nor the v5 settled invariants are inferred from deployment status: settled runtime acceptance remains open. Do not manually clear the parity halt. The required next probe must confirm the exact v5 epoch and completed marker, validation hold active, prior discrepancy unresolved/non-promotable, zero fabricated exits, flat positions/trades, unchanged cash/equity/risk/day peak/history and canonical-ledger digest, clean accounting, and restart stability. If exact preconditions did not match, preserve the blocked v4 state and diagnose without mutation.
+
+Issue #202 remains frozen and no research job was launched. Issue #84 does not begin until Issue #222 receives settled authoritative acceptance.
