@@ -19,6 +19,8 @@ NEW_EPOCH_ID = VERIFIED_V2_EPOCH_ID
 ISSUE82_V3_EPOCH_ID = "stable-paper-v3-20260825-successor01"
 ISSUE126_V4_EPOCH_ID = "stable-paper-v4-20260826-successor01"
 ISSUE126_V4_DECISION = "issue126_sls_reentrant_accounting_successor_rollforward"
+ISSUE222_V5_EPOCH_ID = "stable-paper-v5-20260914-issue222-flat-successor01"
+ISSUE222_V5_DECISION = "issue222_unresolved_v4_projection_verified_flat_successor"
 _APPLIED = False
 
 
@@ -60,6 +62,17 @@ def _successor_epoch(core: Any) -> str | None:
         )
     ):
         return ISSUE126_V4_EPOCH_ID
+    if bool(
+        epoch_id == ISSUE222_V5_EPOCH_ID
+        and str(epoch.get("prior_epoch_id") or "") == ISSUE126_V4_EPOCH_ID
+        and str(epoch.get("historical_recovery_decision") or "") == ISSUE222_V5_DECISION
+        and bool(epoch.get("historical_evidence_archived", False))
+        and bool(epoch.get("validation_hold", False))
+        and str(epoch.get("prior_epoch_discrepancy_status") or "") == "unresolved_non_promotable"
+        and epoch.get("prior_epoch_economics_promotable") is False
+        and int(epoch.get("fabricated_exit_rows") or 0) == 0
+    ):
+        return ISSUE222_V5_EPOCH_ID
     return None
 
 
