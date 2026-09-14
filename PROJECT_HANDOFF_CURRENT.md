@@ -1325,3 +1325,38 @@ gap above one or a provider failure. This is read-only classification only and
 does not change provider, execution, state, accounting, risk, strategy, sizing,
 live, or AI/ML behavior. Issue #202 remains frozen and no research job was
 launched.
+
+## 2026-09-14 Issues #229 and #231 — COMPLETE
+
+PR #230 passed all four exact-head workflows, including exact Gunicorn smoke,
+on `621a00dc7d4e1008ba2a3a5647983bc8c5d8ebbc` and squash-merged as
+`f6a801af373ce5258b332d9456bbe27f1818bb1c`. Settled Splendid acceptance proved
+accounting integrity `ok/pass`, complete coverage, zero discrepancies, and no
+automatic repair. PR #232 then passed the same four mandatory exact-head gates
+on `31d89434ae037e272d3326519ef5c48c4f4d53ef` and squash-merged as
+`0003ad17956225e05b2175e7b36f24e5d3d6d95c`.
+
+Settled acceptance on the exact final deployment is ready/delegating. Sentinel
+now reports only the genuine Issue #222 execution-projection incident; with one
+provider request concurrently in flight it retains observed gap `1`, normalizes
+the permitted sentinel gap to `0`, and reports snapshot completeness without a
+false market-data incident. Accounting is `ok/pass` with 38 parsed state rows,
+complete coverage, zero economic/coverage issues, zero discrepancies, and a
+flat book. The canonical ledger is hash-chain valid at 88 rows / 42 current-epoch
+rows versus 38 state rows; the exact same four historical projections remain
+missing and the parity halt remains active and persisted. The runner has no
+active error and provider status passes.
+
+The rules-owned ORCL short completed a trailing-stop exit during the validation
+window for `4.383375 @ 142.275`, recording execution
+`a28005eb52b34e31a431b446ea68f0c7` and state/canonical counts advanced together.
+No new entry was admitted through the halt. Shadow AI remains observer-only and
+healthy with 91 durable integrity-valid records, 51 join-eligible results,
+43.956% unavailable, exact cumulative cost `$0.238310`, and no promotion
+authority. Production Performance Audit V2 remains disabled/not-run; the frozen
+Issue #202 artifact remains one forward session with zero matched completed
+lifecycles and zero divergences, so all promotion gates remain inconclusive.
+No duplicate research job was launched and no canonical/state/history/day-peak/
+recovery evidence or trading authority was changed. The next correctness action
+remains a separately governed, archival, exact-signature successor
+reconciliation for Issue #222; do not clear the halt manually.
