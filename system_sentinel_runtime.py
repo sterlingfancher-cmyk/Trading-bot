@@ -12,7 +12,7 @@ from typing import Any, Callable, Mapping
 import system_sentinel
 
 
-VERSION = "system-sentinel-runtime-2026-09-03-v1"
+VERSION = "system-sentinel-runtime-2026-09-14-v2-inflight-normalization"
 _REGISTERED_APP_IDS: set[int] = set()
 _INSTALL_STATUS_BY_CORE: dict[int, dict[str, Any]] = {}
 
@@ -87,6 +87,7 @@ def collect_snapshot(
     market_data["observed_in_flight_or_unclassified_requests"] = gap
     if market_data.get("status") == "pass" and gap <= 1:
         market_data["in_flight_or_unclassified_requests"] = 0
+        market_data["accounting_complete_at_snapshot"] = True
 
     snapshot = {
         "valuation": {
