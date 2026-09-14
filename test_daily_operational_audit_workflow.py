@@ -19,6 +19,21 @@ class DailyOperationalAuditWorkflowTests(unittest.TestCase):
         text = WORKFLOW.read_text(encoding="utf-8")
         self.assertNotIn("cycle-completion-contract-2026-08-04-v2-rebind-safe", text)
 
+    def test_issue222_settled_acceptance_is_captured_fail_closed(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("/paper/issue222-verified-flat-successor-status", text)
+        self.assertIn("/paper/canonical-execution-ledger-status", text)
+        self.assertIn("/paper/accounting-integrity-status", text)
+        self.assertIn('assert successor.get("status") == "validation_hold", successor', text)
+        self.assertIn('assert successor.get("fabricated_exit_rows") == 0, successor', text)
+        self.assertIn('assert successor.get("projection_halt_preserved") is True, successor', text)
+        self.assertIn('assert ledger.get("chain_valid") is True, ledger', text)
+        self.assertIn('assert ledger.get("state_projection_parity") is True, ledger', text)
+        self.assertIn('assert accounting_integrity.get("repaired") is False, accounting_integrity', text)
+        self.assertIn("issue222_successor_live.json", text)
+        self.assertIn("canonical_ledger_live.json", text)
+        self.assertIn("accounting_integrity_live.json", text)
+
     def test_workflow_runs_this_regression(self):
         text = WORKFLOW.read_text(encoding="utf-8")
         self.assertGreaterEqual(text.count("test_daily_operational_audit_workflow.py"), 2)
