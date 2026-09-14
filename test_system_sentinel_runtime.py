@@ -98,7 +98,7 @@ class SystemSentinelRuntimeTests(unittest.TestCase):
         collectors["daily_audit"] = lambda core: {
             "market_data": {
                 "status": "pass",
-                "accounting_complete_at_snapshot": True,
+                "accounting_complete_at_snapshot": False,
                 "in_flight_or_unclassified_requests": 1,
             }
         }
@@ -111,6 +111,34 @@ class SystemSentinelRuntimeTests(unittest.TestCase):
         self.assertEqual(
             payload["snapshot"]["market_data"]["in_flight_or_unclassified_requests"],
             0,
+        )
+        self.assertTrue(
+            payload["snapshot"]["market_data"]["accounting_complete_at_snapshot"]
+        )
+
+    def test_two_unclassified_provider_requests_remain_an_incident(self):
+        collectors = _collectors()
+        collectors["daily_audit"] = lambda core: {
+            "market_data": {
+                "status": "pass",
+                "accounting_complete_at_snapshot": False,
+                "in_flight_or_unclassified_requests": 2,
+            }
+        }
+        payload = runtime.build_payload(self.core, collectors=collectors)
+        self.assertEqual(payload["status"], "incident")
+        self.assertEqual(payload["incident_count"], 1)
+        self.assertEqual(payload["incidents"][0]["reason_code"], "market_data_incomplete")
+        self.assertEqual(
+            payload["snapshot"]["market_data"]["observed_in_flight_or_unclassified_requests"],
+            2,
+        )
+        self.assertEqual(
+            payload["snapshot"]["market_data"]["in_flight_or_unclassified_requests"],
+            2,
+        )
+        self.assertFalse(
+            payload["snapshot"]["market_data"]["accounting_complete_at_snapshot"]
         )
 
     def test_route_registration_is_idempotent_and_starts_no_worker(self):

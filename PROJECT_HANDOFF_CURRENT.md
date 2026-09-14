@@ -1301,3 +1301,27 @@ continue checking it when present, add an aggregate P/L comparison, and add
 focused regressions. This change cannot repair state, clear the Issue #222 halt,
 or change strategy, risk, sizing, execution, live, or AI/ML authority. Issue
 #202 remains frozen; no duplicate research run was launched.
+
+## 2026-09-14 Issue #229 complete and Issue #231 sentinel classification — IN VALIDATION
+
+PR #230 passed all four exact-head workflows on
+`621a00dc7d4e1008ba2a3a5647983bc8c5d8ebbc`, including Change Safety and exact
+Gunicorn smoke, and squash-merged as
+`f6a801af373ce5258b332d9456bbe27f1818bb1c`. Settled Splendid acceptance on that
+exact deployment proves accounting integrity `ok/pass`, complete coverage, zero
+discrepancies, and no automatic repair. The active ORCL short subsequently
+closed through the rules-owned lifecycle; ledger/state counts advanced together
+from 41/37 to 42/38 and the same four historical missing projections remain.
+Issue #222's parity halt remains active and persisted; no halt or history was
+cleared or rewritten.
+
+The settled capture also demonstrated Issue #231: daily market-data accounting
+can pass with the one request that its snapshot contract permits to be in
+flight, but sentinel normalizes the gap to zero without normalizing the related
+completeness flag, producing a contradictory high-severity incident. Branch
+`fix/issue-231-sentinel-inflight-classification` makes those two sentinel-only
+fields consistent while retaining the observed gap and continuing to fail on a
+gap above one or a provider failure. This is read-only classification only and
+does not change provider, execution, state, accounting, risk, strategy, sizing,
+live, or AI/ML behavior. Issue #202 remains frozen and no research job was
+launched.
