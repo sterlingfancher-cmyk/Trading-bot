@@ -8,6 +8,10 @@ on:
       - "daily_audit_repair_overlay.py"
       - "daily_data_integrity_audit_overlay.py"
       - "data_integrity_startup_bridge.py"
+      - "issue222_verified_flat_successor.py"
+      - "test_issue222_verified_flat_successor.py"
+      - "canonical_execution_ledger.py"
+      - "paper_accounting_integrity_guard.py"
       - "provider_request_accounting_overlay.py"
       - "bootstrap_wsgi.py"
       - "cycle_completion_contract.py"
@@ -95,6 +99,9 @@ jobs:
             "cycle_completion_contract_live.json:/paper/cycle-completion-contract-status" \
             "state_persistence_contract_live.json:/paper/state-persistence-contract-status" \
             "provider_timeout_contract_live.json:/paper/provider-timeout-contract-status" \
+            "issue222_successor_live.json:/paper/issue222-verified-flat-successor-status" \
+            "canonical_ledger_live.json:/paper/canonical-execution-ledger-status" \
+            "accounting_integrity_live.json:/paper/accounting-integrity-status" \
             "daily_operational_audit_live.json:/paper/daily-audit?full=1"; do
             file=${spec%%:*}
             path=${spec#*:}
@@ -117,6 +124,9 @@ jobs:
           cycle = json.loads(Path("cycle_completion_contract_live.json").read_text(encoding="utf-8"))
           state = json.loads(Path("state_persistence_contract_live.json").read_text(encoding="utf-8"))
           provider = json.loads(Path("provider_timeout_contract_live.json").read_text(encoding="utf-8"))
+          successor = json.loads(Path("issue222_successor_live.json").read_text(encoding="utf-8"))
+          ledger = json.loads(Path("canonical_ledger_live.json").read_text(encoding="utf-8"))
+          accounting_integrity = json.loads(Path("accounting_integrity_live.json").read_text(encoding="utf-8"))
           sections = daily.get("sections")
           contract = daily.get("performance_contract", {})
           authority = daily.get("authority", {})
@@ -154,6 +164,39 @@ jobs:
           assert state.get("status") == "ok", state
           assert state.get("persistent_mount_detected") in {True, False}, state
 
+          assert successor.get("status") == "validation_hold", successor
+          assert successor.get("overall") == "pass", successor
+          assert successor.get("type") == "issue222_verified_flat_successor_status", successor
+          assert successor.get("epoch_id") == "stable-paper-v5-20260914-issue222-flat-successor01", successor
+          assert successor.get("prior_epoch_id") == "stable-paper-v4-20260826-successor01", successor
+          assert successor.get("historical_evidence_archived") is True, successor
+          assert successor.get("validation_hold") is True, successor
+          assert successor.get("canonical_ledger_unchanged") is True, successor
+          assert successor.get("unresolved_prior_discrepancy") is True, successor
+          assert successor.get("prior_epoch_economics_promotable") is False, successor
+          assert successor.get("fabricated_exit_rows") == 0, successor
+          assert successor.get("state_trade_rows") == 0, successor
+          assert successor.get("positions") == [], successor
+          assert successor.get("projection_halt_preserved") is True, successor
+          assert successor.get("projection_halt_reason") == "canonical execution/state projection divergence", successor
+
+          assert ledger.get("status") == "ok" and ledger.get("overall") == "pass", ledger
+          assert ledger.get("chain_valid") is True, ledger
+          assert ledger.get("row_count") == 88, ledger
+          assert ledger.get("current_epoch_id") == successor.get("epoch_id"), ledger
+          assert ledger.get("current_epoch_rows") == 0, ledger
+          assert ledger.get("state_current_epoch_rows") == 0, ledger
+          assert ledger.get("state_projection_parity") is True, ledger
+          assert ledger.get("missing_from_state_count") == 0, ledger
+          assert ledger.get("missing_from_ledger_count") == 0, ledger
+
+          assert accounting_integrity.get("status") == "ok", accounting_integrity
+          assert accounting_integrity.get("overall") == "pass", accounting_integrity
+          assert accounting_integrity.get("coverage_complete") is True, accounting_integrity
+          assert accounting_integrity.get("discrepancy_count_remaining") == 0, accounting_integrity
+          assert accounting_integrity.get("repaired") is False, accounting_integrity
+          assert accounting_integrity.get("successor_validation_hold_read_only") is True, accounting_integrity
+
           print(json.dumps({
               "overall": daily.get("overall"),
               "duration_seconds": daily.get("duration_seconds"),
@@ -172,6 +215,34 @@ jobs:
               "provider_failures": provider.get("health", {}).get("failed"),
               "persistent_mount_detected": state.get("persistent_mount_detected"),
               "state_file": state.get("state_file"),
+              "issue222_successor": {
+                  "status": successor.get("status"),
+                  "epoch_id": successor.get("epoch_id"),
+                  "validation_hold": successor.get("validation_hold"),
+                  "unresolved_prior_discrepancy": successor.get("unresolved_prior_discrepancy"),
+                  "prior_epoch_economics_promotable": successor.get("prior_epoch_economics_promotable"),
+                  "fabricated_exit_rows": successor.get("fabricated_exit_rows"),
+                  "state_trade_rows": successor.get("state_trade_rows"),
+                  "positions": successor.get("positions"),
+                  "cash": successor.get("cash"),
+                  "equity": successor.get("equity"),
+                  "projection_halt_preserved": successor.get("projection_halt_preserved"),
+                  "canonical_ledger_unchanged": successor.get("canonical_ledger_unchanged"),
+              },
+              "canonical_ledger": {
+                  "row_count": ledger.get("row_count"),
+                  "chain_valid": ledger.get("chain_valid"),
+                  "current_epoch_rows": ledger.get("current_epoch_rows"),
+                  "state_current_epoch_rows": ledger.get("state_current_epoch_rows"),
+                  "state_projection_parity": ledger.get("state_projection_parity"),
+              },
+              "accounting_integrity": {
+                  "status": accounting_integrity.get("status"),
+                  "coverage_complete": accounting_integrity.get("coverage_complete"),
+                  "discrepancy_count_remaining": accounting_integrity.get("discrepancy_count_remaining"),
+                  "repaired": accounting_integrity.get("repaired"),
+                  "successor_validation_hold_read_only": accounting_integrity.get("successor_validation_hold_read_only"),
+              },
               "next_action": sections.get("12_next_action"),
           }, indent=2, sort_keys=True))
           PY
@@ -214,6 +285,9 @@ jobs:
             cycle_completion_contract_live.json
             state_persistence_contract_live.json
             provider_timeout_contract_live.json
+            issue222_successor_live.json
+            canonical_ledger_live.json
+            accounting_integrity_live.json
           if-no-files-found: warn
           retention-days: 30
 
