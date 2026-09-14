@@ -59,6 +59,19 @@ def _portfolio(core: Any) -> Dict[str, Any]:
     return pf if isinstance(pf, dict) else {}
 
 
+def _issue222_successor(epoch: Dict[str, Any]) -> bool:
+    return bool(
+        str(epoch.get("id") or "") == ISSUE222_V5_EPOCH_ID
+        and str(epoch.get("prior_epoch_id") or "") == TARGET_EPOCH_ID
+        and str(epoch.get("historical_recovery_decision") or "") == ISSUE222_V5_DECISION
+        and bool(epoch.get("historical_evidence_archived"))
+        and bool(epoch.get("validation_hold"))
+        and str(epoch.get("prior_epoch_discrepancy_status") or "") == "unresolved_non_promotable"
+        and epoch.get("prior_epoch_economics_promotable") is False
+        and int(epoch.get("fabricated_exit_rows") or 0) == 0
+    )
+
+
 def _evidence(core: Any) -> Dict[str, Any]:
     try:
         import canonical_execution_ledger as ledger_module
