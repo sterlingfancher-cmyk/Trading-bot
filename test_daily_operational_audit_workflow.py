@@ -10,8 +10,10 @@ WORKFLOW = Path(".github/workflows/daily-operational-audit.yml")
 class DailyOperationalAuditWorkflowTests(unittest.TestCase):
     def test_cycle_contract_version_is_derived_from_runtime_source(self):
         text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("import cycle_completion_contract as contract", text)
-        self.assertIn("print(contract.VERSION)", text)
+        self.assertIn("import cycle_completion_contract as cycle", text)
+        self.assertIn("print(cycle.VERSION)", text)
+        self.assertIn("import issue222_verified_flat_successor as issue222", text)
+        self.assertIn("print(issue222.VERSION)", text)
         self.assertIn("import cycle_completion_contract as cycle_contract", text)
         self.assertIn('assert cycle.get("version") == cycle_contract.VERSION, cycle', text)
 
@@ -33,6 +35,7 @@ class DailyOperationalAuditWorkflowTests(unittest.TestCase):
         self.assertIn("issue222_successor_live.json", text)
         self.assertIn("canonical_ledger_live.json", text)
         self.assertIn("accounting_integrity_live.json", text)
+        self.assertIn('print(json.dumps({"issue222_raw": successor}, indent=2, sort_keys=True))', text)
 
     def test_workflow_runs_this_regression(self):
         text = WORKFLOW.read_text(encoding="utf-8")

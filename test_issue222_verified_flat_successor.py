@@ -163,7 +163,12 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
 
     def test_possible_later_exit_blocks_without_state_write(self):
         rows, state = _fixture()
-        rows[-2].update({"symbol": "SPCX", "side": "short", "action": "exit"})
+        rows[-2].update({
+            "symbol": "SPCX", "side": "short", "action": "exit",
+            "recorded_local": "2026-09-14 12:00:00 CDT",
+            "entry_price": 148.88, "realized_pnl": -1.25,
+            "reason": "trailing_stop", "parent_execution_id": "entry-1",
+        })
         core = types.SimpleNamespace(portfolio=state)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -172,6 +177,13 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
                 result = recovery.apply(core)
             self.assertEqual(result["status"], "blocked")
             self.assertIn("canonical_evidence_exact", result["failed_checks"])
+            candidate = result["canonical"]["later_exit_candidates"][0]
+            self.assertEqual(candidate["previous_event_hash"], rows[-2]["previous_event_hash"])
+            self.assertEqual(candidate["recorded_local"], "2026-09-14 12:00:00 CDT")
+            self.assertEqual(candidate["entry_price"], 148.88)
+            self.assertEqual(candidate["realized_pnl"], -1.25)
+            self.assertEqual(candidate["reason"], "trailing_stop")
+            self.assertEqual(candidate["parent_execution_id"], "entry-1")
             self.assertEqual(state["accounting_epoch_id"], recovery.OLD_EPOCH_ID)
             self.assertFalse((root / "marker.json").exists())
 

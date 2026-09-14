@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Tuple
 
 import verified_v3_successor_epoch_migration as v3
 
-VERSION = "issue222-verified-flat-successor-2026-09-14-v1"
+VERSION = "issue222-verified-flat-successor-2026-09-14-v2-exact-later-lifecycle-evidence"
 OLD_EPOCH_ID = "stable-paper-v4-20260826-successor01"
 TARGET_EPOCH_ID = "stable-paper-v5-20260914-issue222-flat-successor01"
 DECISION_ID = "issue-222-unresolved-v4-entry-projection-flat-successor-2026-09-14"
@@ -199,9 +199,31 @@ def _canonical_evidence(pf: Dict[str, Any]) -> Dict[str, Any]:
     first_index = min(missing_indexes) if missing_indexes else len(epoch_rows)
     later_exit_candidates = [
         {
-            "execution_id": row.get("execution_id"), "event_hash": row.get("event_hash"),
-            "symbol": row.get("symbol"), "action": row.get("action"),
-            "side": row.get("side"), "price": row.get("price"), "shares": row.get("shares"),
+            key: row.get(key)
+            for key in (
+                "execution_id",
+                "event_hash",
+                "previous_event_hash",
+                "accounting_epoch_id",
+                "ledger_version",
+                "recorded_local",
+                "timestamp",
+                "action",
+                "symbol",
+                "side",
+                "price",
+                "shares",
+                "entry_price",
+                "realized_pnl",
+                "pnl",
+                "pnl_pct",
+                "notional",
+                "fees",
+                "reason",
+                "trade_id",
+                "parent_execution_id",
+                "position_id",
+            )
         }
         for row in epoch_rows[first_index + 1:]
         if str(row.get("symbol") or "").upper() in {"GEV", "SPCX", "ACHR"}
