@@ -2,7 +2,7 @@
 
 The 2026-08-10 clean epoch migration leaves a durable completion marker. Later,
 explicit verified-snapshot roll-forwards are allowed to supersede that epoch.
-This shim teaches the old migration to treat only the exact v1->v2->v3->v4
+This shim teaches the old migration to treat only the exact v1->v2->v3->v4->v5
 successor relationships as healthy instead of reporting a missing active epoch.
 
 It does not mutate account state, risk limits, strategy, sizing, live authority,
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "clean-epoch-successor-compatibility-2026-08-26-v3-v4-chain"
+VERSION = "clean-epoch-successor-compatibility-2026-09-14-v4-v5-chain"
 OLD_EPOCH_ID = "stable-paper-v1-20260810-clean01"
 VERIFIED_V2_EPOCH_ID = "stable-paper-v2-20260812-verified01"
 NEW_EPOCH_ID = VERIFIED_V2_EPOCH_ID
