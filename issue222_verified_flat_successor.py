@@ -83,63 +83,17 @@ EXPECTED_MISSING_ROWS: Tuple[Dict[str, Any], ...] = (
 )
 
 
-def _d(value: Any) -> Dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _l(value: Any) -> List[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _f(value: Any) -> float | None:
-    try:
-        if value is None or isinstance(value, bool):
-            return None
-        result = float(value)
-        return result if math.isfinite(result) else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _close(value: Any, expected: float, tolerance: float) -> bool:
-    number = _f(value)
-    return number is not None and abs(number - expected) <= tolerance
-
-
-def _now(core: Any = None) -> str:
-    try:
-        return str(core.local_ts_text())
-    except Exception:
-        return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _portfolio(core: Any) -> Dict[str, Any]:
-    return v3._portfolio(core)
-
-
-def _epoch_id(pf: Dict[str, Any]) -> str:
-    return v3._epoch_id(pf)
-
-
-def _atomic_json(path: str, payload: Dict[str, Any]) -> None:
-    folder = os.path.dirname(os.path.abspath(path))
-    os.makedirs(folder, exist_ok=True)
-    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True, default=str)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp, path)
-
-
-def _sha256(path: str) -> str | None:
-    if not path or not os.path.isfile(path):
-        return None
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+# Reuse the established successor primitives instead of adding parallel helper
+# owners. The migration's module lock serializes their marker writes.
+_d = v3._d
+_l = v3._l
+_f = v3._f
+_close = v3._close
+_now = v3._now
+_portfolio = v3._portfolio
+_epoch_id = v3._epoch_id
+_atomic_json = v3._atomic_json
+_sha256 = v3._sha256
 
 
 def _marker() -> Dict[str, Any]:
