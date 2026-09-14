@@ -1277,3 +1277,27 @@ strategy, sizing, thresholds, live, or AI/ML authority. After exact-head gates
 and deployment acceptance, use the four exact event hashes and lifecycle fields
 to define a separately tested, archival, restart-safe successor reconciliation.
 Issue #202 remains frozen.
+
+## 2026-09-14 Issue #222 evidence and Issue #229 accounting classification — IN VALIDATION
+
+PR #228 passed all four exact-head repository workflows at
+`741216d6b3840222f5d2c711728ecc7c30560fc7`, including the exact Gunicorn smoke,
+and squash-merged as `97e1903c4f1e60335a751c43c37dd2f09ad16966`.
+Settled authoritative Splendid acceptance is bound to that merge: startup is
+ready/delegating on the exact commit; the canonical ledger remains chain-valid
+with 87 rows; the active epoch remains 41 canonical rows versus 37 state rows;
+and the same four missing entry projections are now exposed with their exact
+immutable event hashes and lifecycle fields. The existing parity halt remains
+active and persisted. No canonical, state, accounting, history, day-peak, or
+recovery evidence was changed.
+
+The same settled capture demonstrated a separate read-only classification
+defect: deterministic accounting and aggregate state agree on the open ORCL
+short (`13.654189` reconstructed versus `13.65` aggregate unrealized P/L), but
+accounting integrity warns because the minimal canonical position row omits the
+optional per-position P/L cache. Issue #229 and branch
+`fix/issue-229-optional-unrealized-reporting` treat an absent cache as absent,
+continue checking it when present, add an aggregate P/L comparison, and add
+focused regressions. This change cannot repair state, clear the Issue #222 halt,
+or change strategy, risk, sizing, execution, live, or AI/ML authority. Issue
+#202 remains frozen; no duplicate research run was launched.
