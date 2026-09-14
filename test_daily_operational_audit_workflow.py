@@ -35,6 +35,11 @@ class DailyOperationalAuditWorkflowTests(unittest.TestCase):
         self.assertIn("issue222_successor_live.json", text)
         self.assertIn("canonical_ledger_live.json", text)
         self.assertIn("accounting_integrity_live.json", text)
+        self.assertIn("/paper/trade-journal?full=1", text)
+        self.assertIn("trade_journal_live.json", text)
+        self.assertIn("issue222_trade_journal_evidence", text)
+        self.assertIn("affected_execution_ids", text)
+        self.assertIn('assert trade_journal.get("status") == "ok", trade_journal', text)
         self.assertIn('print(json.dumps({"issue222_raw": successor}, indent=2, sort_keys=True))', text)
 
     def test_workflow_runs_this_regression(self):
