@@ -53,31 +53,37 @@ jobs:
             test_daily_data_integrity_overlay_v2.py \
             test_daily_operational_audit_workflow.py
 
-      - name: Wait for the repaired Railway runtime
+      - name: Wait for the exact Railway runtime
         id: deployment_ready
         run: |
           base=https://web-production-e1796.up.railway.app
-          expected=$(python - <<'PY'
-          import cycle_completion_contract as contract
-          print(contract.VERSION)
+          readarray -t expected < <(python - <<'PY'
+          import cycle_completion_contract as cycle
+          import issue222_verified_flat_successor as issue222
+          print(cycle.VERSION)
+          print(issue222.VERSION)
           PY
           )
           ready=false
           for attempt in $(seq 1 60); do
             if curl --silent --show-error --fail --max-time 20 \
               "$base/paper/cycle-completion-contract-status" \
-              > cycle_completion_contract_live.json; then
-              version=$(python - <<'PY'
+              > cycle_completion_contract_live.json \
+              && curl --silent --show-error --fail --max-time 20 \
+              "$base/paper/issue222-verified-flat-successor-status" \
+              > issue222_successor_live.json; then
+              readarray -t actual < <(python - <<'PY'
           import json
           from pathlib import Path
-          try:
-              row = json.loads(Path("cycle_completion_contract_live.json").read_text())
-              print(row.get("version", ""))
-          except Exception:
-              print("")
+          for name in ("cycle_completion_contract_live.json", "issue222_successor_live.json"):
+              try:
+                  row = json.loads(Path(name).read_text())
+                  print(row.get("version", ""))
+              except Exception:
+                  print("")
           PY
               )
-              if [ "$version" = "$expected" ]; then
+              if [ "${actual[0]}" = "${expected[0]}" ] && [ "${actual[1]}" = "${expected[1]}" ]; then
                 ready=true
                 break
               fi
@@ -85,8 +91,9 @@ jobs:
             sleep 10
           done
           if [ "$ready" != "true" ]; then
-            echo "Repaired Railway runtime did not become reachable with $expected"
+            echo "Authoritative Railway runtime did not reach both exact contract versions"
             cat cycle_completion_contract_live.json 2>/dev/null || true
+            cat issue222_successor_live.json 2>/dev/null || true
             exit 1
           fi
 
@@ -164,6 +171,7 @@ jobs:
           assert state.get("status") == "ok", state
           assert state.get("persistent_mount_detected") in {True, False}, state
 
+          print(json.dumps({"issue222_raw": successor}, indent=2, sort_keys=True))
           assert successor.get("status") == "validation_hold", successor
           assert successor.get("overall") == "pass", successor
           assert successor.get("type") == "issue222_verified_flat_successor_status", successor
