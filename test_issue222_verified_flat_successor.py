@@ -12,9 +12,11 @@ from unittest import mock
 
 import canonical_execution_ledger as ledger
 import clean_accounting_epoch as clean
+import clean_epoch_successor_compatibility as compatibility
 import issue222_verified_flat_successor as recovery
 import paper_bidirectional_accounting_guard as accounting
 import trade_journal
+import verified_v4_validation_release as v4_release
 
 
 def _fixture():
@@ -262,6 +264,41 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
             result = recovery.apply(core)
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["reason"], "paper_runtime_only")
+
+
+class Issue222SuccessorCompatibilityTests(unittest.TestCase):
+    def _v5_state(self):
+        _, state = _fixture()
+        state["accounting_epoch_id"] = recovery.TARGET_EPOCH_ID
+        state["paper_accounting_epoch"] = {
+            "id": recovery.TARGET_EPOCH_ID,
+            "prior_epoch_id": recovery.OLD_EPOCH_ID,
+            "historical_recovery_decision": recovery.HISTORICAL_DECISION,
+            "historical_evidence_archived": True,
+            "validation_hold": True,
+            "prior_epoch_discrepancy_status": "unresolved_non_promotable",
+            "prior_epoch_economics_promotable": False,
+            "fabricated_exit_rows": 0,
+        }
+        return state
+
+    def test_clean_epoch_compatibility_accepts_only_exact_v5_lineage(self):
+        state = self._v5_state()
+        core = types.SimpleNamespace(portfolio=state)
+        self.assertEqual(compatibility._successor_epoch(core), recovery.TARGET_EPOCH_ID)
+        state["paper_accounting_epoch"]["fabricated_exit_rows"] = 1
+        self.assertIsNone(compatibility._successor_epoch(core))
+
+    def test_v4_release_is_superseded_without_mutation(self):
+        state = self._v5_state()
+        before = copy.deepcopy(state)
+        core = types.SimpleNamespace(portfolio=state)
+        result = v4_release.apply(core)
+        status = v4_release.status_payload(core)
+        self.assertEqual(result["status"], "superseded")
+        self.assertEqual(status["status"], "superseded")
+        self.assertEqual(status["superseded_by_epoch_id"], recovery.TARGET_EPOCH_ID)
+        self.assertEqual(state, before)
 
 
 if __name__ == "__main__":
