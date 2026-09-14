@@ -1389,3 +1389,6 @@ exit treatment. The active parity halt remains the correct fail-closed state.
 No canonical row, state/history, accounting, day peak, recovery artifact, risk
 control, order, or authority was changed. Issue #202 remains frozen and no
 research job was launched.
+
+
+PR #234 exact head `2249662bcd90da86d75aa6c17c58c66e1d0cab07` passed its docs-only exact-head Change Safety workflow and was squash-merged as `409a28d2ae130867bc211ca684184e619ce97bc3`. This merge changes documentation only; authoritative runtime behavior and the active Issue #222 halt are unchanged.
