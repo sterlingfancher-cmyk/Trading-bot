@@ -119,6 +119,37 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
                 payload=payload,
             )
 
+    def test_envelope_payload_is_deeply_immutable(self) -> None:
+        envelope = CanonicalStateStore.prepare(
+            snapshot=_snapshot(), revision=1, created_at="2026-08-20 17:05:00 CDT"
+        )
+
+        with self.assertRaises(TypeError):
+            envelope.payload["portfolio"]["cash"] = 1.0
+        with self.assertRaises(TypeError):
+            envelope.payload["portfolio"]["positions"][0]["quantity"] = 999.0
+
+        rebuilt = envelope.snapshot()
+        self.assertEqual(rebuilt.portfolio.cash, 8000.0)
+        self.assertEqual(rebuilt.portfolio.positions[0].quantity, 2.0)
+
+    def test_mutating_exported_plain_payload_cannot_change_envelope(self) -> None:
+        envelope = CanonicalStateStore.prepare(
+            snapshot=_snapshot(), revision=1, created_at="2026-08-20 17:05:00 CDT"
+        )
+        exported = envelope.to_dict()
+        exported["payload"]["portfolio"]["cash"] = 1.0
+
+        self.assertEqual(envelope.snapshot().portfolio.cash, 8000.0)
+        self.assertEqual(
+            envelope.payload_sha256,
+            CanonicalStateStore.prepare(
+                snapshot=_snapshot(),
+                revision=1,
+                created_at="2026-08-20 17:05:00 CDT",
+            ).payload_sha256,
+        )
+
     def test_production_io_is_disabled_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = CanonicalStateStore(Path(tmp) / "state.json")
