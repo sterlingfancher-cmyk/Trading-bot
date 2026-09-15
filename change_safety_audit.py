@@ -59,6 +59,7 @@ STATE_SERIALIZATION_TESTS = (
     "test_issue165_state_serialization.py",
     "test_issue172_canonical_state_commit.py",
     "test_issue222_canonical_state_parity.py",
+    "test_issue222_verified_flat_successor.py",
 )
 PERFORMANCE_EVIDENCE_INTEGRITY_TESTS = (
     "test_issue167_forward_evidence_integrity.py",
