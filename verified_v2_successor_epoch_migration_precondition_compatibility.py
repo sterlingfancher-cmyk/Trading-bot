@@ -18,7 +18,9 @@ Issue #126 introduces one later exact successor relationship: v3 may be archived
 into the verified v4 accounting epoch. Once that exact v4 epoch is active, the
 older v2->v3 migration is legitimately superseded and must not report its durable
 v3 completion marker as an active-epoch error. This compatibility is reporting
-only; the v4 migration remains the sole v3->v4 write owner.
+only; the v4 migration remains the sole v3->v4 write owner. Issue #222 adds the
+same read-only disposition for its exact archived v5 successor lineage; the v5
+migration remains the sole v4->v5 write owner.
 
 No state, ledger, risk, order, strategy, sizing, threshold, live, or ML authority
 is added here.
