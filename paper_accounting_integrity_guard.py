@@ -23,7 +23,13 @@ import datetime as dt
 import functools
 from typing import Any, Dict, List, Tuple
 
-VERSION = "paper-accounting-integrity-2026-09-14-v4-optional-position-pnl"
+VERSION = "paper-accounting-integrity-2026-09-15-v5-issue222-zero-trade-baseline"
+ISSUE222_V5_EPOCH_ID = "stable-paper-v5-20260914-issue222-flat-successor01"
+ISSUE222_V4_EPOCH_ID = "stable-paper-v4-20260826-successor01"
+ISSUE222_V5_VERSION = "issue222-verified-flat-successor-2026-09-15-v3-unrelated-later-pair-binding"
+ISSUE222_DECISION_ID = "issue-222-unresolved-v4-entry-projection-flat-successor-2026-09-14"
+ISSUE222_HISTORICAL_DECISION = "issue222_unresolved_v4_projection_verified_flat_successor"
+ISSUE222_HALT_REASON = "canonical execution/state projection divergence"
 _APPLIED = False
 _PATCHED_CORE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
@@ -126,10 +132,101 @@ def _initial_cash(pf: Dict[str, Any]) -> float:
     return 10000.0
 
 
+def _issue222_verified_flat_zero_trade_baseline(pf: Dict[str, Any]) -> Dict[str, Any]:
+    """Recognize only the exact governed v5 zero-trade successor baseline.
+
+    An empty execution window is ordinarily incomplete accounting evidence.  The
+    Issue #222 successor is the one bounded exception: its empty window begins
+    from an independently verified flat snapshot while the unresolved v4
+    discrepancy remains archived, non-promotable, and protected by the parity
+    halt.  Every lineage and safety field is checked so drift stays unavailable.
+    """
+    epoch = _d(pf.get("paper_accounting_epoch"))
+    snapshot = _d(epoch.get("verified_snapshot_baseline"))
+    successor = _d(pf.get("issue222_verified_flat_successor"))
+    risk = _d(pf.get("risk_controls"))
+    cash = _f(pf.get("cash"), -1.0)
+    equity = _f(pf.get("equity"), -1.0)
+    snapshot_cash = _f(snapshot.get("cash"), -1.0)
+    snapshot_equity = _f(snapshot.get("equity"), -1.0)
+
+    exact = bool(
+        str(pf.get("accounting_epoch_id") or "") == ISSUE222_V5_EPOCH_ID
+        and str(epoch.get("id") or epoch.get("epoch_id") or "") == ISSUE222_V5_EPOCH_ID
+        and str(epoch.get("version") or "") == ISSUE222_V5_VERSION
+        and str(epoch.get("decision_id") or "") == ISSUE222_DECISION_ID
+        and str(epoch.get("prior_epoch_id") or "") == ISSUE222_V4_EPOCH_ID
+        and str(epoch.get("historical_recovery_decision") or "") == ISSUE222_HISTORICAL_DECISION
+        and epoch.get("historical_evidence_archived") is True
+        and bool(str(epoch.get("forensic_archive_dir") or "").strip())
+        and epoch.get("validation_hold") is True
+        and epoch.get("validation_release_status") == "blocked"
+        and epoch.get("validation_released") is False
+        and epoch.get("zero_trade_baseline") is True
+        and epoch.get("baseline_type") == "verified_flat_snapshot_unresolved_prior_projection"
+        and epoch.get("prior_epoch_discrepancy_status") == "unresolved_non_promotable"
+        and epoch.get("prior_epoch_economics_promotable") is False
+        and type(epoch.get("fabricated_exit_rows")) is int
+        and epoch.get("fabricated_exit_rows") == 0
+        and snapshot.get("verified") is True
+        and str(snapshot.get("version") or "") == ISSUE222_V5_VERSION
+        and isinstance(snapshot.get("positions"), dict)
+        and snapshot.get("positions") == {}
+        and snapshot.get("source") == "independently_clean_flat_v4_state_with_unresolved_canonical_projection_archived"
+        and type(snapshot.get("fabricated_exit_rows")) is int
+        and snapshot.get("fabricated_exit_rows") == 0
+        and str(successor.get("status") or "") == "validation_hold"
+        and str(successor.get("prior_epoch_id") or "") == ISSUE222_V4_EPOCH_ID
+        and str(successor.get("target_epoch_id") or "") == ISSUE222_V5_EPOCH_ID
+        and successor.get("unresolved_prior_discrepancy") is True
+        and successor.get("prior_epoch_economics_promotable") is False
+        and type(successor.get("fabricated_exit_rows")) is int
+        and successor.get("fabricated_exit_rows") == 0
+        and successor.get("risk_halt_cleared") is False
+        and successor.get("canonical_history_rewritten") is False
+        and risk.get("halted") is True
+        and str(risk.get("halt_reason") or "") == ISSUE222_HALT_REASON
+        and isinstance(pf.get("positions"), dict)
+        and pf.get("positions") == {}
+        and isinstance(pf.get("trades"), list)
+        and pf.get("trades") == []
+        and cash > 0.0
+        and equity > 0.0
+        and abs(cash - snapshot_cash) <= 0.01
+        and abs(equity - snapshot_equity) <= 0.01
+        and abs(cash - equity) <= 0.05
+    )
+    if not exact:
+        return {}
+
+    return {
+        "status": "ok",
+        "reason": "verified_flat_successor_zero_trade_baseline",
+        "coverage_basis": "verified_flat_successor_zero_trade_baseline",
+        "coverage_complete": True,
+        "parsed_trade_rows": 0,
+        "ignored_trade_rows": 0,
+        "initial_cash": round(snapshot_cash, 6),
+        "cash": round(cash, 6),
+        "equity": round(equity, 6),
+        "market_value": 0.0,
+        "realized_total": round(_f(snapshot.get("realized_total")), 6),
+        "realized_today": round(_f(snapshot.get("realized_today")), 6),
+        "unrealized_pnl": 0.0,
+        "open_positions": {},
+        "prior_epoch_discrepancy_status": "unresolved_non_promotable",
+        "prior_epoch_economics_promotable": False,
+        "fabricated_exit_rows": 0,
+    }
+
+
 def reconstruct_from_ledger(pf: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
     trades = _l(pf.get("trades"))
     positions = _d(pf.get("positions"))
     if not trades:
+        verified_flat = _issue222_verified_flat_zero_trade_baseline(pf)
+        if verified_flat:
+            return verified_flat
         return {"status": "unavailable", "reason": "trade_ledger_empty", "coverage_complete": False}
 
     lots: Dict[str, List[List[float]]] = {}
