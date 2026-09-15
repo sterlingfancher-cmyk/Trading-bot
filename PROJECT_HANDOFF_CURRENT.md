@@ -1542,3 +1542,51 @@ evaluation to one immutable snapshot revision, and complete the explicit Stage
 F cutover/rollback review. Do not enable production StateStore writes merely to
 produce parity evidence. Issue #202 remains frozen and no performance or AI
 promotion work resumed.
+
+
+## 2026-09-15 Issue #84 — cross-process StateStore serialization — COMPLETE
+
+The next bounded Stage D review demonstrated that the shadow StateStore's
+instance-local `RLock` did not satisfy the single-writer transaction boundary.
+Two independent processes could both read revision N, accept the same N+1
+envelope, and overwrite one another. Atomic replacement protected file shape,
+but it did not make the monotonic compare/backup/write/readback sequence atomic
+across worker processes.
+
+PR #250 adds a deterministic same-directory advisory lock. Sandbox reads take a
+shared lock; commits take an exclusive lock across revision comparison, prior
+revision backup, atomic replacement, fsync, and post-commit readback. The Stage
+D contract and descriptor now require cross-instance/process serialization. A
+deterministic two-process regression pauses one writer after it reads revision
+1, proves a second writer cannot pass the held process lock, then proves that
+the second writer rejects duplicate revision 2 after the first commits. Existing
+deep immutability, digest, backup, restart, revision, and Stage B-F invariants
+remain green.
+
+The exact PR head `6de5c9d9a47811859796b9dc6410af67dcf015b7` passed all five
+applicable workflows: Stage D validation, repository validation,
+architecture-debt regression, the full refactor/ownership/runtime/startup audit,
+and mandatory Change Safety. The exact Gunicorn bootstrap smoke passed. The PR
+squash-merged as `848c8d46ca202ee243bee2c3c929113f172adb83`; all post-merge
+checks and the authoritative `splendid-creativity / web` deployment passed.
+
+Settled read-only Splendid acceptance is bound to that exact merge: sentinel is
+quiet/pass with zero incidents; self-check has no failing components; the
+automatic runner completed its last eligible market cycle normally and now
+skips after the regular session. Canonical/accounting evidence remains unchanged
+and clean: the ledger is chain-valid at 88 immutable rows, v5 canonical/state
+counts are 0/0 with full parity and no missing IDs, accounting is complete with
+zero discrepancies/repairs/fabricated exits, cash is `13429.13048559457`, equity
+is `13429.13`, positions and recent trades are empty, and realized-today and
+unrealized P/L are both zero. The intentionally preserved parity halt remains;
+the daily audit fails only that risk section. `/paper/run` was not called.
+
+The repair remains shadow-only, explicit-sandbox opt-in, production-write
+disabled, and runtime-unregistered. It changed no production state, canonical
+ledger, history, recovery evidence, day baseline/peak, risk limit, policy,
+orders, or AI/ML authority. Rollback is a code-only revert of PR #250; no data
+recovery is needed. Issue #84 remains open. Next, prove one immutable snapshot
+revision can bind the canonical ledger projection, protected valuation, and risk
+evaluation with exact parity and an armed rollback plan before considering any
+authoritative writer activation. Issue #202 remains frozen; V2, ablation, and
+regime work remain disabled/not run, and no duplicate research job was started.
