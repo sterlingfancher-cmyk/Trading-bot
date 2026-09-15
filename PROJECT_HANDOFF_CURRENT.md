@@ -1590,3 +1590,49 @@ revision can bind the canonical ledger projection, protected valuation, and risk
 evaluation with exact parity and an armed rollback plan before considering any
 authoritative writer activation. Issue #202 remains frozen; V2, ablation, and
 regime work remain disabled/not run, and no duplicate research job was started.
+
+
+## 2026-09-15 Issue #84 — single-revision cutover parity proof — COMPLETE
+
+The next Stage F review found that future-canary readiness could be represented
+by independent parity booleans without proving that StateStore, canonical-ledger
+projection, protected valuation, and risk evaluation described the same
+immutable revision. That allowed logically stale or mixed-snapshot evidence to
+appear complete even though each subsystem passed separately.
+
+PR #252 adds a shadow-only immutable `SnapshotBindingProof` to the existing
+canary readiness owner. The verifier requires a positive StateStore revision,
+valid canonical chain, exact projected ledger-row count, full accounting
+portfolio equality, exact protected-valuation cash/equity/unrealized/position
+equality, exact risk-state equality, and the valuation-version lineage consumed
+by risk. The proof requires rollback to remain armed and cannot hold runtime,
+state-write, risk-mutation, or order authority. Stage F readiness now has an
+explicit single-revision binding requirement. Regressions prove a complete
+entry/projector/valuation/risk/envelope chain and fail closed on ledger-row
+drift.
+
+The exact PR head `35ee61e9b1b8138ff0ed8cde29043ebe2c949443` passed Stage F
+validation, repository validation, architecture-debt regression, the full
+refactor/ownership/runtime/startup audit, and mandatory Change Safety. The exact
+Gunicorn bootstrap smoke passed. The PR squash-merged as
+`ef17261d0b79aea9c4a8b4df5a23446402051c2d`; post-merge checks and the
+authoritative `splendid-creativity / web` deployment passed.
+
+Settled read-only Splendid acceptance is bound to that exact merge: bootstrap
+is ready/delegating, sentinel is quiet/pass with zero incidents, self-check has
+no failing components, and the runner is healthy and correctly skipping after
+the session. Canonical/accounting evidence remains unchanged: 88 immutable
+chain-valid rows, v5 canonical/state counts 0/0, full parity, no missing IDs,
+complete accounting with zero discrepancies/repairs/fabricated exits, cash
+`13429.13048559457`, equity `13429.13`, no positions or recent trades, and zero
+realized-today/unrealized P/L. The intentionally preserved parity halt remains;
+the daily audit fails only that risk section. `/paper/run` was not called.
+
+This remains a pure shadow proof and did not activate runtime or production
+writes. No state, ledger, history, recovery, day baseline/peak, threshold,
+strategy, risk, order, or AI/ML authority changed. Rollback is a code-only
+revert of PR #252. Issue #84 remains open. Next, build the bounded read-only
+adapter that derives this typed proof from current authoritative v5 evidence;
+require exact epoch/row/digest provenance and keep any mismatch non-promotable
+before considering writer activation. Issue #202 stays frozen; V2, ablation,
+and regime remain disabled/not run, with no duplicate research job.
