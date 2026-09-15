@@ -43,6 +43,17 @@ def _plain(value: Any) -> Any:
     return value
 
 
+def _freeze(value: Any) -> Any:
+    """Recursively detach and freeze canonical envelope payloads."""
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _freeze(item) for key, item in value.items()}
+        )
+    if isinstance(value, (tuple, list)):
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
 def _canonical_bytes(payload: Mapping[str, Any]) -> bytes:
     return json.dumps(
         _plain(payload),
@@ -188,7 +199,7 @@ class CanonicalStateEnvelope:
         if str(self.payload_sha256) != expected:
             raise StateStoreInvariantError("payload digest mismatch")
         object.__setattr__(self, "revision", int(self.revision))
-        object.__setattr__(self, "payload", MappingProxyType(plain_payload))
+        object.__setattr__(self, "payload", _freeze(plain_payload))
 
     @classmethod
     def build(
@@ -220,7 +231,7 @@ class CanonicalStateEnvelope:
         )
 
     def snapshot(self) -> CanonicalStateSnapshot:
-        return _snapshot_from_payload(self.payload)
+        return _snapshot_from_payload(_plain(self.payload))
 
 
 class CanonicalStateStore:
