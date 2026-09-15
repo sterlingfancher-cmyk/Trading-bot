@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Tuple
 
 import verified_v3_successor_epoch_migration as v3
 
-VERSION = "issue222-verified-flat-successor-2026-09-14-v2-exact-later-lifecycle-evidence"
+VERSION = "issue222-verified-flat-successor-2026-09-15-v3-unrelated-later-pair-binding"
 OLD_EPOCH_ID = "stable-paper-v4-20260826-successor01"
 TARGET_EPOCH_ID = "stable-paper-v5-20260914-issue222-flat-successor01"
 DECISION_ID = "issue-222-unresolved-v4-entry-projection-flat-successor-2026-09-14"
@@ -41,6 +41,7 @@ EXPECTED_LAST_EXECUTION_ID = "a28005eb52b34e31a431b446ea68f0c7"
 MONEY_TOLERANCE = 0.05
 QTY_TOLERANCE = 5e-9
 PRICE_TOLERANCE = 5e-7
+STATE_QTY_TOLERANCE = 5e-6
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 ARCHIVE_ROOT = os.path.join(STATE_DIR, "forensic_archives")
 MARKER_FILE = os.path.join(STATE_DIR, "issue222_verified_flat_successor.json")
@@ -82,6 +83,32 @@ EXPECTED_MISSING_ROWS: Tuple[Dict[str, Any], ...] = (
     },
 )
 
+EXPECTED_UNRELATED_LATER_ENTRY = {
+    "execution_id": "acaa0e0eda6b4eb4a26597f2f1acdec3",
+    "event_hash": "999dd2c3f986f45d470e6579160e24706ea6b801d293fbe4beefe3b21c6a5913",
+    "accounting_epoch_id": OLD_EPOCH_ID,
+    "ledger_version": "canonical-execution-ledger-2026-09-10-v3-state-parity",
+    "action": "entry",
+    "symbol": "ACHR",
+    "side": "short",
+    "price": 5.465,
+    "shares": 183.850040612,
+}
+EXPECTED_UNRELATED_LATER_EXIT = {
+    "execution_id": "10d56e9128cc4afe896df89b01df137c",
+    "event_hash": "9da22c3e655d96025360564289f4db677e6f744a1b3b1a37955b3b89f96710bb",
+    "previous_event_hash": EXPECTED_UNRELATED_LATER_ENTRY["event_hash"],
+    "accounting_epoch_id": OLD_EPOCH_ID,
+    "ledger_version": "canonical-execution-ledger-2026-09-10-v3-state-parity",
+    "action": "exit",
+    "symbol": "ACHR",
+    "side": "short",
+    "price": 5.5099,
+    "shares": 183.850040612,
+    "pnl_pct": -0.82,
+}
+EXPECTED_UNRELATED_EXECUTION_PATH_ID = "ACHR|short|1789065534|5.465000"
+
 
 # Reuse the established successor primitives instead of adding parallel helper
 # owners. The migration's module lock serializes their marker writes.
@@ -120,6 +147,112 @@ def _row_matches(row: Dict[str, Any], expected: Dict[str, Any]) -> bool:
             or str(row.get("execution_id") or "") == expected["execution_id"]
         )
     )
+
+
+def _exact_unrelated_later_pair(
+    epoch_rows: List[Dict[str, Any]],
+    state_rows: List[Dict[str, Any]],
+    later_exit_rows: List[Dict[str, Any]],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Prove the sole later ACHR exit belongs to its own exact later entry."""
+    if len(later_exit_rows) != 1:
+        return False, {"reason": "affected_later_exit_count_not_one", "count": len(later_exit_rows)}
+
+    exit_row = later_exit_rows[0]
+    entry_candidates = [
+        (index, row) for index, row in enumerate(epoch_rows)
+        if str(row.get("event_hash") or "") == EXPECTED_UNRELATED_LATER_ENTRY["event_hash"]
+    ]
+    exit_candidates = [
+        (index, row) for index, row in enumerate(epoch_rows)
+        if str(row.get("event_hash") or "") == EXPECTED_UNRELATED_LATER_EXIT["event_hash"]
+    ]
+    if len(entry_candidates) != 1 or len(exit_candidates) != 1:
+        return False, {"reason": "unrelated_pair_canonical_cardinality_changed"}
+
+    entry_index, entry_row = entry_candidates[0]
+    exit_index, canonical_exit = exit_candidates[0]
+    if canonical_exit is not exit_row:
+        return False, {"reason": "later_exit_candidate_identity_changed"}
+    if exit_index != entry_index + 1:
+        return False, {"reason": "unrelated_pair_not_canonically_adjacent"}
+
+    def canonical_matches(row: Dict[str, Any], expected: Dict[str, Any]) -> bool:
+        exact_keys = (
+            "execution_id", "event_hash", "accounting_epoch_id", "ledger_version",
+            "action", "symbol", "side",
+        )
+        return bool(
+            all(str(row.get(key) or "") == str(expected[key]) for key in exact_keys)
+            and (
+                "previous_event_hash" not in expected
+                or str(row.get("previous_event_hash") or "") == str(expected["previous_event_hash"])
+            )
+            and _close(row.get("price"), expected["price"], PRICE_TOLERANCE)
+            and _close(row.get("shares"), expected["shares"], QTY_TOLERANCE)
+            and (
+                "pnl_pct" not in expected
+                or _close(row.get("pnl_pct"), expected["pnl_pct"], PRICE_TOLERANCE)
+            )
+        )
+
+    if not canonical_matches(entry_row, EXPECTED_UNRELATED_LATER_ENTRY):
+        return False, {"reason": "unrelated_later_entry_signature_mismatch"}
+    if not canonical_matches(canonical_exit, EXPECTED_UNRELATED_LATER_EXIT):
+        return False, {"reason": "unrelated_later_exit_signature_mismatch"}
+    if str(canonical_exit.get("previous_event_hash") or "") != str(entry_row.get("event_hash") or ""):
+        return False, {"reason": "unrelated_pair_hash_link_mismatch"}
+
+    state_by_id = {
+        str(row.get("execution_id") or ""): row
+        for row in state_rows
+        if isinstance(row, dict)
+    }
+    projected_entry = state_by_id.get(EXPECTED_UNRELATED_LATER_ENTRY["execution_id"])
+    projected_exit = state_by_id.get(EXPECTED_UNRELATED_LATER_EXIT["execution_id"])
+    if not projected_entry or not projected_exit:
+        return False, {"reason": "unrelated_pair_missing_from_state_projection"}
+
+    def projection_common(row: Dict[str, Any], expected: Dict[str, Any]) -> bool:
+        return bool(
+            str(row.get("accounting_epoch_id") or "") == OLD_EPOCH_ID
+            and str(row.get("action") or "").lower() == expected["action"]
+            and str(row.get("symbol") or "").upper() == expected["symbol"]
+            and str(row.get("side") or "").lower() == expected["side"]
+            and str(row.get("canonical_ledger_event_hash") or "") == expected["event_hash"]
+            and str(row.get("execution_path_id") or "") == EXPECTED_UNRELATED_EXECUTION_PATH_ID
+            and _close(row.get("price"), expected["price"], PRICE_TOLERANCE)
+            and _close(row.get("shares"), expected["shares"], STATE_QTY_TOLERANCE)
+        )
+
+    if not projection_common(projected_entry, EXPECTED_UNRELATED_LATER_ENTRY):
+        return False, {"reason": "unrelated_later_entry_state_binding_mismatch"}
+    if not projection_common(projected_exit, EXPECTED_UNRELATED_LATER_EXIT):
+        return False, {"reason": "unrelated_later_exit_state_binding_mismatch"}
+    if not (
+        int(projected_entry.get("time") or 0) == 1789065534
+        and str(projected_entry.get("entry_model") or "") == "short_entry_guarded"
+        and str(projected_entry.get("exit_model") or "") == "open_position_exit_pending"
+        and int(projected_exit.get("time") or 0) == 1789067356
+        and str(projected_exit.get("entry_model") or "") == "short_entry_guarded"
+        and str(projected_exit.get("exit_model") or "") == "stop_loss_or_trailing_stop"
+        and str(projected_exit.get("exit_reason") or "") == "structure_stop_short"
+        and _close(projected_exit.get("pnl_dollars"), -8.25, PRICE_TOLERANCE)
+        and _close(projected_exit.get("pnl_pct"), -0.82, PRICE_TOLERANCE)
+    ):
+        return False, {"reason": "unrelated_pair_lifecycle_projection_mismatch"}
+
+    return True, {
+        "classification": "exact_complete_unrelated_later_pair",
+        "entry_execution_id": entry_row.get("execution_id"),
+        "entry_event_hash": entry_row.get("event_hash"),
+        "exit_execution_id": canonical_exit.get("execution_id"),
+        "exit_event_hash": canonical_exit.get("event_hash"),
+        "exit_previous_event_hash": canonical_exit.get("previous_event_hash"),
+        "execution_path_id": EXPECTED_UNRELATED_EXECUTION_PATH_ID,
+        "state_projection_bound": True,
+        "missing_entry_lifecycle_closed": False,
+    }
 
 
 def _canonical_evidence(pf: Dict[str, Any]) -> Dict[str, Any]:
@@ -197,6 +330,12 @@ def _canonical_evidence(pf: Dict[str, Any]) -> Dict[str, Any]:
         issues.append("missing_rows_not_contiguous")
 
     first_index = min(missing_indexes) if missing_indexes else len(epoch_rows)
+    later_exit_rows = [
+        row for row in epoch_rows[first_index + 1:]
+        if str(row.get("symbol") or "").upper() in {"GEV", "SPCX", "ACHR"}
+        and str(row.get("side") or "").lower() == "short"
+        and str(row.get("action") or "").lower() in {"exit", "partial_exit"}
+    ]
     later_exit_candidates = [
         {
             key: row.get(key)
@@ -225,13 +364,18 @@ def _canonical_evidence(pf: Dict[str, Any]) -> Dict[str, Any]:
                 "position_id",
             )
         }
-        for row in epoch_rows[first_index + 1:]
-        if str(row.get("symbol") or "").upper() in {"GEV", "SPCX", "ACHR"}
-        and str(row.get("side") or "").lower() == "short"
-        and str(row.get("action") or "").lower() in {"exit", "partial_exit"}
+        for row in later_exit_rows
     ]
-    if later_exit_candidates:
-        issues.append("possible_later_exit_evidence_requires_review")
+    unrelated_pair_exact, unrelated_pair = _exact_unrelated_later_pair(
+        epoch_rows, state_rows, later_exit_rows
+    )
+    if later_exit_candidates and not unrelated_pair_exact:
+        issues.append("later_exit_evidence_not_exact_unrelated_complete_pair")
+    if not later_exit_candidates:
+        unrelated_pair = {
+            "classification": "none",
+            "missing_entry_lifecycle_closed": False,
+        }
 
     return {
         "status": "ok" if not issues else "fail",
@@ -245,6 +389,8 @@ def _canonical_evidence(pf: Dict[str, Any]) -> Dict[str, Any]:
         "missing_rows": matched,
         "missing_ids": sorted(ledger_ids - state_ids),
         "later_exit_candidates": later_exit_candidates,
+        "unrelated_complete_later_pair": unrelated_pair,
+        "unresolved_missing_lifecycle_ids": sorted(EXPECTED_MISSING_IDS),
     }
 
 
@@ -354,6 +500,8 @@ def _archive(core: Any, pre: Dict[str, Any]) -> Dict[str, Any]:
             "missing_ids": canonical.get("missing_ids"),
             "missing_rows": canonical.get("missing_rows"),
             "later_exit_candidates": canonical.get("later_exit_candidates"),
+            "unrelated_complete_later_pair": canonical.get("unrelated_complete_later_pair"),
+            "unresolved_missing_lifecycle_ids": canonical.get("unresolved_missing_lifecycle_ids"),
             "fabricated_exit_rows": 0,
             "prior_epoch_economics_promotable": False,
         },

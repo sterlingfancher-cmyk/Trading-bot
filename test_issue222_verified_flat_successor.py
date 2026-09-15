@@ -30,6 +30,7 @@ def _fixture():
         })
     for expected in recovery.EXPECTED_MISSING_ROWS:
         row = copy.deepcopy(expected)
+        row["accounting_epoch_id"] = recovery.OLD_EPOCH_ID
         if "execution_id" not in row:
             available = sorted(recovery.EXPECTED_MISSING_IDS - {str(r.get("execution_id")) for r in rows})
             available = [value for value in available if value != "9cad03cbec994e29a9b65293d573f54b"]
@@ -37,18 +38,23 @@ def _fixture():
         rows.append(row)
     used = {str(row.get("execution_id")) for row in rows}
     for index in range(18):
-        execution_id = f"after-{index}"
-        if index == 17:
-            execution_id = recovery.EXPECTED_LAST_EXECUTION_ID
-        rows.append({
-            "execution_id": execution_id, "accounting_epoch_id": recovery.OLD_EPOCH_ID,
-            "event_hash": f"after-hash-{index}", "previous_event_hash": f"after-prev-{index}",
-            "action": "exit" if index == 17 else ("entry" if index % 2 == 0 else "exit"),
-            "symbol": "ORCL" if index == 17 else f"A{index}",
-            "side": "short" if index == 17 else "long",
-            "price": 142.275 if index == 17 else 20.0 + index,
-            "shares": 4.383375 if index == 17 else 1.0,
-        })
+        if index == 0:
+            row = copy.deepcopy(recovery.EXPECTED_UNRELATED_LATER_ENTRY)
+            row["previous_event_hash"] = "after-prev-0"
+        elif index == 1:
+            row = copy.deepcopy(recovery.EXPECTED_UNRELATED_LATER_EXIT)
+        else:
+            execution_id = recovery.EXPECTED_LAST_EXECUTION_ID if index == 17 else f"after-{index}"
+            row = {
+                "execution_id": execution_id, "accounting_epoch_id": recovery.OLD_EPOCH_ID,
+                "event_hash": f"after-hash-{index}", "previous_event_hash": f"after-prev-{index}",
+                "action": "exit" if index == 17 else ("entry" if index % 2 == 0 else "exit"),
+                "symbol": "ORCL" if index == 17 else f"A{index}",
+                "side": "short" if index == 17 else "long",
+                "price": 142.275 if index == 17 else 20.0 + index,
+                "shares": 4.383375 if index == 17 else 1.0,
+            }
+        rows.append(row)
     missing_ids = recovery.EXPECTED_MISSING_IDS
     state_trades = []
     for row in rows:
@@ -56,6 +62,25 @@ def _fixture():
             continue
         mirrored = copy.deepcopy(row)
         mirrored["canonical_ledger_event_hash"] = row["event_hash"]
+        if mirrored["execution_id"] == recovery.EXPECTED_UNRELATED_LATER_ENTRY["execution_id"]:
+            mirrored.update({
+                "execution_path_id": recovery.EXPECTED_UNRELATED_EXECUTION_PATH_ID,
+                "time": 1789065534,
+                "entry_model": "short_entry_guarded",
+                "exit_model": "open_position_exit_pending",
+                "shares": 183.850041,
+            })
+        elif mirrored["execution_id"] == recovery.EXPECTED_UNRELATED_LATER_EXIT["execution_id"]:
+            mirrored.update({
+                "execution_path_id": recovery.EXPECTED_UNRELATED_EXECUTION_PATH_ID,
+                "time": 1789067356,
+                "entry_model": "short_entry_guarded",
+                "exit_model": "stop_loss_or_trailing_stop",
+                "exit_reason": "structure_stop_short",
+                "pnl_dollars": -8.25,
+                "pnl_pct": -0.82,
+                "shares": 183.850041,
+            })
         state_trades.append(mirrored)
     state = {
         "accounting_epoch_id": recovery.OLD_EPOCH_ID,
@@ -84,7 +109,21 @@ def _fixture():
     }
     assert len(rows) == recovery.EXPECTED_CURRENT_EPOCH_ROWS
     assert len(state_trades) == recovery.EXPECTED_STATE_ROWS
-    return rows, state
+    prior_rows = [
+        {
+            "execution_id": f"prior-{index}",
+            "accounting_epoch_id": "stable-paper-v3-prior",
+            "event_hash": f"prior-hash-{index}",
+            "previous_event_hash": f"prior-prev-{index}",
+            "action": "entry" if index % 2 == 0 else "exit",
+            "symbol": f"P{index}",
+            "side": "long",
+            "price": 5.0 + index,
+            "shares": 1.0,
+        }
+        for index in range(recovery.EXPECTED_LEDGER_ROWS - len(rows))
+    ]
+    return prior_rows + rows, state
 
 
 def _accounting_result():
@@ -142,7 +181,7 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
             digest_before = recovery._sha256(str(ledger_path))
             with stack:
                 result = recovery.apply(core)
-            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["status"], "completed", result)
             self.assertEqual(core.portfolio["accounting_epoch_id"], recovery.TARGET_EPOCH_ID)
             self.assertEqual(core.portfolio["positions"], {})
             self.assertEqual(core.portfolio["trades"], [])
@@ -158,7 +197,23 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
                 (Path(result["archive_dir"]) / "issue222_verified_flat_successor_manifest.json").read_text()
             )
             self.assertEqual(archived["pre_cutover_account"]["trades"], before_trades)
-            self.assertEqual(archived["unresolved_prior_discrepancy"]["status"], "unresolved_non_promotable")
+            discrepancy = archived["unresolved_prior_discrepancy"]
+            self.assertEqual(discrepancy["status"], "unresolved_non_promotable")
+            pair = discrepancy["unrelated_complete_later_pair"]
+            self.assertEqual(pair["classification"], "exact_complete_unrelated_later_pair")
+            self.assertEqual(
+                pair["entry_execution_id"],
+                recovery.EXPECTED_UNRELATED_LATER_ENTRY["execution_id"],
+            )
+            self.assertEqual(
+                pair["exit_execution_id"],
+                recovery.EXPECTED_UNRELATED_LATER_EXIT["execution_id"],
+            )
+            self.assertFalse(pair["missing_entry_lifecycle_closed"])
+            self.assertEqual(
+                discrepancy["unresolved_missing_lifecycle_ids"],
+                sorted(recovery.EXPECTED_MISSING_IDS),
+            )
             self.assertEqual(json.loads(journal.read_text())["accounting_epoch_id"], recovery.TARGET_EPOCH_ID)
 
     def test_possible_later_exit_blocks_without_state_write(self):
@@ -177,7 +232,10 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
                 result = recovery.apply(core)
             self.assertEqual(result["status"], "blocked")
             self.assertIn("canonical_evidence_exact", result["failed_checks"])
-            candidate = result["canonical"]["later_exit_candidates"][0]
+            candidate = next(
+                row for row in result["canonical"]["later_exit_candidates"]
+                if row["execution_id"] == rows[-2]["execution_id"]
+            )
             self.assertEqual(candidate["previous_event_hash"], rows[-2]["previous_event_hash"])
             self.assertEqual(candidate["recorded_local"], "2026-09-14 12:00:00 CDT")
             self.assertEqual(candidate["entry_price"], 148.88)
@@ -187,9 +245,58 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
             self.assertEqual(state["accounting_epoch_id"], recovery.OLD_EPOCH_ID)
             self.assertFalse((root / "marker.json").exists())
 
+    def test_unrelated_pair_canonical_hash_link_drift_blocks(self):
+        rows, state = _fixture()
+        pair_exit = next(
+            row for row in rows
+            if row["execution_id"] == recovery.EXPECTED_UNRELATED_LATER_EXIT["execution_id"]
+        )
+        pair_exit["previous_event_hash"] = "not-the-later-entry-event-hash"
+        core = types.SimpleNamespace(portfolio=state)
+        with tempfile.TemporaryDirectory() as directory:
+            stack, _, _ = self._patches(Path(directory), rows, state)
+            with stack:
+                result = recovery.apply(core)
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("canonical_evidence_exact", result["failed_checks"])
+        self.assertEqual(
+            result["canonical"]["unrelated_complete_later_pair"].get("reason"),
+            "unrelated_later_exit_signature_mismatch",
+            result["canonical"],
+        )
+
+    def test_unrelated_pair_projection_drift_blocks(self):
+        mutations = (
+            ("execution_path_id", "ACHR|short|1789065196|5.463100"),
+            ("shares", 183.913988),
+            ("exit_reason", "different_reason"),
+            ("pnl_dollars", -7.0),
+            ("pnl_pct", -0.7),
+            ("exit_model", "different_exit_model"),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field):
+                rows, state = _fixture()
+                pair_exit = next(
+                    row for row in state["trades"]
+                    if row["execution_id"] == recovery.EXPECTED_UNRELATED_LATER_EXIT["execution_id"]
+                )
+                pair_exit[field] = value
+                core = types.SimpleNamespace(portfolio=state)
+                with tempfile.TemporaryDirectory() as directory:
+                    stack, _, _ = self._patches(Path(directory), rows, state)
+                    with stack:
+                        result = recovery.apply(core)
+                self.assertEqual(result["status"], "blocked")
+                self.assertIn("canonical_evidence_exact", result["failed_checks"])
+
     def test_signature_or_missing_set_drift_blocks(self):
         rows, state = _fixture()
-        rows[20]["price"] += 0.01
+        missing = next(
+            row for row in rows
+            if row["execution_id"] == "9cad03cbec994e29a9b65293d573f54b"
+        )
+        missing["price"] += 0.01
         core = types.SimpleNamespace(portfolio=state)
         with tempfile.TemporaryDirectory() as directory:
             stack, _, _ = self._patches(Path(directory), rows, state)
@@ -230,7 +337,7 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
             (root / "marker.json").write_text(json.dumps(marker), encoding="utf-8")
             with stack:
                 result = recovery.apply(core)
-        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["status"], "completed", result)
         self.assertTrue(result["interrupted_completion_retry_performed"])
 
     def test_concurrent_apply_serializes_to_one_cutover(self):
@@ -252,11 +359,11 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
                     thread.start()
                 for thread in threads:
                     thread.join()
+            archive_count = len(list((root / "forensic_archives").glob("*")))
         self.assertEqual(errors, [])
-        self.assertEqual(sorted(result["status"] for result in results), ["completed", "validation_hold"])
+        self.assertEqual(sorted(result["status"] for result in results), ["completed", "validation_hold"], results)
         self.assertEqual(core.portfolio["accounting_epoch_id"], recovery.TARGET_EPOCH_ID)
-        archives = list((root / "forensic_archives").glob("*"))
-        self.assertEqual(len(archives), 1)
+        self.assertEqual(archive_count, 1)
 
     def test_active_epoch_without_completed_marker_fails_closed(self):
         _, state = _fixture()
