@@ -108,7 +108,21 @@ def _fixture():
     }
     assert len(rows) == recovery.EXPECTED_CURRENT_EPOCH_ROWS
     assert len(state_trades) == recovery.EXPECTED_STATE_ROWS
-    return rows, state
+    prior_rows = [
+        {
+            "execution_id": f"prior-{index}",
+            "accounting_epoch_id": "stable-paper-v3-prior",
+            "event_hash": f"prior-hash-{index}",
+            "previous_event_hash": f"prior-prev-{index}",
+            "action": "entry" if index % 2 == 0 else "exit",
+            "symbol": f"P{index}",
+            "side": "long",
+            "price": 5.0 + index,
+            "shares": 1.0,
+        }
+        for index in range(recovery.EXPECTED_LEDGER_ROWS - len(rows))
+    ]
+    return prior_rows + rows, state
 
 
 def _accounting_result():
@@ -277,7 +291,11 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
 
     def test_signature_or_missing_set_drift_blocks(self):
         rows, state = _fixture()
-        rows[20]["price"] += 0.01
+        missing = next(
+            row for row in rows
+            if row["execution_id"] == "9cad03cbec994e29a9b65293d573f54b"
+        )
+        missing["price"] += 0.01
         core = types.SimpleNamespace(portfolio=state)
         with tempfile.TemporaryDirectory() as directory:
             stack, _, _ = self._patches(Path(directory), rows, state)
