@@ -1495,3 +1495,50 @@ observer-only; its evidence is durable but unavailable concentration remains too
 high for promotion. Issue #84 is now the primary engineering program: implement
 the authoritative single-owner StateStore/ledger-projection/valuation/risk
 cutover before any performance or AI promotion work.
+
+
+## 2026-09-15 Issue #84 — Stage D envelope deep-immutability foundation — COMPLETE
+
+The first bounded Issue #84 cutover-readiness review confirmed that Stable Paper
+Core v3 Stages B-F remain shadow-only and are not registered with the production
+runtime. It also demonstrated a concrete StateStore integrity defect: a prepared
+`CanonicalStateEnvelope` froze only its top-level payload mapping. Nested
+portfolio, position, risk, and epoch mappings/lists remained mutable after the
+payload digest was validated. A caller could therefore change canonical
+economics in memory while retaining the old digest; `snapshot()` consumed those
+changed values, and a later sandbox commit could replace the file before
+post-commit readback detected the stale digest.
+
+PR #248 recursively detaches and freezes the complete envelope payload and
+converts it back to a detached plain graph only at snapshot/serialization
+boundaries. Focused regressions prove that nested portfolio and position
+mutation fails, a mutated exported plain copy cannot affect the envelope, and
+digest/restart/backup/revision behavior remains unchanged. The exact PR head
+`a898fe2d3b9afb7f579df03121a8a8ad9a66fa9f` passed all five applicable
+workflows: Stage D validation, repository validation, architecture-debt
+regression, the full refactor/ownership/runtime/startup audit, and mandatory
+Change Safety. Change Safety's exact Gunicorn bootstrap smoke passed. The PR
+squash-merged as `dbdbec211d1b91e20dbf2356d5a5833fa2ffab86`; its post-merge
+checks and authoritative `splendid-creativity / web` deployment passed.
+
+Settled read-only Splendid acceptance is bound to that exact merge commit:
+sentinel is `pass` with zero incidents; self-check reports canonical parity and
+accounting pass; the append-only ledger remains chain-valid at 88 immutable rows
+with v5 canonical/state counts 0/0 and no missing IDs; accounting remains
+complete with zero discrepancies, zero repairs, and zero fabricated exits; cash
+is `13429.13048559457`, equity is `13429.13`, positions are empty, and realized
+today/unrealized P&L are both zero. The automatic runner remains active and
+continues to block entries on the intentionally preserved parity halt. The daily
+audit's only failure is that administrative halt. No production state, ledger,
+history, day baseline/peak, risk threshold, strategy, order authority, or AI/ML
+authority changed, and `/paper/run` was not called.
+
+Rollback is a code-only revert of PR #248; no data rollback or recovery action
+is required because the repaired interface remains shadow-only and made no
+production writes. Issue #84 remains open. Before an authoritative cutover,
+prove cross-instance/process StateStore serialization and single-writer
+ownership, bind the existing ledger projector, protected valuation, and risk
+evaluation to one immutable snapshot revision, and complete the explicit Stage
+F cutover/rollback review. Do not enable production StateStore writes merely to
+produce parity evidence. Issue #202 remains frozen and no performance or AI
+promotion work resumed.
