@@ -1437,3 +1437,61 @@ The PR squash-merged to main as `beef6e24a548efafe7d1edfe7ae866b9b9e546f1`. The 
 This run could not obtain a read-only response from the authoritative runtime URL because the available network reader rejected the Railway domain before making a request. Therefore neither successor application nor the v5 settled invariants are inferred from deployment status: settled runtime acceptance remains open. Do not manually clear the parity halt. The required next probe must confirm the exact v5 epoch and completed marker, validation hold active, prior discrepancy unresolved/non-promotable, zero fabricated exits, flat positions/trades, unchanged cash/equity/risk/day peak/history and canonical-ledger digest, clean accounting, and restart stability. If exact preconditions did not match, preserve the blocked v4 state and diagnose without mutation.
 
 Issue #202 remains frozen and no research job was launched. Issue #84 does not begin until Issue #222 receives settled authoritative acceptance.
+
+
+## 2026-09-15 Issue #222 — verified-flat successor settled acceptance — COMPLETE
+
+Read-only independent evidence was exhausted before cutover. The only later
+affected-symbol exit is the exact complete, separately bound ACHR lifecycle
+(`acaa0e0eda6b4eb4a26597f2f1acdec3` entry to
+`10d56e9128cc4afe896df89b01df137c` exit); it does not close any of the four
+missing entry lifecycles. Exact exits for the missing GEV, two SPCX, and ACHR
+entries remain unavailable, so their v4 discrepancy is retained as unresolved
+and permanently non-promotable. No exit was inferred or fabricated.
+
+PR #242 completed the exact later-pair binding and corrected the focused
+successor fixture so restart/concurrency/signature regressions genuinely run.
+It passed all four exact-head gates, including exact Gunicorn smoke, and merged
+as `b5103855b1cadbefc9966dcd840d0e09cf56289f`. Settled Splendid then applied the
+authorized successor exactly once. The forensic archive is
+`/app/data/forensic_archives/20260915_132337_607645_issue-222-unresolved-v4-entry-projection-flat-successor-2026-09-14`;
+the canonical ledger remained byte-for-byte unchanged.
+
+PRs #243 and #244 made the exact verified-flat, zero-current-trade baseline
+complete accounting evidence in both the legacy guard and the active
+bidirectional runtime owner. PR #245 added bounded startup failing-module
+diagnostics after the first post-merge container failed closed. That diagnostic
+identified the durable legacy v2-to-v3 completion marker as the remaining
+startup blocker. PR #246 extended the existing read-only compatibility owner to
+treat only the exact archived v5 lineage as superseding that legacy migration.
+Every PR passed all mandatory exact-head workflows; Change Safety and the full
+audit included exact Gunicorn startup smoke. Final main is
+`a605e7b1751263bf1f1b8fbd2cce6aa5a28e52be`, and its post-merge repository,
+architecture, Change Safety, full audit, and authoritative Splendid deployment
+contexts passed.
+
+Settled authoritative Splendid evidence on 2026-09-15 is ready/delegating on
+that exact commit. The successor reports `validation_hold/pass`, epoch
+`stable-paper-v5-20260914-issue222-flat-successor01`, cash
+`13429.13048559457`, equity `13429.13`, no positions, no current-epoch state
+trades, zero fabricated exits, archived historical evidence, and the v4
+economics non-promotable. The canonical ledger is hash-chain valid at 88
+immutable rows with v5 canonical/state counts 0/0, full parity, and zero missing
+IDs. Accounting is `ok/pass`, complete, zero discrepancies, no repair, and
+reports the exact verified-flat baseline with unrealized P/L 0. Sentinel is
+quiet/pass with zero incidents; the automatic runner completed normally;
+market-data/path integrity passes. The daily audit's only failure is the
+intentionally preserved administrative parity halt, not an accounting,
+canonical, runner, or market-data defect. The halt was not manually cleared.
+
+Rollback/recovery evidence is the immutable archived v4 state plus its manifest,
+the durable one-time v5 marker, and the unchanged canonical ledger digest. No
+rollback was performed because settled v5 acceptance passed. Any future lineage,
+snapshot, flatness, archive, zero-fabrication, or halt drift remains fail-closed.
+
+Issue #202 remains frozen: Performance Audit V2, ablation, and regime work are
+disabled/not run, and no promotion authority changed. Shadow AI remains
+observer-only; its evidence is durable but unavailable concentration remains too
+high for promotion. Issue #84 is now the primary engineering program: implement
+the authoritative single-owner StateStore/ledger-projection/valuation/risk
+cutover before any performance or AI promotion work.
