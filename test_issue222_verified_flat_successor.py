@@ -166,7 +166,7 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
             digest_before = recovery._sha256(str(ledger_path))
             with stack:
                 result = recovery.apply(core)
-            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["status"], "completed", result)
             self.assertEqual(core.portfolio["accounting_epoch_id"], recovery.TARGET_EPOCH_ID)
             self.assertEqual(core.portfolio["positions"], {})
             self.assertEqual(core.portfolio["trades"], [])
@@ -217,7 +217,10 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
                 result = recovery.apply(core)
             self.assertEqual(result["status"], "blocked")
             self.assertIn("canonical_evidence_exact", result["failed_checks"])
-            candidate = result["canonical"]["later_exit_candidates"][0]
+            candidate = next(
+                row for row in result["canonical"]["later_exit_candidates"]
+                if row["execution_id"] == rows[-2]["execution_id"]
+            )
             self.assertEqual(candidate["previous_event_hash"], rows[-2]["previous_event_hash"])
             self.assertEqual(candidate["recorded_local"], "2026-09-14 12:00:00 CDT")
             self.assertEqual(candidate["entry_price"], 148.88)
@@ -242,8 +245,9 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertIn("canonical_evidence_exact", result["failed_checks"])
         self.assertEqual(
-            result["canonical"]["unrelated_complete_later_pair"]["reason"],
+            result["canonical"]["unrelated_complete_later_pair"].get("reason"),
             "unrelated_later_exit_signature_mismatch",
+            result["canonical"],
         )
 
     def test_unrelated_pair_projection_drift_blocks(self):
@@ -314,7 +318,7 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
             (root / "marker.json").write_text(json.dumps(marker), encoding="utf-8")
             with stack:
                 result = recovery.apply(core)
-        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["status"], "completed", result)
         self.assertTrue(result["interrupted_completion_retry_performed"])
 
     def test_concurrent_apply_serializes_to_one_cutover(self):
@@ -337,7 +341,7 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
                 for thread in threads:
                     thread.join()
         self.assertEqual(errors, [])
-        self.assertEqual(sorted(result["status"] for result in results), ["completed", "validation_hold"])
+        self.assertEqual(sorted(result["status"] for result in results), ["completed", "validation_hold"], results)
         self.assertEqual(core.portfolio["accounting_epoch_id"], recovery.TARGET_EPOCH_ID)
         archives = list((root / "forensic_archives").glob("*"))
         self.assertEqual(len(archives), 1)
