@@ -58,6 +58,7 @@ SHADOW_AI_TESTS = (
 STATE_SERIALIZATION_TESTS = (
     "test_issue165_state_serialization.py",
     "test_issue172_canonical_state_commit.py",
+    "test_issue126_successor_accounting_reconcile_boundary.py",
     "test_issue222_canonical_state_parity.py",
     "test_issue222_verified_flat_successor.py",
 )
@@ -146,6 +147,8 @@ def _is_state_serialization_path(path: str) -> bool:
         "test_issue222_canonical_state_parity.py",
         "v4_canonical_state_reconciliation.py",
         "issue222_verified_flat_successor.py",
+        "paper_accounting_integrity_guard.py",
+        "test_issue126_successor_accounting_reconcile_boundary.py",
         "test_issue222_verified_flat_successor.py",
         "canonical_execution_ledger.py",
     }
