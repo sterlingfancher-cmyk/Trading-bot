@@ -43,7 +43,10 @@ PRICE_INTEGRITY_TESTS = (
 )
 SLS_RECOVERY_PROOF_TESTS = ("test_sls_bad_execution_recovery_proof.py",)
 SUCCESSOR_REPLAY_TESTS = ("test_verified_v2_successor_replay_status.py",)
-SUCCESSOR_EPOCH_MIGRATION_TESTS = ("test_verified_v2_successor_epoch_migration.py",)
+SUCCESSOR_EPOCH_MIGRATION_TESTS = (
+    "test_verified_v2_successor_epoch_migration.py",
+    "test_issue126_successor_compatibility.py",
+)
 RUNTIME_RESEARCH_SNAPSHOT_TESTS = ("test_runtime_research_snapshot.py",)
 LEGACY_EXTERNAL_PAPER_RUNNER_TESTS = ("test_legacy_external_paper_runner_retired.py",)
 SHADOW_AI_TESTS = (

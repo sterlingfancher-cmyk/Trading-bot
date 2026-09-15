@@ -27,6 +27,27 @@ class Issue126SuccessorCompatibilityTests(unittest.TestCase):
             },
         })
 
+    @staticmethod
+    def _v5_core():
+        return types.SimpleNamespace(portfolio={
+            "accounting_epoch_id": v2_compat.ISSUE222_V5_EPOCH_ID,
+            "paper_accounting_epoch": {
+                "id": v2_compat.ISSUE222_V5_EPOCH_ID,
+                "prior_epoch_id": v2_compat.ISSUE126_V4_EPOCH_ID,
+                "historical_recovery_decision": v2_compat.ISSUE222_V5_DECISION,
+                "historical_evidence_archived": True,
+                "forensic_archive_dir": "/app/data/forensic_archives/issue222-exact",
+                "validation_hold": True,
+                "validation_release_status": "blocked",
+                "validation_released": False,
+                "zero_trade_baseline": True,
+                "prior_epoch_discrepancy_status": "unresolved_non_promotable",
+                "prior_epoch_economics_promotable": False,
+                "fabricated_exit_rows": 0,
+                "canonical_history_retained_immutably": True,
+            },
+        })
+
     def test_clean_epoch_compatibility_accepts_only_exact_v4_successor(self):
         core = self._v4_core()
         self.assertEqual(clean_compat._successor_epoch(core), clean_compat.ISSUE126_V4_EPOCH_ID)
@@ -73,6 +94,40 @@ class Issue126SuccessorCompatibilityTests(unittest.TestCase):
     def test_v2_migration_compatibility_fails_closed_on_v4_lineage_mismatch(self):
         core = self._v4_core(canonical_history_retained_immutably=False)
         self.assertFalse(v2_compat._exact_issue126_v4_successor(v2_migration, core))
+
+    def test_v2_migration_compatibility_treats_exact_v5_as_superseded_without_write(self):
+        core = self._v5_core()
+        self.assertTrue(v2_compat._exact_issue222_v5_successor(v2_migration, core))
+        before = copy.deepcopy(core.portfolio)
+        calls = {"original": 0}
+
+        def original(runtime_core=None):
+            calls["original"] += 1
+            return {"status": "error", "overall": "fail", "reason": "should_not_run"}
+
+        with mock.patch.object(v2_migration, "apply", original):
+            v2_compat._install_migration_apply_compatibility(v2_migration)
+            result = v2_migration.apply(core)
+
+        self.assertEqual(result["status"], "superseded")
+        self.assertEqual(result["active_epoch_id"], v2_compat.ISSUE222_V5_EPOCH_ID)
+        self.assertEqual(result["reason"], "exact_issue222_v5_successor_active")
+        self.assertEqual(calls["original"], 0)
+        self.assertEqual(core.portfolio, before)
+        self.assertFalse(result["writes_state"])
+
+    def test_v2_migration_v5_compatibility_fails_closed_on_lineage_drift(self):
+        fields = (
+            ("prior_epoch_id", "wrong-prior"),
+            ("validation_hold", False),
+            ("prior_epoch_economics_promotable", True),
+            ("fabricated_exit_rows", 1),
+        )
+        for field, bad in fields:
+            with self.subTest(field=field):
+                core = self._v5_core()
+                core.portfolio["paper_accounting_epoch"].update({field: bad})
+                self.assertFalse(v2_compat._exact_issue222_v5_successor(v2_migration, core))
 
     def test_compatibility_adds_no_trading_or_state_authority(self):
         authority = v2_compat.status_payload(None)["authority"]
