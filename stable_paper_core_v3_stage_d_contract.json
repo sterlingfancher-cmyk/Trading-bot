@@ -12,6 +12,7 @@
     "sandbox_io_requires_explicit_opt_in": true,
     "canonical_payload_digest_required": true,
     "monotonic_revision_required": true,
+    "cross_instance_process_serialization_required": true,
     "atomic_same_directory_replace_required": true,
     "file_fsync_required": true,
     "directory_fsync_attempt_required": true,
