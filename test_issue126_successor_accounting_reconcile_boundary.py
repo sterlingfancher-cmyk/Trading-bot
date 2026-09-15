@@ -158,7 +158,7 @@ class Issue126SuccessorAccountingBoundaryTests(unittest.TestCase):
 
     def test_runtime_bidirectional_owner_keeps_drift_unavailable(self):
         core = _issue222_v5_core()
-        core.portfolio["risk_controls"]["halted"] = False
+        core.portfolio["risk_controls"].update({"halted": False})
 
         rebuilt = bidirectional.analyze_ledger(core.portfolio, core)
 
