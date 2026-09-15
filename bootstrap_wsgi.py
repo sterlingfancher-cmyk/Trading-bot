@@ -81,6 +81,28 @@ def _bridge_has_error(payload: Any) -> bool:
     )
 
 
+def _bridge_error_summary(payload: Any) -> dict[str, Any]:
+    """Return bounded module errors before the full startup payload is truncated."""
+    if not isinstance(payload, dict):
+        return {"bridge": {"status": "error", "error": "non_object_bridge_payload"}}
+    modules = payload.get("modules")
+    if not isinstance(modules, dict):
+        return {
+            "bridge": {
+                "status": payload.get("status"),
+                "error": payload.get("error"),
+            }
+        } if payload.get("status") == "error" else {}
+    return {
+        str(name): {
+            "status": row.get("status"),
+            "error": str(row.get("error") or "")[:1000],
+        }
+        for name, row in modules.items()
+        if isinstance(row, dict) and row.get("status") == "error"
+    }
+
+
 def _registration_heartbeat_payload(
     started_monotonic: float,
     now_monotonic: float | None = None,
@@ -157,12 +179,21 @@ def _load_application() -> None:
         integrity_routes = data_integrity_startup_bridge.register_routes(delegate, core)
         if _bridge_has_error(integrity_apply) or _bridge_has_error(integrity_routes):
             raise RuntimeError(
-                "data integrity registration failed: "
+                "data integrity registration failed: error_summary="
+                + json.dumps(
+                    {
+                        "apply": _bridge_error_summary(integrity_apply),
+                        "routes": _bridge_error_summary(integrity_routes),
+                    },
+                    sort_keys=True,
+                    default=str,
+                )[:2000]
+                + "; payload="
                 + json.dumps(
                     {"apply": integrity_apply, "routes": integrity_routes},
                     sort_keys=True,
                     default=str,
-                )[:3000]
+                )[:1000]
             )
 
         registration_started_monotonic = time.monotonic()
