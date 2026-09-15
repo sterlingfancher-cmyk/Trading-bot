@@ -27,12 +27,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
-VERSION = "verified-v2-successor-precondition-production-shape-2026-08-26-v3-v4-supersession"
+VERSION = "verified-v2-successor-precondition-production-shape-2026-09-15-v4-v5-supersession"
 EQUITY_MARK_DRIFT_TOLERANCE = 2.0
 QTY_SERIALIZATION_TOLERANCE = 5e-6
 ENTRY_PRICE_TOLERANCE = 1e-4
 ISSUE126_V4_EPOCH_ID = "stable-paper-v4-20260826-successor01"
 ISSUE126_V4_DECISION = "issue126_sls_reentrant_accounting_successor_rollforward"
+ISSUE222_V5_EPOCH_ID = "stable-paper-v5-20260914-issue222-flat-successor01"
+ISSUE222_V5_DECISION = "issue222_unresolved_v4_projection_verified_flat_successor"
 _APPLIED = False
 
 
@@ -130,6 +132,30 @@ def _exact_issue126_v4_successor(migration: Any, core: Any) -> bool:
     )
 
 
+def _exact_issue222_v5_successor(migration: Any, core: Any) -> bool:
+    if core is None:
+        return False
+    pf = migration._portfolio(core)
+    epoch = migration._d(pf.get("paper_accounting_epoch"))
+    active_epoch = str(epoch.get("id") or pf.get("accounting_epoch_id") or "")
+    return bool(
+        active_epoch == ISSUE222_V5_EPOCH_ID
+        and str(epoch.get("prior_epoch_id") or "") == ISSUE126_V4_EPOCH_ID
+        and str(epoch.get("historical_recovery_decision") or "") == ISSUE222_V5_DECISION
+        and epoch.get("historical_evidence_archived") is True
+        and bool(str(epoch.get("forensic_archive_dir") or "").strip())
+        and epoch.get("validation_hold") is True
+        and epoch.get("validation_release_status") == "blocked"
+        and epoch.get("validation_released") is False
+        and epoch.get("zero_trade_baseline") is True
+        and epoch.get("prior_epoch_discrepancy_status") == "unresolved_non_promotable"
+        and epoch.get("prior_epoch_economics_promotable") is False
+        and type(epoch.get("fabricated_exit_rows")) is int
+        and epoch.get("fabricated_exit_rows") == 0
+        and epoch.get("canonical_history_retained_immutably") is True
+    )
+
+
 def _defer_exact_interrupted_completion_error(migration: Any, core: Any, result: Any) -> Any:
     if not isinstance(result, dict):
         return result
@@ -162,6 +188,16 @@ def _install_migration_apply_compatibility(migration: Any) -> None:
     original = current
 
     def interrupted_completion_compatible_apply(runtime_core: Any = None) -> Any:
+        if _exact_issue222_v5_successor(migration, runtime_core):
+            return {
+                "status": "superseded",
+                "overall": "pass",
+                "version": VERSION,
+                "active_epoch_id": ISSUE222_V5_EPOCH_ID,
+                "superseded_epoch_id": migration.TARGET_EPOCH_ID,
+                "reason": "exact_issue222_v5_successor_active",
+                "writes_state": False,
+            }
         if _exact_issue126_v4_successor(migration, runtime_core):
             return {
                 "status": "superseded",
@@ -208,12 +244,14 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "production_accounting_payload_shape_supported": bool(_APPLIED),
         "exact_interrupted_completion_error_deferred_to_finalizer": bool(_APPLIED),
         "exact_issue126_v4_successor_supersession_supported": bool(_APPLIED),
+        "exact_issue222_v5_successor_supersession_supported": bool(_APPLIED),
         "equity_mark_drift_tolerance_dollars": EQUITY_MARK_DRIFT_TOLERANCE,
         "authority": {
             "precondition_only": True,
             "writes_state": False,
             "defers_only_exact_completed_v3_marker_with_verified_v2_reversion": True,
             "accepts_only_exact_issue126_v4_successor_as_v3_supersession": True,
+            "accepts_only_exact_issue222_v5_successor_as_v3_supersession": True,
             "finalizer_remains_only_v2_to_v3_retry_owner": True,
             "edits_or_deletes_canonical_rows": False,
             "rewrites_current_day_peak": False,
