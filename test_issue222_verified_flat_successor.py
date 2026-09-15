@@ -30,6 +30,7 @@ def _fixture():
         })
     for expected in recovery.EXPECTED_MISSING_ROWS:
         row = copy.deepcopy(expected)
+        row["accounting_epoch_id"] = recovery.OLD_EPOCH_ID
         if "execution_id" not in row:
             available = sorted(recovery.EXPECTED_MISSING_IDS - {str(r.get("execution_id")) for r in rows})
             available = [value for value in available if value != "9cad03cbec994e29a9b65293d573f54b"]
