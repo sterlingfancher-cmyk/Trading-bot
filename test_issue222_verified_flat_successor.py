@@ -359,11 +359,11 @@ class Issue222VerifiedFlatSuccessorTests(unittest.TestCase):
                     thread.start()
                 for thread in threads:
                     thread.join()
+            archive_count = len(list((root / "forensic_archives").glob("*")))
         self.assertEqual(errors, [])
         self.assertEqual(sorted(result["status"] for result in results), ["completed", "validation_hold"], results)
         self.assertEqual(core.portfolio["accounting_epoch_id"], recovery.TARGET_EPOCH_ID)
-        archives = list((root / "forensic_archives").glob("*"))
-        self.assertEqual(len(archives), 1)
+        self.assertEqual(archive_count, 1)
 
     def test_active_epoch_without_completed_marker_fails_closed(self):
         _, state = _fixture()
