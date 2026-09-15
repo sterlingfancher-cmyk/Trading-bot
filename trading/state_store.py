@@ -7,7 +7,9 @@ atomic-commit invariants can be proven before any authoritative cutover.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
+import fcntl
 from hashlib import sha256
 import json
 import os
@@ -246,6 +248,7 @@ class CanonicalStateStore:
     def __init__(self, path: Path | str, *, sandbox_io_enabled: bool = False):
         self.path = Path(path)
         self.backup_path = self.path.with_suffix(self.path.suffix + ".bak")
+        self.lock_path = self.path.with_name(f".{self.path.name}.lock")
         self.sandbox_io_enabled = bool(sandbox_io_enabled)
         self._lock = threading.RLock()
 
@@ -279,51 +282,67 @@ class CanonicalStateStore:
             payload=raw.get("payload") if isinstance(raw.get("payload"), Mapping) else {},
         )
 
+    @contextmanager
+    def _process_lock(self, *, exclusive: bool):
+        """Serialize sandbox access across store instances and processes."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(self.lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(
+                descriptor,
+                fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH,
+            )
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
     def read_sandbox(self) -> CanonicalStateEnvelope:
         self._assert_sandbox()
         with self._lock:
-            return self._read_envelope_file(self.path)
+            with self._process_lock(exclusive=False):
+                return self._read_envelope_file(self.path)
 
     def commit_sandbox(self, envelope: CanonicalStateEnvelope) -> None:
         self._assert_sandbox()
         with self._lock:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            if self.path.exists():
-                current = self._read_envelope_file(self.path)
-                if envelope.revision <= current.revision:
-                    raise StateStoreInvariantError(
-                        "canonical revision must increase monotonically"
+            with self._process_lock(exclusive=True):
+                if self.path.exists():
+                    current = self._read_envelope_file(self.path)
+                    if envelope.revision <= current.revision:
+                        raise StateStoreInvariantError(
+                            "canonical revision must increase monotonically"
+                        )
+                    backup_tmp = self.backup_path.with_name(
+                        f".{self.backup_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
                     )
-                backup_tmp = self.backup_path.with_name(
-                    f".{self.backup_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+                    backup_tmp.write_bytes(self.path.read_bytes())
+                    with backup_tmp.open("rb") as handle:
+                        os.fsync(handle.fileno())
+                    os.replace(backup_tmp, self.backup_path)
+
+                temp_path = self.path.with_name(
+                    f".{self.path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
                 )
-                backup_tmp.write_bytes(self.path.read_bytes())
-                with backup_tmp.open("rb") as handle:
+                with temp_path.open("wb") as handle:
+                    handle.write(_canonical_bytes(envelope.to_dict()))
+                    handle.flush()
                     os.fsync(handle.fileno())
-                os.replace(backup_tmp, self.backup_path)
-
-            temp_path = self.path.with_name(
-                f".{self.path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
-            )
-            with temp_path.open("wb") as handle:
-                handle.write(_canonical_bytes(envelope.to_dict()))
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temp_path, self.path)
-            try:
-                directory_fd = os.open(str(self.path.parent), os.O_DIRECTORY)
+                os.replace(temp_path, self.path)
                 try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
-            except (AttributeError, OSError):
-                pass
+                    directory_fd = os.open(str(self.path.parent), os.O_DIRECTORY)
+                    try:
+                        os.fsync(directory_fd)
+                    finally:
+                        os.close(directory_fd)
+                except (AttributeError, OSError):
+                    pass
 
-            persisted = self._read_envelope_file(self.path)
-            if persisted.payload_sha256 != envelope.payload_sha256:
-                raise StateStoreInvariantError("post-commit digest mismatch")
-            if persisted.revision != envelope.revision:
-                raise StateStoreInvariantError("post-commit revision mismatch")
+                persisted = self._read_envelope_file(self.path)
+                if persisted.payload_sha256 != envelope.payload_sha256:
+                    raise StateStoreInvariantError("post-commit digest mismatch")
+                if persisted.revision != envelope.revision:
+                    raise StateStoreInvariantError("post-commit revision mismatch")
 
     @classmethod
     def descriptor(cls) -> Mapping[str, Any]:
@@ -333,6 +352,7 @@ class CanonicalStateStore:
                 "authority": cls.authority,
                 "production_write_enabled": cls.production_write_enabled,
                 "runtime_registered": cls.runtime_registered,
+                "interprocess_locking": True,
                 "reads_environment": cls.reads_environment,
                 "places_orders": cls.places_orders,
                 "schema_version": SCHEMA_VERSION,

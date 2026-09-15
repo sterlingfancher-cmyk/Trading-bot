@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import multiprocessing
 from pathlib import Path
 import tempfile
 import unittest
@@ -20,6 +21,38 @@ from trading.state_store import (
 )
 
 ROOT = Path(__file__).resolve().parent
+
+
+def _commit_in_process(
+    path: str,
+    revision: int,
+    result_queue,
+    entered=None,
+    release=None,
+) -> None:
+    store = CanonicalStateStore(path, sandbox_io_enabled=True)
+    if entered is not None and release is not None:
+        original_read = store._read_envelope_file
+
+        def delayed_read(target):
+            current = original_read(target)
+            entered.set()
+            if not release.wait(timeout=10):
+                raise TimeoutError("test did not release delayed commit")
+            return current
+
+        store._read_envelope_file = delayed_read
+    envelope = store.prepare(
+        snapshot=_snapshot(),
+        revision=revision,
+        created_at=f"2026-08-20 17:0{revision}:00 CDT",
+    )
+    try:
+        store.commit_sandbox(envelope)
+    except Exception as exc:
+        result_queue.put(type(exc).__name__)
+    else:
+        result_queue.put("ok")
 
 
 def _snapshot() -> CanonicalStateSnapshot:
@@ -74,6 +107,9 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
         self.assertFalse(contract["production_write_enabled"])
         self.assertFalse(contract["runtime_registered"])
         self.assertTrue(contract["constraints"]["restart_round_trip_parity_required"])
+        self.assertTrue(
+            contract["constraints"]["cross_instance_process_serialization_required"]
+        )
         self.assertIn(
             "issue_82_prospective_fresh_day_acceptance",
             contract["promotion_blockers"],
@@ -200,11 +236,57 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
             backup_raw = json.loads(store.backup_path.read_text(encoding="utf-8"))
             self.assertEqual(backup_raw["revision"], 1)
 
+    def test_same_revision_commits_are_serialized_across_processes(self) -> None:
+        context = multiprocessing.get_context("fork")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "canonical_state.json"
+            store = CanonicalStateStore(path, sandbox_io_enabled=True)
+            store.commit_sandbox(
+                store.prepare(
+                    snapshot=_snapshot(),
+                    revision=1,
+                    created_at="2026-08-20 17:01:00 CDT",
+                )
+            )
+
+            results = context.Queue()
+            entered = context.Event()
+            release = context.Event()
+            first = context.Process(
+                target=_commit_in_process,
+                args=(str(path), 2, results, entered, release),
+            )
+            second = context.Process(
+                target=_commit_in_process,
+                args=(str(path), 2, results),
+            )
+            first.start()
+            self.assertTrue(entered.wait(timeout=5))
+            second.start()
+            second.join(timeout=0.25)
+            self.assertTrue(
+                second.is_alive(),
+                "competing commit bypassed the held StateStore process lock",
+            )
+
+            release.set()
+            first.join(timeout=5)
+            second.join(timeout=5)
+            self.assertFalse(first.is_alive())
+            self.assertFalse(second.is_alive())
+            self.assertEqual(
+                sorted((results.get(timeout=2), results.get(timeout=2))),
+                ["StateStoreInvariantError", "ok"],
+            )
+            self.assertEqual(store.read_sandbox().revision, 2)
+            self.assertTrue(store.lock_path.exists())
+
     def test_descriptor_denies_runtime_authority(self) -> None:
         descriptor = CanonicalStateStore.descriptor()
         self.assertEqual(descriptor["authority"], "shadow_only")
         self.assertFalse(descriptor["production_write_enabled"])
         self.assertFalse(descriptor["runtime_registered"])
+        self.assertTrue(descriptor["interprocess_locking"])
         self.assertFalse(descriptor["reads_environment"])
         self.assertFalse(descriptor["places_orders"])
 
