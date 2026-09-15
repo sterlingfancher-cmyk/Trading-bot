@@ -21,7 +21,7 @@ import copy
 import datetime as dt
 from typing import Any, Dict, List, Tuple
 
-VERSION = "paper-bidirectional-accounting-2026-09-02-v3-open-residue-tolerance"
+VERSION = "paper-bidirectional-accounting-2026-09-15-v4-issue222-zero-trade-baseline"
 # state.trades serializes execution quantities to six decimals. Accept only the
 # bounded sub-five-micro-share residue already proven safe by canonical replay;
 # material quantity gaps remain coverage failures and cannot create cash.
@@ -120,6 +120,19 @@ def analyze_ledger(pf: Dict[str, Any], core: Any = None) -> Dict[str, Any]:
     trades = _l(pf.get("trades"))
     positions = _d(pf.get("positions"))
     if not trades:
+        issue222_baseline = getattr(
+            accounting, "_issue222_verified_flat_zero_trade_baseline", lambda _pf: {}
+        )(pf)
+        if issue222_baseline:
+            return {
+                **issue222_baseline,
+                "coverage_issues": [],
+                "coverage_issue_count": 0,
+                "economic_issues": [],
+                "economic_issue_count": 0,
+                "accounting_model": "bidirectional_margin_v1",
+                "supports_long_short": True,
+            }
         clean = _clean_zero_trade_baseline(pf, core, accounting)
         if clean is not None:
             clean = dict(clean)
