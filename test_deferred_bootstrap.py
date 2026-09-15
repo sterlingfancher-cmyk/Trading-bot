@@ -86,6 +86,19 @@ class DeferredBootstrapTests(unittest.TestCase):
         with patch.dict(os.environ, {"DEFERRED_WSGI_START_DELAY_SECONDS": "0"}):
             self.assertEqual(self.module._loader_delay_seconds(), 0.1)
 
+    def test_bridge_error_summary_keeps_exact_module_error_visible(self) -> None:
+        payload = {
+            "status": "ok",
+            "modules": {
+                "large_success": {"status": "ok", "details": "x" * 10000},
+                "failed_owner": {"status": "error", "error": "exact failure"},
+            },
+        }
+        self.assertEqual(
+            self.module._bridge_error_summary(payload),
+            {"failed_owner": {"status": "error", "error": "exact failure"}},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
