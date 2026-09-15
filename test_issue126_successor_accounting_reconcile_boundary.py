@@ -3,6 +3,7 @@ import unittest
 from unittest import mock
 
 import paper_accounting_integrity_guard as accounting
+import paper_bidirectional_accounting_guard as bidirectional
 
 
 class FakeCore:
@@ -139,6 +140,30 @@ class Issue126SuccessorAccountingBoundaryTests(unittest.TestCase):
         self.assertEqual(status["reconstructed"]["parsed_trade_rows"], 0)
         self.assertFalse(status["reconstructed"]["prior_epoch_economics_promotable"])
         self.assertEqual(status["reconstructed"]["fabricated_exit_rows"], 0)
+
+    def test_runtime_bidirectional_owner_preserves_exact_issue222_v5_baseline(self):
+        core = _issue222_v5_core()
+
+        rebuilt = bidirectional.analyze_ledger(core.portfolio, core)
+
+        self.assertEqual(rebuilt["status"], "ok")
+        self.assertTrue(rebuilt["coverage_complete"])
+        self.assertEqual(rebuilt["coverage_issue_count"], 0)
+        self.assertEqual(rebuilt["economic_issue_count"], 0)
+        self.assertEqual(rebuilt["accounting_model"], "bidirectional_margin_v1")
+        self.assertEqual(
+            rebuilt["coverage_basis"],
+            "verified_flat_successor_zero_trade_baseline",
+        )
+
+    def test_runtime_bidirectional_owner_keeps_drift_unavailable(self):
+        core = _issue222_v5_core()
+        core.portfolio["risk_controls"]["halted"] = False
+
+        rebuilt = bidirectional.analyze_ledger(core.portfolio, core)
+
+        self.assertEqual(rebuilt["status"], "unavailable")
+        self.assertFalse(rebuilt["coverage_complete"])
 
     def test_issue222_v5_zero_trade_baseline_drift_remains_unavailable(self):
         mutations = (
