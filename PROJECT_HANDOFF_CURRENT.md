@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-16 09:33 CDT
+Last updated: 2026-09-16 13:14 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `27e0982453c6a486cfb32c35f79c311a6bbf3951` (PR #257).
+Validated runtime-code `main`: `1dab8a8b18f3f433da36082d407d9bf5aaae36ba` (PR #259).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
@@ -1760,3 +1760,55 @@ orders, live authority, or AI/ML authority changed, and `/paper/run` was not
 called. Issue #84 remains primary. Next, use the accepted typed v5 binding to
 design the explicit single-owner cutover/rollback boundary without activating
 production writes. Issue #202 remains frozen and no promotion work resumes.
+
+
+## 2026-09-16 Issue #84 — sentinel and ledger-digest runtime acceptance coverage — COMPLETE
+
+The automated runtime-research snapshot captured self-check, accounting,
+canonical ledger counts, risk, runner, market data, Performance Audit V1/V2,
+ablation, regime, and the legacy recovery diagnostic, but it did not request the
+registered read-only system sentinel. It also retained the compact daily audit's
+new canonical ledger digest only in raw evidence rather than the summarized
+acceptance record. This was a demonstrated Issue #84 evidence-integrity gap: a
+configured `11/11` result could not prove sentinel health or bind the exact
+ledger bytes used by the v5 adapter.
+
+PR #259 added `/paper/system-sentinel-status` as a required GET-only endpoint,
+summarized sentinel overall/status/incidents/collection errors/deployed commit
+and advisory/read-only authority, made any sentinel incident fail closed to
+snapshot `warn`, and propagated the canonical ledger SHA-256 into both JSON and
+Markdown summaries. It starts no worker or research, calls no cycle route,
+writes no state, clears no halt, and grants no strategy, sizing, risk, order,
+live, or AI/ML authority. Focused local validation passed 23 runtime-snapshot
+and sentinel tests, compilation, and diff checks.
+
+The exact PR head `87d601434b76d342fbe512d02c955da47b0a3a3b`
+passed repository safety/performance, architecture-debt regression, the full
+refactor/ownership/runtime/startup/research audit, mandatory Change Safety, and
+exact Gunicorn startup smoke. Exact-diff inspection was limited to the collector
+and its regression file. PR #259 squash-merged as
+`1dab8a8b18f3f433da36082d407d9bf5aaae36ba`; all post-merge gates and
+the authoritative `splendid-creativity / web` deployment succeeded.
+
+The first post-deploy snapshot ran while deferred registration was still active
+and reached only 2/12 endpoints, so it was rejected as incomplete. A safe retry
+of that completed job after the deployment settled produced the accepted
+13:14 CDT artifact: 12/12 endpoints reachable; bootstrap ready/delegating; the
+sentinel is `pass/quiet` with zero incidents, zero collection errors,
+advisory-only/read-only authority, and deployed commit exactly
+`1dab8a8b18f3f433da36082d407d9bf5aaae36ba`. The canonical ledger remains
+chain-valid at 88 rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`;
+accounting is clean with zero coverage/economic issues; cash
+`13429.13048559457`, equity `13429.13`, positions empty, day start/peak
+unchanged, market data and runner pass, and the intentionally preserved parity
+halt/validation hold remain active. Shadow capture remains parity-pass but
+forward-ineligible at 1,238 cycles and 31,688 candidates. V1 remains enabled
+with automatic backtesting disabled and 1,200 forward rows; V2, ablation, and
+regime remain disabled/not run. No promotion authority changed.
+
+Rollback is a code-only revert of PR #259; no data recovery is required. Issue
+#84 remains primary. Next, design the explicit single-owner cutover and rollback
+state machine using the accepted v5 typed binding, while keeping production
+writes and runtime registration disabled until a separately reviewed cutover
+decision. Issue #202 remains frozen.
