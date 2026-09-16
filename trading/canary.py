@@ -33,6 +33,8 @@ class SnapshotBindingProof:
     accounting_version: str
     valuation_version: str
     risk_version: str
+    ledger_total_rows: int
+    ledger_epoch_rows: int
     rollback_default_armed: bool = True
     runtime_registration: bool = False
     production_state_writes: bool = False
@@ -73,6 +75,8 @@ class SnapshotBindingProof:
                 "accounting_version": self.accounting_version,
                 "valuation_version": self.valuation_version,
                 "risk_version": self.risk_version,
+                "ledger_total_rows": self.ledger_total_rows,
+                "ledger_epoch_rows": self.ledger_epoch_rows,
                 "rollback_default_armed": self.rollback_default_armed,
                 "runtime_registration": self.runtime_registration,
                 "production_state_writes": self.production_state_writes,
@@ -241,8 +245,12 @@ class CanaryReadinessPlanner:
             ("positive_state_revision", envelope.revision > 0),
             ("canonical_chain_valid", snapshot.execution_chain_valid),
             (
+                "ledger_total_not_below_epoch",
+                snapshot.execution_ledger_rows >= snapshot.execution_epoch_rows,
+            ),
+            (
                 "ledger_projection_row_count",
-                snapshot.execution_ledger_rows == accounting.execution_rows,
+                snapshot.execution_epoch_rows == accounting.execution_rows,
             ),
             ("accounting_portfolio", portfolio == accounting_portfolio),
             ("valuation_cash", portfolio.cash == valuation.cash),
@@ -264,6 +272,8 @@ class CanaryReadinessPlanner:
             accounting_version=accounting.version,
             valuation_version=valuation.version,
             risk_version=risk.version,
+            ledger_total_rows=snapshot.execution_ledger_rows,
+            ledger_epoch_rows=snapshot.execution_epoch_rows,
         )
 
     @classmethod
