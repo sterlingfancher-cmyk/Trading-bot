@@ -3,6 +3,7 @@ import unittest
 from unittest import mock
 
 import paper_accounting_integrity_guard as accounting
+import paper_accounting_readonly_status as readonly_status
 import paper_bidirectional_accounting_guard as bidirectional
 
 
@@ -122,6 +123,23 @@ def _issue222_v5_core():
 
 
 class Issue126SuccessorAccountingBoundaryTests(unittest.TestCase):
+    def test_read_only_status_preserves_successor_and_discrepancy_contract(self):
+        core = _issue222_v5_core()
+        original_status_payload = accounting.status_payload
+        try:
+            readonly_status.apply(core)
+            status = accounting.status_payload(core)
+        finally:
+            accounting.status_payload = original_status_payload
+
+        self.assertEqual(core.save_calls, 0)
+        self.assertEqual(status["overall"], "pass")
+        self.assertTrue(status["successor_accounting_read_only"])
+        self.assertTrue(status["successor_validation_hold_read_only"])
+        self.assertFalse(status["automatic_repair_suppressed"])
+        self.assertEqual(status["discrepancy_count_before_repair"], 0)
+        self.assertEqual(status["discrepancy_count_remaining"], 0)
+
     def test_exact_issue222_v5_zero_trade_baseline_is_complete_read_only_evidence(self):
         core = _issue222_v5_core()
 

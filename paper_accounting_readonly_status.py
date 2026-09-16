@@ -18,6 +18,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
         pf = guard._portfolio(active)
         rebuilt = guard.reconstruct_from_ledger(pf, active)
         discrepancies = guard._discrepancies(pf, rebuilt)
+        successor_read_only = guard._successor_accounting_read_only(pf)
         clean = bool(rebuilt.get("coverage_complete")) and not discrepancies
         return {
             "status": "ok" if clean else "warn",
@@ -27,8 +28,15 @@ def apply(core: Any = None) -> Dict[str, Any]:
             "generated_local": guard._now(active),
             "coverage_complete": bool(rebuilt.get("coverage_complete")),
             "repaired": False,
+            "successor_accounting_read_only": successor_read_only,
+            "successor_validation_hold_read_only": successor_read_only,
+            "automatic_repair_suppressed": bool(successor_read_only and discrepancies),
             "discrepancies": discrepancies,
             "discrepancy_count": len(discrepancies),
+            "discrepancies_before_repair": discrepancies,
+            "discrepancy_count_before_repair": len(discrepancies),
+            "discrepancies_remaining": discrepancies,
+            "discrepancy_count_remaining": len(discrepancies),
             "reconstructed": rebuilt,
             "status_read_is_observational": True,
             "authority": {
