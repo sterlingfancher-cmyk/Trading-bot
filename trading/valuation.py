@@ -29,6 +29,7 @@ from trading.state import PositionSnapshot
 VERSION = "stable-paper-core-v3-stage-b-valuation-2026-08-20-v1"
 AUTHORITY = "shadow_only"
 ACCOUNTING_MODEL = "bidirectional_margin_v1"
+MONEY_SERIALIZATION_TOLERANCE = 0.005
 
 
 class ValuationInvariantError(ValueError):
@@ -163,7 +164,15 @@ class ValuationSnapshot:
 
         expected_position_value = basis + unrealized
         expected_equity = cash + expected_position_value
-        tolerance = max(1e-9, abs(expected_equity) * 1e-12)
+        # The authoritative paper state stores cash at full precision while
+        # serializing displayed equity to cents.  A flat account can therefore
+        # differ by less than half a cent without representing an economic
+        # mismatch.  Keep the allowance bounded to one cent-rounding quantum;
+        # larger drift remains fail-closed.
+        tolerance = max(
+            MONEY_SERIALIZATION_TOLERANCE,
+            abs(expected_equity) * 1e-12,
+        )
         if abs(position_value - expected_position_value) > tolerance:
             raise ValuationInvariantError(
                 "position value must equal cost basis plus unrealized P&L"

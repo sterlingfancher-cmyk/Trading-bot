@@ -128,6 +128,12 @@ def _verify_rows(rows: List[Dict[str, Any]]) -> Tuple[bool, List[str]]:
     return not errors, errors
 
 
+def _rows_sha256(rows: List[Dict[str, Any]]) -> str:
+    """Digest the exact canonical row snapshot used by status reporting."""
+    payload = "".join(_canonical_json(row) + "\n" for row in rows)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def append_execution(action: str, symbol: str, side: str, px: Any, shares: Any, extra: Dict[str, Any] | None = None, core: Any = None) -> Dict[str, Any]:
     with _LOCK:
         rows, parse_errors = _read_rows()
@@ -363,6 +369,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "append_only": True,
         "hash_chain_enabled": True,
         "chain_valid": bool(chain_valid),
+        "ledger_sha256": _rows_sha256(rows),
         "row_count": len(rows),
         "current_epoch_id": current_epoch,
         "current_epoch_rows": current_epoch_rows,

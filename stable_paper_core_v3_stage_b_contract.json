@@ -17,7 +17,7 @@
     "long position value equals quantity times protected mark",
     "short position value equals reserved entry basis plus unrealized P&L",
     "total position value equals total cost basis plus total unrealized P&L",
-    "equity equals cash plus total deterministic position value",
+    "equity equals cash plus total deterministic position value within a maximum half-cent persisted-money serialization tolerance",
     "protected equity must be finite and positive before it is risk-baseline eligible"
   ],
   "prohibited_authority": {

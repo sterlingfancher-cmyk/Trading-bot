@@ -1,4 +1,5 @@
 import json
+import hashlib
 import types
 
 import canonical_execution_ledger as ledger
@@ -30,7 +31,8 @@ def _core():
 
 
 def test_records_hash_chained_execution_and_links_state_trade(tmp_path, monkeypatch):
-    monkeypatch.setattr(ledger, "LEDGER_FILE", str(tmp_path / "ledger.jsonl"))
+    path = tmp_path / "ledger.jsonl"
+    monkeypatch.setattr(ledger, "LEDGER_FILE", str(path))
     core, calls = _core()
     out = ledger.apply(core)
     assert out["hook_applied"] is True
@@ -41,6 +43,7 @@ def test_records_hash_chained_execution_and_links_state_trade(tmp_path, monkeypa
     status = ledger.status_payload(core)
     assert status["chain_valid"] is True
     assert status["row_count"] == 2
+    assert status["ledger_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
     assert status["current_epoch_rows"] == 2
     assert status["authoritative_for_new_executions"] is True
     assert calls[0]["execution_id"]
@@ -94,6 +97,7 @@ def test_compact_daily_audit_exposes_canonical_ledger(monkeypatch):
         lambda core=None: {
             "status": "ok",
             "chain_valid": True,
+            "ledger_sha256": "a" * 64,
             "row_count": 4,
             "current_epoch_id": "epoch-test",
             "current_epoch_rows": 4,
@@ -104,4 +108,5 @@ def test_compact_daily_audit_exposes_canonical_ledger(monkeypatch):
     out = compact.compact_payload({"sections": {}}, None)
     assert out["execution_ledger"]["status"] == "ok"
     assert out["execution_ledger"]["chain_valid"] is True
+    assert out["execution_ledger"]["ledger_sha256"] == "a" * 64
     assert out["execution_ledger"]["row_count"] == 4

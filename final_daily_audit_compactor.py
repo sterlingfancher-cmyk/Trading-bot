@@ -264,6 +264,7 @@ def compact_payload(payload: Dict[str, Any], core: Any = None) -> Dict[str, Any]
         "execution_ledger": {
             "status": ledger.get("status"),
             "chain_valid": ledger.get("chain_valid"),
+            "ledger_sha256": ledger.get("ledger_sha256"),
             "row_count": ledger.get("row_count"),
             "current_epoch_id": ledger.get("current_epoch_id"),
             "current_epoch_rows": ledger.get("current_epoch_rows"),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import json
 from pathlib import Path
 import unittest
@@ -59,6 +60,8 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         self.assertTrue(
             constraints["ledger_total_and_epoch_row_provenance_required"]
         )
+        self.assertTrue(constraints["ledger_sha256_provenance_required_for_runtime_evidence"])
+        self.assertTrue(constraints["authoritative_v5_runtime_evidence_adapter_required"])
 
     def test_current_issue_82_missing_proof_blocks_canary(self) -> None:
         evidence = CanaryEvidence(
@@ -246,6 +249,122 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         self.assertTrue(proof.verified)
         self.assertEqual(proof.ledger_total_rows, 88)
         self.assertEqual(proof.ledger_epoch_rows, 0)
+
+    def _v5_runtime_evidence(self):
+        daily_audit = {
+            "account": {
+                "cash": 13429.13048559457,
+                "equity": 13429.13,
+                "positions": [],
+                "realized_today": 0.0,
+                "unrealized_pnl": 0.0,
+            },
+            "accounting_epoch": {
+                "epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+                "baseline_type": "verified_flat_snapshot_unresolved_prior_projection",
+                "historical_evidence_archived": True,
+                "validation_hold": True,
+                "zero_trade_baseline": True,
+            },
+            "accounting_integrity": {
+                "status": "ok",
+                "coverage_complete": True,
+                "coverage_issue_count": 0,
+                "economic_issue_count": 0,
+            },
+            "execution_ledger": {
+                "chain_valid": True,
+                "ledger_sha256": "a" * 64,
+                "row_count": 88,
+                "current_epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+                "current_epoch_rows": 0,
+                "state_current_epoch_rows": 0,
+                "state_projection_parity": True,
+                "missing_from_state_count": 0,
+                "missing_from_ledger_count": 0,
+            },
+            "risk": {
+                "halted": True,
+                "halt_reason": "canonical execution/state projection divergence",
+                "net_daily_loss_pct": 0.0,
+                "intraday_drawdown_pct": 0.0,
+            },
+        }
+        paper_status = {
+            "cash": 13429.13,
+            "equity": 13429.13,
+            "positions": {},
+            "recent_trades": [],
+            "realized_pnl": {"total": 3429.13048559457, "today": 0.0},
+        }
+        fresh_day = {
+            "baseline_status": "pass",
+            "date": "2026-09-16",
+            "day_start_equity": 13429.13048559457,
+            "day_peak_equity": 13429.13048559457,
+            "fresh_day_reset_pending": False,
+            "halted": True,
+            "halt_reason": "canonical execution/state projection divergence",
+        }
+        return daily_audit, paper_status, fresh_day
+
+    def test_current_v5_runtime_evidence_binds_exact_provenance(self) -> None:
+        audit, status, day = self._v5_runtime_evidence()
+        binding = CanaryReadinessPlanner.bind_verified_flat_v5_runtime_evidence(
+            daily_audit=audit,
+            paper_status=status,
+            fresh_day=day,
+            ledger_sha256="a" * 64,
+            revision=10,
+            captured_at="2026-09-16 09:02:35 CDT",
+        )
+
+        self.assertTrue(binding.proof.verified)
+        self.assertEqual(binding.proof.ledger_total_rows, 88)
+        self.assertEqual(binding.proof.ledger_epoch_rows, 0)
+        self.assertEqual(binding.proof.ledger_sha256, "a" * 64)
+        self.assertEqual(
+            binding.proof.epoch_id,
+            "stable-paper-v5-20260914-issue222-flat-successor01",
+        )
+        self.assertEqual(binding.proof.evidence_source, "https://web-production-e1796.up.railway.app")
+        self.assertFalse(binding.production_state_writes)
+        self.assertFalse(binding.order_authority)
+
+    def test_v5_runtime_adapter_rejects_incomplete_or_drifting_provenance(self) -> None:
+        audit, status, day = self._v5_runtime_evidence()
+        cases = []
+
+        wrong_rows = {
+            **copy.deepcopy(audit),
+            "execution_ledger": {
+                **audit["execution_ledger"],
+                "state_current_epoch_rows": 1,
+            },
+        }
+        cases.append((wrong_rows, status, day, "a" * 64, "https://web-production-e1796.up.railway.app"))
+
+        economic_drift = {
+            **copy.deepcopy(audit),
+            "account": {**audit["account"], "equity": 13429.12},
+        }
+        cases.append((economic_drift, status, day, "a" * 64, "https://web-production-e1796.up.railway.app"))
+
+        cases.append((audit, status, day, "missing", "https://web-production-e1796.up.railway.app"))
+        cases.append((audit, status, day, "a" * 64, "https://trading-bot-clean.up.railway.app"))
+
+        for row_audit, row_status, row_day, digest, source in cases:
+            with self.subTest(digest=digest, source=source, equity=row_audit["account"]["equity"]):
+                with self.assertRaises(CanaryInvariantError):
+                    CanaryReadinessPlanner.bind_verified_flat_v5_runtime_evidence(
+                        daily_audit=row_audit,
+                        paper_status=row_status,
+                        fresh_day=row_day,
+                        ledger_sha256=digest,
+                        revision=10,
+                        captured_at="2026-09-16 09:02:35 CDT",
+                        source_url=source,
+                    )
 
     def test_module_has_no_runtime_or_write_authority(self) -> None:
         path = ROOT / "trading" / "canary.py"
