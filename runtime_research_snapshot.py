@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_BASE_URL = "https://web-production-e1796.up.railway.app"
-VERSION = "runtime-research-snapshot-2026-09-01-v6-lineage-aware-classification"
+VERSION = "runtime-research-snapshot-2026-09-16-v7-sentinel-ledger-provenance"
 
 ENDPOINTS = {
     "bootstrap_status": "/bootstrap-status",
@@ -27,6 +27,7 @@ ENDPOINTS = {
     "self_check": "/paper/self-check",
     "fresh_day_check": "/paper/fresh-day-check",
     "daily_audit": "/paper/daily-audit",
+    "system_sentinel": "/paper/system-sentinel-status",
     "verified_v2_recovery_gate": "/paper/verified-v2-successor-replay-status",
     "v1_status": "/paper/performance-audit-status",
     "v2_status": "/paper/performance-audit-v2-status",
@@ -206,6 +207,7 @@ def _daily_audit_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "coverage_issue_count": accounting.get("coverage_issue_count"),
         "economic_issue_count": accounting.get("economic_issue_count"),
         "canonical_chain_valid": ledger.get("chain_valid"),
+        "canonical_ledger_sha256": ledger.get("ledger_sha256"),
         "canonical_row_count": ledger.get("row_count"),
         "canonical_epoch_id": ledger.get("current_epoch_id"),
         "market_data_status": market.get("status"),
@@ -226,6 +228,7 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
     self_payload = _dict(_dict(raw.get("self_check")).get("payload"))
     fresh_payload = _dict(_dict(raw.get("fresh_day_check")).get("payload"))
     audit_payload = _dict(_dict(raw.get("daily_audit")).get("payload"))
+    sentinel_payload = _dict(_dict(raw.get("system_sentinel")).get("payload"))
     recovery_payload = _dict(
         _dict(raw.get("verified_v2_recovery_gate")).get("payload")
     )
@@ -264,6 +267,8 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
     recovery_overall = recovery_payload.get("overall")
     fresh_baseline_status = fresh_payload.get("baseline_status")
     audit_overall = audit_payload.get("overall")
+    sentinel_overall = sentinel_payload.get("overall")
+    sentinel_status = sentinel_payload.get("status")
     v2_run_status = v2_payload.get("run_status") or latest.get("status") or "unknown"
 
     active_epoch_id = _dict(audit_payload.get("accounting_epoch")).get("epoch_id")
@@ -303,6 +308,11 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
     elif fresh_baseline_status not in {None, "pass"}:
         overall = "warn"
     elif audit_overall not in {None, "pass"}:
+        overall = "warn"
+    elif (
+        sentinel_overall not in {None, "pass"}
+        or sentinel_status not in {None, "quiet"}
+    ):
         overall = "warn"
     elif not recovery_gate_superseded and recovery_overall not in {None, "pass"}:
         overall = "warn"
@@ -359,6 +369,21 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
         },
         "fresh_day": fresh_day,
         "daily_audit": daily_audit,
+        "system_sentinel": {
+            "overall": sentinel_overall,
+            "status": sentinel_status,
+            "version": sentinel_payload.get("version"),
+            "runtime_version": sentinel_payload.get("runtime_version"),
+            "generated_commit_sha": sentinel_payload.get("generated_commit_sha"),
+            "incident_count": sentinel_payload.get("incident_count"),
+            "collection_errors": _dict(sentinel_payload.get("collection_errors")),
+            "advisory_only": _dict(sentinel_payload.get("authority")).get(
+                "advisory_only"
+            ),
+            "read_only_on_demand": _dict(sentinel_payload.get("authority")).get(
+                "read_only_on_demand"
+            ),
+        },
         "recovery_gate": recovery_gate,
         "v1": {
             "version": v1_payload.get("version"),
@@ -405,6 +430,7 @@ def _markdown(report: dict[str, Any]) -> str:
     self_check = _dict(summary.get("self_check"))
     fresh_day = _dict(summary.get("fresh_day"))
     daily_audit = _dict(summary.get("daily_audit"))
+    sentinel = _dict(summary.get("system_sentinel"))
     recovery_gate = _dict(summary.get("recovery_gate"))
     v1 = _dict(summary.get("v1"))
     v2 = _dict(summary.get("v2"))
@@ -449,10 +475,19 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- Accounting integrity: `{daily_audit.get('accounting_integrity_status')}`",
         f"- Coverage / economic issues: `{daily_audit.get('coverage_issue_count')}` / `{daily_audit.get('economic_issue_count')}`",
         f"- Canonical chain / rows: `{daily_audit.get('canonical_chain_valid')}` / `{daily_audit.get('canonical_row_count')}`",
+        f"- Canonical ledger SHA-256: `{daily_audit.get('canonical_ledger_sha256')}`",
         f"- Market data: `{daily_audit.get('market_data_status')}`",
         f"- Runner / active error: `{daily_audit.get('runner_status')}` / `{daily_audit.get('runner_active_error')}`",
         f"- Risk / halted: `{daily_audit.get('risk_status')}` / `{daily_audit.get('risk_halted')}`",
         f"- Risk halt reason: `{daily_audit.get('risk_halt_reason')}`",
+        "",
+        "## System Sentinel",
+        "",
+        f"- Overall / status: `{sentinel.get('overall')}` / `{sentinel.get('status')}`",
+        f"- Incidents: `{sentinel.get('incident_count')}`",
+        f"- Collection errors: `{sentinel.get('collection_errors')}`",
+        f"- Generated commit: `{sentinel.get('generated_commit_sha')}`",
+        f"- Advisory / read-only: `{sentinel.get('advisory_only')}` / `{sentinel.get('read_only_on_demand')}`",
         "",
         "## Verified-v2 Recovery Gate",
         "",
