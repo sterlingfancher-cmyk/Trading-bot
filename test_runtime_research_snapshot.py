@@ -23,6 +23,19 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
         }
         raw["root"]["payload"] = {"status": "ok", "delegate_ready": True}
         raw["paper_status"]["payload"] = {"status": "ok"}
+        raw["system_sentinel"]["payload"] = {
+            "overall": "pass",
+            "status": "quiet",
+            "version": "sentinel-test",
+            "runtime_version": "sentinel-runtime-test",
+            "generated_commit_sha": "a" * 40,
+            "incident_count": 0,
+            "collection_errors": {},
+            "authority": {
+                "advisory_only": True,
+                "read_only_on_demand": True,
+            },
+        }
         raw["self_check"]["payload"] = {
             "overall": "pass",
             "version": "self-check-test",
@@ -56,6 +69,7 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
             },
             "execution_ledger": {
                 "chain_valid": True,
+                "ledger_sha256": "b" * 64,
                 "row_count": 39,
                 "current_epoch_id": epoch_id,
             },
@@ -120,6 +134,10 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
             snapshot.ENDPOINTS["daily_audit"],
             "/paper/daily-audit",
         )
+        self.assertEqual(
+            snapshot.ENDPOINTS["system_sentinel"],
+            "/paper/system-sentinel-status",
+        )
 
     def test_recovery_fresh_day_and_active_audit_are_compacted_together(self):
         summary = snapshot._summarize(self._raw())
@@ -152,10 +170,31 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
         self.assertEqual(audit["economic_issue_count"], 0)
         self.assertTrue(audit["canonical_chain_valid"])
         self.assertEqual(audit["canonical_row_count"], 39)
+        self.assertEqual(audit["canonical_ledger_sha256"], "b" * 64)
         self.assertEqual(audit["market_data_status"], "pass")
         self.assertEqual(audit["runner_status"], "pass")
         self.assertFalse(audit["runner_active_error"])
         self.assertFalse(audit["risk_halted"])
+
+        sentinel = summary["system_sentinel"]
+        self.assertEqual(sentinel["overall"], "pass")
+        self.assertEqual(sentinel["status"], "quiet")
+        self.assertEqual(sentinel["incident_count"], 0)
+        self.assertEqual(sentinel["generated_commit_sha"], "a" * 40)
+        self.assertTrue(sentinel["advisory_only"])
+        self.assertTrue(sentinel["read_only_on_demand"])
+
+    def test_sentinel_incident_warns_snapshot_without_mutation(self):
+        raw = self._raw()
+        raw["system_sentinel"]["payload"].update(
+            {"overall": "warn", "status": "incident", "incident_count": 1}
+        )
+
+        summary = snapshot._summarize(raw)
+
+        self.assertEqual(summary["overall"], "warn")
+        self.assertEqual(summary["system_sentinel"]["status"], "incident")
+        self.assertEqual(summary["system_sentinel"]["incident_count"], 1)
 
     def test_failed_fresh_day_gate_warns_snapshot_without_mutation(self):
         summary = snapshot._summarize(
