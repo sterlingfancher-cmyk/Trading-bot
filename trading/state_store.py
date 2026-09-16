@@ -110,6 +110,7 @@ def _snapshot_payload(snapshot: CanonicalStateSnapshot) -> dict[str, Any]:
             "halt_reason": snapshot.risk.halt_reason,
         },
         "execution_ledger_rows": snapshot.execution_ledger_rows,
+        "execution_epoch_rows": snapshot.execution_epoch_rows,
         "execution_chain_valid": bool(snapshot.execution_chain_valid),
         "source_version": snapshot.source_version,
     }
@@ -172,6 +173,9 @@ def _snapshot_from_payload(payload: Mapping[str, Any]) -> CanonicalStateSnapshot
         portfolio=portfolio,
         risk=risk,
         execution_ledger_rows=int(payload.get("execution_ledger_rows", -1)),
+        execution_epoch_rows=int(
+            payload.get("execution_epoch_rows", payload.get("execution_ledger_rows", -1))
+        ),
         execution_chain_valid=bool(payload.get("execution_chain_valid")),
         source_version=str(payload.get("source_version") or ""),
     )
