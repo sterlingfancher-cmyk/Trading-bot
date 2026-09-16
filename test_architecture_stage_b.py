@@ -19,6 +19,7 @@ from trading.state import PositionSnapshot
 from trading.valuation import (
     DeterministicValuationService,
     ProtectedMarkSnapshot,
+    ValuationSnapshot,
     ValuationInvariantError,
 )
 
@@ -197,6 +198,29 @@ class StablePaperCoreStageBValuationTests(unittest.TestCase):
                 marks=(
                     ProtectedMarkSnapshot("SHORT", 250.0, "test", True, True),
                 ),
+            )
+
+    def test_persisted_cent_rounding_is_bounded_to_half_a_cent(self) -> None:
+        accepted = ValuationSnapshot(
+            cash=13429.13048559457,
+            equity=13429.13,
+            total_cost_basis=0.0,
+            total_position_value=0.0,
+            total_unrealized_pnl=0.0,
+            gross_market_exposure=0.0,
+            net_market_exposure=0.0,
+        )
+        self.assertEqual(accepted.equity, 13429.13)
+
+        with self.assertRaises(ValuationInvariantError):
+            ValuationSnapshot(
+                cash=13429.13048559457,
+                equity=13429.12,
+                total_cost_basis=0.0,
+                total_position_value=0.0,
+                total_unrealized_pnl=0.0,
+                gross_market_exposure=0.0,
+                net_market_exposure=0.0,
             )
 
     def test_stage_b_contract_is_shadow_only_and_requires_issue_82(self) -> None:
