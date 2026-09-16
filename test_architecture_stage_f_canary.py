@@ -56,6 +56,9 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         self.assertTrue(constraints["rollback_switch_required"])
         self.assertTrue(constraints["rollback_default_armed"])
         self.assertTrue(constraints["single_revision_snapshot_binding_required"])
+        self.assertTrue(
+            constraints["ledger_total_and_epoch_row_provenance_required"]
+        )
 
     def test_current_issue_82_missing_proof_blocks_canary(self) -> None:
         evidence = CanaryEvidence(
@@ -163,6 +166,8 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         self.assertEqual(proof.blockers, ())
         self.assertEqual(proof.revision, 7)
         self.assertEqual(proof.payload_sha256, envelope.payload_sha256)
+        self.assertEqual(proof.ledger_total_rows, 1)
+        self.assertEqual(proof.ledger_epoch_rows, 1)
         self.assertTrue(proof.rollback_default_armed)
         self.assertFalse(proof.production_state_writes)
         self.assertFalse(proof.risk_mutation_authority)
@@ -203,6 +208,44 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         )
         self.assertFalse(proof.verified)
         self.assertEqual(proof.blockers, ("ledger_projection_row_count",))
+
+    def test_successor_baseline_binds_total_and_zero_epoch_rows(self) -> None:
+        accounting = CanonicalAccountingProjector.project(
+            baseline=BaselineSnapshot(cash=13429.13048559457),
+            executions=(),
+        )
+        valuation = DeterministicValuationService.value(
+            cash=accounting.portfolio.cash,
+            positions=(),
+            marks=(),
+        )
+        risk = ShadowRiskEngine.evaluate(
+            date="2026-09-16",
+            valuation=valuation,
+            realized_today=0.0,
+            limits=RiskLimits(0.03, 0.03, 0.03),
+        )
+        envelope = CanonicalStateStore.prepare(
+            snapshot=CanonicalStateSnapshot(
+                portfolio=accounting.portfolio,
+                risk=risk.state,
+                execution_ledger_rows=88,
+                execution_epoch_rows=0,
+                execution_chain_valid=True,
+            ),
+            revision=9,
+            created_at="2026-09-16 08:00",
+        )
+
+        proof = CanaryReadinessPlanner.verify_snapshot_binding(
+            envelope=envelope,
+            accounting=accounting,
+            valuation=valuation,
+            risk=risk,
+        )
+        self.assertTrue(proof.verified)
+        self.assertEqual(proof.ledger_total_rows, 88)
+        self.assertEqual(proof.ledger_epoch_rows, 0)
 
     def test_module_has_no_runtime_or_write_authority(self) -> None:
         path = ROOT / "trading" / "canary.py"
