@@ -1636,3 +1636,55 @@ adapter that derives this typed proof from current authoritative v5 evidence;
 require exact epoch/row/digest provenance and keep any mismatch non-promotable
 before considering writer activation. Issue #202 stays frozen; V2, ablation,
 and regime remain disabled/not run, with no duplicate research job.
+
+
+## 2026-09-16 Issue #84 — total versus active-epoch ledger provenance — MERGED; settled endpoint acceptance pending
+
+The bounded adapter-readiness review demonstrated a scope error in the Stage F
+single-revision proof. `CanonicalStateSnapshot.execution_ledger_rows` represented
+the immutable all-epoch ledger total, while
+`AccountingProjection.execution_rows` represented the active epoch projection.
+The proof compared those unlike counts directly. The current v5 baseline is the
+decisive regression shape: 88 preserved canonical rows in total and zero rows
+in the active verified-flat successor epoch. A correct baseline could therefore
+never satisfy the prior proof.
+
+PR #254 adds explicit `execution_epoch_rows` provenance while retaining
+`execution_ledger_rows` as the all-epoch total. State snapshots now require
+nonnegative counts with active-epoch rows no greater than total rows; older
+Stage D envelopes remain compatible by defaulting the absent epoch count to the
+stored total. Stage F separately proves total/epoch ordering and compares only
+active-epoch rows to the accounting projection. Stage D/F contracts and
+round-trip tests were updated, and a v5-shaped 88-total/0-epoch/zero-trade
+regression proves the valid successor baseline.
+
+Local exact focused validation passed both JSON contracts and all 74 Stage
+B/C/D/E/F tests. The PR exact head
+`dc779cf32916fcdabc5ea54a57ac6ab47c944d4e` passed all eight applicable
+exact-head workflows, including Stage C/D/E/F validation, repository safety,
+architecture-debt regression, the full refactor/ownership/runtime/startup
+audit, Change Safety, and exact Gunicorn bootstrap smoke. Exact-diff inspection
+was bounded to seven architecture/contract/test files. PR #254 squash-merged as
+`a300e25982aff64a1c3a6682e2c965e597ad74ad`; post-merge repository validation,
+Change Safety, refactor audit, and the authoritative `splendid-creativity / web`
+deployment context all passed.
+
+Settled endpoint acceptance is not claimed. The available direct read-only
+runtime reader rejected the authoritative Railway domain before issuing a
+request. The post-deploy GitHub research snapshot completed but classified the
+runtime `warn`, reported self-check unavailable, and reached only 2 of 11
+research endpoints; that incomplete snapshot is inconclusive under
+`VALIDATION_POLICY.md` and cannot establish current canonical/accounting/risk
+invariants. The last accepted v5 evidence remains preserved but is not relabeled
+as fresh acceptance for this merge. A later run must obtain a complete settled
+Splendid read-only snapshot bound to `a300e259...` before advancing the adapter
+or any cutover decision.
+
+The change remains shadow-only and runtime-unregistered. It changed no
+production state, ledger, history, recovery evidence, day baseline/peak, risk
+limit, strategy, order authority, or AI/ML authority. Rollback is a code-only
+revert of PR #254; no data recovery is required. Issue #202 remains frozen and
+no research job was launched. Issue #84 remains primary; next action is to
+recover complete settled read-only evidence, then implement the bounded v5
+adapter with exact epoch, row-count, and digest provenance and fail-closed
+non-promotable handling.
