@@ -1,13 +1,15 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-09 04:20 CDT
+Last updated: 2026-09-16 09:33 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `5e7f8bdb7901985dbb4c62d38cc139eb353bda41` (PR #209).
-Active stability/accounting/runtime issue: none. Active improvement issue: #202
-(`hold_10d` read-only forward-shadow validation). Issue #157 infrastructure is
-complete; external AI provider activation remains a separate bounded decision.
+Validated runtime-code `main`: `27e0982453c6a486cfb32c35f79c311a6bbf3951` (PR #257).
+Active engineering issue: #84 (authoritative single-owner StateStore / ledger
+projection / valuation / risk cutover). Active frozen research issue: #202
+(`hold_10d` read-only forward-shadow validation). Issue #222 is safely
+reconciled under the verified-flat v5 validation hold; its prior discrepancy
+remains unresolved and non-promotable.
 
 ## Communication and Continuity
 
@@ -1688,3 +1690,73 @@ no research job was launched. Issue #84 remains primary; next action is to
 recover complete settled read-only evidence, then implement the bounded v5
 adapter with exact epoch, row-count, and digest provenance and fail-closed
 non-promotable handling.
+
+
+## 2026-09-16 Issue #84 — authoritative v5 evidence adapter and accounting status contract — COMPLETE
+
+The incomplete post-PR #254 snapshot was safely retried only after the
+authoritative Splendid deployment had settled. The fresh 09:02 CDT capture
+reached all 11/11 endpoints and closed #254 acceptance: canonical chain valid at
+88 immutable rows with v5 canonical/state counts 0/0, full parity, no missing
+IDs, complete accounting with zero coverage/economic issues, flat positions,
+cash `13429.13048559457`, equity `13429.13`, fresh-day baseline/peak
+`13429.13048559457`, and healthy runner. The preserved parity halt and
+validation hold remained active. This also demonstrated a legitimate
+`0.00048559457` cash/equity difference from persisted cent serialization.
+
+PR #256 added an exact SHA-256 digest of the canonical execution-row snapshot,
+propagated it through the compact daily audit, bounded Stage B valuation to a
+maximum half-cent persisted-money serialization tolerance, and added a narrow
+shadow-only v5 runtime evidence adapter. The adapter fails closed unless the
+authoritative Splendid source proves the exact v5 epoch, archived zero-trade
+validation-held baseline, 88 total/0 active-epoch rows, valid chain, full state
+parity, clean accounting, flat positions, cross-endpoint cash/equity/fresh-day/
+risk consistency, positive revision, preserved parity halt, and an independently
+supplied exact ledger digest. It has no runtime registration, production state
+writes, order authority, risk authority, or promotion authority.
+
+The PR exact head `98a0320f38e3b0db4cab8c836e2f5770ca73d4ea`
+passed all six applicable exact-head workflows, including Stage C/F validation,
+repository safety, architecture-debt regression, the full refactor/runtime/
+startup audit, mandatory Change Safety, and exact Gunicorn startup smoke. The
+focused Stage B-F suites passed 77 tests. PR #256 squash-merged as
+`60e1e4f81d98d0200ca81066b9c49a221469232d`; authoritative
+`splendid-creativity / web` deployment succeeded.
+
+Settled acceptance then exposed a separate bounded observability defect:
+`paper_accounting_readonly_status` replaced the complete accounting guard
+payload and omitted the successor read-only and remaining-discrepancy fields
+required by the daily operational audit. PR #257 preserved the observational,
+zero-write shim while restoring those contract fields and added an exact v5
+regression. Its exact head
+`73f2ef0e5c290090d70c919d5e7695f656ff01ad` passed all four applicable
+exact-head workflows and exact Gunicorn smoke; focused validation passed 14
+tests. It squash-merged as
+`27e0982453c6a486cfb32c35f79c311a6bbf3951`; authoritative Splendid
+deployment succeeded. The settled daily operational audit rerun then passed
+every step. Its artifact proves accounting `ok/pass`, coverage complete, no
+repair, successor read-only true, automatic repair suppression false, and zero
+remaining discrepancies.
+
+The same settled artifact proves the canonical digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`,
+88 rows, v5 epoch rows 0, state rows 0, valid chain, full parity, and zero
+missing IDs. The 09:33 CDT research snapshot reached 11/11 endpoints: accounting
+remains clean, market data and runner pass, cash/equity and the fresh-day
+baseline/peak are unchanged, and the daily audit fails only the intentionally
+preserved parity halt. Shadow capture is parity-pass but forward-ineligible at
+1,207 cycles and 30,680 candidates. Performance Audit V1 remains enabled with
+automatic backtest disabled and 1,200 forward rows; V2, ablation, and regime
+remain disabled/not run. The legacy verified-v2 gate is correctly
+non-applicable to active v5 and grants no authority.
+
+The daily-audit workflow path filter omitted the read-only shim and its focused
+successor test, so the accepted reporting fix would not automatically trigger
+that deployment audit. The follow-up documentation/CI PR adds both paths; no
+runtime behavior changes. Rollback for PRs #256/#257 is code-only; no data
+rollback is required because neither change wrote production state. No ledger,
+state, history, day baseline/peak, recovery evidence, thresholds, strategy,
+orders, live authority, or AI/ML authority changed, and `/paper/run` was not
+called. Issue #84 remains primary. Next, use the accepted typed v5 binding to
+design the explicit single-owner cutover/rollback boundary without activating
+production writes. Issue #202 remains frozen and no promotion work resumes.
