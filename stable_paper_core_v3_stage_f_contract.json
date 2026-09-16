@@ -12,6 +12,7 @@
     "order_authority": false,
     "risk_mutation_authority": false,
     "single_revision_snapshot_binding_required": true,
+    "ledger_total_and_epoch_row_provenance_required": true,
     "live_authority": false,
     "ml_execution_authority": false
   },
