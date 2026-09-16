@@ -92,6 +92,7 @@ def _snapshot() -> CanonicalStateSnapshot:
         portfolio=portfolio,
         risk=risk,
         execution_ledger_rows=303,
+        execution_epoch_rows=3,
         execution_chain_valid=True,
     )
 
@@ -128,6 +129,7 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
         self.assertEqual(rebuilt.risk.day_start_equity, snapshot.risk.day_start_equity)
         self.assertEqual(rebuilt.risk.day_peak_equity, snapshot.risk.day_peak_equity)
         self.assertEqual(rebuilt.execution_ledger_rows, 303)
+        self.assertEqual(rebuilt.execution_epoch_rows, 3)
         self.assertTrue(rebuilt.execution_chain_valid)
         self.assertIsNotNone(rebuilt.portfolio.accounting_epoch)
         self.assertEqual(
@@ -214,6 +216,7 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
             self.assertEqual(loaded.payload_sha256, envelope.payload_sha256)
             self.assertEqual(loaded.snapshot().portfolio.equity, 10050.0)
             self.assertEqual(loaded.snapshot().execution_ledger_rows, 303)
+            self.assertEqual(loaded.snapshot().execution_epoch_rows, 3)
             self.assertTrue(loaded.snapshot().execution_chain_valid)
 
     def test_revision_must_increase_and_backup_preserves_prior_revision(self) -> None:

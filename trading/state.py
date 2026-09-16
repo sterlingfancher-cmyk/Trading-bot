@@ -142,11 +142,22 @@ class CanonicalStateSnapshot:
     execution_chain_valid: bool
     source_version: str = VERSION
     authority: str = AUTHORITY
+    execution_epoch_rows: int | None = None
 
     def __post_init__(self) -> None:
         if int(self.execution_ledger_rows) < 0:
             raise ValueError("execution_ledger_rows must be non-negative")
         object.__setattr__(self, "execution_ledger_rows", int(self.execution_ledger_rows))
+        epoch_rows = (
+            self.execution_ledger_rows
+            if self.execution_epoch_rows is None
+            else int(self.execution_epoch_rows)
+        )
+        if epoch_rows < 0:
+            raise ValueError("execution_epoch_rows must be non-negative")
+        if epoch_rows > self.execution_ledger_rows:
+            raise ValueError("execution_epoch_rows cannot exceed total ledger rows")
+        object.__setattr__(self, "execution_epoch_rows", epoch_rows)
         if self.authority != AUTHORITY:
             raise ValueError("Stage A snapshots are shadow-only")
 
@@ -189,6 +200,7 @@ class CanonicalStateSnapshot:
                     }
                 ),
                 "execution_ledger_rows": self.execution_ledger_rows,
+                "execution_epoch_rows": self.execution_epoch_rows,
                 "execution_chain_valid": bool(self.execution_chain_valid),
             }
         )
