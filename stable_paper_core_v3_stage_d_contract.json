@@ -21,6 +21,7 @@
     "restart_round_trip_parity_required": true,
     "accounting_epoch_preserved": true,
     "execution_ledger_rows_preserved": true,
+    "execution_total_and_epoch_row_provenance_required": true,
     "execution_chain_validity_preserved": true
   },
   "promotion_blockers": [
