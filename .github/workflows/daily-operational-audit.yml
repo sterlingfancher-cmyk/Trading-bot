@@ -12,6 +12,8 @@ on:
       - "test_issue222_verified_flat_successor.py"
       - "canonical_execution_ledger.py"
       - "paper_accounting_integrity_guard.py"
+      - "paper_accounting_readonly_status.py"
+      - "test_issue126_successor_accounting_reconcile_boundary.py"
       - "provider_request_accounting_overlay.py"
       - "bootstrap_wsgi.py"
       - "cycle_completion_contract.py"
