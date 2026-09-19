@@ -26,7 +26,7 @@ from trading.state import (
     RiskStateSnapshot,
 )
 
-VERSION = "stable-paper-core-v3-stage-d-state-store-2026-08-20-v1"
+VERSION = "stable-paper-core-v3-stage-d-rollback-drill-2026-09-19-v2"
 AUTHORITY = "shadow_only"
 SCHEMA_VERSION = 1
 
@@ -307,46 +307,113 @@ class CanonicalStateStore:
             with self._process_lock(exclusive=False):
                 return self._read_envelope_file(self.path)
 
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        try:
+            directory_fd = os.open(str(path), os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except (AttributeError, OSError):
+            pass
+
+    def _write_bytes_atomic(self, path: Path, data: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_name(
+            f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        try:
+            with temp_path.open("wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+            self._fsync_directory(path.parent)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    def _commit_locked(
+        self,
+        envelope: CanonicalStateEnvelope,
+        *,
+        current: CanonicalStateEnvelope | None = None,
+    ) -> None:
+        if self.path.exists():
+            current = current or self._read_envelope_file(self.path)
+            if envelope.revision <= current.revision:
+                raise StateStoreInvariantError(
+                    "canonical revision must increase monotonically"
+                )
+            self._write_bytes_atomic(self.backup_path, self.path.read_bytes())
+
+        self._write_bytes_atomic(self.path, _canonical_bytes(envelope.to_dict()))
+        persisted = self._read_envelope_file(self.path)
+        if persisted.payload_sha256 != envelope.payload_sha256:
+            raise StateStoreInvariantError("post-commit digest mismatch")
+        if persisted.revision != envelope.revision:
+            raise StateStoreInvariantError("post-commit revision mismatch")
+
     def commit_sandbox(self, envelope: CanonicalStateEnvelope) -> None:
         self._assert_sandbox()
         with self._lock:
             with self._process_lock(exclusive=True):
-                if self.path.exists():
-                    current = self._read_envelope_file(self.path)
-                    if envelope.revision <= current.revision:
-                        raise StateStoreInvariantError(
-                            "canonical revision must increase monotonically"
-                        )
-                    backup_tmp = self.backup_path.with_name(
-                        f".{self.backup_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+                self._commit_locked(envelope)
+
+    def archive_sandbox(self, archive_path: Path | str) -> CanonicalStateEnvelope:
+        """Create one immutable rollback archive from the current sandbox state."""
+        self._assert_sandbox()
+        archive = Path(archive_path)
+        if archive in {self.path, self.backup_path, self.lock_path}:
+            raise StateStoreInvariantError("rollback archive path must be distinct")
+        with self._lock:
+            with self._process_lock(exclusive=True):
+                if archive.exists():
+                    raise FileExistsError("rollback archive is immutable")
+                current = self._read_envelope_file(self.path)
+                self._write_bytes_atomic(archive, _canonical_bytes(current.to_dict()))
+                persisted = self._read_envelope_file(archive)
+                if persisted.revision != current.revision:
+                    raise StateStoreInvariantError("rollback archive revision mismatch")
+                if persisted.payload_sha256 != current.payload_sha256:
+                    raise StateStoreInvariantError("rollback archive digest mismatch")
+                return persisted
+
+    def restore_sandbox(
+        self,
+        archive_path: Path | str,
+        *,
+        expected_current_revision: int,
+        created_at: str,
+    ) -> CanonicalStateEnvelope:
+        """Restore archived payload as a new monotonic sandbox revision."""
+        self._assert_sandbox()
+        if isinstance(expected_current_revision, bool) or not isinstance(
+            expected_current_revision, int
+        ):
+            raise StateStoreInvariantError("expected_current_revision must be an integer")
+        archive = Path(archive_path)
+        if archive in {self.path, self.backup_path, self.lock_path}:
+            raise StateStoreInvariantError("rollback archive path must be distinct")
+        with self._lock:
+            with self._process_lock(exclusive=True):
+                current = self._read_envelope_file(self.path)
+                if current.revision != expected_current_revision:
+                    raise StateStoreInvariantError(
+                        "current revision changed before rollback restore"
                     )
-                    backup_tmp.write_bytes(self.path.read_bytes())
-                    with backup_tmp.open("rb") as handle:
-                        os.fsync(handle.fileno())
-                    os.replace(backup_tmp, self.backup_path)
-
-                temp_path = self.path.with_name(
-                    f".{self.path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+                archived = self._read_envelope_file(archive)
+                restored = CanonicalStateEnvelope(
+                    revision=current.revision + 1,
+                    created_at=created_at,
+                    payload=archived.payload,
+                    payload_sha256=archived.payload_sha256,
                 )
-                with temp_path.open("wb") as handle:
-                    handle.write(_canonical_bytes(envelope.to_dict()))
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temp_path, self.path)
-                try:
-                    directory_fd = os.open(str(self.path.parent), os.O_DIRECTORY)
-                    try:
-                        os.fsync(directory_fd)
-                    finally:
-                        os.close(directory_fd)
-                except (AttributeError, OSError):
-                    pass
-
+                self._commit_locked(restored, current=current)
                 persisted = self._read_envelope_file(self.path)
-                if persisted.payload_sha256 != envelope.payload_sha256:
-                    raise StateStoreInvariantError("post-commit digest mismatch")
-                if persisted.revision != envelope.revision:
-                    raise StateStoreInvariantError("post-commit revision mismatch")
+                if persisted.payload_sha256 != archived.payload_sha256:
+                    raise StateStoreInvariantError("rollback restore payload mismatch")
+                return persisted
 
     @classmethod
     def descriptor(cls) -> Mapping[str, Any]:
