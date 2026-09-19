@@ -1878,3 +1878,56 @@ Issue #84 remains primary. Next, prove the rollback archive/restore drill and
 single-writer handoff deterministically in an explicit sandbox while keeping the
 current v5 hold/halt and all production writer registration unchanged. Issue
 #202 remains frozen.
+
+
+## 2026-09-19 Issue #84 — deterministic sandbox rollback and writer handoff — COMPLETE
+
+PR #263 adds the missing executable rollback proof to the shadow-only Stage D
+StateStore. An explicit caller-provided sandbox state can now be archived once
+without overwrite, advanced to a canary revision, and restored from the archive
+only as a new monotonic revision. Restore preserves the displaced canary bytes
+in the existing prewrite backup, verifies the archived and restored payload
+digests, requires an exact expected-current revision, survives restart with
+identical canonical economics, and shares the same exclusive advisory process
+lock as ordinary commits. A concurrent competing writer blocks behind restore
+and then fails closed on the consumed revision. Default production I/O denial,
+`production_write_enabled=false`, and `runtime_registered=false` are unchanged.
+
+Focused validation passed all 14 Stage D regressions, including archive
+immutability, stale-revision rejection without mutation, backup lineage,
+restart parity, production-default denial, and the two-process writer-handoff
+test. Compilation, repository validation, structural audit, exact-diff checks,
+and architecture-debt comparison passed with zero new critical or warning
+findings. The exact PR head
+`e6f3eb6467b232f8fdacd5a225b552b97d559410` passed all five applicable
+exact-head workflows: Stage D, repository safety, architecture debt, the full
+refactor/ownership/runtime/startup/research audit, and mandatory Change Safety
+with exact Gunicorn smoke. Exact-diff inspection was limited to the StateStore,
+its Stage D contract, and focused regression file. PR #263 squash-merged as
+`937b993eb108ae837e0fdde387140282cc14b354`; every post-merge gate passed.
+
+The first automatic post-merge research snapshot reached only 2/12 endpoints
+during deferred registration and was rejected as incomplete. A safe rerun after
+the authoritative Splendid service settled reached 12/12 and proved the exact
+deployed commit `937b993eb108ae837e0fdde387140282cc14b354` through the
+read-only sentinel. Sentinel remains `pass/quiet` with zero incidents and
+collection errors. The canonical ledger remains chain-valid at 88 immutable
+rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`;
+accounting is `ok`, cash is `13429.13048559457`, equity is `13429.13`, and
+positions are empty. Day start/peak remain `13429.13048559457`; market data and
+runner pass. The retained parity halt and v5 validation hold remain active, so
+self-check stays warn exactly as intended. Shadow capture remains parity-pass
+but forward-ineligible at 1,397 cycles and 36,210 candidates. V1 remains
+enabled with automatic backtesting disabled and 1,200 forward rows; V2,
+ablation, and regime remain disabled/not run.
+
+This was an isolated temporary-directory drill only. It did not touch
+production state, canonical ledger, history, day baseline/peak, or recovery
+evidence; it registered no production writer, cleared no halt, changed no
+strategy/sizing/risk/order/live/AI authority, launched no research job, and did
+not call `/paper/run`. Rollback for PR #263 is code-only. Issue #202 remains
+frozen. Issue #84 remains primary. Next, bind the successful typed Stage D drill
+receipt into the Stage F rollback-readiness evidence and define the separately
+reviewed, fail-closed cutover preflight without activating or registering a
+production writer.
