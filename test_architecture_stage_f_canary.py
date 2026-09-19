@@ -15,6 +15,7 @@ from trading.canary import (
     CanaryEvidence,
     CanaryInvariantError,
     CanaryReadinessPlanner,
+    RollbackReadinessEvidence,
 )
 from trading.accounting import (
     BaselineSnapshot,
@@ -62,6 +63,13 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         )
         self.assertTrue(constraints["ledger_sha256_provenance_required_for_runtime_evidence"])
         self.assertTrue(constraints["authoritative_v5_runtime_evidence_adapter_required"])
+        self.assertTrue(constraints["explicit_cutover_state_machine_required"])
+        self.assertTrue(constraints["reviewed_cutover_decision_required"])
+        self.assertTrue(constraints["rollback_baseline_digest_required"])
+        self.assertTrue(constraints["rollback_restore_drill_required"])
+        self.assertTrue(constraints["rollback_restart_parity_required"])
+        self.assertTrue(constraints["single_active_writer_required"])
+        self.assertTrue(constraints["readiness_cannot_activate_or_rollback"])
 
     def test_current_issue_82_missing_proof_blocks_canary(self) -> None:
         evidence = CanaryEvidence(
@@ -365,6 +373,115 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
                         captured_at="2026-09-16 09:02:35 CDT",
                         source_url=source,
                     )
+
+    def _v5_binding(self):
+        audit, status, day = self._v5_runtime_evidence()
+        return CanaryReadinessPlanner.bind_verified_flat_v5_runtime_evidence(
+            daily_audit=audit,
+            paper_status=status,
+            fresh_day=day,
+            ledger_sha256="a" * 64,
+            revision=10,
+            captured_at="2026-09-16 09:02:35 CDT",
+        )
+
+    def _rollback_evidence(self, binding):
+        return RollbackReadinessEvidence(
+            baseline_revision=binding.proof.revision,
+            baseline_payload_sha256=binding.proof.payload_sha256,
+            baseline_ledger_sha256=binding.proof.ledger_sha256,
+            archived_baseline_present=True,
+            restore_drill_passed=True,
+            restart_parity_passed=True,
+            single_writer_exclusivity_passed=True,
+        )
+
+    def test_current_v5_hold_and_halt_block_cutover_readiness(self) -> None:
+        binding = self._v5_binding()
+        decision = CanaryReadinessPlanner.evaluate_cutover_readiness(
+            binding=binding,
+            canary_plan=CanaryReadinessPlanner.plan(
+                evidence=self._all_green(), requested_fraction=0.01
+            ),
+            rollback=self._rollback_evidence(binding),
+        )
+
+        self.assertEqual(decision.state, "blocked")
+        self.assertIn("validation_hold_released", decision.blockers)
+        self.assertIn("risk_halt_released_by_governed_evidence", decision.blockers)
+        self.assertFalse(decision.cutover_review_completed)
+        self.assertFalse(decision.activation_performed)
+        self.assertFalse(decision.rollback_performed)
+        self.assertFalse(decision.runtime_registration)
+        self.assertFalse(decision.production_state_writes)
+
+    def test_cutover_readiness_fails_closed_on_rollback_drift(self) -> None:
+        binding = self._v5_binding()
+        rollback = RollbackReadinessEvidence(
+            baseline_revision=binding.proof.revision + 1,
+            baseline_payload_sha256="b" * 64,
+            baseline_ledger_sha256=binding.proof.ledger_sha256,
+            archived_baseline_present=True,
+            restore_drill_passed=False,
+            restart_parity_passed=True,
+            single_writer_exclusivity_passed=True,
+        )
+        decision = CanaryReadinessPlanner.evaluate_cutover_readiness(
+            binding=binding,
+            canary_plan=CanaryReadinessPlanner.plan(
+                evidence=self._all_green(), requested_fraction=0.01
+            ),
+            rollback=rollback,
+        )
+
+        self.assertEqual(decision.state, "blocked")
+        self.assertIn("rollback_baseline_revision", decision.blockers)
+        self.assertIn("rollback_payload_digest", decision.blockers)
+        self.assertIn("restore_drill_passed", decision.blockers)
+        self.assertFalse(decision.activation_performed)
+
+    def test_rollback_trigger_assessment_is_observational_and_fail_closed(self) -> None:
+        healthy = CanaryReadinessPlanner.assess_rollback_triggers(
+            canonical_chain_valid=True,
+            state_projection_parity=True,
+            accounting_parity=True,
+            valuation_parity=True,
+            risk_parity=True,
+            restart_parity=True,
+            active_writer_count=1,
+        )
+        self.assertFalse(healthy.rollback_required)
+        self.assertEqual(healthy.triggers, ())
+
+        failed = CanaryReadinessPlanner.assess_rollback_triggers(
+            canonical_chain_valid=True,
+            state_projection_parity=False,
+            accounting_parity=True,
+            valuation_parity=False,
+            risk_parity=True,
+            restart_parity=True,
+            active_writer_count=2,
+        )
+        self.assertTrue(failed.rollback_required)
+        self.assertEqual(
+            failed.triggers,
+            (
+                "state_projection_divergence",
+                "valuation_divergence",
+                "writer_ownership_violation",
+            ),
+        )
+        self.assertFalse(failed.activation_performed)
+        self.assertFalse(failed.rollback_performed)
+
+    def test_planner_descriptor_is_callable_and_cannot_claim_activation(self) -> None:
+        descriptor = CanaryReadinessPlanner.descriptor()
+        self.assertTrue(descriptor["cutover_review_required"])
+        self.assertTrue(descriptor["rollback_readiness_required"])
+        self.assertFalse(descriptor["cutover_review_completed"])
+        self.assertFalse(descriptor["activation_performed"])
+        self.assertFalse(descriptor["runtime_registration"])
+        self.assertFalse(descriptor["production_state_writes"])
 
     def test_module_has_no_runtime_or_write_authority(self) -> None:
         path = ROOT / "trading" / "canary.py"
