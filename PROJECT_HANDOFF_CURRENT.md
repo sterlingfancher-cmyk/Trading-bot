@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-16 13:14 CDT
+Last updated: 2026-09-19 10:15 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `1dab8a8b18f3f433da36082d407d9bf5aaae36ba` (PR #259).
+Validated runtime-code `main`: `d74dede0a82af7b2568531acaa93325bfaf37e33` (PR #261).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
@@ -1280,6 +1280,7 @@ and deployment acceptance, use the four exact event hashes and lifecycle fields
 to define a separately tested, archival, restart-safe successor reconciliation.
 Issue #202 remains frozen.
 
+
 ## 2026-09-14 Issue #222 evidence and Issue #229 accounting classification — IN VALIDATION
 
 PR #228 passed all four exact-head repository workflows at
@@ -1812,3 +1813,68 @@ Rollback is a code-only revert of PR #259; no data recovery is required. Issue
 state machine using the accepted v5 typed binding, while keeping production
 writes and runtime registration disabled until a separately reviewed cutover
 decision. Issue #202 remains frozen.
+
+
+## 2026-09-19 Issue #84 — cutover/rollback readiness state machine — COMPLETE
+
+The accepted v5 typed binding proved one immutable StateStore/accounting/
+valuation/risk snapshot, but Stage F still lacked an explicit transition
+boundary between technical parity, rollback readiness, human-reviewed cutover,
+and future writer activation. The planner descriptor also lacked its classmethod
+binding and therefore was not callable on the planner class. This was bounded
+offline architecture work; no market observation was manufactured and no
+weekend time was counted as a forward session.
+
+PR #261 adds immutable rollback-readiness evidence bound to the exact StateStore
+revision, payload digest, and canonical-ledger digest. Readiness additionally
+requires an archived baseline, successful restore drill, restart parity,
+single-writer exclusivity, and a rollback switch armed by default. Its
+fail-closed transition can advance only to `review_required`; it cannot activate
+or roll back a writer. The current verified-flat v5 binding remains explicitly
+`blocked` while its validation hold and retained parity halt are active. A
+separate observational classifier identifies canonical-chain, state-projection,
+accounting, valuation, risk, restart, and writer-ownership rollback triggers
+without performing any mutation. The planner descriptor is now a callable
+classmethod and exposes the unchanged no-authority boundary.
+
+Focused local validation passed 82 Stage B-F and successor-boundary tests,
+compilation, and exact-diff checks. Repository/Railway validation, structural
+audit, ownership validation, typed-configuration parity, and architecture-debt
+regression all passed locally with zero new critical or warning findings. The
+exact PR head `a3cb7894f2cccece4203e061a7d6c056b1594465` passed all five
+applicable exact-head workflows: Stage F, repository safety, architecture debt,
+the full refactor/ownership/runtime/startup/research audit, and mandatory Change
+Safety with exact Gunicorn smoke. Exact-diff inspection was limited to the Stage
+F planner, contract, and focused regression file. PR #261 squash-merged as
+`d74dede0a82af7b2568531acaa93325bfaf37e33`; all post-merge gates and
+the authoritative `splendid-creativity / web` deployment passed.
+
+The first automatic read-only research snapshot captured deferred registration
+and reached only 2/12 endpoints, so it was rejected as incomplete. A safe rerun
+after deployment settled produced the accepted 10:15 CDT artifact: 12/12
+endpoints reachable; bootstrap ready/delegating; sentinel `pass/quiet`, zero
+incidents and collection errors, advisory/read-only, and deployed commit exactly
+`d74dede0a82af7b2568531acaa93325bfaf37e33`. The canonical ledger remains
+chain-valid at 88 immutable rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`;
+v5 accounting is clean with zero coverage/economic issues; cash is
+`13429.13048559457`, equity `13429.13`, and positions are empty. Fresh-day
+baseline/peak remain `13429.13048559457`; market data and runner pass. The
+retained parity halt and validation hold remain active, so self-check is warn
+and daily audit fails only risk exactly as intended.
+
+Shadow capture remains parity-pass but forward-ineligible at 1,397 cycles and
+36,210 candidates. Performance Audit V1 remains enabled with automatic
+backtesting disabled and 1,200 forward rows; V2, ablation, and regime remain
+disabled/not run. The legacy v2 recovery gate remains correctly superseded and
+grants no authority. `/paper/run` was not called and no duplicate research job
+was launched; the incomplete automatic snapshot was retried only after it
+finished.
+
+Rollback for PR #261 is code-only; no data recovery is required. No production
+state, canonical ledger, history, day baseline/peak, recovery evidence, strategy,
+sizing, hard-risk limit, order path, live authority, or AI/ML authority changed.
+Issue #84 remains primary. Next, prove the rollback archive/restore drill and
+single-writer handoff deterministically in an explicit sandbox while keeping the
+current v5 hold/halt and all production writer registration unchanged. Issue
+#202 remains frozen.
