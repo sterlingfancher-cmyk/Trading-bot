@@ -24,7 +24,7 @@ from trading.state_store import CanonicalStateEnvelope
 from trading.state_store import CanonicalStateStore
 from trading.valuation import MONEY_SERIALIZATION_TOLERANCE, ValuationSnapshot
 
-VERSION = "stable-paper-core-v3-stage-f-canary-readiness-2026-08-20-v1"
+VERSION = "stable-paper-core-v3-stage-f-cutover-readiness-2026-09-19-v2"
 AUTHORITY = "shadow_only"
 MAX_CANARY_FRACTION = 0.05
 AUTHORITATIVE_RUNTIME_URL = "https://web-production-e1796.up.railway.app"
@@ -419,6 +419,120 @@ class RuntimeV5Binding:
 
 
 @dataclass(frozen=True)
+class RollbackReadinessEvidence:
+    """Immutable recovery proof for a future, separately reviewed canary."""
+
+    baseline_revision: int
+    baseline_payload_sha256: str
+    baseline_ledger_sha256: str
+    archived_baseline_present: bool
+    restore_drill_passed: bool
+    restart_parity_passed: bool
+    single_writer_exclusivity_passed: bool
+    rollback_switch_default_armed: bool = True
+
+    def __post_init__(self) -> None:
+        if isinstance(self.baseline_revision, bool):
+            raise CanaryInvariantError("baseline_revision must be a positive integer")
+        try:
+            revision = int(self.baseline_revision)
+        except (TypeError, ValueError) as exc:
+            raise CanaryInvariantError(
+                "baseline_revision must be a positive integer"
+            ) from exc
+        if revision <= 0:
+            raise CanaryInvariantError("baseline_revision must be a positive integer")
+        object.__setattr__(self, "baseline_revision", revision)
+        for name in ("baseline_payload_sha256", "baseline_ledger_sha256"):
+            value = str(getattr(self, name) or "").lower().strip()
+            if not re.fullmatch(_SHA256_PATTERN, value):
+                raise CanaryInvariantError(f"{name} must be an exact SHA-256 digest")
+            object.__setattr__(self, name, value)
+
+    def blockers(self, proof: SnapshotBindingProof) -> Tuple[str, ...]:
+        checks = (
+            ("rollback_baseline_revision", self.baseline_revision == proof.revision),
+            (
+                "rollback_payload_digest",
+                self.baseline_payload_sha256 == proof.payload_sha256,
+            ),
+            (
+                "rollback_ledger_digest",
+                self.baseline_ledger_sha256 == proof.ledger_sha256,
+            ),
+            ("archived_baseline_present", self.archived_baseline_present),
+            ("restore_drill_passed", self.restore_drill_passed),
+            ("rollback_restart_parity", self.restart_parity_passed),
+            (
+                "single_writer_exclusivity",
+                self.single_writer_exclusivity_passed,
+            ),
+            ("rollback_switch_default_armed", self.rollback_switch_default_armed),
+        )
+        return tuple(name for name, passed in checks if not bool(passed))
+
+
+@dataclass(frozen=True)
+class CutoverReadinessDecision:
+    """Pure state-machine output; it never activates or rolls back a writer."""
+
+    state: str
+    blockers: Tuple[str, ...]
+    cutover_review_completed: bool = False
+    activation_performed: bool = False
+    rollback_performed: bool = False
+    runtime_registration: bool = False
+    production_state_writes: bool = False
+    risk_mutation_authority: bool = False
+    order_authority: bool = False
+    authority: str = AUTHORITY
+
+    def __post_init__(self) -> None:
+        states = {"blocked", "review_required"}
+        if self.state not in states:
+            raise CanaryInvariantError("unknown cutover readiness state")
+        blockers = tuple(self.blockers)
+        if self.state == "blocked" and not blockers:
+            raise CanaryInvariantError("blocked cutover requires a blocker")
+        if self.state != "blocked" and blockers:
+            raise CanaryInvariantError("unblocked cutover cannot retain blockers")
+        if self.authority != AUTHORITY or any(
+            (
+                self.cutover_review_completed,
+                self.activation_performed,
+                self.rollback_performed,
+                self.runtime_registration,
+                self.production_state_writes,
+                self.risk_mutation_authority,
+                self.order_authority,
+            )
+        ):
+            raise CanaryInvariantError("cutover readiness cannot hold runtime authority")
+        object.__setattr__(self, "blockers", blockers)
+
+
+@dataclass(frozen=True)
+class RollbackTriggerAssessment:
+    rollback_required: bool
+    triggers: Tuple[str, ...]
+    activation_performed: bool = False
+    rollback_performed: bool = False
+    authority: str = AUTHORITY
+
+    def __post_init__(self) -> None:
+        triggers = tuple(self.triggers)
+        if self.rollback_required != bool(triggers):
+            raise CanaryInvariantError("rollback requirement must match trigger state")
+        if (
+            self.authority != AUTHORITY
+            or self.activation_performed
+            or self.rollback_performed
+        ):
+            raise CanaryInvariantError("rollback assessment must remain observational")
+        object.__setattr__(self, "triggers", triggers)
+
+
+@dataclass(frozen=True)
 class CanaryPlan:
     requested_fraction: float
     eligible_for_future_canary: bool
@@ -662,6 +776,77 @@ class CanaryReadinessPlanner:
             risk=risk,
             proof=proof,
         )
+
+    @classmethod
+    def evaluate_cutover_readiness(
+        cls,
+        *,
+        binding: RuntimeV5Binding,
+        canary_plan: CanaryPlan,
+        rollback: RollbackReadinessEvidence,
+    ) -> CutoverReadinessDecision:
+        """Advance only to required review, never to activation readiness."""
+        proof = binding.proof
+        snapshot = binding.envelope.snapshot()
+        epoch = snapshot.portfolio.accounting_epoch
+        checks = (
+            ("verified_runtime_binding", proof.verified),
+            ("authoritative_evidence_source", proof.evidence_source == AUTHORITATIVE_RUNTIME_URL),
+            ("v5_epoch", proof.epoch_id.startswith("stable-paper-v5-")),
+            ("future_canary_evidence", canary_plan.eligible_for_future_canary),
+            ("canary_rollback_armed", canary_plan.rollback_default_armed),
+            ("canary_plan_shadow_only", canary_plan.authority == AUTHORITY),
+            ("canary_plan_no_runtime_registration", not canary_plan.runtime_registration),
+            ("canary_plan_no_writes", not canary_plan.production_state_writes),
+            ("canary_plan_no_order_authority", not canary_plan.order_authority),
+            ("canary_plan_no_risk_authority", not canary_plan.risk_mutation_authority),
+            (
+                "validation_hold_released",
+                epoch is not None and not epoch.validation_hold,
+            ),
+            ("risk_halt_released_by_governed_evidence", not snapshot.risk.halted),
+        )
+        blockers = tuple(name for name, passed in checks if not bool(passed))
+        blockers += rollback.blockers(proof)
+        if blockers:
+            return CutoverReadinessDecision(state="blocked", blockers=blockers)
+        return CutoverReadinessDecision(state="review_required", blockers=())
+
+    @classmethod
+    def assess_rollback_triggers(
+        cls,
+        *,
+        canonical_chain_valid: bool,
+        state_projection_parity: bool,
+        accounting_parity: bool,
+        valuation_parity: bool,
+        risk_parity: bool,
+        restart_parity: bool,
+        active_writer_count: int,
+    ) -> RollbackTriggerAssessment:
+        """Classify fail-closed rollback triggers without performing rollback."""
+        try:
+            if isinstance(active_writer_count, bool):
+                raise TypeError
+            writer_count = int(active_writer_count)
+        except (TypeError, ValueError) as exc:
+            raise CanaryInvariantError("active_writer_count must be an integer") from exc
+        checks = (
+            ("canonical_chain_invalid", canonical_chain_valid),
+            ("state_projection_divergence", state_projection_parity),
+            ("accounting_divergence", accounting_parity),
+            ("valuation_divergence", valuation_parity),
+            ("risk_divergence", risk_parity),
+            ("restart_divergence", restart_parity),
+            ("writer_ownership_violation", writer_count == 1),
+        )
+        triggers = tuple(name for name, healthy in checks if not bool(healthy))
+        return RollbackTriggerAssessment(
+            rollback_required=bool(triggers),
+            triggers=triggers,
+        )
+
+    @classmethod
     def descriptor(cls) -> Mapping[str, Any]:
         return MappingProxyType(
             {
@@ -673,6 +858,10 @@ class CanaryReadinessPlanner:
                 "order_authority": cls.order_authority,
                 "risk_mutation_authority": cls.risk_mutation_authority,
                 "single_revision_snapshot_binding_required": True,
+                "cutover_review_required": True,
+                "rollback_readiness_required": True,
+                "cutover_review_completed": False,
+                "activation_performed": False,
                 "version": VERSION,
             }
         )
