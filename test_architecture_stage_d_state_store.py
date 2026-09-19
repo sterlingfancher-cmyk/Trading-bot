@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 import json
 import multiprocessing
 from pathlib import Path
@@ -53,6 +54,40 @@ def _commit_in_process(
         result_queue.put(type(exc).__name__)
     else:
         result_queue.put("ok")
+
+
+def _restore_in_process(
+    path: str,
+    archive_path: str,
+    result_queue,
+    entered,
+    release,
+) -> None:
+    store = CanonicalStateStore(path, sandbox_io_enabled=True)
+    original_read = store._read_envelope_file
+    paused = False
+
+    def delayed_read(target):
+        nonlocal paused
+        current = original_read(target)
+        if Path(target) == store.path and not paused:
+            paused = True
+            entered.set()
+            if not release.wait(timeout=10):
+                raise TimeoutError("test did not release delayed rollback restore")
+        return current
+
+    store._read_envelope_file = delayed_read
+    try:
+        restored = store.restore_sandbox(
+            archive_path,
+            expected_current_revision=2,
+            created_at="2026-09-19 16:00:00 CDT",
+        )
+    except Exception as exc:
+        result_queue.put(type(exc).__name__)
+    else:
+        result_queue.put(f"ok:{restored.revision}")
 
 
 def _snapshot() -> CanonicalStateSnapshot:
@@ -108,6 +143,13 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
         self.assertFalse(contract["production_write_enabled"])
         self.assertFalse(contract["runtime_registered"])
         self.assertTrue(contract["constraints"]["restart_round_trip_parity_required"])
+        self.assertTrue(contract["constraints"]["rollback_archive_immutable"])
+        self.assertTrue(
+            contract["constraints"]["rollback_restore_monotonic_revision"]
+        )
+        self.assertTrue(
+            contract["constraints"]["rollback_uses_same_exclusive_process_lock"]
+        )
         self.assertTrue(
             contract["constraints"]["cross_instance_process_serialization_required"]
         )
@@ -198,6 +240,14 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
                 store.commit_sandbox(envelope)
             with self.assertRaises(PermissionError):
                 store.read_sandbox()
+            with self.assertRaises(PermissionError):
+                store.archive_sandbox(Path(tmp) / "rollback.json")
+            with self.assertRaises(PermissionError):
+                store.restore_sandbox(
+                    Path(tmp) / "rollback.json",
+                    expected_current_revision=1,
+                    created_at="2026-09-19 16:00:00 CDT",
+                )
             self.assertFalse((Path(tmp) / "state.json").exists())
 
     def test_atomic_sandbox_commit_and_restart_parity(self) -> None:
@@ -283,6 +333,143 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
             )
             self.assertEqual(store.read_sandbox().revision, 2)
             self.assertTrue(store.lock_path.exists())
+
+    def test_rollback_archive_restore_preserves_lineage_and_restart_parity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "canonical_state.json"
+            archive_path = Path(tmp) / "rollback-revision-1.json"
+            store = CanonicalStateStore(path, sandbox_io_enabled=True)
+            baseline = store.prepare(
+                snapshot=_snapshot(),
+                revision=1,
+                created_at="2026-09-19 15:45:00 CDT",
+            )
+            store.commit_sandbox(baseline)
+            archived = store.archive_sandbox(archive_path)
+            archive_bytes = archive_path.read_bytes()
+
+            baseline_snapshot = _snapshot()
+            canary_snapshot = replace(
+                baseline_snapshot,
+                portfolio=replace(
+                    baseline_snapshot.portfolio,
+                    cash=7900.0,
+                    equity=9950.0,
+                ),
+            )
+            canary = store.prepare(
+                snapshot=canary_snapshot,
+                revision=2,
+                created_at="2026-09-19 15:50:00 CDT",
+            )
+            store.commit_sandbox(canary)
+            restored = store.restore_sandbox(
+                archive_path,
+                expected_current_revision=2,
+                created_at="2026-09-19 15:55:00 CDT",
+            )
+
+            self.assertEqual(restored.revision, 3)
+            self.assertEqual(restored.payload_sha256, baseline.payload_sha256)
+            self.assertNotEqual(canary.payload_sha256, baseline.payload_sha256)
+            self.assertEqual(restored.snapshot().portfolio.cash, 8000.0)
+            self.assertEqual(archived.revision, 1)
+            self.assertEqual(archive_path.read_bytes(), archive_bytes)
+            backup = store._read_envelope_file(store.backup_path)
+            self.assertEqual(backup.revision, 2)
+            self.assertEqual(backup.payload_sha256, canary.payload_sha256)
+
+            restarted = CanonicalStateStore(path, sandbox_io_enabled=True)
+            loaded = restarted.read_sandbox()
+            self.assertEqual(loaded.revision, 3)
+            self.assertEqual(loaded.payload_sha256, baseline.payload_sha256)
+
+    def test_rollback_archive_is_immutable_and_stale_restore_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "canonical_state.json"
+            archive_path = Path(tmp) / "rollback.json"
+            store = CanonicalStateStore(path, sandbox_io_enabled=True)
+            store.commit_sandbox(
+                store.prepare(
+                    snapshot=_snapshot(),
+                    revision=1,
+                    created_at="2026-09-19 15:45:00 CDT",
+                )
+            )
+            store.archive_sandbox(archive_path)
+            archive_bytes = archive_path.read_bytes()
+            with self.assertRaises(FileExistsError):
+                store.archive_sandbox(archive_path)
+
+            store.commit_sandbox(
+                store.prepare(
+                    snapshot=_snapshot(),
+                    revision=2,
+                    created_at="2026-09-19 15:50:00 CDT",
+                )
+            )
+            state_bytes = path.read_bytes()
+            with self.assertRaises(StateStoreInvariantError):
+                store.restore_sandbox(
+                    archive_path,
+                    expected_current_revision=1,
+                    created_at="2026-09-19 15:55:00 CDT",
+                )
+            self.assertEqual(path.read_bytes(), state_bytes)
+            self.assertEqual(archive_path.read_bytes(), archive_bytes)
+
+    def test_rollback_restore_serializes_single_writer_handoff(self) -> None:
+        context = multiprocessing.get_context("fork")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "canonical_state.json"
+            archive_path = Path(tmp) / "rollback.json"
+            store = CanonicalStateStore(path, sandbox_io_enabled=True)
+            store.commit_sandbox(
+                store.prepare(
+                    snapshot=_snapshot(),
+                    revision=1,
+                    created_at="2026-09-19 15:40:00 CDT",
+                )
+            )
+            store.archive_sandbox(archive_path)
+            store.commit_sandbox(
+                store.prepare(
+                    snapshot=_snapshot(),
+                    revision=2,
+                    created_at="2026-09-19 15:45:00 CDT",
+                )
+            )
+
+            results = context.Queue()
+            entered = context.Event()
+            release = context.Event()
+            rollback = context.Process(
+                target=_restore_in_process,
+                args=(str(path), str(archive_path), results, entered, release),
+            )
+            competing = context.Process(
+                target=_commit_in_process,
+                args=(str(path), 3, results),
+            )
+            rollback.start()
+            self.assertTrue(entered.wait(timeout=5))
+            competing.start()
+            competing.join(timeout=0.25)
+            self.assertTrue(
+                competing.is_alive(),
+                "competing writer bypassed the rollback restore process lock",
+            )
+
+            release.set()
+            rollback.join(timeout=5)
+            competing.join(timeout=5)
+            self.assertFalse(rollback.is_alive())
+            self.assertFalse(competing.is_alive())
+            self.assertEqual(
+                sorted((results.get(timeout=2), results.get(timeout=2))),
+                ["StateStoreInvariantError", "ok:3"],
+            )
+            self.assertEqual(store.read_sandbox().revision, 3)
 
     def test_descriptor_denies_runtime_authority(self) -> None:
         descriptor = CanonicalStateStore.descriptor()
