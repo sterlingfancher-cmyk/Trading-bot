@@ -1931,3 +1931,59 @@ frozen. Issue #84 remains primary. Next, bind the successful typed Stage D drill
 receipt into the Stage F rollback-readiness evidence and define the separately
 reviewed, fail-closed cutover preflight without activating or registering a
 production writer.
+
+
+## 2026-09-20 Issue #84 — typed rollback receipt bound to Stage F — COMPLETE
+
+PR #265 closes the evidence gap between the complete Stage D sandbox rollback
+drill and Stage F cutover readiness. `CanonicalStateStore` now emits a frozen,
+validated `RollbackDrillReceipt` only after one exclusive-lock sequence archives
+the baseline, commits a distinct next-revision canary, restores the archived
+payload as a new monotonic revision, preserves the displaced canary in the
+prewrite backup, proves archive immutability, and passes restart parity. Receipt
+validation fails closed on revision, digest, archive/backup lineage, incomplete
+proof, runtime registration, production writes, or non-shadow authority.
+Stage F can derive rollback readiness only from this typed receipt; untyped
+claims are rejected. The retained v5 validation hold and parity halt remain the
+only cutover blockers.
+
+Focused validation passed 89 Stage B-F and successor-compatibility regressions,
+including a two-process proof that a competing writer remains blocked across
+the complete archive/canary/restore drill and then rejects the consumed
+revision. Compilation, repository validation, structural/refactor audit,
+exact-diff checks, and architecture-debt comparison passed with zero new
+findings. The exact PR head
+`9a159833a0bb1960a9c51bbd9881e82c9535ca71` passed all six applicable
+exact-head workflows: Stage D, Stage F, repository safety, architecture debt,
+the full refactor/ownership/runtime/startup/research audit, and mandatory
+Change Safety with exact Gunicorn smoke. Exact-diff inspection was limited to
+the Stage D/F implementation, contracts, focused regressions, and Stage F path
+ownership. PR #265 squash-merged as
+`a31896b223d5e026ab8751897910c8807ee4f621`; all post-merge gates and the
+authoritative Splendid deployment passed.
+
+The automatic post-merge snapshot was rejected as incomplete at 2/12 endpoints
+while the application was still registering runtime workers. A safe read-only
+rerun after deployment settled reached 12/12 and proved the exact deployed
+commit `a31896b223d5e026ab8751897910c8807ee4f621`. Sentinel is
+`pass/quiet` with zero incidents and collection errors. The canonical ledger
+remains chain-valid at 88 immutable rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`;
+accounting is `ok`, cash is `13429.13048559457`, equity is `13429.13`,
+and positions are empty. Day start/peak remain `13429.13048559457`; market
+data and runner pass. The retained parity halt and validation hold remain
+active, so self-check remains warn by design. Shadow capture remains parity-pass
+and forward-ineligible at 1,402 cycles and 36,210 candidates. V1 remains
+enabled with automatic backtesting disabled and 1,200 forward rows; V2,
+ablation, and regime remain disabled/not run.
+
+The receipt was produced only in temporary test sandboxes. No production
+StateStore writer was registered or activated; no canonical/accounting/state/
+history/day-peak/recovery evidence changed; no halt was cleared; no strategy,
+sizing, risk, order, live, or AI authority changed; no research job was
+launched; and `/paper/run` was not called. Rollback for PR #265 is code-only.
+Issue #202 remains frozen and Issue #84 remains primary. Next, define an
+immutable, read-only cutover preflight decision package bound to the exact
+StateStore projection, typed rollback receipt, deployed commit, and retained
+hold/halt, while continuing to prohibit production writer registration or
+activation absent a separately reviewed cutover decision.
