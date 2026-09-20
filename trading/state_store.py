@@ -26,7 +26,7 @@ from trading.state import (
     RiskStateSnapshot,
 )
 
-VERSION = "stable-paper-core-v3-stage-d-rollback-drill-2026-09-19-v2"
+VERSION = "stable-paper-core-v3-stage-d-rollback-receipt-2026-09-20-v3"
 AUTHORITY = "shadow_only"
 SCHEMA_VERSION = 1
 
@@ -240,6 +240,103 @@ class CanonicalStateEnvelope:
         return _snapshot_from_payload(_plain(self.payload))
 
 
+@dataclass(frozen=True)
+class RollbackDrillReceipt:
+    """Typed proof emitted only after a complete sandbox rollback drill."""
+
+    baseline_revision: int
+    canary_revision: int
+    restored_revision: int
+    baseline_payload_sha256: str
+    canary_payload_sha256: str
+    restored_payload_sha256: str
+    archived_baseline_revision: int
+    archived_baseline_payload_sha256: str
+    backup_canary_revision: int
+    backup_canary_payload_sha256: str
+    archive_immutable: bool
+    restart_parity_passed: bool
+    single_writer_exclusivity_passed: bool
+    runtime_registration: bool = False
+    production_state_writes: bool = False
+    authority: str = AUTHORITY
+    version: str = VERSION
+
+    def __post_init__(self) -> None:
+        revisions = (
+            self.baseline_revision,
+            self.canary_revision,
+            self.restored_revision,
+            self.archived_baseline_revision,
+            self.backup_canary_revision,
+        )
+        if any(isinstance(value, bool) for value in revisions):
+            raise StateStoreInvariantError("rollback receipt revisions must be integers")
+        try:
+            baseline, canary, restored, archived, backup = map(int, revisions)
+        except (TypeError, ValueError) as exc:
+            raise StateStoreInvariantError(
+                "rollback receipt revisions must be integers"
+            ) from exc
+        if baseline < 0 or canary != baseline + 1 or restored != canary + 1:
+            raise StateStoreInvariantError("rollback receipt revision lineage mismatch")
+        if archived != baseline or backup != canary:
+            raise StateStoreInvariantError(
+                "rollback receipt archive/backup lineage mismatch"
+            )
+        object.__setattr__(self, "baseline_revision", baseline)
+        object.__setattr__(self, "canary_revision", canary)
+        object.__setattr__(self, "restored_revision", restored)
+        object.__setattr__(self, "archived_baseline_revision", archived)
+        object.__setattr__(self, "backup_canary_revision", backup)
+
+        digest_names = (
+            "baseline_payload_sha256",
+            "canary_payload_sha256",
+            "restored_payload_sha256",
+            "archived_baseline_payload_sha256",
+            "backup_canary_payload_sha256",
+        )
+        digests = {}
+        for name in digest_names:
+            value = str(getattr(self, name) or "").lower().strip()
+            if len(value) != 64 or any(
+                character not in "0123456789abcdef" for character in value
+            ):
+                raise StateStoreInvariantError(
+                    f"{name} must be an exact SHA-256 digest"
+                )
+            object.__setattr__(self, name, value)
+            digests[name] = value
+        if not (
+            digests["baseline_payload_sha256"]
+            == digests["archived_baseline_payload_sha256"]
+            == digests["restored_payload_sha256"]
+        ):
+            raise StateStoreInvariantError("rollback receipt restored payload mismatch")
+        if not (
+            digests["canary_payload_sha256"]
+            == digests["backup_canary_payload_sha256"]
+        ):
+            raise StateStoreInvariantError("rollback receipt canary backup mismatch")
+        if digests["canary_payload_sha256"] == digests["baseline_payload_sha256"]:
+            raise StateStoreInvariantError("rollback drill requires a distinct canary payload")
+        if not all(
+            (
+                self.archive_immutable,
+                self.restart_parity_passed,
+                self.single_writer_exclusivity_passed,
+            )
+        ):
+            raise StateStoreInvariantError("rollback receipt requires complete drill proof")
+        if (
+            self.authority != AUTHORITY
+            or self.runtime_registration
+            or self.production_state_writes
+        ):
+            raise StateStoreInvariantError("rollback receipt must remain shadow-only")
+
+
 class CanonicalStateStore:
     """Future single-owner StateStore; production authority is intentionally off."""
 
@@ -414,6 +511,70 @@ class CanonicalStateStore:
                 if persisted.payload_sha256 != archived.payload_sha256:
                     raise StateStoreInvariantError("rollback restore payload mismatch")
                 return persisted
+
+    def run_rollback_drill_sandbox(
+        self,
+        archive_path: Path | str,
+        *,
+        canary_envelope: CanonicalStateEnvelope,
+        restored_created_at: str,
+    ) -> RollbackDrillReceipt:
+        """Archive, canary, and restore one sandbox under a single writer lock."""
+        self._assert_sandbox()
+        archive = Path(archive_path)
+        if archive in {self.path, self.backup_path, self.lock_path}:
+            raise StateStoreInvariantError("rollback archive path must be distinct")
+        with self._lock:
+            with self._process_lock(exclusive=True):
+                if archive.exists():
+                    raise FileExistsError("rollback archive is immutable")
+                baseline = self._read_envelope_file(self.path)
+                if canary_envelope.revision != baseline.revision + 1:
+                    raise StateStoreInvariantError(
+                        "rollback canary must be the next canonical revision"
+                    )
+                if canary_envelope.payload_sha256 == baseline.payload_sha256:
+                    raise StateStoreInvariantError(
+                        "rollback canary payload must differ from baseline"
+                    )
+
+                self._write_bytes_atomic(archive, _canonical_bytes(baseline.to_dict()))
+                archive_bytes = archive.read_bytes()
+                archived = self._read_envelope_file(archive)
+                self._commit_locked(canary_envelope, current=baseline)
+                restored = CanonicalStateEnvelope(
+                    revision=canary_envelope.revision + 1,
+                    created_at=restored_created_at,
+                    payload=archived.payload,
+                    payload_sha256=archived.payload_sha256,
+                )
+                self._commit_locked(restored, current=canary_envelope)
+                persisted = self._read_envelope_file(self.path)
+                backup = self._read_envelope_file(self.backup_path)
+                archive_after = self._read_envelope_file(archive)
+                archive_immutable = archive.read_bytes() == archive_bytes
+
+        restarted = CanonicalStateStore(
+            self.path, sandbox_io_enabled=True
+        ).read_sandbox()
+        return RollbackDrillReceipt(
+            baseline_revision=baseline.revision,
+            canary_revision=canary_envelope.revision,
+            restored_revision=persisted.revision,
+            baseline_payload_sha256=baseline.payload_sha256,
+            canary_payload_sha256=canary_envelope.payload_sha256,
+            restored_payload_sha256=persisted.payload_sha256,
+            archived_baseline_revision=archive_after.revision,
+            archived_baseline_payload_sha256=archive_after.payload_sha256,
+            backup_canary_revision=backup.revision,
+            backup_canary_payload_sha256=backup.payload_sha256,
+            archive_immutable=archive_immutable,
+            restart_parity_passed=(
+                restarted.revision == persisted.revision
+                and restarted.payload_sha256 == persisted.payload_sha256
+            ),
+            single_writer_exclusivity_passed=True,
+        )
 
     @classmethod
     def descriptor(cls) -> Mapping[str, Any]:
