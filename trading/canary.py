@@ -22,9 +22,10 @@ from trading.state import (
 )
 from trading.state_store import CanonicalStateEnvelope
 from trading.state_store import CanonicalStateStore
+from trading.state_store import RollbackDrillReceipt
 from trading.valuation import MONEY_SERIALIZATION_TOLERANCE, ValuationSnapshot
 
-VERSION = "stable-paper-core-v3-stage-f-cutover-readiness-2026-09-19-v2"
+VERSION = "stable-paper-core-v3-stage-f-rollback-receipt-2026-09-20-v3"
 AUTHORITY = "shadow_only"
 MAX_CANARY_FRACTION = 0.05
 AUTHORITATIVE_RUNTIME_URL = "https://web-production-e1796.up.railway.app"
@@ -430,6 +431,42 @@ class RollbackReadinessEvidence:
     restart_parity_passed: bool
     single_writer_exclusivity_passed: bool
     rollback_switch_default_armed: bool = True
+
+    @classmethod
+    def from_drill_receipt(
+        cls,
+        *,
+        receipt: RollbackDrillReceipt,
+        baseline_ledger_sha256: str,
+    ) -> "RollbackReadinessEvidence":
+        """Bind Stage F readiness to a verified Stage D drill receipt."""
+        if not isinstance(receipt, RollbackDrillReceipt):
+            raise CanaryInvariantError(
+                "rollback readiness requires a typed drill receipt"
+            )
+        return cls(
+            baseline_revision=receipt.baseline_revision,
+            baseline_payload_sha256=receipt.baseline_payload_sha256,
+            baseline_ledger_sha256=baseline_ledger_sha256,
+            archived_baseline_present=(
+                receipt.archived_baseline_revision == receipt.baseline_revision
+                and receipt.archived_baseline_payload_sha256
+                == receipt.baseline_payload_sha256
+                and receipt.archive_immutable
+            ),
+            restore_drill_passed=(
+                receipt.restored_revision == receipt.canary_revision + 1
+                and receipt.restored_payload_sha256
+                == receipt.baseline_payload_sha256
+                and receipt.backup_canary_revision == receipt.canary_revision
+                and receipt.backup_canary_payload_sha256
+                == receipt.canary_payload_sha256
+            ),
+            restart_parity_passed=receipt.restart_parity_passed,
+            single_writer_exclusivity_passed=(
+                receipt.single_writer_exclusivity_passed
+            ),
+        )
 
     def __post_init__(self) -> None:
         if isinstance(self.baseline_revision, bool):

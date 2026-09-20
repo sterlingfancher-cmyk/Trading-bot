@@ -18,6 +18,7 @@ from trading.state import (
 from trading.state_store import (
     CanonicalStateEnvelope,
     CanonicalStateStore,
+    RollbackDrillReceipt,
     StateStoreInvariantError,
 )
 
@@ -90,6 +91,49 @@ def _restore_in_process(
         result_queue.put(f"ok:{restored.revision}")
 
 
+def _drill_in_process(
+    path: str,
+    archive_path: str,
+    result_queue,
+    entered,
+    release,
+) -> None:
+    store = CanonicalStateStore(path, sandbox_io_enabled=True)
+    original_read = store._read_envelope_file
+    paused = False
+
+    def delayed_read(target):
+        nonlocal paused
+        current = original_read(target)
+        if Path(target) == store.path and not paused:
+            paused = True
+            entered.set()
+            if not release.wait(timeout=10):
+                raise TimeoutError("test did not release delayed rollback drill")
+        return current
+
+    store._read_envelope_file = delayed_read
+    baseline = _snapshot()
+    canary_snapshot = replace(
+        baseline,
+        portfolio=replace(baseline.portfolio, cash=7900.0, equity=9950.0),
+    )
+    try:
+        receipt = store.run_rollback_drill_sandbox(
+            archive_path,
+            canary_envelope=store.prepare(
+                snapshot=canary_snapshot,
+                revision=2,
+                created_at="2026-09-20 10:01:00 CDT",
+            ),
+            restored_created_at="2026-09-20 10:02:00 CDT",
+        )
+    except Exception as exc:
+        result_queue.put(type(exc).__name__)
+    else:
+        result_queue.put(f"ok:{receipt.restored_revision}")
+
+
 def _snapshot() -> CanonicalStateSnapshot:
     epoch = AccountingEpochSnapshot(
         epoch_id="stable-paper-v3-test",
@@ -149,6 +193,12 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
         )
         self.assertTrue(
             contract["constraints"]["rollback_uses_same_exclusive_process_lock"]
+        )
+        self.assertTrue(
+            contract["constraints"]["typed_rollback_drill_receipt_required"]
+        )
+        self.assertTrue(
+            contract["constraints"]["rollback_drill_single_lock_scope_required"]
         )
         self.assertTrue(
             contract["constraints"]["cross_instance_process_serialization_required"]
@@ -247,6 +297,16 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
                     Path(tmp) / "rollback.json",
                     expected_current_revision=1,
                     created_at="2026-09-19 16:00:00 CDT",
+                )
+            with self.assertRaises(PermissionError):
+                store.run_rollback_drill_sandbox(
+                    Path(tmp) / "rollback.json",
+                    canary_envelope=store.prepare(
+                        snapshot=_snapshot(),
+                        revision=2,
+                        created_at="2026-09-20 10:01:00 CDT",
+                    ),
+                    restored_created_at="2026-09-20 10:02:00 CDT",
                 )
             self.assertFalse((Path(tmp) / "state.json").exists())
 
@@ -464,6 +524,96 @@ class StablePaperCoreStageDStateStoreTests(unittest.TestCase):
             rollback.join(timeout=5)
             competing.join(timeout=5)
             self.assertFalse(rollback.is_alive())
+            self.assertFalse(competing.is_alive())
+            self.assertEqual(
+                sorted((results.get(timeout=2), results.get(timeout=2))),
+                ["StateStoreInvariantError", "ok:3"],
+            )
+            self.assertEqual(store.read_sandbox().revision, 3)
+
+    def test_complete_rollback_drill_emits_typed_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "canonical_state.json"
+            archive_path = Path(tmp) / "rollback.json"
+            store = CanonicalStateStore(path, sandbox_io_enabled=True)
+            baseline_snapshot = _snapshot()
+            baseline = store.prepare(
+                snapshot=baseline_snapshot,
+                revision=7,
+                created_at="2026-09-20 09:55:00 CDT",
+            )
+            store.commit_sandbox(baseline)
+            canary = store.prepare(
+                snapshot=replace(
+                    baseline_snapshot,
+                    portfolio=replace(
+                        baseline_snapshot.portfolio,
+                        cash=7900.0,
+                        equity=9950.0,
+                    ),
+                ),
+                revision=8,
+                created_at="2026-09-20 10:00:00 CDT",
+            )
+
+            receipt = store.run_rollback_drill_sandbox(
+                archive_path,
+                canary_envelope=canary,
+                restored_created_at="2026-09-20 10:01:00 CDT",
+            )
+
+            self.assertIsInstance(receipt, RollbackDrillReceipt)
+            self.assertEqual(receipt.baseline_revision, 7)
+            self.assertEqual(receipt.canary_revision, 8)
+            self.assertEqual(receipt.restored_revision, 9)
+            self.assertEqual(receipt.baseline_payload_sha256, baseline.payload_sha256)
+            self.assertEqual(receipt.restored_payload_sha256, baseline.payload_sha256)
+            self.assertEqual(receipt.backup_canary_payload_sha256, canary.payload_sha256)
+            self.assertTrue(receipt.archive_immutable)
+            self.assertTrue(receipt.restart_parity_passed)
+            self.assertTrue(receipt.single_writer_exclusivity_passed)
+            self.assertFalse(receipt.runtime_registration)
+            self.assertFalse(receipt.production_state_writes)
+            self.assertEqual(store.read_sandbox().revision, 9)
+
+    def test_complete_rollback_drill_holds_one_lock_across_handoff(self) -> None:
+        context = multiprocessing.get_context("fork")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "canonical_state.json"
+            archive_path = Path(tmp) / "rollback.json"
+            store = CanonicalStateStore(path, sandbox_io_enabled=True)
+            store.commit_sandbox(
+                store.prepare(
+                    snapshot=_snapshot(),
+                    revision=1,
+                    created_at="2026-09-20 10:00:00 CDT",
+                )
+            )
+
+            results = context.Queue()
+            entered = context.Event()
+            release = context.Event()
+            drill = context.Process(
+                target=_drill_in_process,
+                args=(str(path), str(archive_path), results, entered, release),
+            )
+            competing = context.Process(
+                target=_commit_in_process,
+                args=(str(path), 2, results),
+            )
+            drill.start()
+            self.assertTrue(entered.wait(timeout=5))
+            competing.start()
+            competing.join(timeout=0.25)
+            self.assertTrue(
+                competing.is_alive(),
+                "competing writer bypassed the full rollback drill lock",
+            )
+
+            release.set()
+            drill.join(timeout=5)
+            competing.join(timeout=5)
+            self.assertFalse(drill.is_alive())
             self.assertFalse(competing.is_alive())
             self.assertEqual(
                 sorted((results.get(timeout=2), results.get(timeout=2))),

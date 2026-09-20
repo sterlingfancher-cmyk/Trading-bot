@@ -1,5 +1,5 @@
 {
-  "version": "stable-paper-core-v3-stage-d-rollback-drill-2026-09-19-v2",
+  "version": "stable-paper-core-v3-stage-d-rollback-receipt-2026-09-20-v3",
   "stage": "D",
   "authority": "shadow_only",
   "target_interface": "trading.state_store.CanonicalStateStore",
@@ -23,6 +23,8 @@
     "rollback_preserves_failed_state_backup": true,
     "rollback_restart_parity": true,
     "rollback_uses_same_exclusive_process_lock": true,
+    "typed_rollback_drill_receipt_required": true,
+    "rollback_drill_single_lock_scope_required": true,
     "post_commit_readback_required": true,
     "restart_round_trip_parity_required": true,
     "accounting_epoch_preserved": true,

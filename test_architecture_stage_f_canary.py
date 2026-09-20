@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import ast
 import copy
+from dataclasses import replace
 import json
 from pathlib import Path
+import tempfile
 import unittest
 
 from test_issue126_successor_accounting_reconcile_boundary import (
@@ -69,6 +71,7 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         self.assertTrue(constraints["rollback_restore_drill_required"])
         self.assertTrue(constraints["rollback_restart_parity_required"])
         self.assertTrue(constraints["single_active_writer_required"])
+        self.assertTrue(constraints["typed_stage_d_rollback_receipt_required"])
         self.assertTrue(constraints["readiness_cannot_activate_or_rollback"])
 
     def test_current_issue_82_missing_proof_blocks_canary(self) -> None:
@@ -414,6 +417,69 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         self.assertFalse(decision.rollback_performed)
         self.assertFalse(decision.runtime_registration)
         self.assertFalse(decision.production_state_writes)
+
+    def test_stage_d_drill_receipt_binds_stage_f_rollback_readiness(self) -> None:
+        binding = self._v5_binding()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "canonical-state.json"
+            archive_path = Path(tmp) / "rollback-baseline.json"
+            store = CanonicalStateStore(path, sandbox_io_enabled=True)
+            store.commit_sandbox(binding.envelope)
+            baseline_snapshot = binding.envelope.snapshot()
+            canary_snapshot = replace(
+                baseline_snapshot,
+                portfolio=replace(
+                    baseline_snapshot.portfolio,
+                    cash=baseline_snapshot.portfolio.cash - 1.0,
+                    equity=baseline_snapshot.portfolio.equity - 1.0,
+                ),
+            )
+            receipt = store.run_rollback_drill_sandbox(
+                archive_path,
+                canary_envelope=store.prepare(
+                    snapshot=canary_snapshot,
+                    revision=binding.proof.revision + 1,
+                    created_at="2026-09-20 10:00:00 CDT",
+                ),
+                restored_created_at="2026-09-20 10:01:00 CDT",
+            )
+
+        rollback = RollbackReadinessEvidence.from_drill_receipt(
+            receipt=receipt,
+            baseline_ledger_sha256=binding.proof.ledger_sha256,
+        )
+        self.assertEqual(rollback.baseline_revision, binding.proof.revision)
+        self.assertEqual(
+            rollback.baseline_payload_sha256,
+            binding.proof.payload_sha256,
+        )
+        self.assertEqual(rollback.blockers(binding.proof), ())
+
+        decision = CanaryReadinessPlanner.evaluate_cutover_readiness(
+            binding=binding,
+            canary_plan=CanaryReadinessPlanner.plan(
+                evidence=self._all_green(), requested_fraction=0.01
+            ),
+            rollback=rollback,
+        )
+        self.assertEqual(decision.state, "blocked")
+        self.assertEqual(
+            decision.blockers,
+            (
+                "validation_hold_released",
+                "risk_halt_released_by_governed_evidence",
+            ),
+        )
+        self.assertFalse(decision.activation_performed)
+        self.assertFalse(decision.runtime_registration)
+        self.assertFalse(decision.production_state_writes)
+
+    def test_stage_f_rejects_untyped_rollback_claim(self) -> None:
+        with self.assertRaises(CanaryInvariantError):
+            RollbackReadinessEvidence.from_drill_receipt(
+                receipt={"restore_drill_passed": True},
+                baseline_ledger_sha256="a" * 64,
+            )
 
     def test_cutover_readiness_fails_closed_on_rollback_drift(self) -> None:
         binding = self._v5_binding()

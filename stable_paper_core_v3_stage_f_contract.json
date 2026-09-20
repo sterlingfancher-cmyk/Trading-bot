@@ -1,5 +1,5 @@
 {
-  "version": "stable-paper-core-v3-stage-f-cutover-readiness-2026-09-19-v2",
+  "version": "stable-paper-core-v3-stage-f-rollback-receipt-2026-09-20-v3",
   "stage": "F",
   "authority": "shadow_only",
   "target_interface": "trading.canary.CanaryReadinessPlanner",
@@ -21,6 +21,7 @@
     "rollback_restore_drill_required": true,
     "rollback_restart_parity_required": true,
     "single_active_writer_required": true,
+    "typed_stage_d_rollback_receipt_required": true,
     "readiness_cannot_activate_or_rollback": true,
     "live_authority": false,
     "ml_execution_authority": false
