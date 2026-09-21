@@ -212,6 +212,15 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         ):
                 self.assertIn(core_test, tests)
 
+    def test_cutover_preflight_artifact_change_selects_focused_regression(self) -> None:
+        for path in (
+            "build_cutover_preflight_artifact.py",
+            "test_issue84_cutover_preflight_artifact.py",
+        ):
+            tests = planned_regressions((path,))
+            self.assertIn("test_issue84_cutover_preflight_artifact.py", tests)
+            self.assertIn("test_architecture_stage_f_canary.py", tests)
+
     def test_shadow_ai_change_selects_complete_shadow_ai_regression_set(self) -> None:
         tests = planned_regressions(("shadow_ai_outcome_memory.py",))
 
