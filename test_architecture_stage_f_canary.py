@@ -17,6 +17,7 @@ from trading.canary import (
     CanaryEvidence,
     CanaryInvariantError,
     CanaryReadinessPlanner,
+    CutoverPreflightDecisionPackage,
     RollbackReadinessEvidence,
 )
 from trading.accounting import (
@@ -72,6 +73,11 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         self.assertTrue(constraints["rollback_restart_parity_required"])
         self.assertTrue(constraints["single_active_writer_required"])
         self.assertTrue(constraints["typed_stage_d_rollback_receipt_required"])
+        self.assertTrue(
+            constraints["immutable_cutover_preflight_package_required"]
+        )
+        self.assertTrue(constraints["exact_deployed_commit_binding_required"])
+        self.assertTrue(constraints["settled_authoritative_deployment_required"])
         self.assertTrue(constraints["readiness_cannot_activate_or_rollback"])
 
     def test_current_issue_82_missing_proof_blocks_canary(self) -> None:
@@ -399,6 +405,31 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
             single_writer_exclusivity_passed=True,
         )
 
+    def _rollback_receipt(self, binding):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "canonical-state.json"
+            archive_path = Path(tmp) / "rollback-baseline.json"
+            store = CanonicalStateStore(path, sandbox_io_enabled=True)
+            store.commit_sandbox(binding.envelope)
+            baseline_snapshot = binding.envelope.snapshot()
+            canary_snapshot = replace(
+                baseline_snapshot,
+                portfolio=replace(
+                    baseline_snapshot.portfolio,
+                    cash=baseline_snapshot.portfolio.cash - 1.0,
+                    equity=baseline_snapshot.portfolio.equity - 1.0,
+                ),
+            )
+            return store.run_rollback_drill_sandbox(
+                archive_path,
+                canary_envelope=store.prepare(
+                    snapshot=canary_snapshot,
+                    revision=binding.proof.revision + 1,
+                    created_at="2026-09-21 08:00:00 CDT",
+                ),
+                restored_created_at="2026-09-21 08:01:00 CDT",
+            )
+
     def test_current_v5_hold_and_halt_block_cutover_readiness(self) -> None:
         binding = self._v5_binding()
         decision = CanaryReadinessPlanner.evaluate_cutover_readiness(
@@ -420,29 +451,7 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
 
     def test_stage_d_drill_receipt_binds_stage_f_rollback_readiness(self) -> None:
         binding = self._v5_binding()
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "canonical-state.json"
-            archive_path = Path(tmp) / "rollback-baseline.json"
-            store = CanonicalStateStore(path, sandbox_io_enabled=True)
-            store.commit_sandbox(binding.envelope)
-            baseline_snapshot = binding.envelope.snapshot()
-            canary_snapshot = replace(
-                baseline_snapshot,
-                portfolio=replace(
-                    baseline_snapshot.portfolio,
-                    cash=baseline_snapshot.portfolio.cash - 1.0,
-                    equity=baseline_snapshot.portfolio.equity - 1.0,
-                ),
-            )
-            receipt = store.run_rollback_drill_sandbox(
-                archive_path,
-                canary_envelope=store.prepare(
-                    snapshot=canary_snapshot,
-                    revision=binding.proof.revision + 1,
-                    created_at="2026-09-20 10:00:00 CDT",
-                ),
-                restored_created_at="2026-09-20 10:01:00 CDT",
-            )
+        receipt = self._rollback_receipt(binding)
 
         rollback = RollbackReadinessEvidence.from_drill_receipt(
             receipt=receipt,
@@ -473,6 +482,80 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         self.assertFalse(decision.activation_performed)
         self.assertFalse(decision.runtime_registration)
         self.assertFalse(decision.production_state_writes)
+
+    def test_cutover_preflight_binds_exact_evidence_and_retains_current_blocks(self) -> None:
+        binding = self._v5_binding()
+        package = CanaryReadinessPlanner.build_cutover_preflight_package(
+            binding=binding,
+            canary_plan=CanaryReadinessPlanner.plan(
+                evidence=self._all_green(), requested_fraction=0.01
+            ),
+            rollback_receipt=self._rollback_receipt(binding),
+            deployed_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+            sentinel_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+            splendid_deployment_settled=True,
+        )
+
+        self.assertIsInstance(package, CutoverPreflightDecisionPackage)
+        self.assertEqual(package.state, "blocked")
+        self.assertEqual(
+            package.blockers,
+            (
+                "validation_hold_released",
+                "risk_halt_released_by_governed_evidence",
+            ),
+        )
+        self.assertEqual(len(package.package_sha256), 64)
+        self.assertEqual(package.to_dict()["runtime_revision"], 10)
+        self.assertEqual(package.to_dict()["runtime_ledger_sha256"], "a" * 64)
+        self.assertTrue(package.to_dict()["validation_hold_retained"])
+        self.assertTrue(package.to_dict()["risk_halt_retained"])
+        self.assertFalse(package.cutover_review_completed)
+        self.assertFalse(package.activation_performed)
+        self.assertFalse(package.runtime_registration)
+        self.assertFalse(package.production_state_writes)
+        with self.assertRaises(CanaryInvariantError):
+            replace(package, package_sha256="c" * 64)
+
+    def test_cutover_preflight_fails_closed_on_deployment_drift(self) -> None:
+        binding = self._v5_binding()
+        package = CanaryReadinessPlanner.build_cutover_preflight_package(
+            binding=binding,
+            canary_plan=CanaryReadinessPlanner.plan(
+                evidence=self._all_green(), requested_fraction=0.01
+            ),
+            rollback_receipt=self._rollback_receipt(binding),
+            deployed_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+            sentinel_commit_sha="b" * 40,
+            splendid_deployment_settled=False,
+        )
+        self.assertEqual(package.state, "blocked")
+        self.assertIn("splendid_deployment_settled", package.blockers)
+        self.assertIn("sentinel_deployed_commit_match", package.blockers)
+        self.assertFalse(package.activation_performed)
+
+        with self.assertRaises(CanaryInvariantError):
+            CanaryReadinessPlanner.build_cutover_preflight_package(
+                binding=binding,
+                canary_plan=CanaryReadinessPlanner.plan(
+                    evidence=self._all_green(), requested_fraction=0.01
+                ),
+                rollback_receipt=self._rollback_receipt(binding),
+                deployed_commit_sha="not-a-commit",
+                sentinel_commit_sha="b" * 40,
+                splendid_deployment_settled=True,
+            )
+        with self.assertRaises(CanaryInvariantError):
+            CanaryReadinessPlanner.build_cutover_preflight_package(
+                binding=binding,
+                canary_plan=CanaryReadinessPlanner.plan(
+                    evidence=self._all_green(), requested_fraction=0.01
+                ),
+                rollback_receipt=self._rollback_receipt(binding),
+                deployed_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+                sentinel_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+                splendid_deployment_settled="true",
+            )
 
     def test_stage_f_rejects_untyped_rollback_claim(self) -> None:
         with self.assertRaises(CanaryInvariantError):
@@ -544,6 +627,8 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         descriptor = CanaryReadinessPlanner.descriptor()
         self.assertTrue(descriptor["cutover_review_required"])
         self.assertTrue(descriptor["rollback_readiness_required"])
+        self.assertTrue(descriptor["immutable_cutover_preflight_required"])
+        self.assertTrue(descriptor["deployed_commit_binding_required"])
         self.assertFalse(descriptor["cutover_review_completed"])
         self.assertFalse(descriptor["activation_performed"])
         self.assertFalse(descriptor["runtime_registration"])
