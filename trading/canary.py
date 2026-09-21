@@ -7,6 +7,8 @@ explicitly supplied acceptance evidence and emits an immutable canary plan.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from math import isfinite
 import re
 from types import MappingProxyType
@@ -25,11 +27,12 @@ from trading.state_store import CanonicalStateStore
 from trading.state_store import RollbackDrillReceipt
 from trading.valuation import MONEY_SERIALIZATION_TOLERANCE, ValuationSnapshot
 
-VERSION = "stable-paper-core-v3-stage-f-rollback-receipt-2026-09-20-v3"
+VERSION = "stable-paper-core-v3-stage-f-cutover-preflight-2026-09-21-v4"
 AUTHORITY = "shadow_only"
 MAX_CANARY_FRACTION = 0.05
 AUTHORITATIVE_RUNTIME_URL = "https://web-production-e1796.up.railway.app"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
+_GIT_SHA_PATTERN = r"^[0-9a-f]{40}$"
 
 
 class CanaryInvariantError(ValueError):
@@ -549,6 +552,169 @@ class CutoverReadinessDecision:
 
 
 @dataclass(frozen=True)
+class CutoverPreflightDecisionPackage:
+    """Immutable, read-only package for a separately reviewed cutover decision."""
+
+    binding: RuntimeV5Binding
+    canary_plan: CanaryPlan
+    rollback: RollbackReadinessEvidence
+    rollback_receipt: RollbackDrillReceipt
+    readiness: CutoverReadinessDecision
+    deployed_commit_sha: str
+    sentinel_commit_sha: str
+    splendid_deployment_settled: bool
+    state: str
+    blockers: Tuple[str, ...]
+    package_sha256: str = ""
+    cutover_review_completed: bool = False
+    activation_performed: bool = False
+    rollback_performed: bool = False
+    runtime_registration: bool = False
+    production_state_writes: bool = False
+    risk_mutation_authority: bool = False
+    order_authority: bool = False
+    authority: str = AUTHORITY
+    version: str = VERSION
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding, RuntimeV5Binding):
+            raise CanaryInvariantError("preflight requires typed runtime binding")
+        if not isinstance(self.canary_plan, CanaryPlan):
+            raise CanaryInvariantError("preflight requires typed canary plan")
+        if not isinstance(self.rollback, RollbackReadinessEvidence):
+            raise CanaryInvariantError("preflight requires typed rollback readiness")
+        if not isinstance(self.rollback_receipt, RollbackDrillReceipt):
+            raise CanaryInvariantError("preflight requires typed rollback receipt")
+        if not isinstance(self.readiness, CutoverReadinessDecision):
+            raise CanaryInvariantError("preflight requires typed readiness decision")
+        deployed = str(self.deployed_commit_sha or "").lower().strip()
+        sentinel = str(self.sentinel_commit_sha or "").lower().strip()
+        if not re.fullmatch(_GIT_SHA_PATTERN, deployed):
+            raise CanaryInvariantError("deployed_commit_sha must be an exact Git SHA")
+        if not re.fullmatch(_GIT_SHA_PATTERN, sentinel):
+            raise CanaryInvariantError("sentinel_commit_sha must be an exact Git SHA")
+        object.__setattr__(self, "deployed_commit_sha", deployed)
+        object.__setattr__(self, "sentinel_commit_sha", sentinel)
+
+        proof = self.binding.proof
+        receipt = self.rollback_receipt
+        expected_rollback = RollbackReadinessEvidence.from_drill_receipt(
+            receipt=receipt,
+            baseline_ledger_sha256=proof.ledger_sha256,
+        )
+        if self.rollback != expected_rollback:
+            raise CanaryInvariantError("preflight rollback readiness must derive from receipt")
+        if self.rollback.blockers(proof):
+            raise CanaryInvariantError("preflight rollback proof drifted from runtime binding")
+        if (
+            receipt.baseline_revision != proof.revision
+            or receipt.baseline_payload_sha256 != proof.payload_sha256
+            or self.rollback.baseline_ledger_sha256 != proof.ledger_sha256
+        ):
+            raise CanaryInvariantError("preflight receipt provenance mismatch")
+        expected_readiness = CanaryReadinessPlanner.evaluate_cutover_readiness(
+            binding=self.binding,
+            canary_plan=self.canary_plan,
+            rollback=self.rollback,
+        )
+        if self.readiness != expected_readiness:
+            raise CanaryInvariantError("preflight readiness decision mismatch")
+
+        blockers = tuple(self.blockers)
+        expected_blockers = list(self.readiness.blockers)
+        if not self.splendid_deployment_settled:
+            expected_blockers.append("splendid_deployment_settled")
+        if deployed != sentinel:
+            expected_blockers.append("sentinel_deployed_commit_match")
+        expected_blockers_tuple = tuple(expected_blockers)
+        if blockers != expected_blockers_tuple:
+            raise CanaryInvariantError("preflight blockers must match exact evidence")
+        expected_state = "blocked" if blockers else "review_required"
+        if self.state != expected_state:
+            raise CanaryInvariantError("preflight state must match blocker state")
+        if not isinstance(self.splendid_deployment_settled, bool):
+            raise CanaryInvariantError("deployment settlement must be an exact boolean")
+        if self.authority != AUTHORITY or any(
+            (
+                self.cutover_review_completed,
+                self.activation_performed,
+                self.rollback_performed,
+                self.runtime_registration,
+                self.production_state_writes,
+                self.risk_mutation_authority,
+                self.order_authority,
+            )
+        ):
+            raise CanaryInvariantError("preflight package must remain read-only")
+        object.__setattr__(self, "blockers", blockers)
+
+        digest = hashlib.sha256(
+            json.dumps(
+                self._digest_payload(),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        supplied = str(self.package_sha256 or "").lower().strip()
+        if supplied and supplied != digest:
+            raise CanaryInvariantError("preflight package digest mismatch")
+        object.__setattr__(self, "package_sha256", digest)
+
+    def _digest_payload(self) -> Mapping[str, Any]:
+        proof = self.binding.proof
+        receipt = self.rollback_receipt
+        return {
+            "authority": self.authority,
+            "version": self.version,
+            "state": self.state,
+            "blockers": self.blockers,
+            "deployed_commit_sha": self.deployed_commit_sha,
+            "sentinel_commit_sha": self.sentinel_commit_sha,
+            "splendid_deployment_settled": self.splendid_deployment_settled,
+            "requested_fraction": self.canary_plan.requested_fraction,
+            "runtime_revision": proof.revision,
+            "runtime_payload_sha256": proof.payload_sha256,
+            "runtime_ledger_sha256": proof.ledger_sha256,
+            "runtime_epoch_id": proof.epoch_id,
+            "runtime_evidence_captured_at": proof.evidence_captured_at,
+            "runtime_evidence_source": proof.evidence_source,
+            "rollback_receipt_version": receipt.version,
+            "rollback_baseline_revision": receipt.baseline_revision,
+            "rollback_baseline_payload_sha256": receipt.baseline_payload_sha256,
+            "rollback_canary_revision": receipt.canary_revision,
+            "rollback_canary_payload_sha256": receipt.canary_payload_sha256,
+            "rollback_restored_revision": receipt.restored_revision,
+            "rollback_restored_payload_sha256": receipt.restored_payload_sha256,
+            "rollback_archive_revision": receipt.archived_baseline_revision,
+            "rollback_archive_payload_sha256": (
+                receipt.archived_baseline_payload_sha256
+            ),
+            "rollback_backup_revision": receipt.backup_canary_revision,
+            "rollback_backup_payload_sha256": receipt.backup_canary_payload_sha256,
+            "rollback_archive_immutable": receipt.archive_immutable,
+            "rollback_restart_parity_passed": receipt.restart_parity_passed,
+            "rollback_single_writer_exclusivity_passed": (
+                receipt.single_writer_exclusivity_passed
+            ),
+            "validation_hold_retained": bool(
+                self.binding.envelope.snapshot().portfolio.accounting_epoch
+                and self.binding.envelope.snapshot().portfolio.accounting_epoch.validation_hold
+            ),
+            "risk_halt_retained": self.binding.envelope.snapshot().risk.halted,
+            "risk_halt_reason": self.binding.envelope.snapshot().risk.halt_reason,
+            "cutover_review_completed": self.cutover_review_completed,
+            "activation_performed": self.activation_performed,
+            "runtime_registration": self.runtime_registration,
+            "production_state_writes": self.production_state_writes,
+        }
+
+    def to_dict(self) -> Mapping[str, Any]:
+        return MappingProxyType(
+            {**self._digest_payload(), "package_sha256": self.package_sha256}
+        )
+
+
+@dataclass(frozen=True)
 class RollbackTriggerAssessment:
     rollback_required: bool
     triggers: Tuple[str, ...]
@@ -884,6 +1050,54 @@ class CanaryReadinessPlanner:
         )
 
     @classmethod
+    def build_cutover_preflight_package(
+        cls,
+        *,
+        binding: RuntimeV5Binding,
+        canary_plan: CanaryPlan,
+        rollback_receipt: RollbackDrillReceipt,
+        deployed_commit_sha: str,
+        sentinel_commit_sha: str,
+        splendid_deployment_settled: bool,
+    ) -> CutoverPreflightDecisionPackage:
+        """Bind exact runtime, rollback, and deployment evidence without authority."""
+        if not isinstance(binding, RuntimeV5Binding):
+            raise CanaryInvariantError("preflight requires typed runtime binding")
+        if not isinstance(canary_plan, CanaryPlan):
+            raise CanaryInvariantError("preflight requires typed canary plan")
+        if not isinstance(rollback_receipt, RollbackDrillReceipt):
+            raise CanaryInvariantError("preflight requires typed rollback receipt")
+        if not isinstance(splendid_deployment_settled, bool):
+            raise CanaryInvariantError("deployment settlement must be an exact boolean")
+        rollback = RollbackReadinessEvidence.from_drill_receipt(
+            receipt=rollback_receipt,
+            baseline_ledger_sha256=binding.proof.ledger_sha256,
+        )
+        readiness = cls.evaluate_cutover_readiness(
+            binding=binding, canary_plan=canary_plan, rollback=rollback
+        )
+        blockers = list(readiness.blockers)
+        if not splendid_deployment_settled:
+            blockers.append("splendid_deployment_settled")
+        deployed = str(deployed_commit_sha or "").lower().strip()
+        sentinel = str(sentinel_commit_sha or "").lower().strip()
+        if deployed != sentinel:
+            blockers.append("sentinel_deployed_commit_match")
+        blockers_tuple = tuple(blockers)
+        return CutoverPreflightDecisionPackage(
+            binding=binding,
+            canary_plan=canary_plan,
+            rollback=rollback,
+            rollback_receipt=rollback_receipt,
+            readiness=readiness,
+            deployed_commit_sha=deployed,
+            sentinel_commit_sha=sentinel,
+            splendid_deployment_settled=splendid_deployment_settled,
+            state="blocked" if blockers_tuple else "review_required",
+            blockers=blockers_tuple,
+        )
+
+    @classmethod
     def descriptor(cls) -> Mapping[str, Any]:
         return MappingProxyType(
             {
@@ -897,6 +1111,8 @@ class CanaryReadinessPlanner:
                 "single_revision_snapshot_binding_required": True,
                 "cutover_review_required": True,
                 "rollback_readiness_required": True,
+                "immutable_cutover_preflight_required": True,
+                "deployed_commit_binding_required": True,
                 "cutover_review_completed": False,
                 "activation_performed": False,
                 "version": VERSION,
