@@ -372,7 +372,7 @@ jobs:
         id: snapshot
         run: |
           complete=false
-          for attempt in 1 2 3 4; do
+          for attempt in 1 2 3 4 5 6 7 8; do
             python runtime_research_snapshot.py \
               --base-url https://web-production-e1796.up.railway.app \
               --retries 2 \
@@ -407,8 +407,8 @@ jobs:
               complete=true
               break
             fi
-            if [ "$attempt" -lt 4 ]; then
-              sleep 30
+            if [ "$attempt" -lt 8 ]; then
+              sleep 45
             fi
           done
           if [ "${{ github.event_name }}" = "push" ] && [ "$complete" != "true" ]; then
