@@ -2098,3 +2098,65 @@ called. Rollback for PR #269 is code-only. Issue #202 remains frozen and Issue
 #84 remains primary. Next, produce a current settled read-only bundle artifact
 through CI and define the separately reviewed decision record, while retaining
 all blockers and prohibiting writer activation until that review is explicit.
+
+
+## 2026-09-21 Issue #84 — settled CI preflight artifact — COMPLETE
+
+PR #271 implemented the next bounded Stage F evidence step. A new offline
+builder consumes one authoritative read-only runtime snapshot, requires complete
+12/12 endpoint classification, exact deployed/sentinel commit parity, a quiet
+zero-incident sentinel, and settled Splendid status, then writes a canonical
+digest-bound evidence bundle plus a separately digest-bound decision-review
+record. Its only StateStore writes are inside a temporary sandbox used for the
+typed rollback drill. The emitted decision is fixed at `pending_review`; it
+cannot activate a writer or claim production, risk, order, live, or ML
+authority. Forward-session, Stage B-E CI, repository, architecture-debt, and
+refactor/startup evidence claims remain deliberately false in this runtime-only
+artifact, so the current hold/halt continue to block cutover.
+
+The first automatic post-merge capture demonstrated two fail-closed integration
+defects without changing production state. Its four-attempt window ended at
+2/12 endpoints while deferred startup was still loading at 137.8 seconds. A
+safe read-only rerun then reached complete exact-head runtime evidence but the
+bundle builder rejected `status_cash_provenance`: the authoritative paper status
+preserved exact-precision cash while the v5 adapter required cent-rounded cash.
+No artifact or approval was manufactured from either rejected run.
+
+PR #272 corrected both bounded defects. Capture now permits eight finite
+attempts separated by 45 seconds and has a regression that rejects an unbounded
+loop. The v5 adapter accepts exact or cent-serialized cash/equity only within
+the existing $0.005 serialization tolerance and rejects a $0.01 drift. PR #271
+exact head `4b32b3b9315c1745fb47ce830ddcadf617ef5c5a` and PR #272 exact head
+`58c75dddfe4aeed67d6b1cbfa56d0c54e8f878f0` each passed all five applicable
+exact-head workflows: Stage F, repository safety, architecture debt, the full
+refactor/ownership/runtime/startup audit, and mandatory Change Safety including
+exact Gunicorn smoke. They squash-merged as
+`f28cdf19635f04f54b58a131de0f553a971a8230` and
+`e54775074a657f1c6ad3c0c6c2aad89799ca9a7e`, respectively.
+
+The settled post-merge run for `e54775074a657f1c6ad3c0c6c2aad89799ca9a7e`
+passed all five workflows, Splendid, and the new `research-snapshot` status. The
+bounded collector observed three 2/12 loading captures before reaching 12/12 at
+14:27 CDT. Sentinel proved the exact commit with no collection error. Accounting
+remained `ok`; the canonical ledger remained chain-valid at 88 immutable rows
+with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`;
+market data and runner remained `pass`; and the retained validation hold and
+risk halt remained true. The CI artifact was uploaded as ID `10659896468`
+(archive SHA-256
+`f967e1e97fe27806bc4f071cc29c0ad035c77fdd1636ef204fe615eefb6436b2`).
+The bundle digest is
+`a1f24a6ccc09dab9f918426f3c07878a763166121a16c15395bcea88ab30674e`;
+the decision digest is
+`4f1d8d05ff1015a11e6b69867c8459aea89311df72327de9f6646b4b5dc31d97`.
+The decision correctly remains `blocked` by future-canary evidence, validation
+hold release, and governed halt release.
+
+No canonical/accounting/state/history/day-peak/recovery evidence was rewritten
+or cleared; `/paper/run` was not called; no research job was launched; no
+strategy, sizing, threshold, hard-risk, order, live, or AI authority changed.
+Rollback is code-only and the generated evidence is immutable CI output. Issue
+#202 remains frozen. Issue #84 remains primary; next, independently review the
+digest-bound pending decision and continue single-owner cutover/rollback design
+without registering a production writer until the reviewed decision and all
+retained gates explicitly pass.
