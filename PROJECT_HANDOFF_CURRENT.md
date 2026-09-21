@@ -1987,3 +1987,57 @@ immutable, read-only cutover preflight decision package bound to the exact
 StateStore projection, typed rollback receipt, deployed commit, and retained
 hold/halt, while continuing to prohibit production writer registration or
 activation absent a separately reviewed cutover decision.
+
+
+## 2026-09-21 Issue #84 — immutable cutover preflight package — COMPLETE
+
+PR #267 adds a frozen, deterministic, read-only cutover-preflight decision
+package to Stage F. The package binds one verified runtime projection, the exact
+typed Stage D rollback receipt and its complete archive/canary/restore/backup
+lineage, the ledger and payload digests, accounting epoch, evidence source and
+capture time, requested canary fraction, exact deployed and sentinel commit
+SHAs, settled Splendid status, and the retained validation hold/risk halt into
+one SHA-256-addressed artifact. It recomputes readiness and rollback evidence
+instead of trusting caller claims, rejects malformed commit provenance and
+package-digest tampering, and adds explicit fail-closed blockers for an
+unsettled deployment or deployed/sentinel commit drift.
+
+Focused validation passed 42 Stage F regressions and 91 combined Stage B-F plus
+successor-compatibility regressions. Compilation, repository validation,
+structural/refactor audit, architecture ownership, typed configuration,
+architecture-debt comparison, and exact-diff checks all passed with zero new
+findings. The exact PR head
+`961608263654fe08cf942a1443db1506ef83be25` passed all five applicable
+exact-head workflows: Stage F, repository safety, architecture debt, the full
+refactor/ownership/runtime/startup/research audit, and mandatory Change Safety
+with exact Gunicorn smoke. Exact-diff inspection was limited to the Stage F
+planner, contract, and focused regressions. PR #267 squash-merged as
+`2eeb3d60101f7299853925700972a5525f0ae7d9`; every post-merge gate and
+the authoritative Splendid deployment passed.
+
+The first automatic post-merge runtime snapshot reached only 2/12 endpoints
+during worker registration and was rejected as incomplete. A safe read-only
+rerun after deployment settled reached 12/12 and proved the exact deployed
+commit `2eeb3d60101f7299853925700972a5525f0ae7d9`. Sentinel remains
+`pass/quiet` with zero incidents and collection errors. The canonical ledger
+remains chain-valid at 88 immutable rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`;
+accounting is `ok`, cash is `13429.13048559457`, equity is `13429.13`,
+and positions are empty. Day start/peak remain `13429.13048559457`; market
+data and runner pass. The parity halt and validation hold remain active, so
+self-check remains warn by design. Shadow capture remains parity-pass and
+forward-ineligible at 1,412 cycles and 36,210 candidates. V1 remains enabled
+with automatic backtesting disabled and 1,200 forward rows; V2, ablation, and
+regime remain disabled/not run.
+
+The preflight package grants no authority: cutover review, activation, rollback,
+runtime registration, production writes, risk mutation, and order authority all
+remain false. No canonical/accounting/state/history/day-peak/recovery evidence
+changed; no halt was cleared; no strategy, sizing, threshold, live, or AI
+authority changed; no research job was launched; and `/paper/run` was not
+called. Rollback for PR #267 is code-only. Issue #202 remains frozen and Issue
+#84 remains primary. Next, make the package reproducible from one immutable
+read-only CI evidence bundle and a separately reviewable cutover decision
+contract, while continuing to prohibit production writer registration or
+activation unless the retained hold/halt are governedly resolved and the
+separate cutover decision is explicitly reviewed.
