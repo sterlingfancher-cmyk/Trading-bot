@@ -27,12 +27,39 @@ from trading.state_store import CanonicalStateStore
 from trading.state_store import RollbackDrillReceipt
 from trading.valuation import MONEY_SERIALIZATION_TOLERANCE, ValuationSnapshot
 
-VERSION = "stable-paper-core-v3-stage-f-cutover-preflight-2026-09-21-v4"
+VERSION = "stable-paper-core-v3-stage-f-cutover-evidence-bundle-2026-09-21-v5"
 AUTHORITY = "shadow_only"
 MAX_CANARY_FRACTION = 0.05
 AUTHORITATIVE_RUNTIME_URL = "https://web-production-e1796.up.railway.app"
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 _GIT_SHA_PATTERN = r"^[0-9a-f]{40}$"
+_PREFLIGHT_BUNDLE_KEYS = {
+    "authority",
+    "version",
+    "daily_audit",
+    "paper_status",
+    "fresh_day",
+    "ledger_sha256",
+    "revision",
+    "captured_at",
+    "source_url",
+    "canary_evidence",
+    "requested_fraction",
+    "rollback_receipt",
+    "deployed_commit_sha",
+    "sentinel_commit_sha",
+    "splendid_deployment_settled",
+}
+_PREFLIGHT_BUNDLE_EXPORT_KEYS = {
+    "authority",
+    "version",
+    "bundle_sha256",
+    "evidence",
+    "runtime_registration",
+    "production_state_writes",
+    "risk_mutation_authority",
+    "order_authority",
+}
 
 
 class CanaryInvariantError(ValueError):
@@ -714,6 +741,324 @@ class CutoverPreflightDecisionPackage:
         )
 
 
+def _rollback_receipt_payload(receipt: RollbackDrillReceipt) -> Mapping[str, Any]:
+    return {
+        "baseline_revision": receipt.baseline_revision,
+        "canary_revision": receipt.canary_revision,
+        "restored_revision": receipt.restored_revision,
+        "baseline_payload_sha256": receipt.baseline_payload_sha256,
+        "canary_payload_sha256": receipt.canary_payload_sha256,
+        "restored_payload_sha256": receipt.restored_payload_sha256,
+        "archived_baseline_revision": receipt.archived_baseline_revision,
+        "archived_baseline_payload_sha256": (
+            receipt.archived_baseline_payload_sha256
+        ),
+        "backup_canary_revision": receipt.backup_canary_revision,
+        "backup_canary_payload_sha256": receipt.backup_canary_payload_sha256,
+        "archive_immutable": receipt.archive_immutable,
+        "restart_parity_passed": receipt.restart_parity_passed,
+        "single_writer_exclusivity_passed": (
+            receipt.single_writer_exclusivity_passed
+        ),
+        "runtime_registration": receipt.runtime_registration,
+        "production_state_writes": receipt.production_state_writes,
+        "authority": receipt.authority,
+        "version": receipt.version,
+    }
+
+
+def _require_typed_canary_evidence(evidence: CanaryEvidence) -> None:
+    if not isinstance(evidence, CanaryEvidence):
+        raise CanaryInvariantError("bundle requires typed canary evidence")
+    if any(
+        not isinstance(getattr(evidence, name), bool)
+        for name in evidence.__dataclass_fields__
+    ):
+        raise CanaryInvariantError("bundle canary evidence must use exact booleans")
+
+
+@dataclass(frozen=True)
+class CutoverPreflightEvidenceBundle:
+    """One immutable CI input that deterministically rebuilds a preflight."""
+
+    evidence_json: str
+    bundle_sha256: str
+    runtime_registration: bool = False
+    production_state_writes: bool = False
+    risk_mutation_authority: bool = False
+    order_authority: bool = False
+    authority: str = AUTHORITY
+    version: str = VERSION
+
+    def __post_init__(self) -> None:
+        if self.authority != AUTHORITY or self.version != VERSION or any(
+            (
+                self.runtime_registration,
+                self.production_state_writes,
+                self.risk_mutation_authority,
+                self.order_authority,
+            )
+        ):
+            raise CanaryInvariantError("preflight evidence bundle must be read-only")
+        try:
+            payload = json.loads(self.evidence_json)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise CanaryInvariantError("preflight evidence bundle must be valid JSON") from exc
+        try:
+            canonical = json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exc:
+            raise CanaryInvariantError("preflight evidence bundle is not canonical JSON") from exc
+        if canonical != self.evidence_json:
+            raise CanaryInvariantError("preflight evidence bundle must be canonical JSON")
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        if str(self.bundle_sha256 or "").lower().strip() != digest:
+            raise CanaryInvariantError("preflight evidence bundle digest mismatch")
+        if payload.get("authority") != AUTHORITY or payload.get("version") != VERSION:
+            raise CanaryInvariantError("preflight evidence bundle contract mismatch")
+        if set(payload) != _PREFLIGHT_BUNDLE_KEYS:
+            raise CanaryInvariantError("preflight evidence bundle schema mismatch")
+        self.reproduce_preflight()
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        daily_audit: Mapping[str, Any],
+        paper_status: Mapping[str, Any],
+        fresh_day: Mapping[str, Any],
+        ledger_sha256: str,
+        revision: int,
+        captured_at: str,
+        source_url: str,
+        canary_evidence: CanaryEvidence,
+        requested_fraction: float,
+        rollback_receipt: RollbackDrillReceipt,
+        deployed_commit_sha: str,
+        sentinel_commit_sha: str,
+        splendid_deployment_settled: bool,
+    ) -> "CutoverPreflightEvidenceBundle":
+        _require_typed_canary_evidence(canary_evidence)
+        if not isinstance(rollback_receipt, RollbackDrillReceipt):
+            raise CanaryInvariantError("bundle requires typed rollback receipt")
+        payload = {
+            "authority": AUTHORITY,
+            "version": VERSION,
+            "daily_audit": daily_audit,
+            "paper_status": paper_status,
+            "fresh_day": fresh_day,
+            "ledger_sha256": ledger_sha256,
+            "revision": revision,
+            "captured_at": captured_at,
+            "source_url": source_url,
+            "canary_evidence": {
+                name: getattr(canary_evidence, name)
+                for name in canary_evidence.__dataclass_fields__
+            },
+            "requested_fraction": requested_fraction,
+            "rollback_receipt": _rollback_receipt_payload(rollback_receipt),
+            "deployed_commit_sha": deployed_commit_sha,
+            "sentinel_commit_sha": sentinel_commit_sha,
+            "splendid_deployment_settled": splendid_deployment_settled,
+        }
+        try:
+            canonical = json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exc:
+            raise CanaryInvariantError("bundle evidence must be JSON serializable") from exc
+        return cls(
+            evidence_json=canonical,
+            bundle_sha256=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        )
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "CutoverPreflightEvidenceBundle":
+        row = _evidence_mapping(value, name="preflight_evidence_bundle")
+        if set(row) != _PREFLIGHT_BUNDLE_EXPORT_KEYS:
+            raise CanaryInvariantError("preflight evidence bundle export schema mismatch")
+        if any(
+            not isinstance(row.get(name), bool)
+            for name in (
+                "runtime_registration",
+                "production_state_writes",
+                "risk_mutation_authority",
+                "order_authority",
+            )
+        ):
+            raise CanaryInvariantError("preflight evidence authority flags must be booleans")
+        try:
+            evidence_json = json.dumps(
+                row["evidence"],
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CanaryInvariantError("preflight evidence export is not canonical JSON") from exc
+        return cls(
+            evidence_json=evidence_json,
+            bundle_sha256=row["bundle_sha256"],
+            runtime_registration=row["runtime_registration"],
+            production_state_writes=row["production_state_writes"],
+            risk_mutation_authority=row["risk_mutation_authority"],
+            order_authority=row["order_authority"],
+            authority=row["authority"],
+            version=row["version"],
+        )
+
+    def reproduce_preflight(self) -> CutoverPreflightDecisionPackage:
+        """Recompute every typed proof from the single canonical bundle."""
+        payload = json.loads(self.evidence_json)
+        try:
+            canary_evidence = CanaryEvidence(**payload["canary_evidence"])
+            _require_typed_canary_evidence(canary_evidence)
+            rollback_receipt = RollbackDrillReceipt(**payload["rollback_receipt"])
+            binding = CanaryReadinessPlanner.bind_verified_flat_v5_runtime_evidence(
+                daily_audit=payload["daily_audit"],
+                paper_status=payload["paper_status"],
+                fresh_day=payload["fresh_day"],
+                ledger_sha256=payload["ledger_sha256"],
+                revision=payload["revision"],
+                captured_at=payload["captured_at"],
+                source_url=payload["source_url"],
+            )
+            plan = CanaryReadinessPlanner.plan(
+                evidence=canary_evidence,
+                requested_fraction=payload["requested_fraction"],
+            )
+            return CanaryReadinessPlanner.build_cutover_preflight_package(
+                binding=binding,
+                canary_plan=plan,
+                rollback_receipt=rollback_receipt,
+                deployed_commit_sha=payload["deployed_commit_sha"],
+                sentinel_commit_sha=payload["sentinel_commit_sha"],
+                splendid_deployment_settled=payload["splendid_deployment_settled"],
+            )
+        except (KeyError, TypeError) as exc:
+            raise CanaryInvariantError("preflight evidence bundle schema mismatch") from exc
+
+    def to_dict(self) -> Mapping[str, Any]:
+        return MappingProxyType(
+            {
+                "authority": self.authority,
+                "version": self.version,
+                "bundle_sha256": self.bundle_sha256,
+                "evidence": json.loads(self.evidence_json),
+                "runtime_registration": self.runtime_registration,
+                "production_state_writes": self.production_state_writes,
+                "risk_mutation_authority": self.risk_mutation_authority,
+                "order_authority": self.order_authority,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class CutoverDecisionReviewContract:
+    """Digest-bound handoff for a future independent cutover review."""
+
+    evidence_bundle: CutoverPreflightEvidenceBundle
+    preflight: CutoverPreflightDecisionPackage
+    state: str
+    blockers: Tuple[str, ...]
+    decision_sha256: str = ""
+    review_status: str = "pending_review"
+    cutover_review_completed: bool = False
+    activation_performed: bool = False
+    runtime_registration: bool = False
+    production_state_writes: bool = False
+    risk_mutation_authority: bool = False
+    order_authority: bool = False
+    live_authority: bool = False
+    ml_execution_authority: bool = False
+    authority: str = AUTHORITY
+    version: str = VERSION
+
+    @classmethod
+    def from_evidence_bundle(
+        cls, bundle: CutoverPreflightEvidenceBundle
+    ) -> "CutoverDecisionReviewContract":
+        if not isinstance(bundle, CutoverPreflightEvidenceBundle):
+            raise CanaryInvariantError("decision contract requires typed evidence bundle")
+        preflight = bundle.reproduce_preflight()
+        return cls(
+            evidence_bundle=bundle,
+            preflight=preflight,
+            state=preflight.state,
+            blockers=preflight.blockers,
+        )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.evidence_bundle, CutoverPreflightEvidenceBundle):
+            raise CanaryInvariantError("decision contract requires typed evidence bundle")
+        if not isinstance(self.preflight, CutoverPreflightDecisionPackage):
+            raise CanaryInvariantError("decision contract requires typed preflight")
+        reproduced = self.evidence_bundle.reproduce_preflight()
+        if (
+            reproduced.package_sha256 != self.preflight.package_sha256
+            or dict(reproduced.to_dict()) != dict(self.preflight.to_dict())
+        ):
+            raise CanaryInvariantError("decision contract evidence/package mismatch")
+        blockers = tuple(self.blockers)
+        if self.state != self.preflight.state or blockers != self.preflight.blockers:
+            raise CanaryInvariantError("decision contract state must match preflight")
+        if self.review_status != "pending_review" or self.cutover_review_completed:
+            raise CanaryInvariantError("decision contract cannot self-approve review")
+        if self.authority != AUTHORITY or self.version != VERSION or any(
+            (
+                self.activation_performed,
+                self.runtime_registration,
+                self.production_state_writes,
+                self.risk_mutation_authority,
+                self.order_authority,
+                self.live_authority,
+                self.ml_execution_authority,
+            )
+        ):
+            raise CanaryInvariantError("decision contract cannot hold runtime authority")
+        object.__setattr__(self, "blockers", blockers)
+        digest = hashlib.sha256(
+            json.dumps(
+                self._digest_payload(), sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()
+        supplied = str(self.decision_sha256 or "").lower().strip()
+        if supplied and supplied != digest:
+            raise CanaryInvariantError("decision contract digest mismatch")
+        object.__setattr__(self, "decision_sha256", digest)
+
+    def _digest_payload(self) -> Mapping[str, Any]:
+        return {
+            "authority": self.authority,
+            "version": self.version,
+            "evidence_bundle_sha256": self.evidence_bundle.bundle_sha256,
+            "preflight_package_sha256": self.preflight.package_sha256,
+            "state": self.state,
+            "blockers": self.blockers,
+            "review_status": self.review_status,
+            "cutover_review_completed": self.cutover_review_completed,
+            "activation_performed": self.activation_performed,
+            "runtime_registration": self.runtime_registration,
+            "production_state_writes": self.production_state_writes,
+            "risk_mutation_authority": self.risk_mutation_authority,
+            "order_authority": self.order_authority,
+            "live_authority": self.live_authority,
+            "ml_execution_authority": self.ml_execution_authority,
+        }
+
+    def to_dict(self) -> Mapping[str, Any]:
+        return MappingProxyType(
+            {**self._digest_payload(), "decision_sha256": self.decision_sha256}
+        )
+
+
 @dataclass(frozen=True)
 class RollbackTriggerAssessment:
     rollback_required: bool
@@ -1112,6 +1457,10 @@ class CanaryReadinessPlanner:
                 "cutover_review_required": True,
                 "rollback_readiness_required": True,
                 "immutable_cutover_preflight_required": True,
+                "single_immutable_ci_evidence_bundle_required": True,
+                "deterministic_preflight_reproduction_required": True,
+                "digest_bound_separate_decision_contract_required": True,
+                "decision_contract_self_approval_forbidden": True,
                 "deployed_commit_binding_required": True,
                 "cutover_review_completed": False,
                 "activation_performed": False,

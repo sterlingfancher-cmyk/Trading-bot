@@ -1,5 +1,5 @@
 {
-  "version": "stable-paper-core-v3-stage-f-cutover-preflight-2026-09-21-v4",
+  "version": "stable-paper-core-v3-stage-f-cutover-evidence-bundle-2026-09-21-v5",
   "stage": "F",
   "authority": "shadow_only",
   "target_interface": "trading.canary.CanaryReadinessPlanner",
@@ -25,6 +25,10 @@
     "immutable_cutover_preflight_package_required": true,
     "exact_deployed_commit_binding_required": true,
     "settled_authoritative_deployment_required": true,
+    "single_immutable_ci_evidence_bundle_required": true,
+    "deterministic_preflight_reproduction_required": true,
+    "digest_bound_separate_decision_contract_required": true,
+    "decision_contract_self_approval_forbidden": true,
     "readiness_cannot_activate_or_rollback": true,
     "live_authority": false,
     "ml_execution_authority": false

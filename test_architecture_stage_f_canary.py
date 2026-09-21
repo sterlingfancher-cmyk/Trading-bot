@@ -17,6 +17,8 @@ from trading.canary import (
     CanaryEvidence,
     CanaryInvariantError,
     CanaryReadinessPlanner,
+    CutoverDecisionReviewContract,
+    CutoverPreflightEvidenceBundle,
     CutoverPreflightDecisionPackage,
     RollbackReadinessEvidence,
 )
@@ -78,6 +80,12 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         )
         self.assertTrue(constraints["exact_deployed_commit_binding_required"])
         self.assertTrue(constraints["settled_authoritative_deployment_required"])
+        self.assertTrue(constraints["single_immutable_ci_evidence_bundle_required"])
+        self.assertTrue(constraints["deterministic_preflight_reproduction_required"])
+        self.assertTrue(
+            constraints["digest_bound_separate_decision_contract_required"]
+        )
+        self.assertTrue(constraints["decision_contract_self_approval_forbidden"])
         self.assertTrue(constraints["readiness_cannot_activate_or_rollback"])
 
     def test_current_issue_82_missing_proof_blocks_canary(self) -> None:
@@ -557,6 +565,125 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
                 splendid_deployment_settled="true",
             )
 
+    def _preflight_evidence_bundle(self):
+        audit, status, day = self._v5_runtime_evidence()
+        binding = self._v5_binding()
+        return CutoverPreflightEvidenceBundle.build(
+            daily_audit=audit,
+            paper_status=status,
+            fresh_day=day,
+            ledger_sha256="a" * 64,
+            revision=10,
+            captured_at="2026-09-16 09:02:35 CDT",
+            source_url="https://web-production-e1796.up.railway.app",
+            canary_evidence=self._all_green(),
+            requested_fraction=0.01,
+            rollback_receipt=self._rollback_receipt(binding),
+            deployed_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+            sentinel_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+            splendid_deployment_settled=True,
+        )
+
+    def test_one_immutable_ci_bundle_reproduces_exact_preflight(self) -> None:
+        bundle = self._preflight_evidence_bundle()
+        first = bundle.reproduce_preflight()
+        second = bundle.reproduce_preflight()
+        restored = CutoverPreflightEvidenceBundle.from_dict(bundle.to_dict())
+
+        self.assertEqual(first.package_sha256, second.package_sha256)
+        self.assertEqual(dict(first.to_dict()), dict(second.to_dict()))
+        self.assertEqual(restored.bundle_sha256, bundle.bundle_sha256)
+        self.assertEqual(
+            restored.reproduce_preflight().package_sha256,
+            first.package_sha256,
+        )
+        self.assertEqual(len(bundle.bundle_sha256), 64)
+        self.assertEqual(
+            bundle.to_dict()["evidence"]["deployed_commit_sha"],
+            "a31896b223d5e026ab8751897910c8807ee4f621",
+        )
+        self.assertEqual(first.state, "blocked")
+        self.assertFalse(bundle.runtime_registration)
+        self.assertFalse(bundle.production_state_writes)
+
+    def test_preflight_bundle_rejects_tamper_and_cross_bundle_decision(self) -> None:
+        bundle = self._preflight_evidence_bundle()
+        with self.assertRaises(CanaryInvariantError):
+            replace(bundle, bundle_sha256="b" * 64)
+        with self.assertRaises(CanaryInvariantError):
+            replace(bundle, evidence_json=bundle.evidence_json + " ")
+        with self.assertRaises(CanaryInvariantError):
+            CutoverPreflightEvidenceBundle.from_dict(
+                {**dict(bundle.to_dict()), "unexpected": True}
+            )
+        invalid_evidence = replace(
+            self._all_green(), repository_validation_green="true"
+        )
+        audit, status, day = self._v5_runtime_evidence()
+        with self.assertRaises(CanaryInvariantError):
+            CutoverPreflightEvidenceBundle.build(
+                daily_audit=audit,
+                paper_status=status,
+                fresh_day=day,
+                ledger_sha256="a" * 64,
+                revision=10,
+                captured_at="2026-09-16 09:02:35 CDT",
+                source_url="https://web-production-e1796.up.railway.app",
+                canary_evidence=invalid_evidence,
+                requested_fraction=0.01,
+                rollback_receipt=self._rollback_receipt(self._v5_binding()),
+                deployed_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+                sentinel_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+                splendid_deployment_settled=True,
+            )
+
+        preflight = bundle.reproduce_preflight()
+        changed = CutoverPreflightEvidenceBundle.build(
+            daily_audit=audit,
+            paper_status=status,
+            fresh_day=day,
+            ledger_sha256="a" * 64,
+            revision=10,
+            captured_at="2026-09-16 09:03:35 CDT",
+            source_url="https://web-production-e1796.up.railway.app",
+            canary_evidence=self._all_green(),
+            requested_fraction=0.01,
+            rollback_receipt=self._rollback_receipt(self._v5_binding()),
+            deployed_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+            sentinel_commit_sha="a31896b223d5e026ab8751897910c8807ee4f621",
+            splendid_deployment_settled=True,
+        )
+        with self.assertRaises(CanaryInvariantError):
+            CutoverDecisionReviewContract(
+                evidence_bundle=changed,
+                preflight=preflight,
+                state=preflight.state,
+                blockers=preflight.blockers,
+            )
+
+    def test_separate_decision_contract_is_digest_bound_and_pending(self) -> None:
+        bundle = self._preflight_evidence_bundle()
+        preflight = bundle.reproduce_preflight()
+        decision = CutoverDecisionReviewContract.from_evidence_bundle(bundle)
+
+        self.assertEqual(decision.review_status, "pending_review")
+        self.assertFalse(decision.cutover_review_completed)
+        self.assertFalse(decision.activation_performed)
+        self.assertFalse(decision.runtime_registration)
+        self.assertFalse(decision.production_state_writes)
+        self.assertEqual(
+            decision.to_dict()["evidence_bundle_sha256"], bundle.bundle_sha256
+        )
+        self.assertEqual(
+            decision.to_dict()["preflight_package_sha256"],
+            preflight.package_sha256,
+        )
+        self.assertEqual(len(decision.decision_sha256), 64)
+        with self.assertRaises(CanaryInvariantError):
+            replace(decision, cutover_review_completed=True)
+        with self.assertRaises(CanaryInvariantError):
+            replace(decision, decision_sha256="c" * 64)
+
     def test_stage_f_rejects_untyped_rollback_claim(self) -> None:
         with self.assertRaises(CanaryInvariantError):
             RollbackReadinessEvidence.from_drill_receipt(
@@ -628,6 +755,12 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         self.assertTrue(descriptor["cutover_review_required"])
         self.assertTrue(descriptor["rollback_readiness_required"])
         self.assertTrue(descriptor["immutable_cutover_preflight_required"])
+        self.assertTrue(descriptor["single_immutable_ci_evidence_bundle_required"])
+        self.assertTrue(descriptor["deterministic_preflight_reproduction_required"])
+        self.assertTrue(
+            descriptor["digest_bound_separate_decision_contract_required"]
+        )
+        self.assertTrue(descriptor["decision_contract_self_approval_forbidden"])
         self.assertTrue(descriptor["deployed_commit_binding_required"])
         self.assertFalse(descriptor["cutover_review_completed"])
         self.assertFalse(descriptor["activation_performed"])
