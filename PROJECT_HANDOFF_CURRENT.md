@@ -2160,3 +2160,34 @@ Rollback is code-only and the generated evidence is immutable CI output. Issue
 digest-bound pending decision and continue single-owner cutover/rollback design
 without registering a production writer until the reviewed decision and all
 retained gates explicitly pass.
+
+
+## 2026-09-21 Issue #84 — independent preflight artifact review — COMPLETE
+
+The immutable CI artifact from settled refactor workflow run `35644406677` was
+downloaded independently by artifact ID `10659896468`. Its ZIP SHA-256 exactly
+matched the recorded archive digest
+`f967e1e97fe27806bc4f071cc29c0ad035c77fdd1636ef204fe615eefb6436b2`.
+The archive contained only the read-only runtime JSON/Markdown capture, canonical
+cutover evidence bundle, and pending decision-review contract.
+
+The downloaded runtime capture was passed through the repository's current
+`build_cutover_preflight_artifact.py` in a new temporary sandbox. The regenerated
+bundle and decision files were byte-for-byte identical to the archived files.
+The independently reproduced bundle digest was
+`a1f24a6ccc09dab9f918426f3c07878a763166121a16c15395bcea88ab30674e`,
+the decision digest was
+`4f1d8d05ff1015a11e6b69867c8459aea89311df72327de9f6646b4b5dc31d97`,
+and the preflight remained `blocked` by exactly `future_canary_evidence`,
+`validation_hold_released`, and `risk_halt_released_by_governed_evidence`.
+The contract remained `pending_review` with every activation, production-write,
+risk-mutation, order, live, ML, and runtime-registration authority false.
+
+This review performed no production operation: the builder's only writes were
+inside its temporary rollback-drill sandbox. No canonical/accounting/state/
+history/day-peak/recovery evidence changed, no halt or validation hold was
+cleared, `/paper/run` was not called, and no research or performance job was
+launched. Issue #202 remains frozen. Issue #84 remains primary; the next safe
+step is continued cutover/rollback design and accumulation of the missing
+governed forward evidence, not writer activation or approval of this blocked
+decision.
