@@ -2034,7 +2034,7 @@ The preflight package grants no authority: cutover review, activation, rollback,
 runtime registration, production writes, risk mutation, and order authority all
 remain false. No canonical/accounting/state/history/day-peak/recovery evidence
 changed; no halt was cleared; no strategy, sizing, threshold, live, or AI
-authority changed; no research job was launched; and `/paper/run` was not
+authority changed; no performance/backtest job was launched; and `/paper/run` was not
 called. Rollback for PR #267 is code-only. Issue #202 remains frozen and Issue
 #84 remains primary. Next, make the package reproducible from one immutable
 read-only CI evidence bundle and a separately reviewable cutover decision
