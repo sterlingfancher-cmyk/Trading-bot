@@ -190,6 +190,15 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
                 )
                 self.assertNotIn(name, forbidden_calls)
 
+    def test_ci_capture_retry_is_bounded_for_slow_deferred_startup(self):
+        workflow = (ROOT / ".github" / "workflows" / "refactor-audit.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("for attempt in 1 2 3 4 5 6 7 8; do", workflow)
+        self.assertIn('if [ "$attempt" -lt 8 ]; then', workflow)
+        self.assertIn("sleep 45", workflow)
+        self.assertNotIn("while true", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
