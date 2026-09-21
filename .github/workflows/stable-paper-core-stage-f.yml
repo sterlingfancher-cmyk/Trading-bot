@@ -5,20 +5,24 @@ on:
     paths:
       - "trading/canary.py"
       - "trading/state_store.py"
+      - "build_cutover_preflight_artifact.py"
       - "stable_paper_core_v3_stage_d_contract.json"
       - "stable_paper_core_v3_stage_f_contract.json"
       - "test_architecture_stage_d_state_store.py"
       - "test_architecture_stage_f_canary.py"
+      - "test_issue84_cutover_preflight_artifact.py"
       - ".github/workflows/stable-paper-core-stage-f.yml"
   push:
     branches: [main]
     paths:
       - "trading/canary.py"
       - "trading/state_store.py"
+      - "build_cutover_preflight_artifact.py"
       - "stable_paper_core_v3_stage_d_contract.json"
       - "stable_paper_core_v3_stage_f_contract.json"
       - "test_architecture_stage_d_state_store.py"
       - "test_architecture_stage_f_canary.py"
+      - "test_issue84_cutover_preflight_artifact.py"
       - ".github/workflows/stable-paper-core-stage-f.yml"
   workflow_dispatch:
 
@@ -34,4 +38,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Run Stage F canary readiness regressions
-        run: python -m unittest -v test_architecture_stage_f_canary.py
+        run: |
+          python -m unittest -v \
+            test_architecture_stage_f_canary.py \
+            test_issue84_cutover_preflight_artifact.py

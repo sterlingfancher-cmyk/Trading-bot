@@ -321,7 +321,7 @@ jobs:
        github.event_name == 'workflow_dispatch' ||
        (github.event_name == 'schedule' && github.event.schedule == '15 23 * * 1-5'))
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       statuses: write
@@ -336,15 +336,96 @@ jobs:
         if: github.event_name == 'push'
         run: sleep 75
 
+      - name: Verify exact-head Splendid deployment acceptance
+        id: splendid
+        if: github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deadline = Date.now() + 240000;
+            while (Date.now() < deadline) {
+              const statuses = await github.paginate(
+                github.rest.repos.listCommitStatusesForRef,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: context.sha,
+                  per_page: 100,
+                },
+              );
+              const splendid = statuses.find(
+                (row) => row.context === 'splendid-creativity - web',
+              );
+              if (splendid?.state === 'success') {
+                core.info(`Settled Splendid acceptance for ${context.sha}`);
+                return;
+              }
+              if (['failure', 'error'].includes(splendid?.state)) {
+                core.setFailed(`Splendid deployment ${splendid.state}`);
+                return;
+              }
+              await new Promise((resolve) => setTimeout(resolve, 10000));
+            }
+            core.setFailed(`Timed out waiting for Splendid acceptance of ${context.sha}`);
+
       - name: Capture read-only Railway research state
         id: snapshot
         run: |
-          python runtime_research_snapshot.py \
-            --base-url https://web-production-e1796.up.railway.app \
-            --retries 2 \
-            --timeout 20 \
-            --json runtime_research_snapshot.json \
-            --markdown runtime_research_snapshot.md
+          complete=false
+          for attempt in 1 2 3 4; do
+            python runtime_research_snapshot.py \
+              --base-url https://web-production-e1796.up.railway.app \
+              --retries 2 \
+              --timeout 20 \
+              --json runtime_research_snapshot.json \
+              --markdown runtime_research_snapshot.md
+            if python - "$GITHUB_SHA" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path("runtime_research_snapshot.json").read_text())
+          connectivity = report.get("summary", {}).get("connectivity", {})
+          sentinel = (
+              report.get("raw", {})
+              .get("system_sentinel", {})
+              .get("payload", {})
+          )
+          complete = (
+              connectivity.get("reachable_count") == 12
+              and connectivity.get("total_count") == 12
+              and connectivity.get("classification_failed_endpoints") == []
+              and connectivity.get("application_ready") is True
+          )
+          if sys.argv[1]:
+              complete = complete and str(
+                  sentinel.get("generated_commit_sha") or ""
+              ).lower() == sys.argv[1].lower()
+          raise SystemExit(0 if complete else 1)
+          PY
+            then
+              complete=true
+              break
+            fi
+            if [ "$attempt" -lt 4 ]; then
+              sleep 30
+            fi
+          done
+          if [ "${{ github.event_name }}" = "push" ] && [ "$complete" != "true" ]; then
+            echo "Exact-head authoritative runtime did not settle completely"
+            exit 1
+          fi
+
+      - name: Build pending-only cutover preflight evidence
+        id: preflight
+        if: github.event_name == 'push'
+        run: |
+          python build_cutover_preflight_artifact.py \
+            --runtime-snapshot runtime_research_snapshot.json \
+            --deployed-commit "$GITHUB_SHA" \
+            --splendid-deployment-settled \
+            --bundle-output cutover_preflight_evidence_bundle.json \
+            --decision-output cutover_decision_review_contract.json
 
       - name: Read runtime snapshot summary
         id: runtime_summary
@@ -375,6 +456,8 @@ jobs:
           path: |
             runtime_research_snapshot.json
             runtime_research_snapshot.md
+            cutover_preflight_evidence_bundle.json
+            cutover_decision_review_contract.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -384,6 +467,7 @@ jobs:
         with:
           script: |
             const captured = '${{ steps.snapshot.outcome }}' === 'success';
+            const preflight = '${{ steps.preflight.outcome }}' === 'success';
             const state = '${{ steps.runtime_summary.outputs.snapshot_status }}';
             const selfCheck = '${{ steps.runtime_summary.outputs.self_check }}';
             const reachable = '${{ steps.runtime_summary.outputs.reachable }}';
@@ -391,10 +475,10 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.sha,
-              state: captured ? 'success' : 'failure',
+              state: captured && preflight ? 'success' : 'failure',
               context: 'research-snapshot',
-              description: captured
-                ? `Runtime ${state}; self-check ${selfCheck}; reachable ${reachable}`
-                : 'Unable to capture Railway runtime state',
+              description: captured && preflight
+                ? `Runtime ${state}; self-check ${selfCheck}; reachable ${reachable}; preflight pending`
+                : 'Unable to capture exact-head runtime preflight evidence',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
