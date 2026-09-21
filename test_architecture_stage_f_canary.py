@@ -356,6 +356,37 @@ class StablePaperCoreStageFCanaryTests(unittest.TestCase):
         self.assertFalse(binding.production_state_writes)
         self.assertFalse(binding.order_authority)
 
+    def test_v5_status_money_accepts_exact_or_cent_serialization_only(self) -> None:
+        audit, status, day = self._v5_runtime_evidence()
+        exact_status = {
+            **status,
+            "cash": audit["account"]["cash"],
+            "equity": audit["account"]["equity"],
+        }
+        binding = CanaryReadinessPlanner.bind_verified_flat_v5_runtime_evidence(
+            daily_audit=audit,
+            paper_status=exact_status,
+            fresh_day=day,
+            ledger_sha256="a" * 64,
+            revision=10,
+            captured_at="2026-09-16 09:02:35 CDT",
+        )
+        self.assertTrue(binding.proof.verified)
+
+        drifted_status = {
+            **exact_status,
+            "cash": audit["account"]["cash"] + 0.01,
+        }
+        with self.assertRaises(CanaryInvariantError):
+            CanaryReadinessPlanner.bind_verified_flat_v5_runtime_evidence(
+                daily_audit=audit,
+                paper_status=drifted_status,
+                fresh_day=day,
+                ledger_sha256="a" * 64,
+                revision=10,
+                captured_at="2026-09-16 09:02:35 CDT",
+            )
+
     def test_v5_runtime_adapter_rejects_incomplete_or_drifting_provenance(self) -> None:
         audit, status, day = self._v5_runtime_evidence()
         cases = []

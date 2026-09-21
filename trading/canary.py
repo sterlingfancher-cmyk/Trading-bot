@@ -215,13 +215,16 @@ def _bind_v5_flat_portfolio(
         "flat_cash_equity_parity",
     )
     _require_evidence(
-        _evidence_float(status.get("cash"), name="paper_status.cash")
-        == round(cash, 2),
+        abs(_evidence_float(status.get("cash"), name="paper_status.cash") - cash)
+        <= MONEY_SERIALIZATION_TOLERANCE,
         "status_cash_provenance",
     )
     _require_evidence(
-        _evidence_float(status.get("equity"), name="paper_status.equity")
-        == round(equity, 2),
+        abs(
+            _evidence_float(status.get("equity"), name="paper_status.equity")
+            - equity
+        )
+        <= MONEY_SERIALIZATION_TOLERANCE,
         "status_equity_provenance",
     )
 
