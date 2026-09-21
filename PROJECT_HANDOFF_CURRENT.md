@@ -2041,3 +2041,60 @@ read-only CI evidence bundle and a separately reviewable cutover decision
 contract, while continuing to prohibit production writer registration or
 activation unless the retained hold/halt are governedly resolved and the
 separate cutover decision is explicitly reviewed.
+
+
+## 2026-09-21 Issue #84 — digest-bound preflight evidence bundle — COMPLETE
+
+PR #269 adds a canonical, SHA-256-addressed, read-only Stage F evidence bundle.
+The bundle carries the exact runtime audit/status/fresh-day inputs, ledger
+digest and revision, source and capture time, typed canary-gate evidence,
+requested fraction, complete typed Stage D rollback receipt, exact deployed and
+sentinel commits, and settled-deployment flag in one canonical JSON payload.
+Loading the exported bundle revalidates its exact schema and digest and
+recomputes the runtime binding, rollback readiness, canary plan, and complete
+preflight package. Non-canonical JSON, unexpected keys, non-boolean gate or
+authority claims, digest tampering, incomplete evidence, and cross-bundle
+package substitution fail closed.
+
+A separate decision-review contract binds the bundle and recomputed preflight
+digests and exact blocker state. It is fixed at `pending_review`, cannot
+self-approve, and cannot claim activation, runtime registration, production
+writes, risk mutation, order, live, or ML authority. The current retained v5
+validation hold and parity halt therefore continue to block cutover; this work
+does not constitute the separately reviewed decision and does not activate a
+writer.
+
+Focused validation passed 45 Stage F regressions and 94 combined Stage B-F plus
+successor-compatibility regressions. Compilation, repository validation,
+structural/refactor audit, architecture ownership, architecture-debt comparison,
+and exact-diff checks passed. The exact PR head
+`54163b4ddab5edc460b81274cf87eb4039e6d053` passed all five applicable
+exact-head workflows: Stage F, repository safety, architecture debt, the full
+refactor/ownership/runtime/startup/research audit, and mandatory Change Safety
+with exact Gunicorn smoke. PR #269 squash-merged as
+`b73e8891889f1210ab357984b2e563d96fbc4f6d`; all post-merge gates and the
+authoritative Splendid deployment passed.
+
+The automatic post-merge snapshot was rejected as incomplete at 2/12 endpoints
+while runtime workers were still registering. The safe read-only rerun after
+settlement reached 12/12 and proved deployed/sentinel commit
+`b73e8891889f1210ab357984b2e563d96fbc4f6d`. Sentinel is `pass/quiet` with zero
+incidents and collection errors. The canonical ledger remains chain-valid at 88
+immutable rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`;
+accounting is `ok`, cash is `13429.13048559457`, equity is `13429.13`, positions
+are empty, and day start/peak remain `13429.13048559457`. Market data and runner
+pass. Self-check is warn only for the retained halt; the daily audit/risk remain
+fail by design for that retained halt and validation hold. Shadow capture is
+parity-pass and forward-ineligible at 1,428 cycles and 36,609 candidates. V1
+retains 1,200 forward rows with automatic backtesting disabled; V2, ablation,
+and regime remain disabled/not run.
+
+No production StateStore writer was registered or activated; no canonical,
+accounting, state, history, day-peak, or recovery evidence changed; no halt or
+validation hold was cleared; no strategy, sizing, threshold, risk, order, live,
+or AI authority changed; no research job was launched; and `/paper/run` was not
+called. Rollback for PR #269 is code-only. Issue #202 remains frozen and Issue
+#84 remains primary. Next, produce a current settled read-only bundle artifact
+through CI and define the separately reviewed decision record, while retaining
+all blockers and prohibiting writer activation until that review is explicit.
