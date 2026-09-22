@@ -2191,3 +2191,36 @@ launched. Issue #202 remains frozen. Issue #84 remains primary; the next safe
 step is continued cutover/rollback design and accumulation of the missing
 governed forward evidence, not writer activation or approval of this blocked
 decision.
+
+
+## 2026-09-22 Issue #84 — independent review settled acceptance — COMPLETE
+
+PR #274 recorded the independent archive verification and byte-for-byte artifact
+regeneration. Its exact head `a8a223a33803d70daa98f5b52cccb26009924ce8`
+passed Change Safety, then squash-merged as
+`922739fc3c856616541e617d27430f5a9c242848`. Post-merge Change Safety and
+authoritative Splendid deployment settled green.
+
+The first read-only post-deploy capture correctly remained incomplete at 2/12
+endpoints while deferred startup was still registering. A later safe read-only
+capture reached 12/12 at 08:09 CDT and proved the exact merged commit. Sentinel
+was `pass/quiet` with zero incidents or collection errors. Accounting remained
+`ok`; the canonical ledger remained chain-valid and projection-parity true at
+88 immutable rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`.
+Cash was `13429.13048559457`, equity was `13429.13`, positions and recent
+trades were empty, and realized/unrealized P&L for the day were both zero.
+Fresh-day baselines passed at the same exact cash/equity value. Market data and
+runner passed with no active error. Shadow capture remained parity-pass and
+forward-ineligible at 1,476 cycles and 37,692 candidates. V1 remained enabled
+with automatic backtesting disabled and 1,200 forward rows; V2, ablation, and
+regime remained disabled/not run.
+
+The retained canonical-divergence halt and validation hold remain active, so
+self-check is warn and the daily risk/audit outcome remains fail by design.
+No halt or hold was cleared; no canonical/accounting/state/history/day-peak/
+recovery evidence changed; `/paper/run` was not called; no research or
+performance job was launched; and no production writer, order, live, or AI
+authority was activated. Issue #202 remains frozen. Issue #84 remains primary;
+continue the governed forward-evidence and cutover/rollback design work without
+approving or activating the still-blocked decision.
