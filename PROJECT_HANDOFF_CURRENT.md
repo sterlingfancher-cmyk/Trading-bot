@@ -2224,3 +2224,12 @@ performance job was launched; and no production writer, order, live, or AI
 authority was activated. Issue #202 remains frozen. Issue #84 remains primary;
 continue the governed forward-evidence and cutover/rollback design work without
 approving or activating the still-blocked decision.
+
+
+## 2026-09-25 Issue #84 — governed v5 paper restart implementation — IN PROGRESS
+
+User-directed restart implementation resumed from current main `d5c33f0021875e9f9a0d9cfa34ee8c3d9dd8c483`. Focused branch `issue84-governed-v5-paper-restart` and PR #276 implement the missing v5 hold/halt transition rather than collecting more unchanged readiness evidence. Exact PR head at this handoff update: `3fddafd96ea8fd5fed14776826c7e37232c9324b`.
+
+The new transition is paper-only and fail-closed. It can first release only while the Issue #222 v5 successor remains the exact verified-flat zero-trade baseline: immutable canonical ledger chain valid and authoritative at 88 total rows, zero v5 rows, exact state projection parity, clean flat accounting reconstruction, archived prior discrepancy still unresolved/non-promotable with zero fabricated exits, and the only active halt equal to the retained canonical execution/state projection divergence halt. The transition releases only the v5 validation hold and that exact inherited administrative halt; forward validation remains required. Strategy, thresholds, sizing, hard-risk limits, canonical/history/day-peak evidence, live authority, ML authority, and order authority are unchanged.
+
+Focused regressions cover bounded release, unrelated-halt rejection, post-execution rejection, projection-parity rejection, persistence-failure rollback, and idempotent restart. Full diff inspection found only the new transition, focused tests, and startup ordering/version wiring. At 16:30 CDT GitHub had not yet produced exact-head workflow runs/statuses for PR #276, so mandatory exact-head Change Safety/Gunicorn/stage validation is not yet evidenced and the PR remains unmerged. No runtime activation, `/paper/run`, state mutation, halt/hold clearing, or research job occurred in this run. Resume by obtaining all mandatory exact-head gates for PR #276, repairing any failure on the same branch, merging only when exact-head green, then performing settled authoritative Splendid acceptance and controlled paper restart verification.
