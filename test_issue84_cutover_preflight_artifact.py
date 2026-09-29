@@ -113,6 +113,84 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
         ):
             self.assertFalse(canary_evidence[blocker])
 
+    def _released_snapshot(self):
+        snapshot = self._snapshot()
+        audit = snapshot["raw"]["daily_audit"]["payload"]
+        audit["overall"] = "pass"
+        audit["generated_local"] = "2026-09-29 08:21:34 CDT"
+        audit["accounting_epoch"].update(
+            {
+                "validation_hold": False,
+                "validation_released": True,
+            }
+        )
+        audit["execution_ledger"]["ledger_sha256"] = (
+            "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
+        )
+        audit["risk"].update({"halted": False, "halt_reason": None})
+        snapshot["raw"]["fresh_day_check"]["payload"].update(
+            {"halted": False, "halt_reason": None}
+        )
+        snapshot["raw"]["bootstrap_status"]["payload"] = {
+            "data_integrity_registration": {
+                "apply": {
+                    "modules": {
+                        "governed_v5_paper_restart": {
+                            "version": "governed-v5-paper-restart-2026-09-25-v1",
+                            "decision_id": "issue84-governed-paper-restart-2026-09-25",
+                            "review_reference": "issue-84-comment-5802294002",
+                            "epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+                            "status": "active",
+                            "overall": "pass",
+                            "paper_execution_enabled": True,
+                            "validation_hold": False,
+                            "risk_halted": False,
+                            "post_start_forward_observations_required": True,
+                        }
+                    }
+                }
+            }
+        }
+        return snapshot
+
+    def test_released_runtime_emits_post_start_acceptance_not_preflight(self):
+        evidence, result = build_artifacts(
+            runtime_snapshot=self._released_snapshot(),
+            deployed_commit_sha=COMMIT,
+            splendid_deployment_settled=True,
+        )
+
+        self.assertEqual(
+            evidence["artifact_kind"],
+            "governed_restart_post_start_acceptance_evidence",
+        )
+        self.assertTrue(all(evidence["checks"].values()))
+        self.assertFalse(evidence["production_authority"])
+        self.assertEqual(result["state"], "active_pending_forward_observations")
+        self.assertTrue(result["activation_observed"])
+        self.assertFalse(result["activation_performed_by_builder"])
+        self.assertEqual(result["blockers"], ["post_start_forward_observations"])
+
+    def test_released_runtime_fails_closed_on_governance_or_ledger_drift(self):
+        for mutate in ("decision", "ledger"):
+            with self.subTest(mutate=mutate):
+                snapshot = self._released_snapshot()
+                if mutate == "decision":
+                    governed = snapshot["raw"]["bootstrap_status"]["payload"][
+                        "data_integrity_registration"
+                    ]["apply"]["modules"]["governed_v5_paper_restart"]
+                    governed["decision_id"] = "unreviewed"
+                else:
+                    snapshot["raw"]["daily_audit"]["payload"][
+                        "execution_ledger"
+                    ]["ledger_sha256"] = "b" * 64
+                with self.assertRaises(CanaryInvariantError):
+                    build_artifacts(
+                        runtime_snapshot=snapshot,
+                        deployed_commit_sha=COMMIT,
+                        splendid_deployment_settled=True,
+                    )
+
     def test_incomplete_or_wrong_commit_snapshot_is_rejected(self):
         incomplete = self._snapshot()
         incomplete["summary"]["connectivity"]["reachable_count"] = 2
