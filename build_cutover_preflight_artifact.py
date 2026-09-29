@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from hashlib import sha256
 import json
 from pathlib import Path
 import tempfile
@@ -23,8 +24,18 @@ from trading.canary import (
     CutoverPreflightEvidenceBundle,
 )
 from trading.state_store import CanonicalStateStore
+from governed_v5_restart_contract import (
+    ACTIVATION_DECISION_ID,
+    ACTIVATION_REVIEW_REFERENCE,
+    TARGET_EPOCH_ID,
+    VERSION as GOVERNED_RESTART_VERSION,
+)
 
-VERSION = "cutover-preflight-ci-artifact-2026-09-21-v1"
+VERSION = "cutover-preflight-ci-artifact-2026-09-29-v2-post-start"
+EXPECTED_PRESTART_LEDGER_ROWS = 88
+EXPECTED_PRESTART_LEDGER_SHA256 = (
+    "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
+)
 
 
 def _mapping(value: Any, *, name: str) -> Mapping[str, Any]:
@@ -117,6 +128,126 @@ def _canary_evidence(
     )
 
 
+def _artifact_sha256(row: Mapping[str, Any]) -> str:
+    payload = json.dumps(row, sort_keys=True, separators=(",", ":"))
+    return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _governed_restart_status(snapshot: Mapping[str, Any]) -> Mapping[str, Any]:
+    bootstrap = _runtime_payload(snapshot, "bootstrap_status")
+    registration = _mapping(
+        bootstrap.get("data_integrity_registration"),
+        name="bootstrap_status.data_integrity_registration",
+    )
+    apply = _mapping(registration.get("apply"), name="data_integrity_registration.apply")
+    modules = _mapping(apply.get("modules"), name="data_integrity_registration.apply.modules")
+    return _mapping(
+        modules.get("governed_v5_paper_restart"),
+        name="governed_v5_paper_restart",
+    )
+
+
+def _build_post_start_acceptance(
+    *,
+    runtime_snapshot: Mapping[str, Any],
+    daily_audit: Mapping[str, Any],
+    paper_status: Mapping[str, Any],
+    fresh_day: Mapping[str, Any],
+    deployed_commit_sha: str,
+) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    epoch = _mapping(daily_audit.get("accounting_epoch"), name="accounting_epoch")
+    ledger = _mapping(daily_audit.get("execution_ledger"), name="execution_ledger")
+    accounting = _mapping(
+        daily_audit.get("accounting_integrity"), name="accounting_integrity"
+    )
+    account = _mapping(daily_audit.get("account"), name="account")
+    risk = _mapping(daily_audit.get("risk"), name="risk")
+    governed = _governed_restart_status(runtime_snapshot)
+
+    checks = {
+        "daily_audit_pass": daily_audit.get("overall") == "pass",
+        "exact_epoch": epoch.get("epoch_id") == TARGET_EPOCH_ID,
+        "validation_hold_released": (
+            epoch.get("validation_hold") is False
+            and epoch.get("validation_released") is True
+        ),
+        "prior_evidence_preserved": (
+            epoch.get("historical_evidence_archived") is True
+            and epoch.get("zero_trade_baseline") is True
+        ),
+        "canonical_ledger_unchanged": (
+            ledger.get("row_count") == EXPECTED_PRESTART_LEDGER_ROWS
+            and ledger.get("ledger_sha256") == EXPECTED_PRESTART_LEDGER_SHA256
+            and ledger.get("current_epoch_id") == TARGET_EPOCH_ID
+            and ledger.get("current_epoch_rows") == 0
+            and ledger.get("state_current_epoch_rows") == 0
+            and ledger.get("chain_valid") is True
+            and ledger.get("state_projection_parity") is True
+            and ledger.get("missing_from_state_count") == 0
+            and ledger.get("missing_from_ledger_count") == 0
+        ),
+        "accounting_clean_and_flat": (
+            accounting.get("status") in ("ok", "pass")
+            and accounting.get("coverage_complete") is True
+            and accounting.get("coverage_issue_count") == 0
+            and accounting.get("economic_issue_count") == 0
+            and account.get("positions") in ({}, [], ())
+            and paper_status.get("positions") in ({}, [], ())
+        ),
+        "risk_halt_released": (
+            risk.get("halted") is False
+            and fresh_day.get("halted") is False
+        ),
+        "governed_restart_active": (
+            governed.get("version") == GOVERNED_RESTART_VERSION
+            and governed.get("decision_id") == ACTIVATION_DECISION_ID
+            and governed.get("review_reference") == ACTIVATION_REVIEW_REFERENCE
+            and governed.get("epoch_id") == TARGET_EPOCH_ID
+            and governed.get("status") == "active"
+            and governed.get("overall") == "pass"
+            and governed.get("paper_execution_enabled") is True
+            and governed.get("validation_hold") is False
+            and governed.get("risk_halted") is False
+            and governed.get("post_start_forward_observations_required") is True
+        ),
+    }
+    failures = sorted(name for name, passed in checks.items() if not passed)
+    if failures:
+        raise CanaryInvariantError(
+            "governed restart post-start evidence blocked: " + ", ".join(failures)
+        )
+
+    evidence = {
+        "artifact_version": VERSION,
+        "artifact_kind": "governed_restart_post_start_acceptance_evidence",
+        "production_authority": False,
+        "read_only": True,
+        "deployed_commit_sha": str(deployed_commit_sha),
+        "source_url": AUTHORITATIVE_RUNTIME_URL,
+        "captured_at": str(daily_audit.get("generated_local") or ""),
+        "epoch_id": TARGET_EPOCH_ID,
+        "ledger_row_count": EXPECTED_PRESTART_LEDGER_ROWS,
+        "ledger_sha256": EXPECTED_PRESTART_LEDGER_SHA256,
+        "checks": checks,
+        "governed_status": dict(governed),
+    }
+    evidence = {**evidence, "acceptance_sha256": _artifact_sha256(evidence)}
+    result = {
+        "artifact_version": VERSION,
+        "artifact_kind": "governed_restart_post_start_acceptance_result",
+        "production_authority": False,
+        "activation_performed_by_builder": False,
+        "activation_observed": True,
+        "state": "active_pending_forward_observations",
+        "review_status": "post_start_baseline_observed",
+        "post_start_forward_observations_required": True,
+        "blockers": ["post_start_forward_observations"],
+        "evidence_sha256": evidence["acceptance_sha256"],
+    }
+    result = {**result, "decision_sha256": _artifact_sha256(result)}
+    return evidence, result
+
+
 def build_artifacts(
     *,
     runtime_snapshot: Mapping[str, Any],
@@ -135,6 +266,15 @@ def build_artifacts(
     daily_audit, paper_status, fresh_day = _require_settled_snapshot(
         runtime_snapshot, deployed_commit_sha=deployed_commit_sha
     )
+    epoch = _mapping(daily_audit.get("accounting_epoch"), name="accounting_epoch")
+    if epoch.get("validation_hold") is False:
+        return _build_post_start_acceptance(
+            runtime_snapshot=runtime_snapshot,
+            daily_audit=daily_audit,
+            paper_status=paper_status,
+            fresh_day=fresh_day,
+            deployed_commit_sha=deployed_commit_sha,
+        )
     ledger = _mapping(
         daily_audit.get("execution_ledger"), name="daily_audit.execution_ledger"
     )
@@ -232,7 +372,8 @@ def main() -> int:
         json.dumps(
             {
                 "status": "pass",
-                "bundle_sha256": bundle["bundle_sha256"],
+                "bundle_sha256": bundle.get("bundle_sha256")
+                or bundle.get("acceptance_sha256"),
                 "decision_sha256": decision["decision_sha256"],
                 "state": decision["state"],
                 "blockers": decision["blockers"],

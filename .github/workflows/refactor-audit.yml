@@ -416,7 +416,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build pending-only cutover preflight evidence
+      - name: Build governed pre-start or post-start evidence
         id: preflight
         if: github.event_name == 'push'
         run: |
@@ -477,8 +477,8 @@ jobs:
               sha: context.sha,
               state: captured && preflight ? 'success' : 'failure',
               context: 'research-snapshot',
-              description: captured && preflight
-                ? `Runtime ${state}; self-check ${selfCheck}; reachable ${reachable}; preflight pending`
-                : 'Unable to capture exact-head runtime preflight evidence',
+          description: captured && preflight
+            ? `Runtime ${state}; self-check ${selfCheck}; reachable ${reachable}; governed evidence accepted`
+            : 'Unable to capture exact-head governed runtime evidence',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });

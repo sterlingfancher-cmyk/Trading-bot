@@ -2358,3 +2358,38 @@ explicit CI-only dependency and a gate self-test pins that requirement. Local
 verification passed 20 gate self-tests, all 165 unittest regressions, and all
 10 focused pytest regressions. Publish this repair, then require a completely
 green exact-head rerun before merge; the prior failed run is not acceptance.
+
+
+## 2026-09-29 Issue #84 — governed restart active; post-start evidence repair — IN PROGRESS
+
+PR #276 exact head `2d6f7945c5424c43771dbad3afee4692a3c7fbbd`
+passed Repository Safety, Architecture Debt, the full
+Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research audit,
+and Change Safety, including both exact Gunicorn smokes and the newly selected
+pytest regressions. It squash-merged as
+`c450a9da553480cd6ea5bf2c2f93ef8bd2761e1c`; authoritative Splendid deployment
+and the post-merge repository, daily-audit, refactor, Change Safety and exact
+Gunicorn checks settled green.
+
+The automatic read-only runtime capture bound the exact merge commit and reached
+12/12 endpoints. It proved the governed restart `active/pass`, paper execution
+enabled, validation hold false, risk halt false, post-start observations still
+required, sentinel `quiet/pass` with zero incidents, self-check and daily audit
+pass, flat cash/equity `13429.13048559457` / `13429.13`, 88 unchanged canonical
+rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`,
+valid chain and projection parity, and complete clean accounting. No v5
+execution row or trade exists yet; this is pre-execution lifecycle/restart/
+accounting acceptance, not forward-trade evidence. No cycle was forced.
+
+The same workflow then exposed a stale evidence-contract defect: its
+pending-only cutover builder still required `validation_hold=true` and failed
+after the governed release correctly set it false. A focused successor repair
+now preserves the old held-state preflight path while emitting a read-only,
+digest-bound post-start acceptance artifact for the exact reviewed decision,
+epoch, unchanged ledger, flat accounting, released administrative controls and
+active governed owner. It grants no production authority and retains
+`post_start_forward_observations` as the sole remaining blocker. Local tests pass
+53 cutover/canary cases, 20 Change Safety gate cases, exact replay of the
+authoritative runtime artifact, and whitespace validation. Publish this repair
+as the next bounded Issue #84 PR and require every exact-head gate before merge.
