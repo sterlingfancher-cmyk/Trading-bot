@@ -334,6 +334,24 @@ def test_append_failure_restores_uncommitted_state_and_halts(monkeypatch, tmp_pa
         "governed paper execution aborted before canonical append"
     )
     assert ledger.status_payload(core)["row_count"] == 0
+    status = restart.status_payload(core)
+    assert status["status_schema_version"] == restart.STATUS_SCHEMA_VERSION
+    assert status["risk_halt_local"] == "2026-09-25 10:00:00 CDT"
+    assert status["last_discrepancy_local"] == "2026-09-25 10:00:00 CDT"
+    assert status["last_discrepancy"] == {
+        "operation": "entry",
+        "intent_id": status["last_discrepancy"]["intent_id"],
+        "error": "RuntimeError: canonical execution append failed; state projection forbidden",
+        "error_chain": [
+            "RuntimeError: canonical execution append failed; state projection forbidden",
+            "OSError: disk unavailable",
+        ],
+        "canonical_rows_before": 0,
+        "canonical_rows_after": 0,
+        "state_restored": True,
+    }
+    assert status["canonical_execution_ledger_error"] is None
+    assert status["canonical_execution_ledger_error_local"] is None
 
 
 def test_projection_discrepancy_stops_after_committed_execution(monkeypatch, tmp_path):
