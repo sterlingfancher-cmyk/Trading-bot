@@ -24,6 +24,7 @@ import shutil
 import threading
 from typing import Any, Dict, List, Tuple
 
+from governed_v5_restart_contract import release_metadata_exact
 import verified_v3_successor_epoch_migration as v3
 
 VERSION = "issue222-verified-flat-successor-2026-09-15-v3-unrelated-later-pair-binding"
@@ -675,8 +676,9 @@ def _active_status(core: Any) -> Dict[str, Any]:
     epoch = _d(pf.get("paper_accounting_epoch"))
     marker = _marker()
     risk = _d(pf.get("risk_controls"))
+    governed_release = release_metadata_exact(epoch)
     return {
-        "status": "validation_hold",
+        "status": "governed_paper_restart_active" if governed_release else "validation_hold",
         "overall": "pass",
         "version": VERSION,
         "epoch_id": TARGET_EPOCH_ID,
@@ -692,8 +694,8 @@ def _active_status(core: Any) -> Dict[str, Any]:
         "positions": sorted(_d(pf.get("positions"))),
         "cash": pf.get("cash"),
         "equity": pf.get("equity"),
-        "projection_halt_preserved": bool(risk.get("halted")),
-        "projection_halt_reason": risk.get("halt_reason"),
+        "projection_halt_preserved": bool(risk.get("halted")) if not governed_release else False,
+        "projection_halt_reason": risk.get("halt_reason") if not governed_release else risk.get("governed_restart_prior_halt_reason"),
     }
 
 

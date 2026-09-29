@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
+from governed_v5_restart_contract import release_metadata_exact
+
 VERSION = "verified-v2-successor-precondition-production-shape-2026-09-15-v4-v5-supersession"
 EQUITY_MARK_DRIFT_TOLERANCE = 2.0
 QTY_SERIALIZATION_TOLERANCE = 5e-6
@@ -140,15 +142,14 @@ def _exact_issue222_v5_successor(migration: Any, core: Any) -> bool:
     pf = migration._portfolio(core)
     epoch = migration._d(pf.get("paper_accounting_epoch"))
     active_epoch = str(epoch.get("id") or pf.get("accounting_epoch_id") or "")
+    held_or_released = bool(epoch.get("validation_hold")) or release_metadata_exact(epoch)
     return bool(
         active_epoch == ISSUE222_V5_EPOCH_ID
         and str(epoch.get("prior_epoch_id") or "") == ISSUE126_V4_EPOCH_ID
         and str(epoch.get("historical_recovery_decision") or "") == ISSUE222_V5_DECISION
         and epoch.get("historical_evidence_archived") is True
         and bool(str(epoch.get("forensic_archive_dir") or "").strip())
-        and epoch.get("validation_hold") is True
-        and epoch.get("validation_release_status") == "blocked"
-        and epoch.get("validation_released") is False
+        and held_or_released
         and epoch.get("zero_trade_baseline") is True
         and epoch.get("prior_epoch_discrepancy_status") == "unresolved_non_promotable"
         and epoch.get("prior_epoch_economics_promotable") is False
