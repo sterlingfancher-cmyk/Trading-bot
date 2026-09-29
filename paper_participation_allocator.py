@@ -483,7 +483,9 @@ def _patch_enter(m: Any) -> bool:
         return False
     original = m.enter_position
 
-    def patched_enter_position(signal, params, market_mode=None):
+    def patched_enter_position(
+        signal, params, market_mode=None, _governed: bool = False
+    ):
         patched_params = params
         info = None
         try:
@@ -494,7 +496,10 @@ def _patch_enter(m: Any) -> bool:
         except Exception as exc:
             info = {"active": False, "error": str(exc), "version": VERSION}
 
-        result = original(signal, patched_params, market_mode=market_mode)
+        call_kwargs = {"market_mode": market_mode}
+        if _governed:
+            call_kwargs["_governed"] = True
+        result = original(signal, patched_params, **call_kwargs)
         if info and isinstance(result, dict) and not result.get("blocked"):
             try:
                 result["paper_participation_allocator"] = info
