@@ -44,6 +44,7 @@ EXPECTED_PRESTART_LEDGER_SHA256 = (
     "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
 )
 INTENT_RECEIPT_LIMIT = 256
+STATUS_SCHEMA_VERSION = "governed-v5-paper-restart-status-2026-09-29-v2-halt-forensics"
 STATE_DIR = (
     os.environ.get("STATE_DIR")
     or os.environ.get("PERSISTENT_STATE_DIR")
@@ -74,6 +75,18 @@ def _f(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _exception_chain(error: BaseException, limit: int = 4) -> list[str]:
+    """Return a bounded diagnostic chain without changing execution behavior."""
+    chain: list[str] = []
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and len(chain) < limit and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(f"{type(current).__name__}: {current}")
+        current = current.__cause__ or current.__context__
+    return chain
 
 
 def _now(core: Any = None) -> str:
@@ -437,6 +450,7 @@ def execute_single_operation(
                     "operation": operation,
                     "intent_id": intent,
                     "error": f"{type(exc).__name__}: {exc}",
+                    "error_chain": _exception_chain(exc),
                     "canonical_rows_before": before_rows,
                     "canonical_rows_after": after_rows,
                     "state_restored": restored,
@@ -522,6 +536,7 @@ def execute_batch_operation(
                 {
                     "operation": operation,
                     "error": f"{type(exc).__name__}: {exc}",
+                    "error_chain": _exception_chain(exc),
                     "canonical_rows_before": before_rows,
                     "canonical_rows_after": after_rows,
                     "state_restored": restored,
@@ -754,17 +769,40 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
     restart = _d(state.get("governed_v5_paper_restart"))
     risk = _d(state.get("risk_controls"))
     active = _active(core) if core is not None else False
+    halt_details = _d(
+        restart.get("last_discrepancy")
+        or risk.get("governed_restart_halt_details")
+    )
     return {
         "status": "active" if active and not risk.get("halted") else "halted" if active else _LAST.get("status", "pending"),
         "overall": "pass" if active and not risk.get("halted") else "fail" if active else _LAST.get("overall", "warn"),
         "type": "governed_v5_paper_restart_status",
         "version": VERSION,
+        "status_schema_version": STATUS_SCHEMA_VERSION,
         "epoch_id": str(epoch.get("id") or ""),
         "decision_id": ACTIVATION_DECISION_ID,
         "review_reference": ACTIVATION_REVIEW_REFERENCE,
         "validation_hold": epoch.get("validation_hold"),
         "risk_halted": risk.get("halted"),
         "risk_halt_reason": risk.get("halt_reason"),
+        "risk_halt_local": risk.get("governed_restart_halt_local"),
+        "last_discrepancy": halt_details or None,
+        "last_discrepancy_local": restart.get("last_discrepancy_local"),
+        "canonical_execution_ledger_error": risk.get(
+            "canonical_execution_ledger_error"
+        ),
+        "canonical_execution_ledger_error_local": risk.get(
+            "canonical_execution_ledger_error_local"
+        ),
+        "canonical_state_projection_error": risk.get(
+            "canonical_state_projection_error"
+        ),
+        "canonical_state_projection_error_local": risk.get(
+            "canonical_state_projection_error_local"
+        ),
+        "canonical_state_projection_execution_id": risk.get(
+            "canonical_state_projection_execution_id"
+        ),
         "paper_execution_enabled": restart.get("paper_execution_enabled", False),
         "post_start_forward_observations_required": restart.get(
             "post_start_forward_observations_required", True
