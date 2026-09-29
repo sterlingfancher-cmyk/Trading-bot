@@ -2347,3 +2347,14 @@ obtaining or dispatching the mandatory exact-head workflows for `fc17c2b...`,
 repairing any failure on this same PR, and merging only after the exact
 Gunicorn smoke and every other required gate pass; then perform settled
 read-only Splendid acceptance.
+
+GitHub then created the exact-head runs. Repository validation, architecture
+debt, the full refactor/ownership/configuration/state/runtime audit, and both
+remote Gunicorn smoke steps passed. Change Safety alone failed after its 165
+unittest regressions because the newly required focused suite invoked
+`python -m pytest` but the workflow installed only production requirements and
+therefore had no pytest module. The same repair path now installs pytest as an
+explicit CI-only dependency and a gate self-test pins that requirement. Local
+verification passed 20 gate self-tests, all 165 unittest regressions, and all
+10 focused pytest regressions. Publish this repair, then require a completely
+green exact-head rerun before merge; the prior failed run is not acceptance.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 from unittest import mock
 
@@ -246,6 +247,15 @@ class ChangeSafetyAuditTests(unittest.TestCase):
                 and "test_issue84_governed_v5_paper_restart.py" in command
                 for command in commands
             )
+        )
+
+    def test_exact_head_workflow_installs_pytest_for_pytest_regressions(self) -> None:
+        workflow = Path(".github/workflows/change-safety-audit.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "python -m pip install --disable-pip-version-check pytest",
+            workflow,
         )
 
     def test_shadow_ai_change_selects_complete_shadow_ai_regression_set(self) -> None:
