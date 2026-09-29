@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-19 10:15 CDT
+Last updated: 2026-09-29 08:37 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `d74dede0a82af7b2568531acaa93325bfaf37e33` (PR #261).
+Validated runtime-code `main`: `9f350546382ebd5ab2326e79c14f995fef7b5d26` (PR #277).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
@@ -2393,3 +2393,49 @@ active governed owner. It grants no production authority and retains
 53 cutover/canary cases, 20 Change Safety gate cases, exact replay of the
 authoritative runtime artifact, and whitespace validation. Publish this repair
 as the next bounded Issue #84 PR and require every exact-head gate before merge.
+
+
+## 2026-09-29 Issue #84 — governed restart and post-start evidence accepted — ACTIVE TRIAL
+
+PR #277 repaired the stale post-start evidence contract on the same bounded
+Issue #84 path. Its exact head
+`53bdfdbb2a659201a4ff65e17ad96b44bb2d41f3` passed Stable Paper Core v3 Stage
+F, Repository Safety, Architecture Debt, Change Safety, and the full
+Refactor/Ownership/Configuration/State/Decision/Runtime/Startup/Research audit.
+Both mandatory exact Gunicorn smoke steps passed. PR #277 squash-merged as
+`9f350546382ebd5ab2326e79c14f995fef7b5d26`.
+
+The exact-merge main workflows also passed. Splendid deployment acceptance
+settled for `9f350546382ebd5ab2326e79c14f995fef7b5d26`, and the automatic read-only
+runtime job reached 12/12 endpoints before successfully building and uploading
+the governed post-start acceptance artifact (workflow run `36575952791`,
+artifact `11038161591`, ZIP digest
+`sha256:1bcd86d8db17f81bb2a2f5aa10127a41b70347c3cae48941c300128226dc1e22`).
+
+The artifact is bound to the exact deployed commit and proves:
+- governed restart `active/pass` for decision
+  `issue84-governed-paper-restart-2026-09-25` and the verified-flat v5 epoch;
+- paper execution enabled, validation hold released, retained administrative
+  risk halt released, and hard-risk limits preserved;
+- self-check and daily audit pass, sentinel `quiet/pass` with zero incidents,
+  and 12/12 read-only runtime endpoints reachable;
+- flat cash/equity `13429.13048559457` / `13429.13` with no positions;
+- 88 immutable canonical rows, valid chain and projection parity, and unchanged
+  ledger digest
+  `f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`;
+- complete clean accounting and no canonical/state/history/day-peak rewrite.
+
+The accepted artifact state is `active_pending_forward_observations`; its only
+blocker is `post_start_forward_observations`. Evidence digest is
+`902726abbefc98db1c282647b04a7c398b24e21c819fa6192114f1dc50b5a10d` and
+decision digest is
+`4b154a55d2814fd9370c1f500a80e47f711acba90d03a506efc1981a23d9b415`.
+The evidence builder is read-only, observed but did not perform activation, and
+grants no production, order, live, strategy, sizing, or AI authority.
+
+Issue #84's bounded governed restart is therefore implemented, merged,
+deployed, and accepted as an active paper trial. Do not force a cycle or claim
+forward-trade acceptance: there is still no post-start execution receipt, and
+ordinary market-driven forward observations remain required. Keep Issue #202
+and `hold_10d` promotion frozen under `VALIDATION_POLICY.md`; the governed
+restart does not relax any performance-promotion gate.
