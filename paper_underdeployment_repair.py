@@ -453,9 +453,18 @@ def _patch_enter(c: Any) -> bool:
     if not callable(current) or _has(current, "_paper_underdeployment_version"):
         return False
     prior = current
-    def enter(signal: Dict[str, Any], params: Dict[str, Any], market_mode: Any = None, __prior=prior):
+    def enter(
+        signal: Dict[str, Any],
+        params: Dict[str, Any],
+        market_mode: Any = None,
+        _governed: bool = False,
+        __prior=prior,
+    ):
         if not ENABLED or not _paper() or not _is_starter(signal) or _d(_risk(c).get("restart")).get("active"):
-            return __prior(signal, params, market_mode=market_mode)
+            call_kwargs = {"market_mode": market_mode}
+            if _governed:
+                call_kwargs["_governed"] = True
+            return __prior(signal, params, **call_kwargs)
         sig, par = dict(signal or {}), dict(params or {})
         ok, gate = _gate(c, sig)
         if not ok:
@@ -471,7 +480,10 @@ def _patch_enter(c: Any) -> bool:
         sig["underdeployment_original_alloc_factor"] = sig.get("alloc_factor"); sig["alloc_factor"] = 1.0
         sig["paper_underdeployment_target_notional"] = round(target, 2); sig["paper_underdeployment_repair_version"] = VERSION
         par["long_alloc_pct"] = target / (equity * bucket_factor)
-        result = __prior(sig, par, market_mode=market_mode)
+        call_kwargs = {"market_mode": market_mode}
+        if _governed:
+            call_kwargs["_governed"] = True
+        result = __prior(sig, par, **call_kwargs)
         if isinstance(result, dict):
             result["paper_underdeployment_repair"] = {**audit, "gate": gate, "exposure_gate": exposure_gate}
             symbol = result.get("symbol") or _symbol(sig); pos = _d(_positions(c).get(symbol))

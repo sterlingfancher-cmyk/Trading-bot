@@ -16,6 +16,8 @@ import market_surge_queue_canonical_execution_bridge as queue_bridge
 import market_surge_queue_executor as surge_queue
 import paper_accounting_integrity_guard as accounting
 import paper_bidirectional_accounting_guard as bidirectional
+import paper_participation_allocator as participation_allocator
+import paper_underdeployment_repair as underdeployment_repair
 
 
 def _state() -> dict:
@@ -247,6 +249,51 @@ def test_governed_release_requires_exact_prestart_evidence(monkeypatch, tmp_path
     assert "positive_flat_valuation" in result["failed_checks"]
     assert state["paper_accounting_epoch"]["validation_hold"] is True
     assert state["risk_controls"]["halted"] is True
+
+
+def test_governed_entry_flag_crosses_runtime_allocation_wrappers(monkeypatch):
+    calls = []
+
+    def base_enter(signal, params, market_mode=None, _governed=False):
+        calls.append(
+            {
+                "signal": signal,
+                "params": params,
+                "market_mode": market_mode,
+                "governed": _governed,
+            }
+        )
+        return {"symbol": signal["symbol"], "blocked": False}
+
+    core = types.SimpleNamespace(
+        enter_position=base_enter,
+        portfolio={"positions": {}, "trades": [], "risk_controls": {}},
+    )
+    monkeypatch.setattr(
+        participation_allocator,
+        "_target_alloc_for_signal",
+        lambda signal, params, runtime: (None, {}),
+    )
+
+    assert participation_allocator._patch_enter(core) is True
+    assert underdeployment_repair._patch_enter(core) is True
+
+    result = core.enter_position(
+        {"symbol": "QQQ", "side": "long"},
+        {},
+        market_mode="risk_on",
+        _governed=True,
+    )
+
+    assert result == {"symbol": "QQQ", "blocked": False}
+    assert calls == [
+        {
+            "signal": {"symbol": "QQQ", "side": "long"},
+            "params": {},
+            "market_mode": "risk_on",
+            "governed": True,
+        }
+    ]
 
 
 def test_release_preserves_lineage_limits_and_accepts_restart_compatibility(monkeypatch, tmp_path):
