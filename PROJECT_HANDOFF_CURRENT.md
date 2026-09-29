@@ -2316,3 +2316,34 @@ AI authority changed. Next executable step: publish this reconciled head to PR
 #276, require every exact-head check-run to pass, then merge and validate the
 governed status plus canonical/accounting/sentinel/self-check surfaces without
 forcing a paper cycle.
+
+
+## 2026-09-29 Issue #84 — reconciled PR published; exact smoke blocked — IN PROGRESS
+
+PR #276 remains the single repair path. The complete reconciled tree at local
+head `fe628473ff4b09215c9d70fa884684103584f451` passed the focused Issue #84
+pytest suite (10 tests), impact-aware Change Safety (165 unittest tests plus the
+10 pytest regressions), repository validation, Railway configuration
+validation, refactor/ownership/configuration audits, architecture-debt/no-growth
+gate, Change Safety gate self-tests (19 tests), and exact diff whitespace check.
+Because this runner had no GitHub HTTPS credentials, the authenticated Git-data
+API published the identical tree as fast-forward PR head
+`fc17c2b7305e49928c0f424d0b8769f32be1b6ae`; no local implementation was lost.
+
+The exact Gunicorn workflow smoke was repeated in an isolated clean checkout
+after installing the declared requirements. Gunicorn listened successfully,
+but `/bootstrap-status` remained `loading` in `legacy_wsgi_import` with the
+loader thread alive for the full 90-second readiness window. The runner also
+reported `Control server error: [Errno 1] Operation not permitted`. This is a
+concrete blocking gate, not a pass. Immediately after the branch update, GitHub
+reported no workflow runs for the exact head, so PR #276 remains unmerged and
+undeployed.
+
+Issue #84 comment 5890973443 records the exact branch/head, validated repairs,
+smoke failure and resumable next step. No production state, canonical evidence,
+halt, validation hold, strategy, hard-risk limit, live authority, order
+authority or AI authority changed, and `/paper/run` was not called. Resume by
+obtaining or dispatching the mandatory exact-head workflows for `fc17c2b...`,
+repairing any failure on this same PR, and merging only after the exact
+Gunicorn smoke and every other required gate pass; then perform settled
+read-only Splendid acceptance.
