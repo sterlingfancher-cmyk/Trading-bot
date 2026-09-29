@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from governed_v5_restart_contract import release_metadata_exact
+
 VERSION = "clean-epoch-successor-compatibility-2026-09-14-v4-v5-chain"
 OLD_EPOCH_ID = "stable-paper-v1-20260810-clean01"
 VERIFIED_V2_EPOCH_ID = "stable-paper-v2-20260812-verified01"
@@ -67,13 +69,20 @@ def _successor_epoch(core: Any) -> str | None:
         and str(epoch.get("prior_epoch_id") or "") == ISSUE126_V4_EPOCH_ID
         and str(epoch.get("historical_recovery_decision") or "") == ISSUE222_V5_DECISION
         and bool(epoch.get("historical_evidence_archived", False))
-        and bool(epoch.get("validation_hold", False))
+        and (
+            bool(epoch.get("validation_hold", False))
+            or _governed_v5_release(epoch)
+        )
         and str(epoch.get("prior_epoch_discrepancy_status") or "") == "unresolved_non_promotable"
         and epoch.get("prior_epoch_economics_promotable") is False
         and int(epoch.get("fabricated_exit_rows") or 0) == 0
     ):
         return ISSUE222_V5_EPOCH_ID
     return None
+
+
+def _governed_v5_release(epoch: Dict[str, Any]) -> bool:
+    return release_metadata_exact(epoch)
 
 
 def _is_verified_successor(core: Any) -> bool:

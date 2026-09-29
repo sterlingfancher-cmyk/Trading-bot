@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import datetime
@@ -10,6 +11,8 @@ import pytz
 from us_holidays import is_us_equity_holiday
 import yfinance as yf
 from flask import Flask, jsonify, request, render_template_string
+
+GOVERNED_V5_STATIC_EXECUTION_BOUNDARIES = True
 
 app = Flask(__name__)
 
@@ -2477,7 +2480,24 @@ def calculate_equity(refresh_prices=True):
     return equity
 
 
-def exit_position(symbol, px, reason, market_mode=None, extra=None):
+def exit_position(symbol, px, reason, market_mode=None, extra=None, _governed=False):
+    if not _governed:
+        try:
+            import governed_v5_paper_restart as governed_restart
+
+            core = sys.modules[__name__]
+            if governed_restart._active(core):
+                return governed_restart.execute_single_operation(
+                    core,
+                    "full_exit",
+                    lambda: exit_position(
+                        symbol, px, reason, market_mode, extra, _governed=True
+                    ),
+                    (symbol, px, reason, market_mode, extra),
+                    {},
+                )
+        except ImportError:
+            pass
     pos = portfolio.get("positions", {}).get(symbol)
     if not pos:
         return None
@@ -2522,8 +2542,33 @@ def exit_position(symbol, px, reason, market_mode=None, extra=None):
 
 
 
-def reduce_position(symbol, px, fraction, reason, market_mode=None, extra=None):
+def reduce_position(
+    symbol, px, fraction, reason, market_mode=None, extra=None, _governed=False
+):
     """Take partial profit while leaving the remaining position open."""
+    if not _governed:
+        try:
+            import governed_v5_paper_restart as governed_restart
+
+            core = sys.modules[__name__]
+            if governed_restart._active(core):
+                return governed_restart.execute_single_operation(
+                    core,
+                    "partial_exit",
+                    lambda: reduce_position(
+                        symbol,
+                        px,
+                        fraction,
+                        reason,
+                        market_mode,
+                        extra,
+                        _governed=True,
+                    ),
+                    (symbol, px, fraction, reason, market_mode, extra),
+                    {},
+                )
+        except ImportError:
+            pass
     pos = portfolio.get("positions", {}).get(symbol)
     if not pos:
         return None
@@ -2576,7 +2621,24 @@ def reduce_position(symbol, px, fraction, reason, market_mode=None, extra=None):
     }
 
 
-def enter_position(signal, params, market_mode=None):
+def enter_position(signal, params, market_mode=None, _governed=False):
+    if not _governed:
+        try:
+            import governed_v5_paper_restart as governed_restart
+
+            core = sys.modules[__name__]
+            if governed_restart._active(core):
+                return governed_restart.execute_single_operation(
+                    core,
+                    "entry",
+                    lambda: enter_position(
+                        signal, params, market_mode, _governed=True
+                    ),
+                    (signal, params, market_mode),
+                    {},
+                )
+        except ImportError:
+            pass
     symbol = signal["symbol"]
     side = signal["side"]
     px = float(signal["price"])

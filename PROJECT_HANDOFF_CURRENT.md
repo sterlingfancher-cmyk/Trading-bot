@@ -2228,8 +2228,91 @@ approving or activating the still-blocked decision.
 
 ## 2026-09-25 Issue #84 — governed v5 paper restart implementation — IN PROGRESS
 
-User-directed restart implementation resumed from current main `d5c33f0021875e9f9a0d9cfa34ee8c3d9dd8c483`. Focused branch `issue84-governed-v5-paper-restart` and PR #276 implement the missing v5 hold/halt transition rather than collecting more unchanged readiness evidence. Exact PR head at this handoff update: `3fddafd96ea8fd5fed14776826c7e37232c9324b`.
+The user-directed bounded paper restart is now implemented on focused branch
+`fix/issue-84-governed-paper-restart` from current main
+`d5c33f0021875e9f9a0d9cfa34ee8c3d9dd8c483`. The implementation is not yet
+merged or deployed, so the September 25 runtime restart target is not claimed
+as met and authoritative Splendid remains on the retained v5 hold/halt pending
+exact-head CI, merge, deployment, and settled acceptance.
 
-The new transition is paper-only and fail-closed. It can first release only while the Issue #222 v5 successor remains the exact verified-flat zero-trade baseline: immutable canonical ledger chain valid and authoritative at 88 total rows, zero v5 rows, exact state projection parity, clean flat accounting reconstruction, archived prior discrepancy still unresolved/non-promotable with zero fabricated exits, and the only active halt equal to the retained canonical execution/state projection divergence halt. The transition releases only the v5 validation hold and that exact inherited administrative halt; forward validation remains required. Strategy, thresholds, sizing, hard-risk limits, canonical/history/day-peak evidence, live authority, ML authority, and order authority are unchanged.
+The governed transition accepts only the exact verified-flat v5 lineage, 88-row
+canonical digest, projection parity, clean bidirectional accounting, flat
+valuation, unchanged hard-risk baselines, and the retained Issue #222
+administrative halt. It then releases only that exact validation hold/halt and
+installs one process/file-locked coordinator around long/short entry,
+partial-exit, and full-exit lifecycle boundaries. Durable intent receipts reject
+duplicate partial exits across restart; post-execution canonical/accounting
+checks halt on discrepancy. The canonical ledger now fails closed before legacy
+state projection when its append fails, preventing an unledgered trade row. The
+v5 accounting baseline now reconstructs from epoch starting cash rather than the
+legacy $10,000 default. No canonical row or historical evidence is rewritten.
 
-Focused regressions cover bounded release, unrelated-halt rejection, post-execution rejection, projection-parity rejection, persistence-failure rollback, and idempotent restart. Full diff inspection found only the new transition, focused tests, and startup ordering/version wiring. At 16:30 CDT GitHub had not yet produced exact-head workflow runs/statuses for PR #276, so mandatory exact-head Change Safety/Gunicorn/stage validation is not yet evidenced and the PR remains unmerged. No runtime activation, `/paper/run`, state mutation, halt/hold clearing, or research job occurred in this run. Resume by obtaining all mandatory exact-head gates for PR #276, repairing any failure on the same branch, merging only when exact-head green, then performing settled authoritative Splendid acceptance and controlled paper restart verification.
+Focused regressions passed: 54 tests and 17 subtests covering exact pre-start
+evidence, lineage and hard-limit preservation, long/short entry, partial/full
+exit, restart persistence, duplicate rejection, canonical append failure,
+projection discrepancy halt, and successor compatibility. Structural refactor
+audit, architecture ownership contract, and architecture-debt regression gate
+all pass against current main with no new debt; the exact diff also passes
+whitespace validation. Repository validation passed and the committed exact head
+implementation commit `fa881874e6a172224520118e805bdfb7a57d6107` passed the impact-aware mandatory
+suite (139 tests) with exact-head Change Safety classification.
+
+The local exact Gunicorn smoke reached the deferred bootstrap endpoint but did
+not become ready inside its 90-second window. At 93.218 seconds the loader was
+still alive in `legacy_wsgi_import`; four read-only benchmark downloads had
+been rate-limited. This is recorded as a transient local smoke limitation, not
+a pass and not a demonstrated application exception. The mandatory remote
+exact-head smoke, remote CI, merge, deployment, and post-deploy acceptance
+remain pending and must not be inferred from the other green local results.
+
+No production operation occurred: the v5 hold/halt was not manually changed,
+`/paper/run` was not called, immutable accounting/state/history/day-peak/recovery
+evidence was untouched, and no strategy, sizing, hard-risk, live, order, or AI
+authority changed. Issue #202 and the frozen `hold_10d` candidate remain
+unchanged.
+
+
+## 2026-09-28 Issue #84 — PR #276 reconciliation and alternate-writer repair — IN PROGRESS
+
+The one active repair path is PR #276. Its original head
+`ca341e4f404b3f2bb4ee3f2c4dace5dd1fcdbd1d` was reconciled with the preserved
+local implementation commits rather than overwritten. Reconciled implementation
+checkpoint `2ac89f0c914671d00392811c9c7692e35f94f273` keeps the broader exact-v5
+preconditions, canonical fail-close behavior, epoch-starting-cash accounting,
+restart receipts and lifecycle tests while removing the duplicate earlier
+restart module.
+
+Fresh read-only Splendid evidence before any deployment remained flat at cash
+`13429.13048559457` and equity `13429.13`, with 88 chain-valid canonical rows,
+digest `f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`,
+projection parity, complete clean accounting and the retained Issue #222 halt/
+validation hold. The runner was healthy after market close. No forward trade or
+session evidence was manufactured.
+
+The review demonstrated an additional execution defect: the surge-queue preview
+reported `can_execute=true` while the risk halt was active, and both surge batch
+writers could mutate positions/cash before their canonical bridge completed.
+The queue now fails closed on `risk.halted`. Core entry/partial/full boundaries
+and both surge batch paths statically enter the same process/file-locked
+coordinator; the queue coordinator encloses its canonical bridge, verifies the
+exact multi-row canonical delta and accounting/state parity, and never restores
+a stale snapshot after any canonical append. Focused coverage includes retained-
+halt rejection, exact two-row batch commit, the real queue-to-canonical bridge,
+zero-row rollback, restart duplicate rejection and long/short partial/full
+lifecycle behavior.
+
+Focused validation passes 64 tests plus 17 subtests. Exact-checkout impact-aware
+Change Safety at the implementation checkpoint passed 165 tests; repository and
+Railway validation, refactor/ownership/configuration checks and architecture-
+debt regression pass with zero debt growth. The Change Safety selector now
+explicitly requires the governed-restart suite for these runtime paths. Remote
+exact-head workflows, exact Gunicorn smoke, merge, authoritative Splendid
+deployment and settled activation acceptance remain pending; the previous
+incomplete provider-rate-limited smoke is still not a pass.
+
+No production state changed, no halt or validation hold was manually cleared,
+`/paper/run` was not called, and no strategy, sizing, hard-risk, live, order or
+AI authority changed. Next executable step: publish this reconciled head to PR
+#276, require every exact-head check-run to pass, then merge and validate the
+governed status plus canonical/accounting/sentinel/self-check surfaces without
+forcing a paper cycle.

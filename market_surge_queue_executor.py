@@ -181,6 +181,7 @@ def _validate_environment(pf: Dict[str, Any], core: Any = None) -> Tuple[bool, L
     cash_pct = round((cash / equity * 100.0), 4) if equity else 0.0
 
     realized_today = _safe_float(perf.get("realized_pnl_today", pf.get("realized_today", 0.0)))
+    risk_halted = bool(risk.get("halted", False))
     self_defense = bool(risk.get("self_defense_active", False))
     daily_dd = _safe_float(risk.get("daily_loss_pct", risk.get("daily_drawdown_pct", 0.0)))
     intraday_dd = _safe_float(risk.get("intraday_drawdown_pct", 0.0))
@@ -192,6 +193,8 @@ def _validate_environment(pf: Dict[str, Any], core: Any = None) -> Tuple[bool, L
         failures.append("paper_surge_candidate_queue_empty")
     if not eligible_mode or surge_level < 2:
         failures.append("market_surge_aggression_not_eligible")
+    if risk_halted:
+        failures.append("risk_halted")
     if self_defense:
         failures.append("self_defense_active")
     if realized_today < 0:
@@ -212,6 +215,7 @@ def _validate_environment(pf: Dict[str, Any], core: Any = None) -> Tuple[bool, L
         "equity": round(equity, 4),
         "cash_pct": cash_pct,
         "realized_today": round(realized_today, 4),
+        "risk_halted": risk_halted,
         "self_defense_active": self_defense,
         "daily_drawdown_pct": daily_dd,
         "intraday_drawdown_pct": intraday_dd,

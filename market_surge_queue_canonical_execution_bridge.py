@@ -129,8 +129,29 @@ def apply(core: Any = None) -> Dict[str, Any]:
     prior = getattr(current, "_canonical_surge_queue_bridge_prior", current)
 
     @functools.wraps(prior)
-    def canonical_execute(runtime_core: Any = None, *, explicit_confirm: bool = False):
+    def canonical_execute(
+        runtime_core: Any = None,
+        *,
+        explicit_confirm: bool = False,
+        _governed: bool = False,
+    ):
         active = runtime_core or core
+        if not _governed:
+            try:
+                import governed_v5_paper_restart as governed_restart
+
+                if governed_restart._active(active):
+                    return governed_restart.execute_batch_operation(
+                        active,
+                        "market_surge_queue",
+                        lambda: canonical_execute(
+                            active,
+                            explicit_confirm=explicit_confirm,
+                            _governed=True,
+                        ),
+                    )
+            except ImportError:
+                pass
         pf = _portfolio(active)
         before_trades = _l(pf.get("trades"))
         before_len = len(before_trades)

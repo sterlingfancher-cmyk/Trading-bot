@@ -1163,7 +1163,26 @@ def _execute_confirmed(
     *,
     auto_fire: bool = False,
     trigger: str = "manual_confirm",
+    _governed: bool = False,
 ) -> Dict[str, Any]:
+    if not _governed:
+        try:
+            import governed_v5_paper_restart as governed_restart
+
+            if governed_restart._active(core):
+                return governed_restart.execute_batch_operation(
+                    core,
+                    "market_surge_deployment",
+                    lambda: _execute_confirmed(
+                        core,
+                        plan,
+                        auto_fire=auto_fire,
+                        trigger=trigger,
+                        _governed=True,
+                    ),
+                )
+        except ImportError:
+            pass
     if not plan.get("deployment_allowed"):
         plan["executed"] = False
         plan["message"] = "No execution. Deployment is not allowed by current guardrails."

@@ -20,7 +20,7 @@ import threading
 import uuid
 from typing import Any, Dict, List, Tuple
 
-VERSION = "canonical-execution-ledger-2026-09-12-v5-reconciliation-signatures"
+VERSION = "canonical-execution-ledger-2026-09-25-v6-fail-closed-append"
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 LEDGER_FILE = os.path.join(STATE_DIR, "canonical_execution_ledger.jsonl")
 
@@ -299,7 +299,14 @@ def apply(core: Any = None) -> Dict[str, Any]:
             linked_extra["canonical_ledger_version"] = VERSION
         except Exception as exc:
             _mark_ledger_failure(core, exc)
-            linked_extra["canonical_execution_ledger_error"] = f"{type(exc).__name__}: {exc}"
+            # The canonical append is the write-ahead boundary. Continuing into
+            # the legacy state projection after it fails would create a state
+            # execution with no immutable source row. Raise before ``prior``;
+            # the governed Issue #84 coordinator restores the still-uncommitted
+            # in-memory mutation and keeps trading halted.
+            raise RuntimeError(
+                "canonical execution append failed; state projection forbidden"
+            ) from exc
         result = prior(action, symbol, side, px, shares, linked_extra)
         _persist_projection(core, event)
         return result

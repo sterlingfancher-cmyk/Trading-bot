@@ -13,6 +13,8 @@ import datetime as dt
 import os
 from typing import Any, Dict
 
+from governed_v5_restart_contract import release_metadata_exact
+
 VERSION = "verified-v4-validation-release-2026-09-02-v1"
 TARGET_EPOCH_ID = "stable-paper-v4-20260826-successor01"
 MINIMUM_POST_EPOCH_VALID_ROWS = 1
@@ -62,12 +64,13 @@ def _portfolio(core: Any) -> Dict[str, Any]:
 
 
 def _issue222_successor(epoch: Dict[str, Any]) -> bool:
+    held_or_released = bool(epoch.get("validation_hold")) or release_metadata_exact(epoch)
     return bool(
         str(epoch.get("id") or "") == ISSUE222_V5_EPOCH_ID
         and str(epoch.get("prior_epoch_id") or "") == TARGET_EPOCH_ID
         and str(epoch.get("historical_recovery_decision") or "") == ISSUE222_V5_DECISION
         and bool(epoch.get("historical_evidence_archived"))
-        and bool(epoch.get("validation_hold"))
+        and held_or_released
         and str(epoch.get("prior_epoch_discrepancy_status") or "") == "unresolved_non_promotable"
         and epoch.get("prior_epoch_economics_promotable") is False
         and int(epoch.get("fabricated_exit_rows") or 0) == 0

@@ -23,6 +23,8 @@ import datetime as dt
 import functools
 from typing import Any, Dict, List, Tuple
 
+from governed_v5_restart_contract import release_metadata_exact
+
 VERSION = "paper-accounting-integrity-2026-09-15-v5-issue222-zero-trade-baseline"
 ISSUE222_V5_EPOCH_ID = "stable-paper-v5-20260914-issue222-flat-successor01"
 ISSUE222_V4_EPOCH_ID = "stable-paper-v4-20260826-successor01"
@@ -120,6 +122,14 @@ def _trade_fields(row: Dict[str, Any]) -> Tuple[str, str, float, float, str]:
 
 
 def _initial_cash(pf: Dict[str, Any]) -> float:
+    # Stable successor epochs carry their canonical baseline inside the epoch.
+    # Prefer it to the legacy top-level/history fallbacks so the first governed
+    # v5 execution reconstructs from 13,429.13 rather than the original 10,000
+    # account seed.
+    epoch = _d(pf.get("paper_accounting_epoch"))
+    epoch_start = _f(epoch.get("starting_cash"), 0.0)
+    if epoch_start > 0:
+        return epoch_start
     for key in ("initial_cash", "starting_cash", "starting_equity", "initial_equity"):
         value = _f(pf.get(key), 0.0)
         if value > 0:
@@ -150,6 +160,24 @@ def _issue222_verified_flat_zero_trade_baseline(pf: Dict[str, Any]) -> Dict[str,
     snapshot_cash = _f(snapshot.get("cash"), -1.0)
     snapshot_equity = _f(snapshot.get("equity"), -1.0)
 
+    governed_release = release_metadata_exact(epoch)
+
+    hold_or_governed_release = bool(
+        (
+            epoch.get("validation_hold") is True
+            and epoch.get("validation_release_status") == "blocked"
+            and epoch.get("validation_released") is False
+            and risk.get("halted") is True
+            and str(risk.get("halt_reason") or "") == ISSUE222_HALT_REASON
+        )
+        or (
+            governed_release
+            and risk.get("halted") is False
+            and str(risk.get("governed_restart_prior_halt_reason") or "")
+            == ISSUE222_HALT_REASON
+        )
+    )
+
     exact = bool(
         str(pf.get("accounting_epoch_id") or "") == ISSUE222_V5_EPOCH_ID
         and str(epoch.get("id") or epoch.get("epoch_id") or "") == ISSUE222_V5_EPOCH_ID
@@ -159,9 +187,7 @@ def _issue222_verified_flat_zero_trade_baseline(pf: Dict[str, Any]) -> Dict[str,
         and str(epoch.get("historical_recovery_decision") or "") == ISSUE222_HISTORICAL_DECISION
         and epoch.get("historical_evidence_archived") is True
         and bool(str(epoch.get("forensic_archive_dir") or "").strip())
-        and epoch.get("validation_hold") is True
-        and epoch.get("validation_release_status") == "blocked"
-        and epoch.get("validation_released") is False
+        and hold_or_governed_release
         and epoch.get("zero_trade_baseline") is True
         and epoch.get("baseline_type") == "verified_flat_snapshot_unresolved_prior_projection"
         and epoch.get("prior_epoch_discrepancy_status") == "unresolved_non_promotable"
@@ -184,8 +210,6 @@ def _issue222_verified_flat_zero_trade_baseline(pf: Dict[str, Any]) -> Dict[str,
         and successor.get("fabricated_exit_rows") == 0
         and successor.get("risk_halt_cleared") is False
         and successor.get("canonical_history_rewritten") is False
-        and risk.get("halted") is True
-        and str(risk.get("halt_reason") or "") == ISSUE222_HALT_REASON
         and isinstance(pf.get("positions"), dict)
         and pf.get("positions") == {}
         and isinstance(pf.get("trades"), list)

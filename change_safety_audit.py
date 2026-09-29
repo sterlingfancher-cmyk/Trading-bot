@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-09-21-v14-preflight-artifact"
+VERSION = "change-safety-audit-2026-09-28-v15-governed-restart"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -49,6 +49,8 @@ SUCCESSOR_EPOCH_MIGRATION_TESTS = (
 )
 RUNTIME_RESEARCH_SNAPSHOT_TESTS = ("test_runtime_research_snapshot.py",)
 CUTOVER_PREFLIGHT_ARTIFACT_TESTS = ("test_issue84_cutover_preflight_artifact.py",)
+GOVERNED_V5_RESTART_TESTS = ("test_issue84_governed_v5_paper_restart.py",)
+PYTEST_REGRESSION_TESTS = frozenset(GOVERNED_V5_RESTART_TESTS)
 LEGACY_EXTERNAL_PAPER_RUNNER_TESTS = ("test_legacy_external_paper_runner_retired.py",)
 SHADOW_AI_TESTS = (
     "test_shadow_ai_research_contract.py",
@@ -136,6 +138,18 @@ def _is_runtime_research_snapshot_path(path: str) -> bool:
 
 def _is_cutover_preflight_artifact_path(path: str) -> bool:
     return "cutover_preflight_artifact" in path.lower()
+
+
+def _is_governed_v5_restart_path(path: str) -> bool:
+    return Path(path.lower()).name in {
+        "app.py",
+        "governed_v5_paper_restart.py",
+        "governed_v5_restart_contract.py",
+        "market_surge_deployment_mode.py",
+        "market_surge_queue_canonical_execution_bridge.py",
+        "market_surge_queue_executor.py",
+        "test_issue84_governed_v5_paper_restart.py",
+    }
 
 
 def _is_legacy_external_paper_runner_path(path: str) -> bool:
@@ -273,6 +287,8 @@ def planned_regressions(paths: Iterable[str]) -> tuple[str, ...]:
         tests.extend(RUNTIME_RESEARCH_SNAPSHOT_TESTS)
     if any(_is_cutover_preflight_artifact_path(path) for path in path_tuple):
         tests.extend(CUTOVER_PREFLIGHT_ARTIFACT_TESTS)
+    if any(_is_governed_v5_restart_path(path) for path in path_tuple):
+        tests.extend(GOVERNED_V5_RESTART_TESTS)
     if any(_is_legacy_external_paper_runner_path(path) for path in path_tuple):
         tests.extend(LEGACY_EXTERNAL_PAPER_RUNNER_TESTS)
     if any(_is_shadow_ai_path(path) for path in path_tuple):
@@ -296,7 +312,18 @@ def run_regressions(paths: Iterable[str]) -> tuple[str, ...]:
     tests = planned_regressions(paths)
     if not tests:
         return tests
-    subprocess.run([sys.executable, "-m", "unittest", "-v", *tests], check=True)
+    unittest_tests = [test for test in tests if test not in PYTEST_REGRESSION_TESTS]
+    pytest_tests = [test for test in tests if test in PYTEST_REGRESSION_TESTS]
+    if unittest_tests:
+        subprocess.run(
+            [sys.executable, "-m", "unittest", "-v", *unittest_tests],
+            check=True,
+        )
+    if pytest_tests:
+        subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", *pytest_tests],
+            check=True,
+        )
     return tests
 
 

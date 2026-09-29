@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
-from change_safety_audit import classify_paths, evaluate_gate, planned_regressions
+from change_safety_audit import (
+    classify_paths,
+    evaluate_gate,
+    planned_regressions,
+    run_regressions,
+)
 
 
 class ChangeSafetyAuditTests(unittest.TestCase):
@@ -220,6 +226,27 @@ class ChangeSafetyAuditTests(unittest.TestCase):
             tests = planned_regressions((path,))
             self.assertIn("test_issue84_cutover_preflight_artifact.py", tests)
             self.assertIn("test_architecture_stage_f_canary.py", tests)
+
+    def test_governed_v5_restart_change_selects_focused_regression(self) -> None:
+        for path in (
+            "governed_v5_paper_restart.py",
+            "market_surge_queue_executor.py",
+            "app.py",
+        ):
+            tests = planned_regressions((path,))
+            self.assertIn("test_issue84_governed_v5_paper_restart.py", tests)
+
+    @mock.patch("change_safety_audit.subprocess.run")
+    def test_governed_v5_restart_suite_runs_under_pytest(self, run) -> None:
+        run_regressions(("governed_v5_paper_restart.py",))
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertTrue(
+            any(
+                command[1:4] == ["-m", "pytest", "-q"]
+                and "test_issue84_governed_v5_paper_restart.py" in command
+                for command in commands
+            )
+        )
 
     def test_shadow_ai_change_selects_complete_shadow_ai_regression_set(self) -> None:
         tests = planned_regressions(("shadow_ai_outcome_memory.py",))

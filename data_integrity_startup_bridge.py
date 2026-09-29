@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-VERSION = "data-integrity-startup-bridge-2026-09-25-v43-governed-v5-paper-restart"
+VERSION = "data-integrity-startup-bridge-2026-09-25-v43-governed-v5-restart"
 MODULES = (
     "final_daily_audit_compactor",
     "daily_audit_entry_count_bridge",
@@ -103,10 +103,12 @@ MODULES = (
     # only the demonstrated four-entry projection gap may create the archived,
     # non-promotable verified-flat epoch, and the active parity halt is retained.
     "issue222_verified_flat_successor",
-    # User-authorized Issue #84 controlled paper restart. This exact v5-only
-    # transition runs after the successor owner, releases only its administrative
-    # hold plus inherited projection halt, and keeps prior evidence non-promotable.
-    "issue84_governed_v5_paper_restart",
+    # User-reviewed Issue #84 transition. It runs after every historical
+    # successor owner, requires the exact flat v5/ledger/accounting signature,
+    # and installs the serialized paper execution coordinator before the auto
+    # runner is registered. It cannot alter strategy, sizing, hard-risk, live,
+    # ML, or immutable-history authority.
+    "governed_v5_paper_restart",
 )
 
 

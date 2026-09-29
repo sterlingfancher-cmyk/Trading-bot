@@ -1,6 +1,7 @@
 import json
 import hashlib
 import types
+import pytest
 
 import canonical_execution_ledger as ledger
 import final_daily_audit_compactor as compact
@@ -78,15 +79,17 @@ def test_ledger_failure_halts_without_overwriting_existing_halt(monkeypatch):
 
     monkeypatch.setattr(ledger, "append_execution", boom)
     ledger.apply(core)
-    core.record_trade("entry", "QQQ", "long", 100, 1, {})
+    with pytest.raises(RuntimeError, match="canonical execution append failed"):
+        core.record_trade("entry", "QQQ", "long", 100, 1, {})
     assert core.portfolio["risk_controls"]["halted"] is True
     assert core.portfolio["risk_controls"]["halt_reason"] == "canonical execution ledger write failed"
-    assert "canonical_execution_ledger_error" in calls[0]
+    assert calls == []
 
     core2, _ = _core()
     core2.portfolio["risk_controls"] = {"halted": True, "halt_reason": "existing accounting halt"}
     ledger.apply(core2)
-    core2.record_trade("entry", "QQQ", "long", 100, 1, {})
+    with pytest.raises(RuntimeError, match="canonical execution append failed"):
+        core2.record_trade("entry", "QQQ", "long", 100, 1, {})
     assert core2.portfolio["risk_controls"]["halt_reason"] == "existing accounting halt"
 
 
