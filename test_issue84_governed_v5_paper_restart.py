@@ -415,7 +415,9 @@ def test_preappend_abort_recovery_rejects_non_exact_incident(monkeypatch, tmp_pa
 
 def test_fresh_day_consumed_abort_drift_relatches_fail_closed(monkeypatch, tmp_path):
     core = _activate(monkeypatch, tmp_path)
-    _set_exact_restored_wrapper_abort(core, intent_id="different-intent")
+    details = _set_exact_restored_wrapper_abort(
+        core, intent_id="different-intent"
+    )
     risk = core.portfolio["risk_controls"]
     risk.clear()
     risk.update(
@@ -433,6 +435,103 @@ def test_fresh_day_consumed_abort_drift_relatches_fail_closed(monkeypatch, tmp_p
     assert result["status"] == "halted"
     assert result["risk_halted"] is True
     assert risk["halt_reason"] == "governed pre-append abort recovery evidence drift"
+    assert result["preappend_abort_recovery"] is None
+    governed = core.portfolio["governed_v5_paper_restart"]
+    assert governed["last_discrepancy"] == details
+    assert governed["last_recovery_failure"]["status"] == "not_applicable"
+    assert governed["last_recovery_failure"]["failed_checks"] == [
+        "exact_entry_wrapper_error"
+    ]
+    second = restart.apply(core)
+    assert second["status"] == "halted"
+    assert second["risk_halted"] is True
+
+
+def _set_exact_pr282_failed_recovery(core):
+    _set_exact_restored_wrapper_abort(core)
+    passing = restart._preappend_abort_recovery_evidence(core)
+    checks = copy.deepcopy(passing["checks"])
+    checks.pop("recorded_incident_reference_exact")
+    for name in restart.PR282_FAILED_RECOVERY_CHECKS:
+        checks[name] = False
+    failure = {
+        "status": "not_applicable",
+        "overall": "fail",
+        "version": restart.PR282_FAILED_RECOVERY_VERSION,
+        "failed_checks": list(restart.PR282_FAILED_RECOVERY_CHECKS),
+        "checks": checks,
+    }
+    risk = core.portfolio["risk_controls"]
+    risk.update(
+        {
+            "halted": True,
+            "halt_reason": restart.RECOVERY_DRIFT_HALT_REASON,
+            "governed_restart_halt_local": "2026-09-30 14:04:12 CDT",
+            "governed_restart_halt_details": copy.deepcopy(failure),
+        }
+    )
+    governed = core.portfolio["governed_v5_paper_restart"]
+    governed.update(
+        {
+            "status": "halted",
+            "last_discrepancy": copy.deepcopy(failure),
+            "last_discrepancy_local": "2026-09-30 14:04:12 CDT",
+        }
+    )
+    governed.pop("preappend_abort_recovery", None)
+    return failure
+
+
+def test_exact_pr282_failed_recovery_successor_recovers_without_rewrite(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    failure = _set_exact_pr282_failed_recovery(core)
+    canonical_before = copy.deepcopy(ledger.status_payload(core))
+    epoch_before = copy.deepcopy(core.portfolio["paper_accounting_epoch"])
+    history_before = copy.deepcopy(core.portfolio["history"])
+    day_start_before = core.portfolio["risk_controls"]["day_start_equity"]
+    day_peak_before = core.portfolio["risk_controls"]["day_peak_equity"]
+
+    result = restart.apply(core)
+
+    assert result["status"] == "active"
+    assert result["risk_halted"] is False
+    recovery = result["preappend_abort_recovery"]
+    assert recovery["status"] == "recovered"
+    assert recovery["recovery_mode"] == "pr282_failed_recovery_successor"
+    assert recovery["incident_evidence_reference"] == (
+        restart.RECOVERABLE_INCIDENT_EVIDENCE_REFERENCE
+    )
+    assert recovery["historical_discrepancy_rewritten"] is False
+    assert result["last_discrepancy"] == failure
+    assert ledger.status_payload(core) == canonical_before
+    assert core.portfolio["paper_accounting_epoch"] == epoch_before
+    assert core.portfolio["history"] == history_before
+    assert core.portfolio["risk_controls"]["day_start_equity"] == day_start_before
+    assert core.portfolio["risk_controls"]["day_peak_equity"] == day_peak_before
+    assert accounting._issue222_verified_flat_zero_trade_baseline(core.portfolio)[
+        "coverage_complete"
+    ] is True
+
+
+def test_pr282_successor_rejects_near_match(monkeypatch, tmp_path):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_pr282_failed_recovery(core)
+    governed = core.portfolio["governed_v5_paper_restart"]
+    governed["last_discrepancy"]["checks"]["canonical_digest_unchanged"] = False
+    core.portfolio["risk_controls"].update(
+        {
+            "governed_restart_halt_details": copy.deepcopy(
+                governed["last_discrepancy"]
+            )
+        }
+    )
+
+    result = restart.apply(core)
+
+    assert result["status"] == "halted"
+    assert result["risk_halted"] is True
     assert result["preappend_abort_recovery"] is None
 
 

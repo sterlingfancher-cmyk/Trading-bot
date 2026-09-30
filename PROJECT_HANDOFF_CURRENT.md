@@ -2504,3 +2504,53 @@ forward-trade acceptance: there is still no post-start execution receipt, and
 ordinary market-driven forward observations remain required. Keep Issue #202
 and `hold_10d` promotion frozen under `VALIDATION_POLICY.md`; the governed
 restart does not relax any performance-promotion gate.
+
+
+## 2026-09-30 Issue #84 — pre-append abort recovery-forensics successor — IN PROGRESS
+
+PR #282 exact head `ea8d9856bbbfc0f589886337195d39dd23b97226`
+passed every mandatory exact-head workflow, including both exact Gunicorn
+smokes, and squash-merged as
+`2ff5a1201db9b50144a04e72ec587c772f583eba`. The merge-head Repository
+Safety (`36762833034`), Architecture Debt (`36762833114`), Change Safety
+(`36762833090`) and Refactor/runtime (`36762833109`) gates passed; Splendid
+deployed that exact commit successfully.
+
+Settled read-only runtime acceptance did not pass. The research job
+`110050289773` in run `36762833109` reached all 12 monitored endpoints and
+proved the exact deployed commit, 88 chain-valid canonical rows with unchanged
+digest `f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`,
+projection parity, zero accounting coverage/economic issues, healthy runner and
+market data, and the flat account at cash `13429.13048559457` / equity
+`13429.13`. It also correctly showed the system halted with one sentinel
+incident and reason `governed pre-append abort recovery evidence drift`; the
+evidence builder rejected acceptance. No cycle was forced.
+
+The governed restart endpoint supplied the missing diagnosis. PR #282's
+fail-closed recovery latch replaced `restart.last_discrepancy` and its original
+incident timestamp with its own `not_applicable` recovery diagnostic. That
+diagnostic failed exactly `exact_preappend_abort_boundary`,
+`exact_incident_time`, and `exact_entry_wrapper_error`, while its no-append,
+canonical digest/row/chain/parity, flat-state, accounting and hard-risk checks
+all passed. Issue #84 comment `5897148822` independently preserves the original
+exact incident at `2026-09-29 08:49:52 CDT`, operation `entry`, intent
+`0787369dd4481d57c6d73f944f3e14cb89f3088b80ea08e8fe464d95ccac2547`,
+the exact wrapper `TypeError`, 88 canonical rows before/after and
+`state_restored=true`.
+
+The single active repair branch is `fix/issue84-preserve-recovery-forensics`.
+It keeps future recovery failures in separate fields without overwriting the
+historical discrepancy, accepts only the complete exact deployed PR #282
+failure signature as a non-destructive successor, records the independent
+incident reference, and rejects near matches. It also adds
+`/paper/governed-v5-restart-status` to the mandatory read-only runtime snapshot
+and raises the exact settled-endpoint requirement from 12 to 13. Focused tests
+currently pass 37/37. Exact-head workflows, review, merge, deployment and
+settled recovery acceptance are still pending and must not be inferred from
+the local result.
+
+No canonical/accounting/state/history/day-peak evidence was rewritten, no halt
+was manually cleared, `/paper/run` was not called, and no live, AI, strategy,
+sizing or hard-risk authority changed. Resume by committing and publishing this
+same branch, recording its exact head in Issue #84, requiring every exact-head
+gate, and only then performing settled read-only Splendid acceptance.

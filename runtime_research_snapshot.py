@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_BASE_URL = "https://web-production-e1796.up.railway.app"
-VERSION = "runtime-research-snapshot-2026-09-16-v7-sentinel-ledger-provenance"
+VERSION = "runtime-research-snapshot-2026-09-30-v8-governed-restart"
 
 ENDPOINTS = {
     "bootstrap_status": "/bootstrap-status",
@@ -28,6 +28,7 @@ ENDPOINTS = {
     "fresh_day_check": "/paper/fresh-day-check",
     "daily_audit": "/paper/daily-audit",
     "system_sentinel": "/paper/system-sentinel-status",
+    "governed_v5_restart": "/paper/governed-v5-restart-status",
     "verified_v2_recovery_gate": "/paper/verified-v2-successor-replay-status",
     "v1_status": "/paper/performance-audit-status",
     "v2_status": "/paper/performance-audit-v2-status",
@@ -221,6 +222,29 @@ def _daily_audit_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _governed_restart_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    recovery = _dict(payload.get("preappend_abort_recovery"))
+    failure = _dict(
+        payload.get("last_recovery_failure") or payload.get("last_discrepancy")
+    )
+    return {
+        "status": payload.get("status"),
+        "overall": payload.get("overall"),
+        "version": payload.get("version"),
+        "epoch_id": payload.get("epoch_id"),
+        "risk_halted": payload.get("risk_halted"),
+        "risk_halt_reason": payload.get("risk_halt_reason"),
+        "paper_execution_enabled": payload.get("paper_execution_enabled"),
+        "recovery_status": recovery.get("status"),
+        "recovery_mode": recovery.get("recovery_mode"),
+        "recovery_version": recovery.get("version"),
+        "incident_evidence_reference": recovery.get(
+            "incident_evidence_reference"
+        ),
+        "failed_checks": failure.get("failed_checks"),
+    }
+
+
 def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
     bootstrap_payload = _dict(_dict(raw.get("bootstrap_status")).get("payload"))
     root_payload = _dict(_dict(raw.get("root")).get("payload"))
@@ -229,6 +253,9 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
     fresh_payload = _dict(_dict(raw.get("fresh_day_check")).get("payload"))
     audit_payload = _dict(_dict(raw.get("daily_audit")).get("payload"))
     sentinel_payload = _dict(_dict(raw.get("system_sentinel")).get("payload"))
+    governed_payload = _dict(
+        _dict(raw.get("governed_v5_restart")).get("payload")
+    )
     recovery_payload = _dict(
         _dict(raw.get("verified_v2_recovery_gate")).get("payload")
     )
@@ -384,6 +411,7 @@ def _summarize(raw: dict[str, dict[str, Any]]) -> dict[str, Any]:
                 "read_only_on_demand"
             ),
         },
+        "governed_v5_restart": _governed_restart_summary(governed_payload),
         "recovery_gate": recovery_gate,
         "v1": {
             "version": v1_payload.get("version"),
@@ -431,6 +459,7 @@ def _markdown(report: dict[str, Any]) -> str:
     fresh_day = _dict(summary.get("fresh_day"))
     daily_audit = _dict(summary.get("daily_audit"))
     sentinel = _dict(summary.get("system_sentinel"))
+    governed = _dict(summary.get("governed_v5_restart"))
     recovery_gate = _dict(summary.get("recovery_gate"))
     v1 = _dict(summary.get("v1"))
     v2 = _dict(summary.get("v2"))
@@ -488,6 +517,16 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- Collection errors: `{sentinel.get('collection_errors')}`",
         f"- Generated commit: `{sentinel.get('generated_commit_sha')}`",
         f"- Advisory / read-only: `{sentinel.get('advisory_only')}` / `{sentinel.get('read_only_on_demand')}`",
+        "",
+        "## Governed v5 Restart",
+        "",
+        f"- Status / overall: `{governed.get('status')}` / `{governed.get('overall')}`",
+        f"- Risk halted / reason: `{governed.get('risk_halted')}` / `{governed.get('risk_halt_reason')}`",
+        f"- Paper execution enabled: `{governed.get('paper_execution_enabled')}`",
+        f"- Recovery status / mode: `{governed.get('recovery_status')}` / `{governed.get('recovery_mode')}`",
+        f"- Recovery version: `{governed.get('recovery_version')}`",
+        f"- Incident evidence: `{governed.get('incident_evidence_reference')}`",
+        f"- Failed checks: `{governed.get('failed_checks')}`",
         "",
         "## Verified-v2 Recovery Gate",
         "",

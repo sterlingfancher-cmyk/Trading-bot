@@ -36,6 +36,21 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
                 "read_only_on_demand": True,
             },
         }
+        raw["governed_v5_restart"]["payload"] = {
+            "status": "active",
+            "overall": "pass",
+            "version": "governed-test",
+            "epoch_id": epoch_id,
+            "risk_halted": False,
+            "risk_halt_reason": "",
+            "paper_execution_enabled": True,
+            "preappend_abort_recovery": {
+                "status": "recovered",
+                "version": "recovery-test",
+                "recovery_mode": "pr282_failed_recovery_successor",
+                "incident_evidence_reference": "issue-84-comment-5897148822",
+            },
+        }
         raw["self_check"]["payload"] = {
             "overall": "pass",
             "version": "self-check-test",
@@ -138,6 +153,10 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
             snapshot.ENDPOINTS["system_sentinel"],
             "/paper/system-sentinel-status",
         )
+        self.assertEqual(
+            snapshot.ENDPOINTS["governed_v5_restart"],
+            "/paper/governed-v5-restart-status",
+        )
 
     def test_recovery_fresh_day_and_active_audit_are_compacted_together(self):
         summary = snapshot._summarize(self._raw())
@@ -183,6 +202,18 @@ class RuntimeResearchSnapshotTests(unittest.TestCase):
         self.assertEqual(sentinel["generated_commit_sha"], "a" * 40)
         self.assertTrue(sentinel["advisory_only"])
         self.assertTrue(sentinel["read_only_on_demand"])
+
+        governed = summary["governed_v5_restart"]
+        self.assertEqual(governed["status"], "active")
+        self.assertEqual(governed["overall"], "pass")
+        self.assertFalse(governed["risk_halted"])
+        self.assertEqual(
+            governed["recovery_mode"], "pr282_failed_recovery_successor"
+        )
+        self.assertEqual(
+            governed["incident_evidence_reference"],
+            "issue-84-comment-5897148822",
+        )
 
     def test_sentinel_incident_warns_snapshot_without_mutation(self):
         raw = self._raw()
