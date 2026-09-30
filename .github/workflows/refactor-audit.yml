@@ -392,8 +392,8 @@ jobs:
               .get("payload", {})
           )
           complete = (
-              connectivity.get("reachable_count") == 12
-              and connectivity.get("total_count") == 12
+              connectivity.get("reachable_count") == 13
+              and connectivity.get("total_count") == 13
               and connectivity.get("classification_failed_endpoints") == []
               and connectivity.get("application_ready") is True
           )

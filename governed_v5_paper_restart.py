@@ -55,7 +55,44 @@ RECOVERABLE_ENTRY_WRAPPER_INTENT_ID = (
 )
 RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL = "2026-09-29 08:49:52 CDT"
 RECOVERABLE_FRESH_DAY_RESET_DATE = "2026-09-30"
-ABORT_RECOVERY_VERSION = "governed-v5-preappend-abort-recovery-2026-09-30-v1"
+RECOVERABLE_INCIDENT_EVIDENCE_REFERENCE = "issue-84-comment-5897148822"
+RECOVERY_DRIFT_HALT_REASON = "governed pre-append abort recovery evidence drift"
+PR282_FAILED_RECOVERY_VERSION = "governed-v5-preappend-abort-recovery-2026-09-30-v1"
+PR282_FAILED_RECOVERY_CHECKS = (
+    "exact_preappend_abort_boundary",
+    "exact_incident_time",
+    "exact_entry_wrapper_error",
+)
+PR282_FAILED_RECOVERY_ALL_CHECKS = frozenset(
+    {
+        "canonical_authoritative",
+        "canonical_chain_valid",
+        "canonical_digest_unchanged",
+        "canonical_epoch_window_empty",
+        "canonical_hook_active",
+        "canonical_no_active_errors",
+        "canonical_no_missing_rows",
+        "canonical_rows_unchanged",
+        "canonical_state_projection_parity",
+        "empty_v5_state_window",
+        "entry_marker_fix_reviewed_parent",
+        "exact_entry_wrapper_error",
+        "exact_incident_time",
+        "exact_preappend_abort_boundary",
+        "exact_released_v5_lineage",
+        "flat_state",
+        "governed_restart_active",
+        "hard_risk_limits_unchanged",
+        "no_canonical_append_during_abort",
+        "no_governed_receipts",
+        "paper_runtime",
+        "positive_flat_valuation",
+        "state_epoch_window_empty",
+    }
+)
+ABORT_RECOVERY_VERSION = (
+    "governed-v5-preappend-abort-recovery-2026-09-30-v2-pr282-successor"
+)
 ENTRY_MARKER_FIX_REVIEWED_PARENT = (
     "6364759af8ed256baf9b2bc99adb3ce28b25cdea"
 )
@@ -211,6 +248,43 @@ def _entry_marker_fix_reviewed_parent() -> bool:
     )
 
 
+def _pr282_failed_recovery_signature(
+    risk: Mapping[str, Any], restart: Mapping[str, Any]
+) -> bool:
+    """Match only the exact fail-closed diagnostic emitted by deployed PR #282."""
+    failure = _d(
+        restart.get("last_recovery_failure")
+        or restart.get("last_discrepancy")
+        or risk.get("governed_restart_halt_details")
+    )
+    checks = _d(failure.get("checks"))
+    failed = failure.get("failed_checks")
+    risk_details = _d(risk.get("governed_restart_halt_details"))
+    return bool(
+        risk.get("halted") is True
+        and risk.get("halt_reason") == RECOVERY_DRIFT_HALT_REASON
+        and restart.get("status") == "halted"
+        and restart.get("preappend_abort_recovery") is None
+        and failure.get("status") == "not_applicable"
+        and failure.get("overall") == "fail"
+        and failure.get("version") == PR282_FAILED_RECOVERY_VERSION
+        and risk_details == failure
+        and isinstance(failed, list)
+        and tuple(failed) == PR282_FAILED_RECOVERY_CHECKS
+        and set(checks) == PR282_FAILED_RECOVERY_ALL_CHECKS
+        and all(checks.get(name) is False for name in PR282_FAILED_RECOVERY_CHECKS)
+        and all(
+            value is True
+            for name, value in checks.items()
+            if name not in PR282_FAILED_RECOVERY_CHECKS
+        )
+        and checks.get("no_canonical_append_during_abort") is True
+        and checks.get("canonical_digest_unchanged") is True
+        and checks.get("canonical_rows_unchanged") is True
+        and checks.get("canonical_state_projection_parity") is True
+    )
+
+
 def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
     """Verify the one demonstrated pre-append wrapper abort without mutation."""
     state = _portfolio(core)
@@ -227,6 +301,7 @@ def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
     hard_limits = _d(restart.get("hard_risk_limits"))
     cash = _f(state.get("cash"), -1.0)
     equity = _f(state.get("equity"), -1.0)
+    pr282_failed_recovery = _pr282_failed_recovery_signature(risk, restart)
     active_abort_halt = bool(
         risk.get("halted") is True
         and risk.get("halt_reason") == PREAPPEND_ABORT_HALT_REASON
@@ -249,29 +324,47 @@ def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
         ),
         "exact_preappend_abort_boundary": bool(
             restart.get("status") == "halted"
-            and (active_abort_halt or consumed_by_exact_fresh_day_reset)
+            and (
+                active_abort_halt
+                or consumed_by_exact_fresh_day_reset
+                or pr282_failed_recovery
+            )
         ),
         "exact_incident_time": bool(
-            restart.get("last_discrepancy_local")
-            == RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
-            and (
-                consumed_by_exact_fresh_day_reset
-                or risk.get("governed_restart_halt_local")
+            pr282_failed_recovery
+            or (
+                restart.get("last_discrepancy_local")
                 == RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
+                and (
+                    consumed_by_exact_fresh_day_reset
+                    or risk.get("governed_restart_halt_local")
+                    == RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
+                )
             )
         ),
         "exact_entry_wrapper_error": bool(
-            discrepancy.get("operation") == "entry"
-            and discrepancy.get("intent_id")
-            == RECOVERABLE_ENTRY_WRAPPER_INTENT_ID
-            and discrepancy.get("error") == RECOVERABLE_ENTRY_WRAPPER_ERROR
-            and discrepancy.get("state_restored") is True
+            pr282_failed_recovery
+            or (
+                discrepancy.get("operation") == "entry"
+                and discrepancy.get("intent_id")
+                == RECOVERABLE_ENTRY_WRAPPER_INTENT_ID
+                and discrepancy.get("error") == RECOVERABLE_ENTRY_WRAPPER_ERROR
+                and discrepancy.get("state_restored") is True
+            )
         ),
         "no_canonical_append_during_abort": bool(
-            type(discrepancy.get("canonical_rows_before")) is int
-            and discrepancy.get("canonical_rows_before")
-            == discrepancy.get("canonical_rows_after")
-            == prestart_rows
+            pr282_failed_recovery
+            or (
+                type(discrepancy.get("canonical_rows_before")) is int
+                and discrepancy.get("canonical_rows_before")
+                == discrepancy.get("canonical_rows_after")
+                == prestart_rows
+            )
+        ),
+        "recorded_incident_reference_exact": bool(
+            not pr282_failed_recovery
+            or RECOVERABLE_INCIDENT_EVIDENCE_REFERENCE
+            == "issue-84-comment-5897148822"
         ),
         "entry_marker_fix_reviewed_parent": _entry_marker_fix_reviewed_parent(),
         "flat_state": _d(state.get("positions")) == {},
@@ -323,10 +416,15 @@ def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
         "canonical": canonical,
         "discrepancy": discrepancy,
         "recovery_mode": (
-            "fresh_day_reset_consumed_halt"
-            if consumed_by_exact_fresh_day_reset
-            else "active_exact_abort_halt"
+            "pr282_failed_recovery_successor"
+            if pr282_failed_recovery
+            else (
+                "fresh_day_reset_consumed_halt"
+                if consumed_by_exact_fresh_day_reset
+                else "active_exact_abort_halt"
+            )
         ),
+        "incident_evidence_reference": RECOVERABLE_INCIDENT_EVIDENCE_REFERENCE,
     }
 
 
@@ -364,6 +462,10 @@ def _recover_exact_preappend_wrapper_abort(core: Any) -> Dict[str, Any]:
             ),
             "checks": dict(evidence["checks"]),
             "historical_discrepancy_preserved": True,
+            "historical_discrepancy_rewritten": False,
+            "incident_evidence_reference": evidence[
+                "incident_evidence_reference"
+            ],
             "recovery_mode": evidence["recovery_mode"],
         }
         risk["halted"] = False
@@ -537,8 +639,13 @@ def _latch(core: Any, reason: str, details: Mapping[str, Any]) -> None:
     state["risk_controls"] = risk
     restart = _d(state.setdefault("governed_v5_paper_restart", {}))
     restart["status"] = "halted"
-    restart["last_discrepancy"] = dict(details)
-    restart["last_discrepancy_local"] = _now(core)
+    local = _now(core)
+    if reason == RECOVERY_DRIFT_HALT_REASON:
+        restart["last_recovery_failure"] = dict(details)
+        restart["last_recovery_failure_local"] = local
+    else:
+        restart["last_discrepancy"] = dict(details)
+        restart["last_discrepancy_local"] = local
     try:
         _save(core)
     except Exception as exc:
@@ -939,6 +1046,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
             discrepancy = _d(restart.get("last_discrepancy"))
             recovery_candidate = bool(
                 risk.get("halt_reason") == PREAPPEND_ABORT_HALT_REASON
+                or _pr282_failed_recovery_signature(risk, restart)
                 or (
                     restart.get("status") == "halted"
                     and restart.get("preappend_abort_recovery") is None
@@ -951,7 +1059,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
                     if recovery.get("status") != "recovered":
                         _latch(
                             core,
-                            "governed pre-append abort recovery evidence drift",
+                            RECOVERY_DRIFT_HALT_REASON,
                             recovery,
                         )
                 except Exception as exc:
@@ -1015,6 +1123,10 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "risk_halt_local": risk.get("governed_restart_halt_local"),
         "last_discrepancy": halt_details or None,
         "last_discrepancy_local": restart.get("last_discrepancy_local"),
+        "last_recovery_failure": restart.get("last_recovery_failure"),
+        "last_recovery_failure_local": restart.get(
+            "last_recovery_failure_local"
+        ),
         "canonical_execution_ledger_error": risk.get(
             "canonical_execution_ledger_error"
         ),
