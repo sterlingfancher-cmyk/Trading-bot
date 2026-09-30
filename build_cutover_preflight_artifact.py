@@ -36,6 +36,12 @@ EXPECTED_PRESTART_LEDGER_ROWS = 88
 EXPECTED_PRESTART_LEDGER_SHA256 = (
     "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
 )
+EXPECTED_RUNTIME_ENDPOINT_COUNT = 13
+EXPECTED_ABORT_RECOVERY_VERSION = (
+    "governed-v5-preappend-abort-recovery-2026-09-30-v2-pr282-successor"
+)
+EXPECTED_ABORT_RECOVERY_MODE = "pr282_failed_recovery_successor"
+EXPECTED_INCIDENT_EVIDENCE_REFERENCE = "issue-84-comment-5897148822"
 
 
 def _mapping(value: Any, *, name: str) -> Mapping[str, Any]:
@@ -67,7 +73,7 @@ def _require_settled_snapshot(
     )
     if (
         connectivity.get("reachable_count") != connectivity.get("total_count")
-        or connectivity.get("total_count") != 12
+        or connectivity.get("total_count") != EXPECTED_RUNTIME_ENDPOINT_COUNT
         or connectivity.get("classification_failed_endpoints") != []
         or connectivity.get("application_ready") is not True
     ):
@@ -134,17 +140,7 @@ def _artifact_sha256(row: Mapping[str, Any]) -> str:
 
 
 def _governed_restart_status(snapshot: Mapping[str, Any]) -> Mapping[str, Any]:
-    bootstrap = _runtime_payload(snapshot, "bootstrap_status")
-    registration = _mapping(
-        bootstrap.get("data_integrity_registration"),
-        name="bootstrap_status.data_integrity_registration",
-    )
-    apply = _mapping(registration.get("apply"), name="data_integrity_registration.apply")
-    modules = _mapping(apply.get("modules"), name="data_integrity_registration.apply.modules")
-    return _mapping(
-        modules.get("governed_v5_paper_restart"),
-        name="governed_v5_paper_restart",
-    )
+    return _runtime_payload(snapshot, "governed_v5_restart")
 
 
 def _build_post_start_acceptance(
@@ -163,6 +159,10 @@ def _build_post_start_acceptance(
     account = _mapping(daily_audit.get("account"), name="account")
     risk = _mapping(daily_audit.get("risk"), name="risk")
     governed = _governed_restart_status(runtime_snapshot)
+    recovery = _mapping(
+        governed.get("preappend_abort_recovery"),
+        name="governed_v5_restart.preappend_abort_recovery",
+    )
 
     checks = {
         "daily_audit_pass": daily_audit.get("overall") == "pass",
@@ -209,6 +209,17 @@ def _build_post_start_acceptance(
             and governed.get("validation_hold") is False
             and governed.get("risk_halted") is False
             and governed.get("post_start_forward_observations_required") is True
+        ),
+        "exact_preappend_abort_recovery": (
+            recovery.get("status") == "recovered"
+            and recovery.get("overall") == "pass"
+            and recovery.get("version") == EXPECTED_ABORT_RECOVERY_VERSION
+            and recovery.get("recovery_mode") == EXPECTED_ABORT_RECOVERY_MODE
+            and recovery.get("incident_evidence_reference")
+            == EXPECTED_INCIDENT_EVIDENCE_REFERENCE
+            and recovery.get("historical_discrepancy_preserved") is True
+            and recovery.get("historical_discrepancy_rewritten") is False
+            and all(_mapping(recovery.get("checks"), name="recovery.checks").values())
         ),
     }
     failures = sorted(name for name, passed in checks.items() if not passed)
