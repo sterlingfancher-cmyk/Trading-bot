@@ -15,7 +15,6 @@ import sys
 from typing import Any, Dict, Tuple
 
 VERSION = "paper-participation-allocator-2026-05-21-v1"
-GOVERNED_ENTRY_MARKER_COMPATIBLE = True
 REGISTERED_APP_IDS: set[int] = set()
 PATCHED_MODULE_IDS: set[int] = set()
 

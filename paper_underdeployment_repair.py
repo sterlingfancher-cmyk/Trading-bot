@@ -17,7 +17,6 @@ import time
 from typing import Any, Dict, Iterable, List, Tuple
 
 VERSION = "paper-underdeployment-repair-2026-08-03-v1"
-GOVERNED_ENTRY_MARKER_COMPATIBLE = True
 ENABLED = os.environ.get("PAPER_UNDERDEPLOYMENT_REPAIR_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 PAPER_ONLY = os.environ.get("PAPER_UNDERDEPLOYMENT_REPAIR_PAPER_ONLY", "true").lower() not in {"0", "false", "no", "off"}
 TARGETS = {

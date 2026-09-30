@@ -55,6 +55,9 @@ RECOVERABLE_ENTRY_WRAPPER_INTENT_ID = (
 )
 RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL = "2026-09-29 08:49:52 CDT"
 ABORT_RECOVERY_VERSION = "governed-v5-preappend-abort-recovery-2026-09-30-v1"
+ENTRY_MARKER_FIX_REVIEWED_PARENT = (
+    "6364759af8ed256baf9b2bc99adb3ce28b25cdea"
+)
 STATE_DIR = (
     os.environ.get("STATE_DIR")
     or os.environ.get("PERSISTENT_STATE_DIR")
@@ -200,17 +203,11 @@ def _canonical(core: Any) -> Dict[str, Any]:
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
 
 
-def _entry_marker_fix_loaded() -> bool:
-    try:
-        import paper_participation_allocator as participation
-        import paper_underdeployment_repair as underdeployment
-
-        return bool(
-            participation.GOVERNED_ENTRY_MARKER_COMPATIBLE is True
-            and underdeployment.GOVERNED_ENTRY_MARKER_COMPATIBLE is True
-        )
-    except Exception:
-        return False
+def _entry_marker_fix_reviewed_parent() -> bool:
+    """Bind recovery to the reviewed PR #280 parent without runtime imports."""
+    return ENTRY_MARKER_FIX_REVIEWED_PARENT == (
+        "6364759af8ed256baf9b2bc99adb3ce28b25cdea"
+    )
 
 
 def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
@@ -260,7 +257,7 @@ def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
             == discrepancy.get("canonical_rows_after")
             == prestart_rows
         ),
-        "entry_marker_fix_loaded": _entry_marker_fix_loaded(),
+        "entry_marker_fix_reviewed_parent": _entry_marker_fix_reviewed_parent(),
         "flat_state": _d(state.get("positions")) == {},
         "empty_v5_state_window": _l(state.get("trades")) == [],
         "no_governed_receipts": _l(
