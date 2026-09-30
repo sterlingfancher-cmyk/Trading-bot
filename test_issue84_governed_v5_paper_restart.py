@@ -296,6 +296,110 @@ def test_governed_entry_flag_crosses_runtime_allocation_wrappers(monkeypatch):
     ]
 
 
+def _set_exact_restored_wrapper_abort(core, *, state_restored=True):
+    details = {
+        "operation": "entry",
+        "intent_id": restart.RECOVERABLE_ENTRY_WRAPPER_INTENT_ID,
+        "error": restart.RECOVERABLE_ENTRY_WRAPPER_ERROR,
+        "canonical_rows_before": 0,
+        "canonical_rows_after": 0,
+        "state_restored": state_restored,
+    }
+    risk = core.portfolio["risk_controls"]
+    risk.update(
+        {
+            "halted": True,
+            "halt_reason": restart.PREAPPEND_ABORT_HALT_REASON,
+            "governed_restart_halt_version": restart.VERSION,
+            "governed_restart_halt_local": (
+                restart.RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
+            ),
+            "governed_restart_halt_details": copy.deepcopy(details),
+        }
+    )
+    governed = core.portfolio["governed_v5_paper_restart"]
+    governed.update(
+        {
+            "status": "halted",
+            "last_discrepancy": copy.deepcopy(details),
+            "last_discrepancy_local": (
+                restart.RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
+            ),
+        }
+    )
+    return details
+
+
+def test_exact_restored_wrapper_abort_recovers_without_evidence_change(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    details = _set_exact_restored_wrapper_abort(core)
+    canonical_before = copy.deepcopy(ledger.status_payload(core))
+    epoch_before = copy.deepcopy(core.portfolio["paper_accounting_epoch"])
+    history_before = copy.deepcopy(core.portfolio["history"])
+    day_start_before = core.portfolio["risk_controls"]["day_start_equity"]
+    day_peak_before = core.portfolio["risk_controls"]["day_peak_equity"]
+
+    result = restart.apply(core)
+
+    assert result["status"] == "active"
+    assert result["risk_halted"] is False
+    assert core.portfolio["risk_controls"]["halted"] is False
+    assert core.portfolio["risk_controls"]["halt_reason"] == ""
+    recovery = result["preappend_abort_recovery"]
+    assert recovery["status"] == "recovered"
+    assert recovery["version"] == restart.ABORT_RECOVERY_VERSION
+    assert all(recovery["checks"].values())
+    assert recovery["historical_discrepancy_preserved"] is True
+    assert result["last_discrepancy"] == details
+    assert ledger.status_payload(core) == canonical_before
+    assert core.portfolio["paper_accounting_epoch"] == epoch_before
+    assert core.portfolio["history"] == history_before
+    assert core.portfolio["risk_controls"]["day_start_equity"] == day_start_before
+    assert core.portfolio["risk_controls"]["day_peak_equity"] == day_peak_before
+    assert accounting._issue222_verified_flat_zero_trade_baseline(core.portfolio)[
+        "coverage_complete"
+    ] is True
+
+
+def test_preappend_abort_recovery_rejects_non_exact_incident(monkeypatch, tmp_path):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_restored_wrapper_abort(core, state_restored=False)
+
+    result = restart.apply(core)
+
+    assert result["status"] == "halted"
+    assert result["risk_halted"] is True
+    assert result["preappend_abort_recovery"] is None
+    evidence = restart._preappend_abort_recovery_evidence(core)
+    assert "exact_entry_wrapper_error" in evidence["failed_checks"]
+
+
+def test_preappend_abort_recovery_rolls_back_when_persistence_fails(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    details = _set_exact_restored_wrapper_abort(core)
+
+    def fail_save(*args, **kwargs):
+        raise OSError("state persistence unavailable")
+
+    monkeypatch.setattr(core, "save_state", fail_save)
+    result = restart.apply(core)
+
+    assert result["status"] == "error"
+    assert result["reason"] == "preappend_abort_recovery_failed"
+    assert core.portfolio["risk_controls"]["halted"] is True
+    assert core.portfolio["risk_controls"]["halt_reason"] == (
+        restart.PREAPPEND_ABORT_HALT_REASON
+    )
+    governed = core.portfolio["governed_v5_paper_restart"]
+    assert governed["status"] == "halted"
+    assert governed["last_discrepancy"] == details
+    assert "preappend_abort_recovery" not in governed
+
+
 def test_release_preserves_lineage_limits_and_accepts_restart_compatibility(monkeypatch, tmp_path):
     core = _activate(monkeypatch, tmp_path)
     epoch = core.portfolio["paper_accounting_epoch"]
