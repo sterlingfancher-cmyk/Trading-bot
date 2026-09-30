@@ -296,14 +296,14 @@ def test_governed_entry_flag_crosses_runtime_allocation_wrappers(monkeypatch):
     ]
 
 
-def _set_exact_restored_wrapper_abort(core):
+def _set_exact_restored_wrapper_abort(core, *, state_restored=True):
     details = {
         "operation": "entry",
         "intent_id": restart.RECOVERABLE_ENTRY_WRAPPER_INTENT_ID,
         "error": restart.RECOVERABLE_ENTRY_WRAPPER_ERROR,
         "canonical_rows_before": 0,
         "canonical_rows_after": 0,
-        "state_restored": True,
+        "state_restored": state_restored,
     }
     risk = core.portfolio["risk_controls"]
     risk.update(
@@ -365,13 +365,7 @@ def test_exact_restored_wrapper_abort_recovers_without_evidence_change(
 
 def test_preappend_abort_recovery_rejects_non_exact_incident(monkeypatch, tmp_path):
     core = _activate(monkeypatch, tmp_path)
-    _set_exact_restored_wrapper_abort(core)
-    core.portfolio["governed_v5_paper_restart"]["last_discrepancy"][
-        "state_restored"
-    ] = False
-    core.portfolio["risk_controls"]["governed_restart_halt_details"][
-        "state_restored"
-    ] = False
+    _set_exact_restored_wrapper_abort(core, state_restored=False)
 
     result = restart.apply(core)
 
