@@ -168,6 +168,57 @@ def test_canonical_parity_halt_survives_guarded_update_new_day_reset():
     assert rc["canonical_state_projection_parity_halt_carried_forward"] is True
 
 
+def test_governed_release_provenance_survives_legacy_get_new_day_reset():
+    module = _fresh_module()
+    core = FakeCore()
+    core.portfolio["equity"] = 13190.5
+    core.portfolio["risk_controls"].update(
+        {
+            "halted": False,
+            "halt_reason": "",
+            "governed_restart_prior_halt_reason": "issue222 prior halt",
+            "governed_restart_released_local": "2026-09-29 08:45:00 CDT",
+            "governed_restart_release_version": "governed-v5",
+        }
+    )
+    module.apply(core)
+
+    rc = core.get_risk_controls()
+
+    assert rc["date"] == "2026-08-19"
+    assert rc["halted"] is False
+    assert rc["governed_restart_prior_halt_reason"] == "issue222 prior halt"
+    assert rc["governed_restart_released_local"] == "2026-09-29 08:45:00 CDT"
+    assert rc["governed_restart_release_version"] == "governed-v5"
+    assert rc["governed_restart_metadata_carried_forward"] is True
+
+
+def test_governed_preappend_abort_survives_guarded_update_new_day_reset():
+    module = _fresh_module()
+    core = FakeCore()
+    details = {"operation": "entry", "state_restored": True}
+    core.portfolio["risk_controls"].update(
+        {
+            "halted": True,
+            "halt_reason": module.GOVERNED_PREAPPEND_ABORT_HALT_REASON,
+            "governed_restart_halt_version": "governed-v5",
+            "governed_restart_halt_local": "2026-09-29 08:49:52 CDT",
+            "governed_restart_halt_details": details,
+            "governed_restart_prior_halt_reason": "issue222 prior halt",
+        }
+    )
+    module.apply(core)
+
+    rc = core.update_daily_risk_controls(13250.25)
+
+    assert rc["date"] == "2026-08-19"
+    assert rc["halted"] is True
+    assert rc["halt_reason"] == module.GOVERNED_PREAPPEND_ABORT_HALT_REASON
+    assert rc["governed_restart_halt_details"] == details
+    assert rc["governed_restart_abort_halt_carried_forward"] is True
+    assert rc["governed_restart_prior_halt_reason"] == "issue222 prior halt"
+
+
 def test_already_initialized_current_day_is_never_rewritten():
     module = _fresh_module()
     core = FakeCore()

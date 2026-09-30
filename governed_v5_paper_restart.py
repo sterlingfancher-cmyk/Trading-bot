@@ -54,6 +54,7 @@ RECOVERABLE_ENTRY_WRAPPER_INTENT_ID = (
     "0787369dd4481d57c6d73f944f3e14cb89f3088b80ea08e8fe464d95ccac2547"
 )
 RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL = "2026-09-29 08:49:52 CDT"
+RECOVERABLE_FRESH_DAY_RESET_DATE = "2026-09-30"
 ABORT_RECOVERY_VERSION = "governed-v5-preappend-abort-recovery-2026-09-30-v1"
 ENTRY_MARKER_FIX_REVIEWED_PARENT = (
     "6364759af8ed256baf9b2bc99adb3ce28b25cdea"
@@ -226,23 +227,38 @@ def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
     hard_limits = _d(restart.get("hard_risk_limits"))
     cash = _f(state.get("cash"), -1.0)
     equity = _f(state.get("equity"), -1.0)
+    active_abort_halt = bool(
+        risk.get("halted") is True
+        and risk.get("halt_reason") == PREAPPEND_ABORT_HALT_REASON
+        and risk.get("governed_restart_halt_version") == VERSION
+        and risk.get("governed_restart_halt_local")
+        == RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
+    )
+    consumed_by_exact_fresh_day_reset = bool(
+        risk.get("halted") is False
+        and str(risk.get("halt_reason") or "") == ""
+        and str(risk.get("date") or "") == RECOVERABLE_FRESH_DAY_RESET_DATE
+        and restart.get("status") == "halted"
+        and restart.get("preappend_abort_recovery") is None
+    )
     checks = {
         "paper_runtime": _paper_only(),
         "governed_restart_active": _active(core),
         "exact_released_v5_lineage": bool(
             is_exact_v5_successor(epoch) and _release_metadata_exact(epoch)
         ),
-        "exact_preappend_abort_halt": bool(
-            risk.get("halted") is True
-            and risk.get("halt_reason") == PREAPPEND_ABORT_HALT_REASON
-            and risk.get("governed_restart_halt_version") == VERSION
-            and restart.get("status") == "halted"
+        "exact_preappend_abort_boundary": bool(
+            restart.get("status") == "halted"
+            and (active_abort_halt or consumed_by_exact_fresh_day_reset)
         ),
         "exact_incident_time": bool(
-            risk.get("governed_restart_halt_local")
+            restart.get("last_discrepancy_local")
             == RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
-            and restart.get("last_discrepancy_local")
-            == RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
+            and (
+                consumed_by_exact_fresh_day_reset
+                or risk.get("governed_restart_halt_local")
+                == RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
+            )
         ),
         "exact_entry_wrapper_error": bool(
             discrepancy.get("operation") == "entry"
@@ -306,6 +322,11 @@ def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
         "failed_checks": [name for name, passed in checks.items() if not passed],
         "canonical": canonical,
         "discrepancy": discrepancy,
+        "recovery_mode": (
+            "fresh_day_reset_consumed_halt"
+            if consumed_by_exact_fresh_day_reset
+            else "active_exact_abort_halt"
+        ),
     }
 
 
@@ -343,9 +364,13 @@ def _recover_exact_preappend_wrapper_abort(core: Any) -> Dict[str, Any]:
             ),
             "checks": dict(evidence["checks"]),
             "historical_discrepancy_preserved": True,
+            "recovery_mode": evidence["recovery_mode"],
         }
         risk["halted"] = False
         risk["halt_reason"] = ""
+        risk["governed_restart_prior_halt_reason"] = RETAINED_HALT_REASON
+        risk["governed_restart_released_local"] = restart.get("activated_local")
+        risk["governed_restart_release_version"] = VERSION
         risk["governed_restart_recovered_halt_reason"] = PREAPPEND_ABORT_HALT_REASON
         risk["governed_restart_abort_recovered_local"] = recovered_local
         risk["governed_restart_abort_recovery_version"] = ABORT_RECOVERY_VERSION
@@ -910,9 +935,25 @@ def apply(core: Any = None) -> Dict[str, Any]:
             )
         else:
             risk = _d(_portfolio(core).get("risk_controls"))
-            if risk.get("halt_reason") == PREAPPEND_ABORT_HALT_REASON:
+            restart = _d(_portfolio(core).get("governed_v5_paper_restart"))
+            discrepancy = _d(restart.get("last_discrepancy"))
+            recovery_candidate = bool(
+                risk.get("halt_reason") == PREAPPEND_ABORT_HALT_REASON
+                or (
+                    restart.get("status") == "halted"
+                    and restart.get("preappend_abort_recovery") is None
+                    and discrepancy.get("error") == RECOVERABLE_ENTRY_WRAPPER_ERROR
+                )
+            )
+            if recovery_candidate:
                 try:
-                    _recover_exact_preappend_wrapper_abort(core)
+                    recovery = _recover_exact_preappend_wrapper_abort(core)
+                    if recovery.get("status") != "recovered":
+                        _latch(
+                            core,
+                            "governed pre-append abort recovery evidence drift",
+                            recovery,
+                        )
                 except Exception as exc:
                     _LAST = {
                         "status": "error",

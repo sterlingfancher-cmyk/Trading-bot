@@ -363,6 +363,41 @@ def test_exact_restored_wrapper_abort_recovers_without_evidence_change(
     ] is True
 
 
+def test_exact_abort_consumed_by_fresh_day_reset_is_reconciled_with_receipt(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    details = _set_exact_restored_wrapper_abort(core)
+    risk = core.portfolio["risk_controls"]
+    risk.clear()
+    risk.update(
+        {
+            "date": restart.RECOVERABLE_FRESH_DAY_RESET_DATE,
+            "day_start_equity": core.portfolio["equity"],
+            "day_peak_equity": core.portfolio["equity"],
+            "halted": False,
+            "halt_reason": "",
+        }
+    )
+    canonical_before = copy.deepcopy(ledger.status_payload(core))
+
+    result = restart.apply(core)
+
+    assert result["status"] == "active"
+    assert result["risk_halted"] is False
+    recovery = result["preappend_abort_recovery"]
+    assert recovery["status"] == "recovered"
+    assert recovery["recovery_mode"] == "fresh_day_reset_consumed_halt"
+    assert recovery["historical_discrepancy_preserved"] is True
+    assert result["last_discrepancy"] == details
+    assert risk["governed_restart_prior_halt_reason"] == restart.RETAINED_HALT_REASON
+    assert risk["governed_restart_release_version"] == restart.VERSION
+    assert ledger.status_payload(core) == canonical_before
+    assert accounting._issue222_verified_flat_zero_trade_baseline(core.portfolio)[
+        "coverage_complete"
+    ] is True
+
+
 def test_preappend_abort_recovery_rejects_non_exact_incident(monkeypatch, tmp_path):
     core = _activate(monkeypatch, tmp_path)
     _set_exact_restored_wrapper_abort(core, state_restored=False)
