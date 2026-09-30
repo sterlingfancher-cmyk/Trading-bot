@@ -16,8 +16,11 @@ This guard is intentionally prospective and fail-closed:
   daily reset is allowed to initialize from that value;
 * an already-initialized current day is never rewritten, so this module does not
   clear today's halt or rewrite today's peak after the fact;
-* a canonical/state projection-divergence halt survives the ordinary new-day
-  risk-metric reset until a separately governed reconciliation resolves it.
+* canonical/state projection-divergence and governed pre-append execution
+  halts survive the ordinary new-day risk-metric reset until their separately
+  governed reconciliations resolve them;
+* governed release/recovery provenance survives daily counter resets so the
+  verified-flat accounting baseline remains attributable across sessions.
 
 No strategy, sizing, risk thresholds, accounting history, live authority, ML
 authority, or order-placement behavior is changed.
@@ -28,9 +31,25 @@ import functools
 import math
 from typing import Any, Dict
 
-VERSION = "fresh-risk-day-baseline-guard-2026-09-12-v3-integrity-halt-carry-forward"
+VERSION = "fresh-risk-day-baseline-guard-2026-09-30-v4-governance-carry-forward"
 MIN_SANE_EQUITY = 1.0
 CANONICAL_PARITY_HALT_REASON = "canonical execution/state projection divergence"
+GOVERNED_PREAPPEND_ABORT_HALT_REASON = (
+    "governed paper execution aborted before canonical append"
+)
+GOVERNED_PROVENANCE_KEYS = (
+    "governed_restart_prior_halt_reason",
+    "governed_restart_released_local",
+    "governed_restart_release_version",
+    "governed_restart_recovered_halt_reason",
+    "governed_restart_abort_recovered_local",
+    "governed_restart_abort_recovery_version",
+)
+GOVERNED_ABORT_KEYS = (
+    "governed_restart_halt_version",
+    "governed_restart_halt_local",
+    "governed_restart_halt_details",
+)
 _APPLIED_CORE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
 
@@ -104,6 +123,29 @@ def _carry_forward_canonical_parity_halt(fresh: Dict[str, Any], snapshot: Dict[s
     fresh["halt_reason"] = CANONICAL_PARITY_HALT_REASON
 
 
+def _governed_restart_snapshot(rc: Dict[str, Any]) -> Dict[str, Any]:
+    """Capture only non-daily governed restart provenance and active abort data."""
+    snapshot = {key: rc.get(key) for key in GOVERNED_PROVENANCE_KEYS if key in rc}
+    if str(rc.get("halt_reason") or "") == GOVERNED_PREAPPEND_ABORT_HALT_REASON:
+        snapshot.update({key: rc.get(key) for key in GOVERNED_ABORT_KEYS if key in rc})
+        snapshot["governed_preappend_abort_active"] = True
+    return snapshot
+
+
+def _carry_forward_governed_restart(
+    fresh: Dict[str, Any], snapshot: Dict[str, Any]
+) -> None:
+    if not snapshot:
+        return
+    abort_active = snapshot.pop("governed_preappend_abort_active", False) is True
+    fresh.update(snapshot)
+    fresh["governed_restart_metadata_carried_forward"] = True
+    if abort_active:
+        fresh["halted"] = True
+        fresh["halt_reason"] = GOVERNED_PREAPPEND_ABORT_HALT_REASON
+        fresh["governed_restart_abort_halt_carried_forward"] = True
+
+
 def apply(core: Any = None) -> Dict[str, Any]:
     if core is None:
         return {"status": "pending", "overall": "warn", "version": VERSION, "reason": "runtime_missing"}
@@ -135,6 +177,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
             portfolio["risk_controls"] = rc
 
         integrity_halt = _canonical_parity_halt_snapshot(rc)
+        governed_restart = _governed_restart_snapshot(rc)
         today = _today(core)
         legacy_reset_required = bool(today and str(rc.get("date") or "") != today)
         if legacy_reset_required:
@@ -145,6 +188,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
 
         out = prior_get()
         if isinstance(out, dict):
+            _carry_forward_governed_restart(out, governed_restart)
             _carry_forward_canonical_parity_halt(out, integrity_halt)
         if isinstance(out, dict) and legacy_reset_required and str(out.get("date") or "") == today:
             if _sane_equity(out.get("day_start_equity")) and _sane_equity(out.get("day_peak_equity")):
@@ -160,6 +204,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
             portfolio["risk_controls"] = rc
 
         integrity_halt = _canonical_parity_halt_snapshot(rc)
+        governed_restart = _governed_restart_snapshot(rc)
         today = _today(core)
         if today and str(rc.get("date") or "") != today:
             if not _sane_equity(equity):
@@ -174,6 +219,7 @@ def apply(core: Any = None) -> Dict[str, Any]:
             fresh["day_start_equity"] = float(equity)
             fresh["day_peak_equity"] = float(equity)
             _clear_pending(fresh, "update_daily_risk_controls.argument")
+            _carry_forward_governed_restart(fresh, governed_restart)
             _carry_forward_canonical_parity_halt(fresh, integrity_halt)
             portfolio["risk_controls"] = fresh
 
