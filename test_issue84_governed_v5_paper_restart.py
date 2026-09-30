@@ -296,10 +296,12 @@ def test_governed_entry_flag_crosses_runtime_allocation_wrappers(monkeypatch):
     ]
 
 
-def _set_exact_restored_wrapper_abort(core, *, state_restored=True):
+def _set_exact_restored_wrapper_abort(
+    core, *, state_restored=True, intent_id=restart.RECOVERABLE_ENTRY_WRAPPER_INTENT_ID
+):
     details = {
         "operation": "entry",
-        "intent_id": restart.RECOVERABLE_ENTRY_WRAPPER_INTENT_ID,
+        "intent_id": intent_id,
         "error": restart.RECOVERABLE_ENTRY_WRAPPER_ERROR,
         "canonical_rows_before": 0,
         "canonical_rows_after": 0,
@@ -409,6 +411,29 @@ def test_preappend_abort_recovery_rejects_non_exact_incident(monkeypatch, tmp_pa
     assert result["preappend_abort_recovery"] is None
     evidence = restart._preappend_abort_recovery_evidence(core)
     assert "exact_entry_wrapper_error" in evidence["failed_checks"]
+
+
+def test_fresh_day_consumed_abort_drift_relatches_fail_closed(monkeypatch, tmp_path):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_restored_wrapper_abort(core, intent_id="different-intent")
+    risk = core.portfolio["risk_controls"]
+    risk.clear()
+    risk.update(
+        {
+            "date": restart.RECOVERABLE_FRESH_DAY_RESET_DATE,
+            "day_start_equity": core.portfolio["equity"],
+            "day_peak_equity": core.portfolio["equity"],
+            "halted": False,
+            "halt_reason": "",
+        }
+    )
+
+    result = restart.apply(core)
+
+    assert result["status"] == "halted"
+    assert result["risk_halted"] is True
+    assert risk["halt_reason"] == "governed pre-append abort recovery evidence drift"
+    assert result["preappend_abort_recovery"] is None
 
 
 def test_preappend_abort_recovery_rolls_back_when_persistence_fails(
