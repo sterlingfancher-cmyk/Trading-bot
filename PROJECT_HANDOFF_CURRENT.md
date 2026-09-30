@@ -2554,3 +2554,42 @@ was manually cleared, `/paper/run` was not called, and no live, AI, strategy,
 sizing or hard-risk authority changed. Resume by committing and publishing this
 same branch, recording its exact head in Issue #84, requiring every exact-head
 gate, and only then performing settled read-only Splendid acceptance.
+
+
+## 2026-09-30 Issue #84 — exact recovery active; acceptance contract mismatch — IN PROGRESS
+
+PR #283 exact head `ca2d19bf66ed4052961afa8fe5bb1eef8bbbb610`
+passed all four mandatory exact-head workflows, including both exact Gunicorn
+smokes, and squash-merged as
+`31df5830bcab6fbba112471b7c0f38bdfe4a0788`. All merge-head code gates and
+both Gunicorn smokes passed, and Splendid accepted the exact merge deployment.
+
+The governed successor then recovered exactly and non-destructively:
+`status=active`, `overall=pass`, `risk_halted=false`, recovery mode
+`pr282_failed_recovery_successor`, version
+`governed-v5-preappend-abort-recovery-2026-09-30-v2-pr282-successor`, all
+recovery checks true, historical discrepancy preserved/not rewritten, and
+incident reference `issue-84-comment-5897148822`. The canonical ledger remains
+88 rows with unchanged digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`,
+valid chain and state parity; the account remains flat at cash
+`13429.13048559457` and equity `13429.13`. Daily audit, accounting, market data,
+runner and sentinel are clean; sentinel is quiet and binds exact merge commit
+`31df5830...`.
+
+Post-merge run `36778209521` nevertheless failed only at the evidence-builder
+step after its 13-endpoint read-only capture succeeded. The exact error was
+`CanaryInvariantError: runtime snapshot is incomplete or unsettled`: the
+builder still hard-coded the old 12-endpoint count and still read governed
+status indirectly from bootstrap instead of the newly mandatory direct
+endpoint. This is an acceptance-contract defect, not a recovery/runtime defect
+and not settled acceptance.
+
+The single follow-up branch `fix/issue84-recovery-acceptance-contract` updates
+the builder to require 13 endpoints, consume the direct governed status, and
+bind post-start acceptance to the exact recovery version/mode/independent issue
+reference, preservation flags and all-true recovery checks. It adds rejection
+coverage for receipt drift. No cycle was forced, no execution occurred, and no
+canonical/accounting/state/history/day-peak, strategy, sizing, hard-risk, live
+or AI authority changed. Resume through focused tests and every exact-head gate;
+do not claim settled acceptance until the builder succeeds after deployment.

@@ -33,6 +33,7 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
                 "fresh_day_check",
                 "daily_audit",
                 "system_sentinel",
+                "governed_v5_restart",
                 "verified_v2_recovery_gate",
                 "v1_status",
                 "v2_status",
@@ -56,8 +57,8 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
             "status": "pass",
             "summary": {
                 "connectivity": {
-                    "reachable_count": 12,
-                    "total_count": 12,
+                    "reachable_count": 13,
+                    "total_count": 13,
                     "classification_failed_endpoints": [],
                     "application_ready": True,
                 }
@@ -131,25 +132,27 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
         snapshot["raw"]["fresh_day_check"]["payload"].update(
             {"halted": False, "halt_reason": None}
         )
-        snapshot["raw"]["bootstrap_status"]["payload"] = {
-            "data_integrity_registration": {
-                "apply": {
-                    "modules": {
-                        "governed_v5_paper_restart": {
-                            "version": "governed-v5-paper-restart-2026-09-25-v1",
-                            "decision_id": "issue84-governed-paper-restart-2026-09-25",
-                            "review_reference": "issue-84-comment-5802294002",
-                            "epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
-                            "status": "active",
-                            "overall": "pass",
-                            "paper_execution_enabled": True,
-                            "validation_hold": False,
-                            "risk_halted": False,
-                            "post_start_forward_observations_required": True,
-                        }
-                    }
-                }
-            }
+        snapshot["raw"]["governed_v5_restart"]["payload"] = {
+            "version": "governed-v5-paper-restart-2026-09-25-v1",
+            "decision_id": "issue84-governed-paper-restart-2026-09-25",
+            "review_reference": "issue-84-comment-5802294002",
+            "epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+            "status": "active",
+            "overall": "pass",
+            "paper_execution_enabled": True,
+            "validation_hold": False,
+            "risk_halted": False,
+            "post_start_forward_observations_required": True,
+            "preappend_abort_recovery": {
+                "status": "recovered",
+                "overall": "pass",
+                "version": "governed-v5-preappend-abort-recovery-2026-09-30-v2-pr282-successor",
+                "recovery_mode": "pr282_failed_recovery_successor",
+                "incident_evidence_reference": "issue-84-comment-5897148822",
+                "historical_discrepancy_preserved": True,
+                "historical_discrepancy_rewritten": False,
+                "checks": {"all_exact": True},
+            },
         }
         return snapshot
 
@@ -176,14 +179,32 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
             with self.subTest(mutate=mutate):
                 snapshot = self._released_snapshot()
                 if mutate == "decision":
-                    governed = snapshot["raw"]["bootstrap_status"]["payload"][
-                        "data_integrity_registration"
-                    ]["apply"]["modules"]["governed_v5_paper_restart"]
+                    governed = snapshot["raw"]["governed_v5_restart"]["payload"]
                     governed["decision_id"] = "unreviewed"
                 else:
                     snapshot["raw"]["daily_audit"]["payload"][
                         "execution_ledger"
                     ]["ledger_sha256"] = "b" * 64
+                with self.assertRaises(CanaryInvariantError):
+                    build_artifacts(
+                        runtime_snapshot=snapshot,
+                        deployed_commit_sha=COMMIT,
+                        splendid_deployment_settled=True,
+                    )
+
+    def test_released_runtime_fails_closed_on_recovery_receipt_drift(self):
+        for mutate in ("mode", "reference", "check"):
+            with self.subTest(mutate=mutate):
+                snapshot = self._released_snapshot()
+                recovery = snapshot["raw"]["governed_v5_restart"]["payload"][
+                    "preappend_abort_recovery"
+                ]
+                if mutate == "mode":
+                    recovery["recovery_mode"] = "different"
+                elif mutate == "reference":
+                    recovery["incident_evidence_reference"] = "different"
+                else:
+                    recovery["checks"]["all_exact"] = False
                 with self.assertRaises(CanaryInvariantError):
                     build_artifacts(
                         runtime_snapshot=snapshot,
