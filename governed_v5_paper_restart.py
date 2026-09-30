@@ -45,6 +45,16 @@ EXPECTED_PRESTART_LEDGER_SHA256 = (
 )
 INTENT_RECEIPT_LIMIT = 256
 STATUS_SCHEMA_VERSION = "governed-v5-paper-restart-status-2026-09-29-v2-halt-forensics"
+PREAPPEND_ABORT_HALT_REASON = "governed paper execution aborted before canonical append"
+RECOVERABLE_ENTRY_WRAPPER_ERROR = (
+    "TypeError: _patch_enter.<locals>.enter() got an unexpected keyword argument "
+    "'_governed'"
+)
+RECOVERABLE_ENTRY_WRAPPER_INTENT_ID = (
+    "0787369dd4481d57c6d73f944f3e14cb89f3088b80ea08e8fe464d95ccac2547"
+)
+RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL = "2026-09-29 08:49:52 CDT"
+ABORT_RECOVERY_VERSION = "governed-v5-preappend-abort-recovery-2026-09-30-v1"
 STATE_DIR = (
     os.environ.get("STATE_DIR")
     or os.environ.get("PERSISTENT_STATE_DIR")
@@ -188,6 +198,171 @@ def _canonical(core: Any) -> Dict[str, Any]:
         return ledger.status_payload(core)
     except Exception as exc:
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _entry_marker_fix_loaded() -> bool:
+    try:
+        import paper_participation_allocator as participation
+        import paper_underdeployment_repair as underdeployment
+
+        return bool(
+            participation.GOVERNED_ENTRY_MARKER_COMPATIBLE is True
+            and underdeployment.GOVERNED_ENTRY_MARKER_COMPATIBLE is True
+        )
+    except Exception:
+        return False
+
+
+def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
+    """Verify the one demonstrated pre-append wrapper abort without mutation."""
+    state = _portfolio(core)
+    epoch = _d(state.get("paper_accounting_epoch"))
+    risk = _d(state.get("risk_controls"))
+    restart = _d(state.get("governed_v5_paper_restart"))
+    discrepancy = _d(
+        restart.get("last_discrepancy")
+        or risk.get("governed_restart_halt_details")
+    )
+    canonical = _canonical(core)
+    prestart_rows = restart.get("prestart_ledger_rows")
+    prestart_digest = str(restart.get("prestart_ledger_sha256") or "")
+    hard_limits = _d(restart.get("hard_risk_limits"))
+    cash = _f(state.get("cash"), -1.0)
+    equity = _f(state.get("equity"), -1.0)
+    checks = {
+        "paper_runtime": _paper_only(),
+        "governed_restart_active": _active(core),
+        "exact_released_v5_lineage": bool(
+            is_exact_v5_successor(epoch) and _release_metadata_exact(epoch)
+        ),
+        "exact_preappend_abort_halt": bool(
+            risk.get("halted") is True
+            and risk.get("halt_reason") == PREAPPEND_ABORT_HALT_REASON
+            and risk.get("governed_restart_halt_version") == VERSION
+            and restart.get("status") == "halted"
+        ),
+        "exact_incident_time": bool(
+            risk.get("governed_restart_halt_local")
+            == RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
+            and restart.get("last_discrepancy_local")
+            == RECOVERABLE_ENTRY_WRAPPER_INCIDENT_LOCAL
+        ),
+        "exact_entry_wrapper_error": bool(
+            discrepancy.get("operation") == "entry"
+            and discrepancy.get("intent_id")
+            == RECOVERABLE_ENTRY_WRAPPER_INTENT_ID
+            and discrepancy.get("error") == RECOVERABLE_ENTRY_WRAPPER_ERROR
+            and discrepancy.get("state_restored") is True
+        ),
+        "no_canonical_append_during_abort": bool(
+            type(discrepancy.get("canonical_rows_before")) is int
+            and discrepancy.get("canonical_rows_before")
+            == discrepancy.get("canonical_rows_after")
+            == prestart_rows
+        ),
+        "entry_marker_fix_loaded": _entry_marker_fix_loaded(),
+        "flat_state": _d(state.get("positions")) == {},
+        "empty_v5_state_window": _l(state.get("trades")) == [],
+        "no_governed_receipts": _l(
+            state.get("governed_execution_intent_receipts")
+        )
+        == [],
+        "positive_flat_valuation": bool(
+            cash > 0.0 and equity > 0.0 and abs(cash - equity) <= 0.05
+        ),
+        "hard_risk_limits_unchanged": bool(
+            hard_limits.get("max_daily_loss_pct")
+            == getattr(core, "MAX_DAILY_LOSS_PCT", None)
+            and hard_limits.get("max_intraday_drawdown_pct")
+            == getattr(core, "MAX_INTRADAY_DRAWDOWN_PCT", None)
+        ),
+        "canonical_hook_active": canonical.get("hook_applied") is True,
+        "canonical_authoritative": canonical.get(
+            "authoritative_for_new_executions"
+        )
+        is True,
+        "canonical_chain_valid": canonical.get("chain_valid") is True,
+        "canonical_digest_unchanged": bool(
+            prestart_digest
+            and canonical.get("ledger_sha256") == prestart_digest
+        ),
+        "canonical_rows_unchanged": canonical.get("row_count")
+        == prestart_rows,
+        "canonical_epoch_window_empty": canonical.get("current_epoch_rows") == 0,
+        "state_epoch_window_empty": canonical.get("state_current_epoch_rows") == 0,
+        "canonical_state_projection_parity": canonical.get(
+            "state_projection_parity"
+        )
+        is True,
+        "canonical_no_missing_rows": bool(
+            canonical.get("missing_from_ledger_count") == 0
+            and canonical.get("missing_from_state_count") == 0
+        ),
+        "canonical_no_active_errors": bool(
+            not _l(canonical.get("errors"))
+            and risk.get("canonical_execution_ledger_error") in (None, "")
+            and risk.get("canonical_state_projection_error") in (None, "")
+        ),
+    }
+    return {
+        "checks": checks,
+        "failed_checks": [name for name, passed in checks.items() if not passed],
+        "canonical": canonical,
+        "discrepancy": discrepancy,
+    }
+
+
+def _recover_exact_preappend_wrapper_abort(core: Any) -> Dict[str, Any]:
+    """Release only the exact restored pre-append wrapper abort after its fix."""
+    with _execution_lock():
+        evidence = _preappend_abort_recovery_evidence(core)
+        if evidence["failed_checks"]:
+            return {
+                "status": "not_applicable",
+                "overall": "fail",
+                "version": ABORT_RECOVERY_VERSION,
+                "failed_checks": evidence["failed_checks"],
+                "checks": evidence["checks"],
+            }
+
+        state = _portfolio(core)
+        risk = _d(state.get("risk_controls"))
+        restart = _d(state.get("governed_v5_paper_restart"))
+        risk_before = copy.deepcopy(risk)
+        restart_before = copy.deepcopy(restart)
+        recovered_local = _now(core)
+        recovery = {
+            "status": "recovered",
+            "overall": "pass",
+            "version": ABORT_RECOVERY_VERSION,
+            "recovered_local": recovered_local,
+            "prior_halt_reason": PREAPPEND_ABORT_HALT_REASON,
+            "incident_intent_id": RECOVERABLE_ENTRY_WRAPPER_INTENT_ID,
+            "canonical_row_count": _d(evidence.get("canonical")).get(
+                "row_count"
+            ),
+            "canonical_ledger_sha256": _d(evidence.get("canonical")).get(
+                "ledger_sha256"
+            ),
+            "checks": dict(evidence["checks"]),
+            "historical_discrepancy_preserved": True,
+        }
+        risk["halted"] = False
+        risk["halt_reason"] = ""
+        risk["governed_restart_recovered_halt_reason"] = PREAPPEND_ABORT_HALT_REASON
+        risk["governed_restart_abort_recovered_local"] = recovered_local
+        risk["governed_restart_abort_recovery_version"] = ABORT_RECOVERY_VERSION
+        restart["status"] = "active"
+        restart["preappend_abort_recovery"] = recovery
+        try:
+            _save(core)
+        except Exception:
+            risk.clear()
+            risk.update(risk_before)
+            restart.clear()
+            restart.update(restart_before)
+            raise
+        return recovery
 
 
 def _preconditions(core: Any) -> Dict[str, Any]:
@@ -736,6 +911,20 @@ def apply(core: Any = None) -> Dict[str, Any]:
                 "governed paper execution coordinator unavailable",
                 coordinator,
             )
+        else:
+            risk = _d(_portfolio(core).get("risk_controls"))
+            if risk.get("halt_reason") == PREAPPEND_ABORT_HALT_REASON:
+                try:
+                    _recover_exact_preappend_wrapper_abort(core)
+                except Exception as exc:
+                    _LAST = {
+                        "status": "error",
+                        "overall": "fail",
+                        "version": VERSION,
+                        "reason": "preappend_abort_recovery_failed",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                    return dict(_LAST)
         _LAST = status_payload(core)
         return dict(_LAST)
 
@@ -809,10 +998,12 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         ),
         "last_execution_receipt": restart.get("last_execution_receipt"),
         "last_execution_checks": restart.get("last_execution_checks"),
+        "preappend_abort_recovery": restart.get("preappend_abort_recovery"),
         "authority": {
             "paper_only": True,
             "releases_only_exact_v5_administrative_hold": True,
             "clears_only_exact_retained_projection_halt": True,
+            "clears_only_exact_restored_preappend_wrapper_abort": True,
             "preserves_hard_risk_limits": True,
             "serializes_execution_boundaries": True,
             "restores_state_after_canonical_append": False,
