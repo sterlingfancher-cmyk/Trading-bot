@@ -2593,3 +2593,48 @@ coverage for receipt drift. No cycle was forced, no execution occurred, and no
 canonical/accounting/state/history/day-peak, strategy, sizing, hard-risk, live
 or AI authority changed. Resume through focused tests and every exact-head gate;
 do not claim settled acceptance until the builder succeeds after deployment.
+
+
+## 2026-10-01 Issue #84 — governed recovery accepted; single-owner transaction — IN PROGRESS
+
+PR #284 exact head `00cf8bf97d6144ec706cbbc1aef4ff073c3f8a2b`
+passed every mandatory workflow, including both exact Gunicorn smokes, and
+squash-merged as `db196dd8423f6e27e87d7142905524c8655a62f7`.
+All merge-head code gates passed. Refactor/runtime run `36779557598` completed
+successfully, including settled exact-head Splendid acceptance, the 13-endpoint
+read-only capture, governed evidence builder, and artifact upload.
+
+Artifact `11126529322` has ZIP digest
+`sha256:0b68af825342e9f837ca9ece1bfa398cb6444f353acdf2797d2d1bf23ee62fc3`.
+It binds exact deployed commit `db196dd...`, evidence/acceptance SHA
+`d189aafaeeb9d55673692cbc9e5af7cb91bdd4e0d24b907e6c8d81c02a89d9dc`,
+and decision SHA
+`1aa6e614d6d9cd805c07b85d6f9dd1550e158266eb86b2525f81f8636d3d40ea`.
+Its state is `active_pending_forward_observations`; the only blocker is
+`post_start_forward_observations`, and the builder observed rather than
+performed activation. Production authority remains false.
+
+The exact governed recovery is active/pass with risk halt and validation hold
+false. Recovery version
+`governed-v5-preappend-abort-recovery-2026-09-30-v2-pr282-successor`, mode
+`pr282_failed_recovery_successor`, incident reference
+`issue-84-comment-5897148822`, historical discrepancy preservation and every
+recovery check are accepted. The account remains flat at cash
+`13429.13048559457` / equity `13429.13`; canonical ledger remains 88 rows,
+chain-valid and parity-clean with unchanged digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`.
+Daily audit, accounting, risk, runner, market data and sentinel are pass/quiet.
+Issue #84 comment `5932092317` records the durable acceptance checkpoint.
+
+The restart recovery path is therefore settled. Forward observations remain
+required evidence but are not a prerequisite for safe offline architecture
+implementation. The active branch is
+`fix/issue84-single-owner-transaction`. It adds a pure fail-closed transaction
+that requires a typed, chain-valid canonical ledger append proof before
+composing accounting projection, protected valuation, risk evaluation and
+exactly one next StateStore revision. It performs no ledger append, state-file
+write, runtime registration, order, live/AI action, strategy change or risk
+limit change; production writer activation still requires a separately
+reviewed cutover decision and settled acceptance. Focused tests currently pass
+9/9. Continue through exact-diff inspection and every mandatory exact-head gate
+before merge.
