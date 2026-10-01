@@ -1,15 +1,43 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-09-30 08:39 CDT
+Last updated: 2026-10-01 14:00 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `023f1eddff9489fd667e0fcb09f5f510600d1e78` (PR #281 code/deployment gates passed; settled governed evidence failed closed as recorded below).
+Validated runtime-code `main`: `cef87edfac3eee69e8536efb6c3c8acb6fa2683a` (PR #286 deployed exactly; runtime later failed closed on the wrapper-stack defect below).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
+
+## 2026-10-01 Issue #84 — Wrapper-stack abort repair in progress
+
+PR #285 completed the single-owner transaction binding and settled on Splendid.
+PR #286 added an atomic projection-recovery journal and passed every PR and
+merge-head code gate, including both exact Gunicorn smokes. Its merge
+`cef87edfac3eee69e8536efb6c3c8acb6fa2683a` deployed exactly and the runtime
+artifact captured all 13 endpoints, but the builder correctly rejected settled
+acceptance after a second real pre-append abort was found.
+
+At `2026-10-01 08:55:16 CDT`, intent
+`35ef0a98a60c43cd979b293e8dee0001967c96a1885f026908876aff12b85c27`
+failed with `_wrap_enter.<locals>.wrapped() got an unexpected keyword argument
+'_governed'`. State restoration succeeded and canonical rows remained 88 ->
+88 with the prior digest unchanged; no execution was appended or fabricated.
+The runtime subsequently latched `governed pre-append abort recovery evidence
+drift` and remains flat and fail-closed.
+
+The active branch is `fix/issue84-governed-wrapper-recovery`. It repairs all
+three remaining active entry wrappers (`risk_reward_structure`,
+`multi_timeframe_swing`, and `fundamental_valuation_risk_layer`) so the governed
+marker survives the full composed stack. It also adds an exact, non-destructive
+successor recovery for this demonstrated incident: the prior recovery receipt
+is preserved byte-for-byte, the new incident receives a separate receipt, and
+any near-match remains halted. Focused tests currently pass 20/20. Next:
+commit/publish one bounded PR, run every exact-head gate and both Gunicorn
+smokes, merge only if green, then require settled Splendid acceptance without
+calling `/paper/run`.
 
 ## 2026-09-29/30 Issue #84 — Governed v5 Restart Recovery
 

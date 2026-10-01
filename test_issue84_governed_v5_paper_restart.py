@@ -18,6 +18,9 @@ import paper_accounting_integrity_guard as accounting
 import paper_bidirectional_accounting_guard as bidirectional
 import paper_participation_allocator as participation_allocator
 import paper_underdeployment_repair as underdeployment_repair
+import risk_reward_structure
+import multi_timeframe_swing
+import fundamental_valuation_risk_layer
 
 
 def _state() -> dict:
@@ -296,6 +299,42 @@ def test_governed_entry_flag_crosses_runtime_allocation_wrappers(monkeypatch):
     ]
 
 
+def test_governed_entry_flag_crosses_full_runtime_wrapper_stack(monkeypatch):
+    calls = []
+
+    def base_enter(signal, params, market_mode=None, _governed=False):
+        calls.append(_governed)
+        return {"symbol": signal["symbol"], "blocked": False}
+
+    core = types.SimpleNamespace(
+        enter_position=base_enter,
+        portfolio={"positions": {}, "trades": [], "risk_controls": {}},
+    )
+    core.enter_position = risk_reward_structure._wrap_enter(
+        core, core.enter_position
+    )
+    monkeypatch.setitem(
+        multi_timeframe_swing._ORIGINALS,
+        "enter_position",
+        core.enter_position,
+    )
+    multi_timeframe_swing._wrap_enter(core)
+    monkeypatch.setattr(
+        fundamental_valuation_risk_layer,
+        "_risk_for_symbol",
+        lambda *args, **kwargs: {"risk_multiplier": 1.0},
+    )
+    assert fundamental_valuation_risk_layer._patch_enter_position(core) is True
+
+    core.enter_position(
+        {"symbol": "QQQ", "side": "long"},
+        {},
+        market_mode="risk_on",
+        _governed=True,
+    )
+    assert calls == [True]
+
+
 def _set_exact_restored_wrapper_abort(
     core, *, state_restored=True, intent_id=restart.RECOVERABLE_ENTRY_WRAPPER_INTENT_ID
 ):
@@ -510,6 +549,65 @@ def test_exact_pr282_failed_recovery_successor_recovers_without_rewrite(
     assert core.portfolio["history"] == history_before
     assert core.portfolio["risk_controls"]["day_start_equity"] == day_start_before
     assert core.portfolio["risk_controls"]["day_peak_equity"] == day_peak_before
+
+
+def test_exact_post_recovery_wrapper_abort_preserves_prior_receipt(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_pr282_failed_recovery(core)
+    first = restart.apply(core)
+    prior_receipt = copy.deepcopy(first["preappend_abort_recovery"])
+    governed = core.portfolio["governed_v5_paper_restart"]
+    rows = governed["prestart_ledger_rows"]
+    discrepancy = {
+        "operation": "entry",
+        "intent_id": restart.SUCCESSOR_WRAPPER_ABORT_INTENT_ID,
+        "error": restart.RECOVERABLE_ENTRY_WRAPPER_ERROR,
+        "canonical_rows_before": rows,
+        "canonical_rows_after": rows,
+        "state_restored": True,
+    }
+    checks = copy.deepcopy(prior_receipt["checks"])
+    for name in restart.PR282_FAILED_RECOVERY_CHECKS:
+        checks[name] = False
+    failure = {
+        "status": "not_applicable",
+        "overall": "fail",
+        "version": restart.ABORT_RECOVERY_VERSION,
+        "failed_checks": list(restart.PR282_FAILED_RECOVERY_CHECKS),
+        "checks": checks,
+    }
+    governed.update(
+        {
+            "status": "halted",
+            "last_discrepancy": discrepancy,
+            "last_discrepancy_local": restart.SUCCESSOR_WRAPPER_ABORT_INCIDENT_LOCAL,
+            "last_recovery_failure": copy.deepcopy(failure),
+        }
+    )
+    core.portfolio["risk_controls"].update(
+        {
+            "halted": True,
+            "halt_reason": restart.RECOVERY_DRIFT_HALT_REASON,
+            "governed_restart_halt_details": copy.deepcopy(failure),
+        }
+    )
+
+    result = restart.apply(core)
+
+    assert result["status"] == "active"
+    assert result["risk_halted"] is False
+    assert result["preappend_abort_recovery"] == prior_receipt
+    successor_receipt = result["post_recovery_wrapper_abort_recovery"]
+    assert successor_receipt["status"] == "recovered"
+    assert successor_receipt["version"] == (
+        restart.SUCCESSOR_WRAPPER_ABORT_RECOVERY_VERSION
+    )
+    assert successor_receipt["recovery_mode"] == (
+        "post_recovery_wrapper_stack_abort"
+    )
+    assert governed["last_discrepancy"] == discrepancy
     assert accounting._issue222_verified_flat_zero_trade_baseline(core.portfolio)[
         "coverage_complete"
     ] is True

@@ -229,8 +229,11 @@ def _wrap_entry_quality(core: Any, original: Any):
 
 def _wrap_enter(core: Any, original: Any):
     @functools.wraps(original)
-    def wrapped(signal: Dict[str, Any], params: Dict[str, Any], market_mode: Any = None):
-        result = original(signal, params, market_mode=market_mode)
+    def wrapped(signal: Dict[str, Any], params: Dict[str, Any], market_mode: Any = None, _governed: bool = False):
+        call_kwargs = {"market_mode": market_mode}
+        if _governed:
+            call_kwargs["_governed"] = True
+        result = original(signal, params, **call_kwargs)
         try:
             if isinstance(result, dict) and not result.get("blocked") and isinstance(signal, dict):
                 sym = str(signal.get("symbol", "")).upper(); plan = signal.get("risk_plan")

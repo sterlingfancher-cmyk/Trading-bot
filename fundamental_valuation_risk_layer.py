@@ -528,7 +528,7 @@ def _patch_enter_position(core: Any) -> bool:
     if not callable(original) or getattr(original, "_fundamental_valuation_risk_patched", False):
         return False
 
-    def wrapped(signal: Dict[str, Any], params: Dict[str, Any], market_mode: Any = None):
+    def wrapped(signal: Dict[str, Any], params: Dict[str, Any], market_mode: Any = None, _governed: bool = False):
         sig = dict(signal or {})
         symbol = str(sig.get("symbol") or "").upper()
         side = str(sig.get("side") or "long").lower()
@@ -544,7 +544,10 @@ def _patch_enter_position(core: Any) -> bool:
                 "reasons": _safe_list(risk.get("reasons"))[:6],
             }
 
-        result = original(sig, params, market_mode=market_mode)
+        call_kwargs = {"market_mode": market_mode}
+        if _governed:
+            call_kwargs["_governed"] = True
+        result = original(sig, params, **call_kwargs)
 
         try:
             if isinstance(result, dict) and not result.get("blocked") and symbol:
