@@ -13,6 +13,23 @@ from change_safety_audit import (
 
 
 class ChangeSafetyAuditTests(unittest.TestCase):
+    def test_single_owner_transaction_classifies_every_authority_boundary(self):
+        categories, boundaries = classify_paths(("trading/transaction.py",))
+
+        self.assertTrue(
+            {
+                "state_persistence",
+                "accounting_execution",
+                "valuation_market_data",
+                "risk",
+            }.issubset(categories)
+        )
+        self.assertTrue(
+            {"state", "accounting", "execution", "valuation", "risk"}.issubset(
+                boundaries
+            )
+        )
+
     def test_runner_observability_change_selects_runtime_audits(self) -> None:
         tests = planned_regressions(("fast_self_check_override.py",))
         self.assertIn("test_self_check_runtime_classification.py", tests)

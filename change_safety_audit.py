@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-09-28-v15-governed-restart"
+VERSION = "change-safety-audit-2026-10-01-v16-single-owner-transaction"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -22,6 +22,7 @@ CORE_TESTS = (
     "test_architecture_stage_d_state_store.py",
     "test_architecture_stage_e_accounting.py",
     "test_architecture_stage_f_canary.py",
+    "test_issue84_single_owner_transaction.py",
 )
 RUNTIME_TESTS = (
     "test_runtime_shadow_capture.py",
@@ -50,7 +51,9 @@ SUCCESSOR_EPOCH_MIGRATION_TESTS = (
 RUNTIME_RESEARCH_SNAPSHOT_TESTS = ("test_runtime_research_snapshot.py",)
 CUTOVER_PREFLIGHT_ARTIFACT_TESTS = ("test_issue84_cutover_preflight_artifact.py",)
 GOVERNED_V5_RESTART_TESTS = ("test_issue84_governed_v5_paper_restart.py",)
-PYTEST_REGRESSION_TESTS = frozenset(GOVERNED_V5_RESTART_TESTS)
+PYTEST_REGRESSION_TESTS = frozenset(
+    GOVERNED_V5_RESTART_TESTS + ("test_issue84_single_owner_transaction.py",)
+)
 LEGACY_EXTERNAL_PAPER_RUNNER_TESTS = ("test_legacy_external_paper_runner_retired.py",)
 SHADOW_AI_TESTS = (
     "test_shadow_ai_research_contract.py",
@@ -138,6 +141,13 @@ def _is_runtime_research_snapshot_path(path: str) -> bool:
 
 def _is_cutover_preflight_artifact_path(path: str) -> bool:
     return "cutover_preflight_artifact" in path.lower()
+
+
+def _is_single_owner_transaction_path(path: str) -> bool:
+    return Path(path.lower()).name in {
+        "transaction.py",
+        "test_issue84_single_owner_transaction.py",
+    }
 
 
 def _is_governed_v5_restart_path(path: str) -> bool:
@@ -235,6 +245,18 @@ def classify_paths(paths: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ..
         if _is_runtime_research_snapshot_path(path):
             categories.add("runtime_observability")
             boundaries.add("runtime_observability")
+        if _is_single_owner_transaction_path(path):
+            categories.update(
+                (
+                    "state_persistence",
+                    "accounting_execution",
+                    "valuation_market_data",
+                    "risk",
+                )
+            )
+            boundaries.update(
+                ("state", "accounting", "execution", "valuation", "risk")
+            )
         if "self_check" in path or "operational_audit" in path:
             categories.add("runtime_observability")
             boundaries.add("runtime_observability")
