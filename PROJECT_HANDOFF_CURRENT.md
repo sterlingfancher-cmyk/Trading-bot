@@ -2638,3 +2638,40 @@ limit change; production writer activation still requires a separately
 reviewed cutover decision and settled acceptance. Focused tests currently pass
 9/9. Continue through exact-diff inspection and every mandatory exact-head gate
 before merge.
+
+
+## 2026-10-01 Issue #84 — atomic transaction recovery journal — IN PROGRESS
+
+PR #285 exact head `ba733c881d9f9ad76fccd3221869f6a2aa78b014`
+passed every mandatory exact-head gate, including both exact Gunicorn smokes,
+and squash-merged as `f7063fe2ce68a9c45c8d70cbc3f5963fa0e6e15e`.
+All merge-head gates passed. Refactor/runtime run `36867526955` completed with
+settled exact-deployment Splendid acceptance and artifact `11163819359` (ZIP
+digest
+`sha256:f07fa3a01c3060a107fe371eecff71075977199de274e06dd95c072e130767d9`).
+The 13/13 read-only snapshot is PASS; sentinel is pass/quiet and binds the exact
+merge commit. Governed v5 remains active/pass with paper execution enabled,
+risk halt false and validation hold false. The account is flat at equity
+`13429.13`; canonical ledger remains chain-valid at 88 rows with unchanged
+digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`.
+Acceptance SHA is
+`ea92e20adaa5ad2d07ef117aabc925bed5434e71599ad0a62b846b99ea799a11`
+and decision SHA is
+`207d5706e41d20c39388107ba407916c78f1e259307b676ccbb5e01456a4a4c9`.
+State remains `active_pending_forward_observations`; the only blocker is
+`post_start_forward_observations`, and production authority remains false.
+Issue #84 comment `5932374465` is the durable settlement record.
+
+The active functional branch is
+`fix/issue84-atomic-transaction-journal`. It adds a sandbox-only, unregistered
+write-ahead journal for the reviewed single-owner transaction. Recovery is
+fail-closed at the immutable ledger boundary: a prepared transaction with no
+append is abandoned without state mutation; an exact settled append rolls
+forward exactly one bound StateStore revision; a crash after the state commit
+is idempotently recognized without creating another revision. The journal is
+digest-bound, process-locked, rejects unrelated ledger/state boundaries and
+never rewrites a canonical ledger row. It holds no production state, order,
+live or AI authority. Focused transaction/journal and audit tests currently
+pass. Continue through exact-diff inspection and every mandatory exact-head
+gate before merge and settled read-only deployment acceptance.

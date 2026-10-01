@@ -14,7 +14,9 @@ from change_safety_audit import (
 
 class ChangeSafetyAuditTests(unittest.TestCase):
     def test_single_owner_transaction_classifies_every_authority_boundary(self):
-        categories, boundaries = classify_paths(("trading/transaction.py",))
+        categories, boundaries = classify_paths(
+            ("trading/transaction.py", "trading/transaction_journal.py")
+        )
 
         self.assertTrue(
             {
@@ -29,6 +31,8 @@ class ChangeSafetyAuditTests(unittest.TestCase):
                 boundaries
             )
         )
+        tests = planned_regressions(("trading/transaction_journal.py",))
+        self.assertIn("test_issue84_atomic_transaction_journal.py", tests)
 
     def test_runner_observability_change_selects_runtime_audits(self) -> None:
         tests = planned_regressions(("fast_self_check_override.py",))

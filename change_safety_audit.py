@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-10-01-v16-single-owner-transaction"
+VERSION = "change-safety-audit-2026-10-01-v17-atomic-transaction-journal"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -23,6 +23,7 @@ CORE_TESTS = (
     "test_architecture_stage_e_accounting.py",
     "test_architecture_stage_f_canary.py",
     "test_issue84_single_owner_transaction.py",
+    "test_issue84_atomic_transaction_journal.py",
 )
 RUNTIME_TESTS = (
     "test_runtime_shadow_capture.py",
@@ -52,7 +53,11 @@ RUNTIME_RESEARCH_SNAPSHOT_TESTS = ("test_runtime_research_snapshot.py",)
 CUTOVER_PREFLIGHT_ARTIFACT_TESTS = ("test_issue84_cutover_preflight_artifact.py",)
 GOVERNED_V5_RESTART_TESTS = ("test_issue84_governed_v5_paper_restart.py",)
 PYTEST_REGRESSION_TESTS = frozenset(
-    GOVERNED_V5_RESTART_TESTS + ("test_issue84_single_owner_transaction.py",)
+    GOVERNED_V5_RESTART_TESTS
+    + (
+        "test_issue84_single_owner_transaction.py",
+        "test_issue84_atomic_transaction_journal.py",
+    )
 )
 LEGACY_EXTERNAL_PAPER_RUNNER_TESTS = ("test_legacy_external_paper_runner_retired.py",)
 SHADOW_AI_TESTS = (
@@ -146,7 +151,9 @@ def _is_cutover_preflight_artifact_path(path: str) -> bool:
 def _is_single_owner_transaction_path(path: str) -> bool:
     return Path(path.lower()).name in {
         "transaction.py",
+        "transaction_journal.py",
         "test_issue84_single_owner_transaction.py",
+        "test_issue84_atomic_transaction_journal.py",
     }
 
 

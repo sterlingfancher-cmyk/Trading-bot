@@ -1,0 +1,325 @@
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+import json
+
+import pytest
+
+from trading.accounting import ExecutionSnapshot
+from trading.risk import RiskLimits
+from trading.state import (
+    AccountingEpochSnapshot,
+    CanonicalStateSnapshot,
+    PortfolioSnapshot,
+    RiskStateSnapshot,
+)
+from trading.state_store import CanonicalStateStore
+from trading.transaction import LedgerAppendProof, SingleOwnerProjectionTransaction
+from trading.transaction_journal import (
+    ObservedLedgerState,
+    SandboxTransactionJournal,
+    TransactionJournalInvariantError,
+)
+from trading.valuation import ProtectedMarkSnapshot
+
+
+def _current():
+    snapshot = CanonicalStateSnapshot(
+        portfolio=PortfolioSnapshot(
+            cash=1_000.0,
+            equity=1_000.0,
+            realized_total=0.0,
+            realized_today=0.0,
+            unrealized_pnl=0.0,
+            positions=(),
+            accounting_epoch=AccountingEpochSnapshot(
+                epoch_id="stable-paper-v5-test",
+                baseline_type="verified_flat_successor",
+                historical_evidence_archived=True,
+                validation_hold=False,
+            ),
+        ),
+        risk=RiskStateSnapshot(
+            date="2026-10-01",
+            day_start_equity=1_000.0,
+            day_peak_equity=1_000.0,
+            daily_loss_fraction=0.0,
+            intraday_drawdown_fraction=0.0,
+            halted=False,
+        ),
+        execution_ledger_rows=88,
+        execution_epoch_rows=0,
+        execution_chain_valid=True,
+    )
+    envelope = CanonicalStateStore.prepare(
+        snapshot=snapshot,
+        revision=7,
+        created_at="2026-10-01 08:00:00 CDT",
+    )
+    assert envelope.snapshot().execution_ledger_rows == 88
+    return envelope
+
+
+def _receipt():
+    current = _current()
+    execution = ExecutionSnapshot(
+        sequence=89,
+        symbol="SPY",
+        event="entry",
+        side="long",
+        quantity=1.0,
+        price=100.0,
+        timestamp="2026-10-01 08:01:00 CDT",
+        execution_id="execution-89",
+    )
+    proof = LedgerAppendProof(
+        previous_total_rows=88,
+        next_total_rows=89,
+        previous_epoch_rows=0,
+        next_epoch_rows=1,
+        previous_state_payload_sha256=current.payload_sha256,
+        previous_sha256="a" * 64,
+        next_sha256="b" * 64,
+        appended_execution_ids=("execution-89",),
+        chain_valid=True,
+    )
+    return SingleOwnerProjectionTransaction.prepare(
+        current=current,
+        executions=(execution,),
+        protected_marks=(
+            ProtectedMarkSnapshot(
+                symbol="SPY",
+                price=101.0,
+                source="protected-test-mark",
+                fresh=True,
+                plausible=True,
+                observed_at="2026-10-01 08:01:01 CDT",
+            ),
+        ),
+        ledger=proof,
+        risk_date="2026-10-01",
+        risk_limits=RiskLimits(
+            max_daily_loss_fraction=0.03,
+            max_intraday_drawdown_fraction=0.03,
+            hard_realized_loss_fraction=0.02,
+        ),
+        created_at="2026-10-01 08:01:02 CDT",
+    )
+
+
+def _observed_previous():
+    return ObservedLedgerState(
+        total_rows=88,
+        epoch_rows=0,
+        ledger_sha256="a" * 64,
+        chain_valid=True,
+    )
+
+
+def _observed_next():
+    return ObservedLedgerState(
+        total_rows=89,
+        epoch_rows=1,
+        ledger_sha256="b" * 64,
+        chain_valid=True,
+        execution_ids=("execution-89",),
+    )
+
+
+def _sandbox(tmp_path):
+    state = CanonicalStateStore(
+        tmp_path / "canonical-state.json", sandbox_io_enabled=True
+    )
+    state.commit_sandbox(_current())
+    journal = SandboxTransactionJournal(
+        tmp_path / "transaction-journal.json", sandbox_io_enabled=True
+    )
+    return state, journal
+
+
+def test_preappend_recovery_aborts_without_ledger_or_state_mutation(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    baseline_bytes = state.path.read_bytes()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+
+    recovery = journal.recover(
+        receipt,
+        _observed_previous(),
+        state,
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+
+    assert recovery.action == "aborted_before_append"
+    assert recovery.replayed_state_commit is False
+    assert state.path.read_bytes() == baseline_bytes
+    assert state.read_sandbox().revision == 7
+    assert journal.read_sandbox().phase == "aborted_before_append"
+
+
+def test_crash_after_append_rolls_forward_exactly_one_state_revision(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+
+    recovery = journal.recover(
+        receipt,
+        _observed_next(),
+        state,
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+
+    persisted = state.read_sandbox()
+    assert recovery.action == "state_commit_replayed"
+    assert recovery.replayed_state_commit is True
+    assert persisted.revision == 8
+    assert persisted.payload_sha256 == receipt.next_envelope.payload_sha256
+    assert persisted.snapshot().execution_ledger_rows == 89
+    assert journal.read_sandbox().phase == "state_committed"
+
+
+def test_restart_after_commit_is_idempotent_and_does_not_create_revision_nine(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    journal.settle_ledger(
+        receipt,
+        _observed_next(),
+        recorded_at="2026-10-01 08:01:02 CDT",
+    )
+    state.commit_sandbox(receipt.next_envelope)
+
+    restarted_state = CanonicalStateStore(state.path, sandbox_io_enabled=True)
+    restarted_journal = SandboxTransactionJournal(
+        journal.path, sandbox_io_enabled=True
+    )
+    recovery = restarted_journal.recover(
+        receipt,
+        _observed_next(),
+        restarted_state,
+        recorded_at="2026-10-01 08:01:04 CDT",
+    )
+
+    assert recovery.action == "already_committed"
+    assert recovery.replayed_state_commit is False
+    assert restarted_state.read_sandbox().revision == 8
+    assert restarted_journal.read_sandbox().phase == "state_committed"
+
+
+@pytest.mark.parametrize(
+    "observed",
+    (
+        ObservedLedgerState(89, 1, "c" * 64, True, ("execution-89",)),
+        ObservedLedgerState(90, 2, "b" * 64, True, ("execution-89",)),
+        ObservedLedgerState(89, 1, "b" * 64, True, ("other",)),
+    ),
+)
+def test_recovery_rejects_ledger_boundary_drift(tmp_path, observed):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+
+    with pytest.raises(TransactionJournalInvariantError):
+        journal.recover(
+            receipt,
+            observed,
+            state,
+            recorded_at="2026-10-01 08:01:03 CDT",
+        )
+    assert state.read_sandbox().revision == 7
+
+
+def test_recovery_rejects_unrelated_state_revision(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    unrelated = CanonicalStateStore.prepare(
+        snapshot=_current().snapshot(),
+        revision=9,
+        created_at="2026-10-01 08:01:02 CDT",
+    )
+    state.commit_sandbox(unrelated)
+
+    with pytest.raises(TransactionJournalInvariantError):
+        journal.recover(
+            receipt,
+            _observed_next(),
+            state,
+            recorded_at="2026-10-01 08:01:03 CDT",
+        )
+
+
+def test_journal_digest_detects_tampering(tmp_path):
+    _, journal = _sandbox(tmp_path)
+    journal.begin(
+        _receipt(),
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    raw = json.loads(journal.path.read_text(encoding="utf-8"))
+    raw["next_revision"] = 99
+    journal.path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(TransactionJournalInvariantError):
+        journal.read_sandbox()
+
+
+def test_process_lock_allows_only_one_transaction_identity(tmp_path):
+    _, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+
+    def begin(transaction_id):
+        process_peer = SandboxTransactionJournal(
+            journal.path, sandbox_io_enabled=True
+        )
+        try:
+            return process_peer.begin(
+                receipt,
+                transaction_id=transaction_id,
+                recorded_at="2026-10-01 08:01:01 CDT",
+            ).transaction_id
+        except TransactionJournalInvariantError:
+            return "rejected"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = set(pool.map(begin, ("transaction-a", "transaction-b")))
+
+    assert "rejected" in results
+    assert len(results) == 2
+    assert journal.read_sandbox().transaction_id in {"transaction-a", "transaction-b"}
+
+
+def test_journal_has_no_runtime_or_order_authority(tmp_path):
+    descriptor = SandboxTransactionJournal.descriptor()
+    assert descriptor["authority"] == "shadow_only"
+    assert descriptor["runtime_registered"] is False
+    assert descriptor["production_write_enabled"] is False
+    assert descriptor["places_orders"] is False
+    assert descriptor["rewrites_canonical_ledger"] is False
+
+    with pytest.raises(PermissionError):
+        SandboxTransactionJournal(tmp_path / "journal.json").begin(
+            _receipt(),
+            transaction_id="transaction-89",
+            recorded_at="2026-10-01 08:01:01 CDT",
+        )
