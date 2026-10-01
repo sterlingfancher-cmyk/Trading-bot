@@ -613,6 +613,53 @@ def test_exact_post_recovery_wrapper_abort_preserves_prior_receipt(
     ] is True
 
 
+def test_post_recovery_wrapper_abort_rejects_near_match(monkeypatch, tmp_path):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_pr282_failed_recovery(core)
+    first = restart.apply(core)
+    governed = core.portfolio["governed_v5_paper_restart"]
+    rows = governed["prestart_ledger_rows"]
+    discrepancy = {
+        "operation": "entry",
+        "intent_id": "near-match-intent",
+        "error": restart.RECOVERABLE_ENTRY_WRAPPER_ERROR,
+        "canonical_rows_before": rows,
+        "canonical_rows_after": rows,
+        "state_restored": True,
+    }
+    checks = copy.deepcopy(first["preappend_abort_recovery"]["checks"])
+    for name in restart.PR282_FAILED_RECOVERY_CHECKS:
+        checks[name] = False
+    failure = {
+        "status": "not_applicable",
+        "overall": "fail",
+        "version": restart.ABORT_RECOVERY_VERSION,
+        "failed_checks": list(restart.PR282_FAILED_RECOVERY_CHECKS),
+        "checks": checks,
+    }
+    governed.update(
+        {
+            "status": "halted",
+            "last_discrepancy": discrepancy,
+            "last_discrepancy_local": restart.SUCCESSOR_WRAPPER_ABORT_INCIDENT_LOCAL,
+            "last_recovery_failure": copy.deepcopy(failure),
+        }
+    )
+    core.portfolio["risk_controls"].update(
+        {
+            "halted": True,
+            "halt_reason": restart.RECOVERY_DRIFT_HALT_REASON,
+            "governed_restart_halt_details": copy.deepcopy(failure),
+        }
+    )
+
+    result = restart.apply(core)
+
+    assert result["status"] == "halted"
+    assert result["risk_halted"] is True
+    assert result["post_recovery_wrapper_abort_recovery"] is None
+
+
 def test_pr282_successor_rejects_near_match(monkeypatch, tmp_path):
     core = _activate(monkeypatch, tmp_path)
     _set_exact_pr282_failed_recovery(core)
