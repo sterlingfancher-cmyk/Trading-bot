@@ -165,6 +165,9 @@ def _is_governed_v5_restart_path(path: str) -> bool:
         "market_surge_deployment_mode.py",
         "market_surge_queue_canonical_execution_bridge.py",
         "market_surge_queue_executor.py",
+        "risk_reward_structure.py",
+        "multi_timeframe_swing.py",
+        "fundamental_valuation_risk_layer.py",
         "test_issue84_governed_v5_paper_restart.py",
     }
 

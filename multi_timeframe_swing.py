@@ -245,8 +245,11 @@ def _wrap_entry_quality(core):
 
 def _wrap_enter(core):
     original = _ORIGINALS.get("enter_position")
-    def wrapped(signal, params, market_mode=None):
-        result = original(signal, params, market_mode=market_mode)
+    def wrapped(signal, params, market_mode=None, _governed=False):
+        call_kwargs = {"market_mode": market_mode}
+        if _governed:
+            call_kwargs["_governed"] = True
+        result = original(signal, params, **call_kwargs)
         if not ENABLED or not result or result.get("blocked"):
             return result
         symbol = signal.get("symbol")
