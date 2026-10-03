@@ -5,6 +5,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import types
+import pytest
 
 import canonical_execution_ledger as ledger
 import clean_epoch_successor_compatibility as clean_compat
@@ -551,8 +552,21 @@ def test_exact_pr282_failed_recovery_successor_recovers_without_rewrite(
     assert core.portfolio["risk_controls"]["day_peak_equity"] == day_peak_before
 
 
+@pytest.mark.parametrize(
+    ("intent_id", "incident_local"),
+    [
+        (
+            restart.SUCCESSOR_WRAPPER_ABORT_INTENT_ID,
+            restart.SUCCESSOR_WRAPPER_ABORT_INCIDENT_LOCAL,
+        ),
+        (
+            restart.LATEST_WRAPPER_ABORT_INTENT_ID,
+            restart.LATEST_WRAPPER_ABORT_INCIDENT_LOCAL,
+        ),
+    ],
+)
 def test_exact_post_recovery_wrapper_abort_preserves_prior_receipt(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, intent_id, incident_local
 ):
     core = _activate(monkeypatch, tmp_path)
     _set_exact_pr282_failed_recovery(core)
@@ -562,8 +576,8 @@ def test_exact_post_recovery_wrapper_abort_preserves_prior_receipt(
     rows = governed["prestart_ledger_rows"]
     discrepancy = {
         "operation": "entry",
-        "intent_id": restart.SUCCESSOR_WRAPPER_ABORT_INTENT_ID,
-        "error": restart.RECOVERABLE_ENTRY_WRAPPER_ERROR,
+        "intent_id": intent_id,
+        "error": restart.RECOVERABLE_WRAPPER_STACK_ERROR,
         "canonical_rows_before": rows,
         "canonical_rows_after": rows,
         "state_restored": True,
@@ -582,7 +596,7 @@ def test_exact_post_recovery_wrapper_abort_preserves_prior_receipt(
         {
             "status": "halted",
             "last_discrepancy": discrepancy,
-            "last_discrepancy_local": restart.SUCCESSOR_WRAPPER_ABORT_INCIDENT_LOCAL,
+            "last_discrepancy_local": incident_local,
             "last_recovery_failure": copy.deepcopy(failure),
         }
     )
@@ -622,7 +636,7 @@ def test_post_recovery_wrapper_abort_rejects_near_match(monkeypatch, tmp_path):
     discrepancy = {
         "operation": "entry",
         "intent_id": "near-match-intent",
-        "error": restart.RECOVERABLE_ENTRY_WRAPPER_ERROR,
+        "error": restart.RECOVERABLE_WRAPPER_STACK_ERROR,
         "canonical_rows_before": rows,
         "canonical_rows_after": rows,
         "state_restored": True,
