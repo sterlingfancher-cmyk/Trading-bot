@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-03 10:20 CDT
+Last updated: 2026-10-03 16:20 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `73186024bd3c7b7d89bd0881e7f37b664459202f` (PR #288 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `3303ea63578eba94f0e6aa4b95bb7622b9949264` (PR #289 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
@@ -39,7 +39,7 @@ authority remains false and AI/ML remains shadow-only. Post-start forward
 observations are still required; Saturday time is not a market session and no
 forward trade evidence is claimed.
 
-## 2026-10-03 Issue #84 — terminal transaction journal rollover in progress
+## 2026-10-03 Issue #84 — terminal transaction journal rollover merged and accepted
 
 Weekend cutover-readiness inspection found a concrete repeated-execution
 blocker in the shadow-only single-owner transaction journal. Its active record
@@ -49,7 +49,16 @@ later transaction failed as a competing owner. This did not affect the current
 legacy-backed paper runtime because the canonical StateStore writer and journal
 remain unregistered, but it would make a future reviewed cutover single-use.
 
-The active branch is `fix/issue84-terminal-journal-rollover`. It permits reuse
+PR #289 exact head `1575f19b600d8d4bc79424b0515870508a15244f`
+and exact tree `812ae07f5cac93d658dee8578fa1f9aabce6faf9` passed all
+four mandatory workflows and both exact Gunicorn smokes, then squash-merged as
+`3303ea63578eba94f0e6aa4b95bb7622b9949264`. All four merge-head code gates
+and both exact Gunicorn smokes also passed. Splendid accepted the exact merge,
+and runtime workflow `37154475267` completed successfully with a settled 13/13
+read-only capture. Runtime artifact `11284694940` has ZIP SHA-256
+`afd168dde86edb1a0120f824ae95968d5a0eec10dac440e107c28c4ae3bc1f4b`.
+
+The completed branch was `fix/issue84-terminal-journal-rollover`. It permits reuse
 only after an exact terminal record is copied to an immutable SHA-256-named
 archive under the same interprocess lock. Active `prepared` or
 `ledger_settled` records still reject competitors, transaction IDs cannot be
@@ -61,11 +70,21 @@ sizing, hard-risk or AI authority. Focused transaction/journal tests pass
 pytest cases, repository/architecture/configuration/debt gates pass with zero
 new critical findings, and whitespace validation passes. A local exact
 Gunicorn attempt was incomplete rather than passing: bootstrap remained in
-`legacy_wsgi_import` while Yahoo Finance returned provider rate limits. Next:
-publish one bounded PR from current main (including the settled-acceptance
-handoff checkpoint), require all mandatory exact-head gates and both CI
-Gunicorn smokes, and merge only if green. No production writer activation is
-authorized by this readiness repair.
+`legacy_wsgi_import` while Yahoo Finance returned provider rate limits. Both
+independent CI exact-head smokes subsequently passed.
+
+Settled runtime remained safe and unchanged: sentinel is pass/quiet and binds
+the exact merge; self-check, compact audit, accounting, canonical chain,
+market data, runner and risk pass; the account is flat at equity `13429.13`;
+the canonical ledger remains 88 chain-valid rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`.
+Governed v5 is active/pass, paper execution remains enabled and risk is not
+halted. The recovery status still preserves the recorded successor lineage and
+three historical exact-incident checks remain surfaced as failed evidence,
+not erased or rewritten. The verified-v2 gate remains a nonblocking,
+inapplicable failure because active v5 supersedes that lineage. No production
+writer was activated, no `/paper/run` call or direct order was made, and no
+Saturday forward market session or trade evidence is claimed.
 
 ## 2026-10-03 Issue #84 — latest wrapper-abort recovery implementation
 
