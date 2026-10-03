@@ -97,8 +97,16 @@ SUCCESSOR_WRAPPER_ABORT_INTENT_ID = (
     "35ef0a98a60c43cd979b293e8dee0001967c96a1885f026908876aff12b85c27"
 )
 SUCCESSOR_WRAPPER_ABORT_INCIDENT_LOCAL = "2026-10-01 08:55:16 CDT"
+LATEST_WRAPPER_ABORT_INTENT_ID = (
+    "1891cc36f31ac7eecba784676a506eed33f7b36bb53ede366a763268fd7bba41"
+)
+LATEST_WRAPPER_ABORT_INCIDENT_LOCAL = "2026-10-02 08:45:19 CDT"
+RECOVERABLE_WRAPPER_STACK_ERROR = (
+    "TypeError: _wrap_enter.<locals>.wrapped() got an unexpected keyword "
+    "argument '_governed'"
+)
 SUCCESSOR_WRAPPER_ABORT_RECOVERY_VERSION = (
-    "governed-v5-wrapper-stack-abort-recovery-2026-10-01-v1"
+    "governed-v5-wrapper-stack-abort-recovery-2026-10-03-v2"
 )
 ENTRY_MARKER_FIX_REVIEWED_PARENT = (
     "6364759af8ed256baf9b2bc99adb3ce28b25cdea"
@@ -292,15 +300,15 @@ def _pr282_failed_recovery_signature(
     )
 
 
-def _successor_wrapper_abort_signature(
+def _matched_successor_wrapper_abort(
     risk: Mapping[str, Any], restart: Mapping[str, Any]
-) -> bool:
-    """Match the exact post-recovery wrapper-stack abort without rewriting v1."""
+) -> Dict[str, str] | None:
+    """Match one independently captured wrapper-stack abort exactly."""
     old = _d(restart.get("preappend_abort_recovery"))
     failure = _d(restart.get("last_recovery_failure"))
     checks = _d(failure.get("checks"))
     discrepancy = _d(restart.get("last_discrepancy"))
-    return bool(
+    common = bool(
         risk.get("halted") is True
         and risk.get("halt_reason") == RECOVERY_DRIFT_HALT_REASON
         and restart.get("status") == "halted"
@@ -317,16 +325,35 @@ def _successor_wrapper_abort_signature(
         == PR282_FAILED_RECOVERY_CHECKS
         and all(checks.get(name) is False for name in PR282_FAILED_RECOVERY_CHECKS)
         and discrepancy.get("operation") == "entry"
-        and discrepancy.get("intent_id") == SUCCESSOR_WRAPPER_ABORT_INTENT_ID
-        and discrepancy.get("error") == RECOVERABLE_ENTRY_WRAPPER_ERROR
+        and discrepancy.get("error") == RECOVERABLE_WRAPPER_STACK_ERROR
         and discrepancy.get("state_restored") is True
         and discrepancy.get("canonical_rows_before")
         == discrepancy.get("canonical_rows_after")
         == restart.get("prestart_ledger_rows")
-        and restart.get("last_discrepancy_local")
-        == SUCCESSOR_WRAPPER_ABORT_INCIDENT_LOCAL
         and _d(risk.get("governed_restart_halt_details")) == failure
     )
+    if not common:
+        return None
+    observed = (
+        (
+            SUCCESSOR_WRAPPER_ABORT_INTENT_ID,
+            SUCCESSOR_WRAPPER_ABORT_INCIDENT_LOCAL,
+        ),
+        (LATEST_WRAPPER_ABORT_INTENT_ID, LATEST_WRAPPER_ABORT_INCIDENT_LOCAL),
+    )
+    for intent_id, incident_local in observed:
+        if (
+            discrepancy.get("intent_id") == intent_id
+            and restart.get("last_discrepancy_local") == incident_local
+        ):
+            return {"intent_id": intent_id, "incident_local": incident_local}
+    return None
+
+
+def _successor_wrapper_abort_signature(
+    risk: Mapping[str, Any], restart: Mapping[str, Any]
+) -> bool:
+    return _matched_successor_wrapper_abort(risk, restart) is not None
 
 
 def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
@@ -346,7 +373,8 @@ def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
     cash = _f(state.get("cash"), -1.0)
     equity = _f(state.get("equity"), -1.0)
     pr282_failed_recovery = _pr282_failed_recovery_signature(risk, restart)
-    successor_wrapper_abort = _successor_wrapper_abort_signature(risk, restart)
+    successor_wrapper_incident = _matched_successor_wrapper_abort(risk, restart)
+    successor_wrapper_abort = successor_wrapper_incident is not None
     active_abort_halt = bool(
         risk.get("halted") is True
         and risk.get("halt_reason") == PREAPPEND_ABORT_HALT_REASON
@@ -476,6 +504,7 @@ def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
             )
         ),
         "incident_evidence_reference": RECOVERABLE_INCIDENT_EVIDENCE_REFERENCE,
+        "successor_wrapper_incident": successor_wrapper_incident,
     }
 
 
@@ -505,7 +534,7 @@ def _recover_exact_preappend_wrapper_abort(core: Any) -> Dict[str, Any]:
             else ABORT_RECOVERY_VERSION
         )
         incident_intent_id = (
-            SUCCESSOR_WRAPPER_ABORT_INTENT_ID
+            _d(evidence.get("successor_wrapper_incident")).get("intent_id")
             if successor_wrapper_abort
             else RECOVERABLE_ENTRY_WRAPPER_INTENT_ID
         )

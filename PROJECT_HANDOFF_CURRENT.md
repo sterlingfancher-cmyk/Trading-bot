@@ -1,15 +1,47 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-01 14:00 CDT
+Last updated: 2026-10-03 10:18 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `cef87edfac3eee69e8536efb6c3c8acb6fa2683a` (PR #286 deployed exactly; runtime later failed closed on the wrapper-stack defect below).
+Validated runtime-code `main`: `77482187576ce8e0afc68bc980db6bb25b2057fb` (PR #287 deployed exactly; runtime remains fail-closed on the newer exact wrapper abort below).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
+
+## 2026-10-03 Issue #84 — latest wrapper-abort recovery in progress
+
+PR #287 exact head `34cddc43533a60d6c8de8114943ebc25d0b8f4aa`
+passed all mandatory exact-head workflows and both Gunicorn smokes, then
+squash-merged as `77482187576ce8e0afc68bc980db6bb25b2057fb`.
+All merge-head code gates and both Gunicorn smokes passed, and Splendid accepted
+the exact merge deployment. The 13/13 read-only runtime capture also bound the
+sentinel to that exact commit.
+
+Settled governed acceptance correctly failed closed. While PR #287 was still
+pending, another market-day attempt on `2026-10-02 08:45:19 CDT` replaced the
+last discrepancy with a newer exact pre-append abort: intent
+`1891cc36f31ac7eecba784676a506eed33f7b36bb53ede366a763268fd7bba41`,
+error `_wrap_enter.<locals>.wrapped() got an unexpected keyword argument
+'_governed'`, `state_restored=true`, and canonical rows unchanged 88 -> 88.
+The canonical digest remains
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`,
+chain/parity are valid, and the account remains flat at cash
+`13429.13048559457` / equity `13429.13`. Runtime artifact `11277157216`
+(ZIP SHA-256
+`4dcae776786816e222f298b05ac0618dab906d1d3c8c809428bebe7b32af0050`)
+preserves the exact evidence. No execution was appended or fabricated.
+
+The active branch is `fix/issue84-latest-wrapper-abort-recovery`. It corrects
+the recovery matcher to use the actual wrapper-stack error (PR #287 had matched
+the older `_patch_enter` error) and admits only the two independently captured
+wrapper-stack incident IDs/timestamps. The newest incident receives the
+separate successor receipt while the prior recovery receipt remains unchanged;
+near matches remain halted. Focused tests pass 21/21. Next: publish a bounded
+PR, require every exact-head gate and both Gunicorn smokes, merge only if green,
+then repeat settled Splendid acceptance without calling `/paper/run`.
 
 ## 2026-10-01 Issue #84 — Wrapper-stack abort repair in progress
 
