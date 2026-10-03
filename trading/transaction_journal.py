@@ -23,12 +23,13 @@ from typing import Any, Mapping, Tuple
 from trading.state_store import CanonicalStateStore
 from trading.transaction import CanonicalTransactionReceipt
 
-VERSION = "stable-paper-core-v3-transaction-journal-2026-10-01-v1"
+VERSION = "stable-paper-core-v3-transaction-journal-2026-10-03-v2"
 AUTHORITY = "shadow_only"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PHASES = frozenset(
     {"prepared", "ledger_settled", "state_committed", "aborted_before_append"}
 )
+_TERMINAL_PHASES = frozenset({"state_committed", "aborted_before_append"})
 
 
 class TransactionJournalInvariantError(ValueError):
@@ -295,6 +296,50 @@ class SandboxTransactionJournal:
             raise TransactionJournalInvariantError("journal root must be an object")
         return TransactionJournalRecord.from_dict(raw)
 
+    def _terminal_archive_path(
+        self, record: TransactionJournalRecord
+    ) -> Path:
+        return self.path.with_name(
+            f".{self.path.name}.{record.record_sha256}.terminal.json"
+        )
+
+    def _archive_terminal_locked(
+        self, record: TransactionJournalRecord
+    ) -> Path:
+        """Preserve one terminal receipt before the active slot is reused."""
+        if record.phase not in _TERMINAL_PHASES:
+            raise TransactionJournalInvariantError(
+                "only a terminal journal record can be archived"
+            )
+        archive = self._terminal_archive_path(record)
+        payload = _canonical_bytes(record.to_dict())
+        if archive.exists():
+            if archive.read_bytes() != payload:
+                raise TransactionJournalInvariantError(
+                    "terminal journal archive is not immutable"
+                )
+            return archive
+
+        temporary = archive.with_name(
+            f".{archive.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        try:
+            with temporary.open("xb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.link(temporary, archive)
+            except FileExistsError:
+                if archive.read_bytes() != payload:
+                    raise TransactionJournalInvariantError(
+                        "terminal journal archive is not immutable"
+                    )
+            self._fsync_directory(archive.parent)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return archive
+
     @staticmethod
     def _record_for(
         receipt: CanonicalTransactionReceipt,
@@ -380,12 +425,14 @@ class SandboxTransactionJournal:
         with self._lock, self._process_lock():
             if self.path.exists():
                 current = self._read_locked()
-                self._assert_bound(current, receipt)
-                if current.transaction_id != candidate.transaction_id:
+                if current.transaction_id == candidate.transaction_id:
+                    self._assert_bound(current, receipt)
+                    return current
+                if current.phase not in _TERMINAL_PHASES:
                     raise TransactionJournalInvariantError(
                         "another transaction already owns the journal"
                     )
-                return current
+                self._archive_terminal_locked(current)
             self._write_locked(candidate)
             return self._read_locked()
 
@@ -512,6 +559,7 @@ class SandboxTransactionJournal:
                 "places_orders": cls.places_orders,
                 "preappend_recovery": "abort_without_mutation",
                 "postappend_recovery": "roll_forward_one_bound_state_revision",
+                "terminal_rollover": "immutable_digest_archive_before_reuse",
                 "rewrites_canonical_ledger": False,
                 "interprocess_locking": True,
                 "version": VERSION,
