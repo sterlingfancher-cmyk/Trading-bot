@@ -107,6 +107,43 @@ def _receipt():
     )
 
 
+def _next_receipt(current):
+    execution = ExecutionSnapshot(
+        sequence=90,
+        symbol="SPY",
+        event="exit",
+        side="long",
+        quantity=1.0,
+        price=102.0,
+        timestamp="2026-10-01 08:02:00 CDT",
+        execution_id="execution-90",
+    )
+    proof = LedgerAppendProof(
+        previous_total_rows=89,
+        next_total_rows=90,
+        previous_epoch_rows=1,
+        next_epoch_rows=2,
+        previous_state_payload_sha256=current.payload_sha256,
+        previous_sha256="b" * 64,
+        next_sha256="c" * 64,
+        appended_execution_ids=("execution-90",),
+        chain_valid=True,
+    )
+    return SingleOwnerProjectionTransaction.prepare(
+        current=current,
+        executions=(execution,),
+        protected_marks=(),
+        ledger=proof,
+        risk_date="2026-10-01",
+        risk_limits=RiskLimits(
+            max_daily_loss_fraction=0.03,
+            max_intraday_drawdown_fraction=0.03,
+            hard_realized_loss_fraction=0.02,
+        ),
+        created_at="2026-10-01 08:02:02 CDT",
+    )
+
+
 def _observed_previous():
     return ObservedLedgerState(
         total_rows=88,
@@ -309,6 +346,123 @@ def test_process_lock_allows_only_one_transaction_identity(tmp_path):
     assert journal.read_sandbox().transaction_id in {"transaction-a", "transaction-b"}
 
 
+def test_terminal_record_is_archived_before_next_transaction_reuses_slot(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    first = _receipt()
+    journal.begin(
+        first,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    journal.recover(
+        first,
+        _observed_next(),
+        state,
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+    terminal = journal.read_sandbox()
+    terminal_bytes = journal.path.read_bytes()
+    second = _next_receipt(state.read_sandbox())
+
+    active = journal.begin(
+        second,
+        transaction_id="transaction-90",
+        recorded_at="2026-10-01 08:02:01 CDT",
+    )
+
+    archives = list(tmp_path.glob(".transaction-journal.json.*.terminal.json"))
+    assert active.phase == "prepared"
+    assert active.transaction_id == "transaction-90"
+    assert len(archives) == 1
+    assert archives[0].name == (
+        f".transaction-journal.json.{terminal.record_sha256}.terminal.json"
+    )
+    assert archives[0].read_bytes() == terminal_bytes
+    assert json.loads(archives[0].read_text(encoding="utf-8"))["phase"] == (
+        "state_committed"
+    )
+
+    restarted = SandboxTransactionJournal(journal.path, sandbox_io_enabled=True)
+    assert restarted.begin(
+        second,
+        transaction_id="transaction-90",
+        recorded_at="2026-10-01 08:02:01 CDT",
+    ) == active
+
+
+def test_terminal_rollover_rejects_tampered_existing_archive(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    journal.recover(
+        receipt,
+        _observed_previous(),
+        state,
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+    terminal = journal.read_sandbox()
+    archive = journal._terminal_archive_path(terminal)
+    archive.write_bytes(b"tampered")
+
+    with pytest.raises(
+        TransactionJournalInvariantError,
+        match="terminal journal archive is not immutable",
+    ):
+        journal.begin(
+            receipt,
+            transaction_id="transaction-90",
+            recorded_at="2026-10-01 08:02:01 CDT",
+        )
+    assert journal.read_sandbox() == terminal
+
+
+def test_process_lock_allows_only_one_successor_after_terminal_rollover(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    first = _receipt()
+    journal.begin(
+        first,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    journal.recover(
+        first,
+        _observed_next(),
+        state,
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+    second = _next_receipt(state.read_sandbox())
+
+    def begin(transaction_id):
+        process_peer = SandboxTransactionJournal(
+            journal.path, sandbox_io_enabled=True
+        )
+        try:
+            return process_peer.begin(
+                second,
+                transaction_id=transaction_id,
+                recorded_at="2026-10-01 08:02:01 CDT",
+            ).transaction_id
+        except TransactionJournalInvariantError:
+            return "rejected"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = set(pool.map(begin, ("transaction-90-a", "transaction-90-b")))
+
+    assert "rejected" in results
+    assert len(results) == 2
+    assert journal.read_sandbox().transaction_id in {
+        "transaction-90-a",
+        "transaction-90-b",
+    }
+    assert len(
+        list(tmp_path.glob(".transaction-journal.json.*.terminal.json"))
+    ) == 1
+
+
 def test_journal_has_no_runtime_or_order_authority(tmp_path):
     descriptor = SandboxTransactionJournal.descriptor()
     assert descriptor["authority"] == "shadow_only"
@@ -316,6 +470,9 @@ def test_journal_has_no_runtime_or_order_authority(tmp_path):
     assert descriptor["production_write_enabled"] is False
     assert descriptor["places_orders"] is False
     assert descriptor["rewrites_canonical_ledger"] is False
+    assert descriptor["terminal_rollover"] == (
+        "immutable_digest_archive_before_reuse"
+    )
 
     with pytest.raises(PermissionError):
         SandboxTransactionJournal(tmp_path / "journal.json").begin(
