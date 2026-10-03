@@ -1,17 +1,45 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-03 10:18 CDT
+Last updated: 2026-10-03 10:20 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `77482187576ce8e0afc68bc980db6bb25b2057fb` (PR #287 deployed exactly; runtime remains fail-closed on the newer exact wrapper abort below).
+Validated runtime-code `main`: `73186024bd3c7b7d89bd0881e7f37b664459202f` (PR #288 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-03 Issue #84 — latest wrapper-abort recovery in progress
+## 2026-10-03 Issue #84 — governed restart activated; forward observation pending
+
+PR #288 exact head `dfc470251c535d0959fc571d9f754b7173dc257f`
+passed all four mandatory exact-head workflows and both exact Gunicorn smokes,
+then squash-merged as `73186024bd3c7b7d89bd0881e7f37b664459202f`.
+All four merge-head code gates and both exact Gunicorn smokes passed. Splendid
+accepted the exact merge, and runtime workflow `37132568919` completed
+successfully with a settled 13/13 read-only capture. Artifact `11277627443`
+has ZIP SHA-256
+`2892a73b1988072861829fb08890b4a1f3d16461cbb63687634026d63de4889a`.
+
+The exact 2026-10-02 wrapper-stack abort was recovered non-destructively under
+receipt version `governed-v5-wrapper-stack-abort-recovery-2026-10-03-v2`.
+The prior recovery receipt and historical discrepancy remain preserved. The
+canonical ledger is unchanged at 88 chain-valid rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`;
+projection parity, accounting and the daily audit pass. The account remains
+flat at equity `13429.13`. Sentinel is quiet and binds exact commit
+`73186024bd3c7b7d89bd0881e7f37b664459202f`.
+
+Governed v5 status is `active` / `pass`, risk is not halted, the administrative
+validation hold is released, and paper execution is enabled. This activation
+was performed by the governed runtime transition, not by the read-only
+evidence builder; no `/paper/run` call or direct order was made. Production
+authority remains false and AI/ML remains shadow-only. Post-start forward
+observations are still required; Saturday time is not a market session and no
+forward trade evidence is claimed.
+
+## 2026-10-03 Issue #84 — latest wrapper-abort recovery implementation
 
 PR #287 exact head `34cddc43533a60d6c8de8114943ebc25d0b8f4aa`
 passed all mandatory exact-head workflows and both Gunicorn smokes, then
@@ -34,14 +62,13 @@ chain/parity are valid, and the account remains flat at cash
 `4dcae776786816e222f298b05ac0618dab906d1d3c8c809428bebe7b32af0050`)
 preserves the exact evidence. No execution was appended or fabricated.
 
-The active branch is `fix/issue84-latest-wrapper-abort-recovery`. It corrects
+The completed branch was `fix/issue84-latest-wrapper-abort-recovery`. It corrects
 the recovery matcher to use the actual wrapper-stack error (PR #287 had matched
 the older `_patch_enter` error) and admits only the two independently captured
 wrapper-stack incident IDs/timestamps. The newest incident receives the
 separate successor receipt while the prior recovery receipt remains unchanged;
-near matches remain halted. Focused tests pass 21/21. Next: publish a bounded
-PR, require every exact-head gate and both Gunicorn smokes, merge only if green,
-then repeat settled Splendid acceptance without calling `/paper/run`.
+near matches remain halted. Focused tests passed 22/22. PR #288 completed the
+required exact-head gates, merge and settled acceptance described above.
 
 ## 2026-10-01 Issue #84 — Wrapper-stack abort repair in progress
 
