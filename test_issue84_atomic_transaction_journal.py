@@ -255,6 +255,72 @@ def test_restart_after_commit_is_idempotent_and_does_not_create_revision_nine(tm
     assert restarted_journal.read_sandbox().phase == "state_committed"
 
 
+def test_repeated_recovery_preserves_terminal_record_bytes_and_digest(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    first = journal.recover(
+        receipt,
+        _observed_next(),
+        state,
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+    terminal = journal.read_sandbox()
+    terminal_bytes = journal.path.read_bytes()
+
+    repeated = SandboxTransactionJournal(
+        journal.path, sandbox_io_enabled=True
+    ).recover(
+        receipt,
+        _observed_next(),
+        CanonicalStateStore(state.path, sandbox_io_enabled=True),
+        recorded_at="2026-10-01 08:05:00 CDT",
+    )
+
+    assert first.action == "state_commit_replayed"
+    assert repeated.action == "already_committed"
+    assert repeated.replayed_state_commit is False
+    assert journal.path.read_bytes() == terminal_bytes
+    assert journal.read_sandbox() == terminal
+
+
+def test_repeated_terminal_recovery_rejects_stale_state_without_mutation(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    previous_state_bytes = state.path.read_bytes()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    journal.recover(
+        receipt,
+        _observed_next(),
+        state,
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+    terminal_bytes = journal.path.read_bytes()
+    stale_state_path = tmp_path / "stale-state.json"
+    stale_state_path.write_bytes(previous_state_bytes)
+
+    with pytest.raises(
+        TransactionJournalInvariantError,
+        match="committed recovery requires the exact terminal boundary",
+    ):
+        journal.recover(
+            receipt,
+            _observed_next(),
+            CanonicalStateStore(stale_state_path, sandbox_io_enabled=True),
+            recorded_at="2026-10-01 08:05:00 CDT",
+        )
+
+    assert journal.path.read_bytes() == terminal_bytes
+
+
 @pytest.mark.parametrize(
     "observed",
     (
@@ -473,6 +539,7 @@ def test_journal_has_no_runtime_or_order_authority(tmp_path):
     assert descriptor["terminal_rollover"] == (
         "immutable_digest_archive_before_reuse"
     )
+    assert descriptor["terminal_recovery"] == "immutable_idempotent_receipt"
 
     with pytest.raises(PermissionError):
         SandboxTransactionJournal(tmp_path / "journal.json").begin(

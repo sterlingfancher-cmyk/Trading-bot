@@ -23,7 +23,7 @@ from typing import Any, Mapping, Tuple
 from trading.state_store import CanonicalStateStore
 from trading.transaction import CanonicalTransactionReceipt
 
-VERSION = "stable-paper-core-v3-transaction-journal-2026-10-03-v2"
+VERSION = "stable-paper-core-v3-transaction-journal-2026-10-04-v3"
 AUTHORITY = "shadow_only"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PHASES = frozenset(
@@ -474,6 +474,25 @@ class SandboxTransactionJournal:
             ledger_phase = self._ledger_phase(current, observed)
             state = store.read_sandbox()
 
+            if current.phase == "state_committed":
+                if ledger_phase != "next" or not (
+                    state.revision == current.next_revision
+                    and state.payload_sha256 == current.next_state_sha256
+                ):
+                    raise TransactionJournalInvariantError(
+                        "committed recovery requires the exact terminal boundary"
+                    )
+                return TransactionRecoveryReceipt(
+                    transaction_id=current.transaction_id,
+                    action="already_committed",
+                    phase=current.phase,
+                    previous_revision=current.previous_revision,
+                    current_revision=state.revision,
+                    ledger_sha256=observed.ledger_sha256,
+                    state_payload_sha256=state.payload_sha256,
+                    replayed_state_commit=False,
+                )
+
             if current.phase == "prepared" and ledger_phase == "previous":
                 if (
                     state.revision != current.previous_revision
@@ -560,6 +579,7 @@ class SandboxTransactionJournal:
                 "preappend_recovery": "abort_without_mutation",
                 "postappend_recovery": "roll_forward_one_bound_state_revision",
                 "terminal_rollover": "immutable_digest_archive_before_reuse",
+                "terminal_recovery": "immutable_idempotent_receipt",
                 "rewrites_canonical_ledger": False,
                 "interprocess_locking": True,
                 "version": VERSION,
