@@ -697,6 +697,14 @@ def test_post_recovery_wrapper_abort_rejects_near_match(monkeypatch, tmp_path):
 def test_exact_runtime_wrapper_abort_preserves_both_prior_recovery_receipts(
     monkeypatch, tmp_path
 ):
+    # Bind the recovery to the independently captured incident timestamp, not
+    # the later failed-recovery evaluation / halt timestamp.
+    assert restart.RUNTIME_WRAPPER_ABORT_INCIDENT_LOCAL == (
+        "2026-10-05 08:47:12 CDT"
+    )
+    assert restart.RUNTIME_WRAPPER_ABORT_EVIDENCE_REFERENCE == (
+        "issue-84-comment-6001396224"
+    )
     core = _activate(monkeypatch, tmp_path)
     _set_exact_pr282_failed_recovery(core)
     first = restart.apply(core)
@@ -756,6 +764,7 @@ def test_exact_runtime_wrapper_abort_preserves_both_prior_recovery_receipts(
             "last_discrepancy": runtime_discrepancy,
             "last_discrepancy_local": restart.RUNTIME_WRAPPER_ABORT_INCIDENT_LOCAL,
             "last_recovery_failure": copy.deepcopy(failure),
+            "last_recovery_failure_local": "2026-10-05 09:07:42 CDT",
         }
     )
     core.portfolio["risk_controls"].update(
@@ -781,6 +790,80 @@ def test_exact_runtime_wrapper_abort_preserves_both_prior_recovery_receipts(
         restart.RUNTIME_WRAPPER_ABORT_EVIDENCE_REFERENCE
     )
     assert governed["last_discrepancy"] == runtime_discrepancy
+
+
+def test_runtime_wrapper_abort_rejects_later_recovery_failure_timestamp(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_pr282_failed_recovery(core)
+    first = restart.apply(core)
+    governed = core.portfolio["governed_v5_paper_restart"]
+    rows = governed["prestart_ledger_rows"]
+
+    wrapper_discrepancy = {
+        "operation": "entry",
+        "intent_id": restart.LATEST_WRAPPER_ABORT_INTENT_ID,
+        "error": restart.RECOVERABLE_WRAPPER_STACK_ERROR,
+        "canonical_rows_before": rows,
+        "canonical_rows_after": rows,
+        "state_restored": True,
+    }
+    failed_checks = copy.deepcopy(first["preappend_abort_recovery"]["checks"])
+    for name in restart.PR282_FAILED_RECOVERY_CHECKS:
+        failed_checks[name] = False
+    failure = {
+        "status": "not_applicable",
+        "overall": "fail",
+        "version": restart.ABORT_RECOVERY_VERSION,
+        "failed_checks": list(restart.PR282_FAILED_RECOVERY_CHECKS),
+        "checks": failed_checks,
+    }
+    governed.update(
+        {
+            "status": "halted",
+            "last_discrepancy": wrapper_discrepancy,
+            "last_discrepancy_local": restart.LATEST_WRAPPER_ABORT_INCIDENT_LOCAL,
+            "last_recovery_failure": copy.deepcopy(failure),
+        }
+    )
+    core.portfolio["risk_controls"].update(
+        {
+            "halted": True,
+            "halt_reason": restart.RECOVERY_DRIFT_HALT_REASON,
+            "governed_restart_halt_details": copy.deepcopy(failure),
+        }
+    )
+    second = restart.apply(core)
+    governed.update(
+        {
+            "status": "halted",
+            "last_discrepancy": {
+                "operation": "entry",
+                "intent_id": restart.RUNTIME_WRAPPER_ABORT_INTENT_ID,
+                "error": restart.RUNTIME_WRAPPER_ABORT_ERROR,
+                "canonical_rows_before": rows,
+                "canonical_rows_after": rows,
+                "state_restored": True,
+            },
+            "last_discrepancy_local": "2026-10-05 09:07:42 CDT",
+            "last_recovery_failure": copy.deepcopy(failure),
+        }
+    )
+    core.portfolio["risk_controls"].update(
+        {
+            "halted": True,
+            "halt_reason": restart.RECOVERY_DRIFT_HALT_REASON,
+            "governed_restart_halt_details": copy.deepcopy(failure),
+        }
+    )
+
+    result = restart.apply(core)
+
+    assert second["post_recovery_wrapper_abort_recovery"]["status"] == "recovered"
+    assert result["status"] == "halted"
+    assert result["risk_halted"] is True
+    assert result["post_recovery_runtime_wrapper_abort_recovery"] is None
 
 
 def test_pr282_successor_rejects_near_match(monkeypatch, tmp_path):
