@@ -22,6 +22,11 @@ import paper_underdeployment_repair as underdeployment_repair
 import risk_reward_structure
 import multi_timeframe_swing
 import fundamental_valuation_risk_layer
+import loss_streak_defensive_governor
+import paper_controlled_expansion
+import pattern_recognition_layer
+import regime_flip_entry_guard
+import theme_starter_exception
 
 
 def _state() -> dict:
@@ -326,6 +331,21 @@ def test_governed_entry_flag_crosses_full_runtime_wrapper_stack(monkeypatch):
         lambda *args, **kwargs: {"risk_multiplier": 1.0},
     )
     assert fundamental_valuation_risk_layer._patch_enter_position(core) is True
+    monkeypatch.setattr(
+        loss_streak_defensive_governor,
+        "_govern_signal",
+        lambda *args, **kwargs: (True, {}),
+    )
+    assert loss_streak_defensive_governor.apply(core)["status"] == "ok"
+    assert pattern_recognition_layer.apply(core)["status"] == "ok"
+    assert paper_controlled_expansion._patch_enter_position(core) is True
+    assert theme_starter_exception._patch_enter_position(core) is True
+    monkeypatch.setattr(
+        regime_flip_entry_guard,
+        "_entry_guard",
+        lambda *args, **kwargs: (True, {}),
+    )
+    assert regime_flip_entry_guard._patch_enter_position(core) is True
 
     core.enter_position(
         {"symbol": "QQQ", "side": "long"},
@@ -672,6 +692,95 @@ def test_post_recovery_wrapper_abort_rejects_near_match(monkeypatch, tmp_path):
     assert result["status"] == "halted"
     assert result["risk_halted"] is True
     assert result["post_recovery_wrapper_abort_recovery"] is None
+
+
+def test_exact_runtime_wrapper_abort_preserves_both_prior_recovery_receipts(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_pr282_failed_recovery(core)
+    first = restart.apply(core)
+    governed = core.portfolio["governed_v5_paper_restart"]
+    rows = governed["prestart_ledger_rows"]
+    first_receipt = copy.deepcopy(first["preappend_abort_recovery"])
+
+    wrapper_discrepancy = {
+        "operation": "entry",
+        "intent_id": restart.LATEST_WRAPPER_ABORT_INTENT_ID,
+        "error": restart.RECOVERABLE_WRAPPER_STACK_ERROR,
+        "canonical_rows_before": rows,
+        "canonical_rows_after": rows,
+        "state_restored": True,
+    }
+    failed_checks = copy.deepcopy(first_receipt["checks"])
+    for name in restart.PR282_FAILED_RECOVERY_CHECKS:
+        failed_checks[name] = False
+    failure = {
+        "status": "not_applicable",
+        "overall": "fail",
+        "version": restart.ABORT_RECOVERY_VERSION,
+        "failed_checks": list(restart.PR282_FAILED_RECOVERY_CHECKS),
+        "checks": failed_checks,
+    }
+    governed.update(
+        {
+            "status": "halted",
+            "last_discrepancy": wrapper_discrepancy,
+            "last_discrepancy_local": restart.LATEST_WRAPPER_ABORT_INCIDENT_LOCAL,
+            "last_recovery_failure": copy.deepcopy(failure),
+        }
+    )
+    core.portfolio["risk_controls"].update(
+        {
+            "halted": True,
+            "halt_reason": restart.RECOVERY_DRIFT_HALT_REASON,
+            "governed_restart_halt_details": copy.deepcopy(failure),
+        }
+    )
+    second = restart.apply(core)
+    second_receipt = copy.deepcopy(
+        second["post_recovery_wrapper_abort_recovery"]
+    )
+
+    runtime_discrepancy = {
+        "operation": "entry",
+        "intent_id": restart.RUNTIME_WRAPPER_ABORT_INTENT_ID,
+        "error": restart.RUNTIME_WRAPPER_ABORT_ERROR,
+        "canonical_rows_before": rows,
+        "canonical_rows_after": rows,
+        "state_restored": True,
+    }
+    governed.update(
+        {
+            "status": "halted",
+            "last_discrepancy": runtime_discrepancy,
+            "last_discrepancy_local": restart.RUNTIME_WRAPPER_ABORT_INCIDENT_LOCAL,
+            "last_recovery_failure": copy.deepcopy(failure),
+        }
+    )
+    core.portfolio["risk_controls"].update(
+        {
+            "halted": True,
+            "halt_reason": restart.RECOVERY_DRIFT_HALT_REASON,
+            "governed_restart_halt_details": copy.deepcopy(failure),
+        }
+    )
+
+    result = restart.apply(core)
+
+    assert result["status"] == "active"
+    assert result["risk_halted"] is False
+    assert result["preappend_abort_recovery"] == first_receipt
+    assert result["post_recovery_wrapper_abort_recovery"] == second_receipt
+    recovery = result["post_recovery_runtime_wrapper_abort_recovery"]
+    assert recovery["status"] == "recovered"
+    assert recovery["version"] == restart.RUNTIME_WRAPPER_ABORT_RECOVERY_VERSION
+    assert recovery["recovery_mode"] == "post_recovery_runtime_wrapper_abort"
+    assert recovery["incident_intent_id"] == restart.RUNTIME_WRAPPER_ABORT_INTENT_ID
+    assert recovery["incident_evidence_reference"] == (
+        restart.RUNTIME_WRAPPER_ABORT_EVIDENCE_REFERENCE
+    )
+    assert governed["last_discrepancy"] == runtime_discrepancy
 
 
 def test_pr282_successor_rejects_near_match(monkeypatch, tmp_path):

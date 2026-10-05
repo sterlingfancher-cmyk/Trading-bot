@@ -321,8 +321,11 @@ def _patch_enter_position(core: Any) -> bool:
         return False
     original = current
 
-    def patched_enter_position(signal, params, market_mode=None):
+    def patched_enter_position(signal, params, market_mode=None, _governed=False):
         global _CYCLE_THEME_STARTERS_USED
+        call_kwargs = {"market_mode": market_mode}
+        if _governed:
+            call_kwargs["_governed"] = True
         try:
             marker = (signal or {}).get("theme_starter_exception") if isinstance(signal, dict) else None
             if isinstance(marker, dict):
@@ -336,7 +339,7 @@ def _patch_enter_position(core: Any) -> bool:
                         "max_per_cycle": MAX_PER_CYCLE,
                         "version": VERSION,
                     }
-                result = original(signal, params, market_mode=market_mode)
+                result = original(signal, params, **call_kwargs)
                 if isinstance(result, dict) and not result.get("blocked"):
                     _CYCLE_THEME_STARTERS_USED += 1
                     result["theme_starter_exception"] = marker
@@ -355,7 +358,7 @@ def _patch_enter_position(core: Any) -> bool:
                 return result
         except Exception:
             pass
-        return original(signal, params, market_mode=market_mode)
+        return original(signal, params, **call_kwargs)
 
     patched_enter_position._theme_starter_exception_entry_patched = True  # type: ignore[attr-defined]
     patched_enter_position._theme_starter_exception_entry_original = original  # type: ignore[attr-defined]
