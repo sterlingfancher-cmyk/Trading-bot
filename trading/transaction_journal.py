@@ -23,7 +23,7 @@ from typing import Any, Mapping, Tuple
 from trading.state_store import CanonicalStateStore
 from trading.transaction import CanonicalTransactionReceipt
 
-VERSION = "stable-paper-core-v3-transaction-journal-2026-10-04-v3"
+VERSION = "stable-paper-core-v3-transaction-journal-2026-10-05-v4"
 AUTHORITY = "shadow_only"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PHASES = frozenset(
@@ -453,7 +453,14 @@ class SandboxTransactionJournal:
                 )
             if self._ledger_phase(current, observed) != "next":
                 raise TransactionJournalInvariantError("ledger append is not settled")
-            settled = replace(current, phase="ledger_settled", updated_at=recorded_at, record_sha256="")
+            if current.phase == "ledger_settled":
+                return current
+            settled = replace(
+                current,
+                phase="ledger_settled",
+                updated_at=recorded_at,
+                record_sha256="",
+            )
             self._write_locked(settled)
             return self._read_locked()
 
@@ -578,6 +585,7 @@ class SandboxTransactionJournal:
                 "places_orders": cls.places_orders,
                 "preappend_recovery": "abort_without_mutation",
                 "postappend_recovery": "roll_forward_one_bound_state_revision",
+                "ledger_settlement": "immutable_idempotent_record",
                 "terminal_rollover": "immutable_digest_archive_before_reuse",
                 "terminal_recovery": "immutable_idempotent_receipt",
                 "rewrites_canonical_ledger": False,

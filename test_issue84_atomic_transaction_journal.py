@@ -255,6 +255,64 @@ def test_restart_after_commit_is_idempotent_and_does_not_create_revision_nine(tm
     assert restarted_journal.read_sandbox().phase == "state_committed"
 
 
+def test_repeated_ledger_settlement_preserves_record_bytes_and_digest(tmp_path):
+    _, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    settled = journal.settle_ledger(
+        receipt,
+        _observed_next(),
+        recorded_at="2026-10-01 08:01:02 CDT",
+    )
+    settled_bytes = journal.path.read_bytes()
+
+    repeated = SandboxTransactionJournal(
+        journal.path, sandbox_io_enabled=True
+    ).settle_ledger(
+        receipt,
+        _observed_next(),
+        recorded_at="2026-10-01 08:05:00 CDT",
+    )
+
+    assert repeated == settled
+    assert journal.path.read_bytes() == settled_bytes
+
+
+def test_repeated_ledger_settlement_rejects_boundary_drift_without_mutation(tmp_path):
+    _, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    journal.settle_ledger(
+        receipt,
+        _observed_next(),
+        recorded_at="2026-10-01 08:01:02 CDT",
+    )
+    settled_bytes = journal.path.read_bytes()
+
+    with pytest.raises(TransactionJournalInvariantError):
+        journal.settle_ledger(
+            receipt,
+            ObservedLedgerState(
+                total_rows=89,
+                epoch_rows=1,
+                ledger_sha256="c" * 64,
+                chain_valid=True,
+                execution_ids=("execution-89",),
+            ),
+            recorded_at="2026-10-01 08:05:00 CDT",
+        )
+
+    assert journal.path.read_bytes() == settled_bytes
+
+
 def test_repeated_recovery_preserves_terminal_record_bytes_and_digest(tmp_path):
     state, journal = _sandbox(tmp_path)
     receipt = _receipt()
@@ -536,6 +594,7 @@ def test_journal_has_no_runtime_or_order_authority(tmp_path):
     assert descriptor["production_write_enabled"] is False
     assert descriptor["places_orders"] is False
     assert descriptor["rewrites_canonical_ledger"] is False
+    assert descriptor["ledger_settlement"] == "immutable_idempotent_record"
     assert descriptor["terminal_rollover"] == (
         "immutable_digest_archive_before_reuse"
     )
