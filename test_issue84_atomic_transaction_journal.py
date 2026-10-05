@@ -198,6 +198,71 @@ def test_preappend_recovery_aborts_without_ledger_or_state_mutation(tmp_path):
     assert journal.read_sandbox().phase == "aborted_before_append"
 
 
+def test_repeated_preappend_abort_preserves_terminal_record_bytes(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    first = journal.recover(
+        receipt,
+        _observed_previous(),
+        state,
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+    terminal_bytes = journal.path.read_bytes()
+
+    repeated = SandboxTransactionJournal(
+        journal.path, sandbox_io_enabled=True
+    ).recover(
+        receipt,
+        _observed_previous(),
+        state,
+        recorded_at="2026-10-01 08:05:00 CDT",
+    )
+
+    assert repeated == first
+    assert journal.path.read_bytes() == terminal_bytes
+
+
+def test_repeated_preappend_abort_rejects_terminal_boundary_drift(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+    journal.recover(
+        receipt,
+        _observed_previous(),
+        state,
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+    terminal_bytes = journal.path.read_bytes()
+
+    with pytest.raises(TransactionJournalInvariantError):
+        journal.recover(
+            receipt,
+            _observed_next(),
+            state,
+            recorded_at="2026-10-01 08:05:00 CDT",
+        )
+    assert journal.path.read_bytes() == terminal_bytes
+
+    state.commit_sandbox(receipt.next_envelope)
+    with pytest.raises(TransactionJournalInvariantError):
+        journal.recover(
+            receipt,
+            _observed_previous(),
+            state,
+            recorded_at="2026-10-01 08:06:00 CDT",
+        )
+    assert journal.path.read_bytes() == terminal_bytes
+
+
 def test_crash_after_append_rolls_forward_exactly_one_state_revision(tmp_path):
     state, journal = _sandbox(tmp_path)
     receipt = _receipt()

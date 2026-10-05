@@ -23,7 +23,7 @@ from typing import Any, Mapping, Tuple
 from trading.state_store import CanonicalStateStore
 from trading.transaction import CanonicalTransactionReceipt
 
-VERSION = "stable-paper-core-v3-transaction-journal-2026-10-05-v4"
+VERSION = "stable-paper-core-v3-transaction-journal-2026-10-05-v5"
 AUTHORITY = "shadow_only"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PHASES = frozenset(
@@ -500,6 +500,25 @@ class SandboxTransactionJournal:
                     replayed_state_commit=False,
                 )
 
+            if current.phase == "aborted_before_append":
+                if ledger_phase != "previous" or not (
+                    state.revision == current.previous_revision
+                    and state.payload_sha256 == current.previous_state_sha256
+                ):
+                    raise TransactionJournalInvariantError(
+                        "aborted recovery requires the exact terminal boundary"
+                    )
+                return TransactionRecoveryReceipt(
+                    transaction_id=current.transaction_id,
+                    action="aborted_before_append",
+                    phase=current.phase,
+                    previous_revision=current.previous_revision,
+                    current_revision=state.revision,
+                    ledger_sha256=observed.ledger_sha256,
+                    state_payload_sha256=state.payload_sha256,
+                    replayed_state_commit=False,
+                )
+
             if current.phase == "prepared" and ledger_phase == "previous":
                 if (
                     state.revision != current.previous_revision
@@ -526,10 +545,6 @@ class SandboxTransactionJournal:
                     replayed_state_commit=False,
                 )
 
-            if current.phase == "aborted_before_append":
-                raise TransactionJournalInvariantError(
-                    "an aborted transaction cannot later acquire a ledger append"
-                )
             if ledger_phase != "next":
                 raise TransactionJournalInvariantError(
                     "StateStore commit requires the exact settled append"
