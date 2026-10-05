@@ -422,7 +422,12 @@ def apply(m: Any) -> Dict[str, Any]:
     if callable(original_enter):
         setattr(m, "_loss_gov_original_enter_position", original_enter)
 
-        def patched_enter_position(signal: Dict[str, Any], params: Dict[str, Any], market_mode: str | None = None):
+        def patched_enter_position(
+            signal: Dict[str, Any],
+            params: Dict[str, Any],
+            market_mode: str | None = None,
+            _governed: bool = False,
+        ):
             if isinstance(signal, dict):
                 gov_ok, decision = _govern_signal(m, signal)
                 signal["loss_streak_governor"] = decision
@@ -442,7 +447,10 @@ def apply(m: Any) -> Dict[str, Any]:
                     except Exception:
                         pass
                     return {"entered": False, "blocked": True, "reason": "loss_streak_defensive_governor", "governor": decision}
-            return original_enter(signal, params, market_mode=market_mode)
+            call_kwargs = {"market_mode": market_mode}
+            if _governed:
+                call_kwargs["_governed"] = True
+            return original_enter(signal, params, **call_kwargs)
 
         m.enter_position = patched_enter_position
         patched.append("enter_position")

@@ -625,8 +625,16 @@ def apply(m: Any) -> Dict[str, Any]:
     if callable(original_enter):
         setattr(m, "_pattern_original_enter_position", original_enter)
 
-        def patched_enter_position(signal: Dict[str, Any], params: Dict[str, Any], market_mode: str | None = None):
-            result = original_enter(signal, params, market_mode=market_mode)
+        def patched_enter_position(
+            signal: Dict[str, Any],
+            params: Dict[str, Any],
+            market_mode: str | None = None,
+            _governed: bool = False,
+        ):
+            call_kwargs = {"market_mode": market_mode}
+            if _governed:
+                call_kwargs["_governed"] = True
+            result = original_enter(signal, params, **call_kwargs)
             try:
                 symbol = str(signal.get("symbol", "")).upper()
                 pat = signal.get("pattern_recognition")

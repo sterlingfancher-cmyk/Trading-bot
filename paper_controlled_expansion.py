@@ -191,8 +191,11 @@ def _patch_enter_position(m: Any) -> bool:
         return False
     original = current
 
-    def patched_enter_position(signal, params, market_mode=None):
-        result = original(signal, params, market_mode=market_mode)
+    def patched_enter_position(signal, params, market_mode=None, _governed=False):
+        call_kwargs = {"market_mode": market_mode}
+        if _governed:
+            call_kwargs["_governed"] = True
+        result = original(signal, params, **call_kwargs)
         try:
             if not (ENABLED and _paper_context() and isinstance(result, dict) and not result.get("blocked")):
                 return result

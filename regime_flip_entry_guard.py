@@ -364,7 +364,10 @@ def _patch_enter_position(core: Any) -> bool:
         return False
     original = current
 
-    def patched_enter_position(signal, params, market_mode=None):
+    def patched_enter_position(signal, params, market_mode=None, _governed=False):
+        call_kwargs = {"market_mode": market_mode}
+        if _governed:
+            call_kwargs["_governed"] = True
         try:
             market = _market(core, None, market_mode=market_mode)
             guard_ok, guard_info = _entry_guard(core, signal if isinstance(signal, dict) else {}, params or {}, market)
@@ -376,7 +379,7 @@ def _patch_enter_position(core: Any) -> bool:
                     "reason": guard_info.get("reason", "regime_flip_entry_guard_block"),
                     "regime_flip_entry_guard": guard_info,
                 }
-            result = original(signal, params, market_mode=market_mode)
+            result = original(signal, params, **call_kwargs)
             if isinstance(result, dict) and not result.get("blocked"):
                 result["regime_flip_entry_guard"] = guard_info
                 try:
@@ -392,7 +395,7 @@ def _patch_enter_position(core: Any) -> bool:
                     pass
             return result
         except Exception:
-            return original(signal, params, market_mode=market_mode)
+            return original(signal, params, **call_kwargs)
 
     patched_enter_position._regime_flip_entry_guard_entry_patched = True  # type: ignore[attr-defined]
     patched_enter_position._regime_flip_entry_guard_entry_original = original  # type: ignore[attr-defined]

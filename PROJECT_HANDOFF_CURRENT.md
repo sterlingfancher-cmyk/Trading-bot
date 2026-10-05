@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-05 08:56 CDT
+Last updated: 2026-10-05 14:05 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -11,7 +11,50 @@ projection / valuation / risk cutover). Active frozen research issue: #202
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-05 Issue #84 — immutable pre-append abort retry in progress
+## 2026-10-05 Issue #84 — governed marker wrapper repair in progress
+
+PR #292 merged as `b03a1e34d9b8eeeb63b74caed05273bf353f6ef3`
+after all PR and merge-head code gates and both exact Gunicorn smokes passed,
+but settled runtime acceptance failed closed. Exact Splendid deployment and the
+13/13 read-only capture succeeded; runtime workflow `37321817793` failed only
+at `Build governed pre-start or post-start evidence`. Artifact `11350757633`
+has ZIP SHA-256
+`1a1b17f36ab505be83474bf261f7e46ba689f059d79ab78caa599f3e910914a1`.
+
+At 2026-10-05 09:07:42 CDT a real governed entry attempt aborted before the
+canonical append with `TypeError: apply.<locals>.patched_enter_position() got
+an unexpected keyword argument '_governed'`, intent
+`90dcbb9447ff5cbda53906411d32d0bc71e6983a097a284fecc3e5bcdee9c9c5`,
+and `state_restored=true`. Canonical rows remained 88 -> 88 with unchanged
+digest `f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`;
+the account remained flat at equity `13429.13`. The runtime correctly latched
+`governed pre-append abort recovery evidence drift`; governed v5 is halted and
+the accepted-runtime pointer above intentionally remains PR #291. No halt was
+manually cleared, and no execution was appended or fabricated.
+
+The active branch is `fix/issue84-runtime-wrapper-governed-marker`. It forwards
+the governed marker through all five active entry wrappers omitted from the
+prior full-stack regression, extends that regression to the actual runtime
+stack, and adds an exact evidence-bound successor recovery for this immutable
+abort. The new recovery requires the exact intent, time, error, flat state,
+unchanged ledger and both prior immutable recovery receipts; it preserves those
+receipts and writes a distinct third-generation receipt. Focused governed-
+restart, canonical bridge and journal tests pass 49/49. No production writer,
+live or AI authority is added; strategy, sizing and hard-risk limits are
+unchanged. Exact-head Change Safety passes its 21-test audit gate plus 100
+unittest and 51 pytest cases; repository/configuration/refactor/ownership/
+typed-configuration/debt gates pass with zero new critical findings or
+warnings, and whitespace validation passes. After installing the declared
+runtime dependencies in the ephemeral test image, the local exact Gunicorn
+attempt was incomplete rather than passing: bootstrap remained in
+`legacy_wsgi_import` after 93 seconds while Yahoo Finance rate-limited SPY,
+QQQ and IWM. The two mandatory provider-hosted exact-head smoke jobs therefore
+remain required.
+Next: publish one bounded PR, require every exact-head gate including both
+provider-hosted Gunicorn smokes, then require settled exact-main Splendid
+acceptance before moving the validated-runtime pointer or claiming recovery.
+
+## 2026-10-05 Issue #84 — immutable pre-append abort retry merged; acceptance failed closed
 
 The next terminal-retry inspection reproduced a bounded sandbox-journal defect
 on accepted main `6fb175337fefbdfca31000b99dd0ea8e31102898`. The first
@@ -21,7 +64,7 @@ boundary raised an invariant error instead of returning the existing terminal
 receipt. That made a safely completed pre-append abort non-idempotent across a
 caller retry or process restart.
 
-The active branch is `fix/issue84-preappend-abort-idempotence`. An exact retry
+The completed branch was `fix/issue84-preappend-abort-idempotence`. An exact retry
 now validates the previous ledger and StateStore boundary and returns the
 existing receipt without rewriting the terminal record. Ledger-append or
 StateStore drift still fails closed without mutation. The regression failed on
@@ -36,8 +79,12 @@ rate-limited SPY and QQQ. This remains sandbox-only and unregistered with no
 production, runtime, order, live, AI, strategy, sizing, hard-risk or
 halt-clearing authority. The settled 08:40 CDT Splendid evidence below remains
 current on unchanged accepted main; no duplicate runtime research job was
-started. Next: publish one bounded PR and require both CI Gunicorn smokes plus
-exact-main settled Splendid acceptance.
+started. PR #292 exact head
+`81abf3536b2728192a0fc4cf3e2c13056046e6e6` and exact tree
+`2440f59e804178f1d7e08205423534e470b8c9f7` passed all required PR gates and
+merged as the commit recorded above. Its sandbox-only journal repair is valid,
+but the unrelated active-wrapper abort means deployment acceptance is not yet
+settled.
 
 ## 2026-10-05 Issue #84 — immutable ledger settlement merged and accepted
 
