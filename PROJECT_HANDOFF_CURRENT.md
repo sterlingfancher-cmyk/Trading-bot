@@ -1,17 +1,50 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-04 10:00 CDT
+Last updated: 2026-10-05 08:28 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `3303ea63578eba94f0e6aa4b95bb7622b9949264` (PR #289 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `ccb50d2da2eb73affddfd804130bf46135ae9cc6` (PR #290 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-04 Issue #84 — immutable terminal recovery in progress
+## 2026-10-05 Issue #84 — immutable ledger settlement in progress
+
+The next restart/retry inspection reproduced another bounded identity defect in
+the sandbox journal. Retrying `settle_ledger` after the exact append was already
+recorded returned the right phase but rewrote `updated_at`, changing the active
+record bytes and SHA-256 digest. The same settled append could therefore acquire
+multiple journal identities before StateStore recovery.
+
+The active branch is `fix/issue84-ledger-settlement-idempotence`. An exact retry
+of an already `ledger_settled` record now returns the existing immutable record
+without a write; the existing ledger-boundary checks still reject any drift.
+Focused tests pass 17/17 and the wider transaction/StateStore selection passes
+46/46. Exact-head Change Safety passes 99 unittest plus 26 pytest cases;
+repository/configuration/refactor/ownership/typed-config/debt gates pass with
+zero new critical findings or warnings, and whitespace validation passes. The
+local exact Gunicorn attempt was incomplete rather than passing: bootstrap
+remained in `legacy_wsgi_import` after 93 seconds while Yahoo Finance
+rate-limited SPY and timed out QQQ. This remains sandbox-only and unregistered
+with no production, runtime, order, live, AI, strategy, sizing or hard-risk
+authority. Next: publish one bounded PR and require both CI Gunicorn smokes plus
+exact-main settled Splendid acceptance before claiming completion.
+
+Fresh Splendid read-only evidence at 2026-10-05 08:17 CDT is pass/quiet on exact
+main `ccb50d2da2eb73affddfd804130bf46135ae9cc6`: all 13 endpoints are reachable;
+self-check, accounting, daily audit, canonical chain, market data, runner and
+risk pass; the account is flat at equity `13429.13`; the ledger remains 88 rows
+with digest `f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`.
+Governed v5 is active/pass and not halted. The 15-second first capture timed out
+on eight heavier endpoints while five lightweight endpoints remained reachable;
+a bounded 60-second retry completed 13/13. This was latency, not an accepted
+outage. Monday pre-open time is not counted as a completed forward market
+session and no forward trade evidence is claimed.
+
+## 2026-10-04 Issue #84 — immutable terminal recovery merged and accepted
 
 The next restart/replay inspection found a bounded sandbox-journal defect after
 PR #289. A repeated recovery of an already `state_committed` transaction
@@ -20,7 +53,7 @@ with the retry timestamp. That changed the record digest and terminal bytes,
 so the same completed transaction could acquire multiple terminal identities
 before rollover. A focused regression reproduced the mutation exactly.
 
-The active branch is `fix/issue84-journal-restart-recovery`. It returns an
+The completed branch was `fix/issue84-journal-restart-recovery`. It returns an
 idempotent receipt for an exact terminal ledger/StateStore boundary without
 writing the journal, and fails closed when the terminal boundary is stale or
 drifted. The previously merged immutable SHA-256 terminal rollover remains
@@ -30,12 +63,28 @@ repository/configuration/refactor/ownership/typed-config/debt gates pass with
 zero new critical findings or warnings. The local exact Gunicorn attempt was
 incomplete rather than passing: bootstrap remained in `legacy_wsgi_import`
 after 93 seconds while Yahoo Finance rate-limited SPY/QQQ/IWM and IWM also
-timed out. Both mandatory CI smokes remain required. This repair is still
-sandbox-only and unregistered; it grants no production-state, runtime, order,
-live, strategy, sizing, hard-risk or AI authority. Next: publish one bounded
-PR from current main with the prior handoff checkpoint reconciled, require
-every exact-head gate and both Gunicorn smokes, and require exact-main Splendid
-settled acceptance after merge.
+timed out. Both mandatory PR exact-head smokes subsequently passed.
+
+PR #290 exact head `fa6f6cd64fd7183bd5a6f103cbd4b5e6267c4cd8`
+and exact tree `065a1820c2f9c5a46a1ce978c0334378f4eee97b` passed all
+four mandatory workflows, then squash-merged as
+`ccb50d2da2eb73affddfd804130bf46135ae9cc6`. All four merge-head code gates
+and both exact Gunicorn smokes passed. Splendid accepted the exact merge and
+runtime workflow `37212039505` completed a settled 13/13 read-only capture.
+Artifact `11307226475` has ZIP SHA-256
+`19f0c4c9fe942ab0b4a6ca796028c50882ed290a4249588c01709dbdf25ae347`.
+
+Settled runtime remains pass/quiet on the exact merge: self-check, accounting,
+daily audit, canonical chain, market data, runner and risk pass; the account is
+flat at equity `13429.13`; the ledger remains 88 chain-valid rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`.
+Governed v5 remains active/pass, paper execution enabled and not halted. The
+preserved successor lineage still surfaces the same three historical incident
+checks, and verified-v2 remains a nonblocking inapplicable failure because v5
+supersedes it. Sunday is not counted as a forward market session; no forward
+trade evidence is claimed. This repair remains sandbox-only/unregistered and
+grants no production-state, runtime, order, live, strategy, sizing, hard-risk
+or AI authority. No `/paper/run` or direct order was used.
 
 ## 2026-10-03 Issue #84 — governed restart activated; forward observation pending
 
