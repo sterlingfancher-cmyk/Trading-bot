@@ -1,17 +1,17 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-05 08:28 CDT
+Last updated: 2026-10-05 08:40 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `ccb50d2da2eb73affddfd804130bf46135ae9cc6` (PR #290 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `6fb175337fefbdfca31000b99dd0ea8e31102898` (PR #291 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-05 Issue #84 — immutable ledger settlement in progress
+## 2026-10-05 Issue #84 — immutable ledger settlement merged and accepted
 
 The next restart/retry inspection reproduced another bounded identity defect in
 the sandbox journal. Retrying `settle_ledger` after the exact append was already
@@ -19,7 +19,7 @@ recorded returned the right phase but rewrote `updated_at`, changing the active
 record bytes and SHA-256 digest. The same settled append could therefore acquire
 multiple journal identities before StateStore recovery.
 
-The active branch is `fix/issue84-ledger-settlement-idempotence`. An exact retry
+The completed branch was `fix/issue84-ledger-settlement-idempotence`. An exact retry
 of an already `ledger_settled` record now returns the existing immutable record
 without a write; the existing ledger-boundary checks still reject any drift.
 Focused tests pass 17/17 and the wider transaction/StateStore selection passes
@@ -30,8 +30,28 @@ local exact Gunicorn attempt was incomplete rather than passing: bootstrap
 remained in `legacy_wsgi_import` after 93 seconds while Yahoo Finance
 rate-limited SPY and timed out QQQ. This remains sandbox-only and unregistered
 with no production, runtime, order, live, AI, strategy, sizing or hard-risk
-authority. Next: publish one bounded PR and require both CI Gunicorn smokes plus
-exact-main settled Splendid acceptance before claiming completion.
+authority.
+
+PR #291 exact head `4434ede353f5fbdc6ed3d3056f2c478692ec6efe`
+and exact tree `7cb27a8d2ef7383841fd8247c2814268858995c1` passed all
+four mandatory workflows and both exact Gunicorn smokes, then squash-merged as
+`6fb175337fefbdfca31000b99dd0ea8e31102898`. All four merge-head code gates
+and both exact Gunicorn smokes passed. Splendid accepted the exact merge and
+runtime workflow `37317870438` completed a settled 13/13 read-only capture.
+Artifact `11348373585` has ZIP SHA-256
+`9b2976638582396e070c1e76bdfc204cfd15ab54de82a4634fe750742e745b39`.
+
+Settled runtime evidence at 2026-10-05 08:40 CDT is pass/quiet on the exact
+merge: self-check, accounting, daily audit, canonical chain, market data,
+runner and risk pass; the account is flat at equity `13429.13`; the ledger
+remains 88 chain-valid rows with digest
+`f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166`.
+Governed v5 remains active/pass, paper execution enabled and not halted. Runtime
+shadow capture remains parity-only and explicitly ineligible as forward
+evidence; Monday pre-open is not counted as a completed market session. The
+verified-v2 failure remains nonblocking and inapplicable because the active v5
+lineage supersedes it. No production writer was activated, and no `/paper/run`
+call or direct order was made.
 
 Fresh Splendid read-only evidence at 2026-10-05 08:17 CDT is pass/quiet on exact
 main `ccb50d2da2eb73affddfd804130bf46135ae9cc6`: all 13 endpoints are reachable;
