@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-05 14:24 CDT
+Last updated: 2026-10-06 09:25 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -10,6 +10,42 @@ projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
+
+## 2026-10-06 Issue #84 — post-start acceptance rejected valid forward trades
+
+PR #294 exact head `9187428ca75654eea9355f7fb320273fdd5bcc73`
+passed all four PR workflows after the three jobs cancelled before acquiring a
+runner were retried; both exact-head Gunicorn smokes passed. It squash-merged
+as `3c152d53821f257e92422e98170a6af92571664e`. All four merge-head code
+workflows and both exact Gunicorn smokes passed, and Splendid settled that exact
+commit. Runtime workflow `37476564248`, job `112314047819`, then captured a
+complete 13/13 exact-head read-only snapshot but failed closed at `Build
+governed pre-start or post-start evidence` with
+`governed restart post-start evidence blocked: accounting_clean_and_flat,
+canonical_ledger_unchanged`. Artifact `11419208661` has ZIP SHA-256
+`bc23fdfef7ab304d01e07383c514e801dc4a45ae97a22a49e9c63661860160ea`.
+
+The artifact proves the rejection is an acceptance-builder defect, not runtime
+accounting or ledger drift. Governed paper execution is active; four reviewed
+forward entries advanced the canonical ledger from the immutable 88-row
+baseline to 92 rows, with current-epoch/state rows both 4, chain and projection
+parity valid, no missing rows, accounting coverage complete, zero coverage or
+economic issues, and matching open symbols `AMD`, `ANET`, `LITE`, `QQQ` across
+accounting/state/paper status. Self-check and daily audit pass, sentinel is
+quiet/pass on exact commit `3c152d5`, risk is not halted, and equity was
+`13443.10`. No halt was manually cleared and no execution was appended or
+fabricated by validation.
+
+The active branch is `fix/issue84-poststart-evidence-forward-trades`. It keeps
+the immutable 88-row/digest recovery baseline exact while validating lawful
+post-start forward progress by ledger delta, current-epoch/state parity,
+accounting/open-symbol reconciliation and the latest governed execution
+receipt. The exact captured artifact now builds a passing read-only acceptance
+bundle locally; focused tests pass 10/10, including negative regressions for
+row-delta, state-row, position and receipt drift. Next: complete the remaining
+exact-head validation, publish one bounded PR, then require every PR and merge
+gate plus settled exact-main Splendid acceptance. The validated-runtime pointer
+above remains PR #291 until that required governed evidence gate passes.
 
 ## 2026-10-05 Issue #84 — governed marker wrapper repair merged; timestamp correction in progress
 

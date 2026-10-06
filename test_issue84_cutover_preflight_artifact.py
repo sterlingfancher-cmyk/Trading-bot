@@ -128,6 +128,7 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
         audit["execution_ledger"]["ledger_sha256"] = (
             "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
         )
+        audit["accounting_integrity"]["parsed_trade_rows"] = 0
         audit["risk"].update({"halted": False, "halt_reason": None})
         snapshot["raw"]["fresh_day_check"]["payload"].update(
             {"halted": False, "halt_reason": None}
@@ -146,6 +147,10 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
             "preappend_abort_recovery": {
                 "status": "recovered",
                 "overall": "pass",
+                "canonical_row_count": 88,
+                "canonical_ledger_sha256": (
+                    "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
+                ),
                 "version": "governed-v5-preappend-abort-recovery-2026-09-30-v2-pr282-successor",
                 "recovery_mode": "pr282_failed_recovery_successor",
                 "incident_evidence_reference": "issue-84-comment-5897148822",
@@ -174,6 +179,117 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
         self.assertFalse(result["activation_performed_by_builder"])
         self.assertEqual(result["blockers"], ["post_start_forward_observations"])
 
+    def test_released_runtime_accepts_reconciled_forward_entries(self):
+        snapshot = self._released_snapshot()
+        audit = snapshot["raw"]["daily_audit"]["payload"]
+        audit["execution_ledger"].update(
+            {
+                "row_count": 92,
+                "ledger_sha256": "c" * 64,
+                "current_epoch_rows": 4,
+                "state_current_epoch_rows": 4,
+            }
+        )
+        audit["accounting_integrity"]["reconstructed_open_positions"] = [
+            "AMD",
+            "ANET",
+            "LITE",
+            "QQQ",
+        ]
+        audit["accounting_integrity"]["parsed_trade_rows"] = 4
+        audit["account"].update(
+            {
+                "cash": 9884.47,
+                "equity": 13443.10,
+                "positions": ["QQQ", "ANET", "AMD", "LITE"],
+            }
+        )
+        snapshot["raw"]["paper_status"]["payload"]["positions"] = {
+            symbol: {"side": "long"}
+            for symbol in ("AMD", "ANET", "LITE", "QQQ")
+        }
+        governed = snapshot["raw"]["governed_v5_restart"]["payload"]
+        governed["preappend_abort_recovery"].update(
+            {
+                "canonical_row_count": 88,
+                "canonical_ledger_sha256": (
+                    "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
+                ),
+            }
+        )
+        governed["last_execution_receipt"] = {
+            "canonical_last_execution_id": "execution-4",
+            "canonical_row_count": 92,
+            "intent_id": "intent-4",
+            "operation": "entry",
+        }
+
+        evidence, result = build_artifacts(
+            runtime_snapshot=snapshot,
+            deployed_commit_sha=COMMIT,
+            splendid_deployment_settled=True,
+        )
+
+        self.assertTrue(all(evidence["checks"].values()))
+        self.assertEqual(evidence["ledger_row_count"], 92)
+        self.assertEqual(evidence["current_epoch_rows"], 4)
+        self.assertEqual(evidence["prestart_ledger_row_count"], 88)
+        self.assertEqual(result["state"], "active_pending_forward_observations")
+
+    def test_released_runtime_rejects_forward_ledger_or_accounting_drift(self):
+        for mutate in ("row_delta", "state_rows", "positions", "receipt"):
+            with self.subTest(mutate=mutate):
+                snapshot = self._released_snapshot()
+                audit = snapshot["raw"]["daily_audit"]["payload"]
+                audit["execution_ledger"].update(
+                    {
+                        "row_count": 89,
+                        "ledger_sha256": "c" * 64,
+                        "current_epoch_rows": 1,
+                        "state_current_epoch_rows": 1,
+                    }
+                )
+                audit["accounting_integrity"]["reconstructed_open_positions"] = [
+                    "AMD"
+                ]
+                audit["accounting_integrity"]["parsed_trade_rows"] = 1
+                audit["account"].update(
+                    {"cash": 12000.0, "equity": 13400.0, "positions": ["AMD"]}
+                )
+                snapshot["raw"]["paper_status"]["payload"]["positions"] = {
+                    "AMD": {"side": "long"}
+                }
+                governed = snapshot["raw"]["governed_v5_restart"]["payload"]
+                governed["preappend_abort_recovery"].update(
+                    {
+                        "canonical_row_count": 88,
+                        "canonical_ledger_sha256": (
+                            "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
+                        ),
+                    }
+                )
+                governed["last_execution_receipt"] = {
+                    "canonical_last_execution_id": "execution-1",
+                    "canonical_row_count": 89,
+                    "intent_id": "intent-1",
+                    "operation": "entry",
+                }
+                if mutate == "row_delta":
+                    audit["execution_ledger"]["row_count"] = 90
+                elif mutate == "state_rows":
+                    audit["execution_ledger"]["state_current_epoch_rows"] = 0
+                elif mutate == "positions":
+                    audit["accounting_integrity"]["reconstructed_open_positions"] = []
+                else:
+                    governed["last_execution_receipt"]["canonical_row_count"] = 88
+
+                with self.assertRaises(CanaryInvariantError):
+                    build_artifacts(
+                        runtime_snapshot=snapshot,
+                        deployed_commit_sha=COMMIT,
+                        splendid_deployment_settled=True,
+                    )
+
     def test_released_runtime_fails_closed_on_governance_or_ledger_drift(self):
         for mutate in ("decision", "ledger"):
             with self.subTest(mutate=mutate):
@@ -184,7 +300,7 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
                 else:
                     snapshot["raw"]["daily_audit"]["payload"][
                         "execution_ledger"
-                    ]["ledger_sha256"] = "b" * 64
+                    ]["chain_valid"] = False
                 with self.assertRaises(CanaryInvariantError):
                     build_artifacts(
                         runtime_snapshot=snapshot,

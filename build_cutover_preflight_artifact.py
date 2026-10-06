@@ -31,7 +31,7 @@ from governed_v5_restart_contract import (
     VERSION as GOVERNED_RESTART_VERSION,
 )
 
-VERSION = "cutover-preflight-ci-artifact-2026-09-29-v2-post-start"
+VERSION = "cutover-preflight-ci-artifact-2026-10-06-v3-forward-execution"
 EXPECTED_PRESTART_LEDGER_ROWS = 88
 EXPECTED_PRESTART_LEDGER_SHA256 = (
     "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
@@ -143,6 +143,18 @@ def _governed_restart_status(snapshot: Mapping[str, Any]) -> Mapping[str, Any]:
     return _runtime_payload(snapshot, "governed_v5_restart")
 
 
+def _position_symbols(value: Any, *, name: str) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, Mapping):
+        symbols = value.keys()
+    elif isinstance(value, (list, tuple, set)):
+        symbols = value
+    else:
+        raise CanaryInvariantError(f"{name} must identify open-position symbols")
+    return {str(symbol) for symbol in symbols}
+
+
 def _build_post_start_acceptance(
     *,
     runtime_snapshot: Mapping[str, Any],
@@ -163,6 +175,24 @@ def _build_post_start_acceptance(
         governed.get("preappend_abort_recovery"),
         name="governed_v5_restart.preappend_abort_recovery",
     )
+    current_epoch_rows = ledger.get("current_epoch_rows")
+    ledger_rows = ledger.get("row_count")
+    accounting_symbols = _position_symbols(
+        accounting.get("reconstructed_open_positions"),
+        name="accounting_integrity.reconstructed_open_positions",
+    )
+    account_symbols = _position_symbols(
+        account.get("positions"), name="account.positions"
+    )
+    paper_symbols = _position_symbols(
+        paper_status.get("positions"), name="paper_status.positions"
+    )
+    last_execution_receipt = governed.get("last_execution_receipt")
+    if last_execution_receipt is not None:
+        last_execution_receipt = _mapping(
+            last_execution_receipt,
+            name="governed_v5_restart.last_execution_receipt",
+        )
 
     checks = {
         "daily_audit_pass": daily_audit.get("overall") == "pass",
@@ -175,24 +205,48 @@ def _build_post_start_acceptance(
             epoch.get("historical_evidence_archived") is True
             and epoch.get("zero_trade_baseline") is True
         ),
-        "canonical_ledger_unchanged": (
-            ledger.get("row_count") == EXPECTED_PRESTART_LEDGER_ROWS
-            and ledger.get("ledger_sha256") == EXPECTED_PRESTART_LEDGER_SHA256
+        "canonical_ledger_forward_progress_valid": (
+            isinstance(ledger_rows, int)
+            and not isinstance(ledger_rows, bool)
+            and isinstance(current_epoch_rows, int)
+            and not isinstance(current_epoch_rows, bool)
+            and ledger_rows >= EXPECTED_PRESTART_LEDGER_ROWS
+            and current_epoch_rows >= 0
+            and ledger_rows - EXPECTED_PRESTART_LEDGER_ROWS == current_epoch_rows
+            and isinstance(ledger.get("ledger_sha256"), str)
+            and len(ledger.get("ledger_sha256")) == 64
             and ledger.get("current_epoch_id") == TARGET_EPOCH_ID
-            and ledger.get("current_epoch_rows") == 0
-            and ledger.get("state_current_epoch_rows") == 0
+            and ledger.get("state_current_epoch_rows") == current_epoch_rows
             and ledger.get("chain_valid") is True
             and ledger.get("state_projection_parity") is True
             and ledger.get("missing_from_state_count") == 0
             and ledger.get("missing_from_ledger_count") == 0
         ),
-        "accounting_clean_and_flat": (
+        "prestart_ledger_baseline_preserved": (
+            recovery.get("canonical_row_count") == EXPECTED_PRESTART_LEDGER_ROWS
+            and recovery.get("canonical_ledger_sha256")
+            == EXPECTED_PRESTART_LEDGER_SHA256
+        ),
+        "accounting_clean_and_reconciled": (
             accounting.get("status") in ("ok", "pass")
             and accounting.get("coverage_complete") is True
             and accounting.get("coverage_issue_count") == 0
             and accounting.get("economic_issue_count") == 0
-            and account.get("positions") in ({}, [], ())
-            and paper_status.get("positions") in ({}, [], ())
+            and accounting.get("parsed_trade_rows") == current_epoch_rows
+            and accounting_symbols == account_symbols == paper_symbols
+            and float(account.get("cash") or 0.0) > 0.0
+            and float(account.get("equity") or 0.0) > 0.0
+        ),
+        "latest_execution_receipt_matches_ledger": (
+            (current_epoch_rows == 0 and last_execution_receipt is None)
+            or (
+                current_epoch_rows > 0
+                and last_execution_receipt is not None
+                and last_execution_receipt.get("canonical_row_count") == ledger_rows
+                and bool(last_execution_receipt.get("canonical_last_execution_id"))
+                and bool(last_execution_receipt.get("intent_id"))
+                and last_execution_receipt.get("operation") in ("entry", "exit")
+            )
         ),
         "risk_halt_released": (
             risk.get("halted") is False
@@ -237,8 +291,11 @@ def _build_post_start_acceptance(
         "source_url": AUTHORITATIVE_RUNTIME_URL,
         "captured_at": str(daily_audit.get("generated_local") or ""),
         "epoch_id": TARGET_EPOCH_ID,
-        "ledger_row_count": EXPECTED_PRESTART_LEDGER_ROWS,
-        "ledger_sha256": EXPECTED_PRESTART_LEDGER_SHA256,
+        "prestart_ledger_row_count": EXPECTED_PRESTART_LEDGER_ROWS,
+        "prestart_ledger_sha256": EXPECTED_PRESTART_LEDGER_SHA256,
+        "ledger_row_count": ledger_rows,
+        "ledger_sha256": str(ledger.get("ledger_sha256") or ""),
+        "current_epoch_rows": current_epoch_rows,
         "checks": checks,
         "governed_status": dict(governed),
     }
