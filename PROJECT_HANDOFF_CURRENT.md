@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-05 14:05 CDT
+Last updated: 2026-10-05 14:24 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -11,7 +11,32 @@ projection / valuation / risk cutover). Active frozen research issue: #202
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-05 Issue #84 — governed marker wrapper repair in progress
+## 2026-10-05 Issue #84 — governed marker wrapper repair merged; timestamp correction in progress
+
+PR #293 exact head `125fb0bb3bcff71494ceb98d131f0b09227b7a64`
+and tree `2c8e7ff1dfdbad84c217ea3dd60eca1f26cedd25` passed all
+four PR workflows and both exact Gunicorn smokes, then squash-merged as
+`d2fe34f659f49eb44f938860ccafd12be3436a7b`. All four merge-head code
+workflows and both exact Gunicorn smokes passed. Exact Splendid deployment and
+the read-only capture succeeded, but runtime job `111937564842` failed closed
+while building governed evidence. Artifact `11367456069` has ZIP SHA-256
+`a3245c766e95ca76d4ac80eb4a652ffcf976a5b26435e9d2df7c8721fb5e80b1`.
+
+The artifact corrected the incident chronology: the immutable wrapper abort is
+`last_discrepancy_local=2026-10-05 08:47:12 CDT`; `09:07:42 CDT` is the later
+failed-recovery evaluation and halt timestamp. The PR #293 matcher bound the
+incident to the latter, so it rejected the otherwise exact intent/error and
+preserved the halt. The active branch is now
+`fix/issue84-runtime-wrapper-incident-timestamp`; it changes only that exact
+evidence-bound timestamp/reference and retains the wrapper repair and all
+three immutable recovery receipts. Focused governed/transaction/journal tests
+pass 52/52; exact-head Change Safety passes 21 audit-gate tests, 95 unittest
+and 52 pytest cases; repository/configuration/refactor/ownership/typed-config/
+debt and whitespace gates pass with zero new critical findings or warnings.
+The unchanged local startup path is still limited by the recorded Yahoo rate
+limits, so provider exact-head smokes remain mandatory. Next: one bounded PR,
+every exact-head gate, then settled exact-main Splendid acceptance. The
+validated-runtime pointer above intentionally remains PR #291.
 
 PR #292 merged as `b03a1e34d9b8eeeb63b74caed05273bf353f6ef3`
 after all PR and merge-head code gates and both exact Gunicorn smokes passed,
@@ -21,7 +46,7 @@ at `Build governed pre-start or post-start evidence`. Artifact `11350757633`
 has ZIP SHA-256
 `1a1b17f36ab505be83474bf261f7e46ba689f059d79ab78caa599f3e910914a1`.
 
-At 2026-10-05 09:07:42 CDT a real governed entry attempt aborted before the
+At 2026-10-05 08:47:12 CDT a real governed entry attempt aborted before the
 canonical append with `TypeError: apply.<locals>.patched_enter_position() got
 an unexpected keyword argument '_governed'`, intent
 `90dcbb9447ff5cbda53906411d32d0bc71e6983a097a284fecc3e5bcdee9c9c5`,
@@ -32,7 +57,7 @@ the account remained flat at equity `13429.13`. The runtime correctly latched
 the accepted-runtime pointer above intentionally remains PR #291. No halt was
 manually cleared, and no execution was appended or fabricated.
 
-The active branch is `fix/issue84-runtime-wrapper-governed-marker`. It forwards
+The merged PR #293 branch was `fix/issue84-runtime-wrapper-governed-marker`. It forwards
 the governed marker through all five active entry wrappers omitted from the
 prior full-stack regression, extends that regression to the actual runtime
 stack, and adds an exact evidence-bound successor recovery for this immutable
