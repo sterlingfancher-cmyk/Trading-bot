@@ -356,6 +356,53 @@ def test_governed_entry_flag_crosses_full_runtime_wrapper_stack(monkeypatch):
     assert calls == [True]
 
 
+def test_governed_exit_flag_crosses_multi_timeframe_wrapper(monkeypatch):
+    calls = []
+
+    def base_exit(
+        symbol, px, reason, market_mode=None, extra=None, _governed=False
+    ):
+        calls.append(
+            {
+                "symbol": symbol,
+                "market_mode": market_mode,
+                "extra": extra,
+                "governed": _governed,
+            }
+        )
+        return {"symbol": symbol, "blocked": False}
+
+    core = types.SimpleNamespace(
+        exit_position=base_exit,
+        portfolio={"positions": {}, "last_market": {}},
+    )
+    monkeypatch.setitem(
+        multi_timeframe_swing._ORIGINALS,
+        "exit_position",
+        core.exit_position,
+    )
+    multi_timeframe_swing._wrap_exit(core)
+
+    result = core.exit_position(
+        "QQQ",
+        101.0,
+        "target",
+        market_mode="risk_on",
+        extra={"source": "governed_test"},
+        _governed=True,
+    )
+
+    assert result == {"symbol": "QQQ", "blocked": False}
+    assert calls == [
+        {
+            "symbol": "QQQ",
+            "market_mode": "risk_on",
+            "extra": {"source": "governed_test"},
+            "governed": True,
+        }
+    ]
+
+
 def _set_exact_restored_wrapper_abort(
     core, *, state_restored=True, intent_id=restart.RECOVERABLE_ENTRY_WRAPPER_INTENT_ID
 ):
