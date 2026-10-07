@@ -913,6 +913,166 @@ def test_runtime_wrapper_abort_rejects_later_recovery_failure_timestamp(
     assert result["post_recovery_runtime_wrapper_abort_recovery"] is None
 
 
+def _set_exact_active_full_exit_abort(monkeypatch, core):
+    governed = core.portfolio["governed_v5_paper_restart"]
+    risk = core.portfolio["risk_controls"]
+    core.portfolio["positions"] = {
+        "QQQ": {
+            "side": "long",
+            "entry": 100.0,
+            "last_price": 101.0,
+            "shares": 1.0,
+        }
+    }
+    core.portfolio["trades"] = [{"action": "entry", "symbol": "QQQ"}]
+    core.portfolio["cash"] = 10000.0
+    core.portfolio["equity"] = 10101.0
+    governed["preappend_abort_recovery"] = {
+        "status": "recovered",
+        "version": restart.ABORT_RECOVERY_VERSION,
+        "historical_discrepancy_preserved": True,
+        "historical_discrepancy_rewritten": False,
+    }
+    governed["post_recovery_wrapper_abort_recovery"] = {
+        "status": "recovered",
+        "version": restart.SUCCESSOR_WRAPPER_ABORT_RECOVERY_VERSION,
+        "incident_intent_id": restart.LATEST_WRAPPER_ABORT_INTENT_ID,
+        "historical_discrepancy_preserved": True,
+        "historical_discrepancy_rewritten": False,
+    }
+    governed["last_execution_receipt"] = {
+        "operation": "partial_exit",
+        "canonical_row_count": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_ROWS,
+        "canonical_last_execution_id": "latest-execution-id",
+    }
+    governed["last_execution_checks"] = {
+        "canonical_chain_valid": True,
+        "canonical_state_projection_parity": True,
+        "accounting_coverage_complete": True,
+    }
+    discrepancy = {
+        "operation": "full_exit",
+        "intent_id": restart.RUNTIME_FULL_EXIT_ABORT_INTENT_ID,
+        "error": restart.RUNTIME_FULL_EXIT_ABORT_ERROR,
+        "canonical_rows_before": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_ROWS,
+        "canonical_rows_after": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_ROWS,
+        "state_restored": True,
+    }
+    checks = {
+        name: True
+        for name in restart.PR282_FAILED_RECOVERY_ALL_CHECKS
+    }
+    checks["recorded_incident_reference_exact"] = True
+    for name in restart.RUNTIME_FULL_EXIT_ABORT_FAILED_CHECKS:
+        checks[name] = False
+    failure = {
+        "status": "not_applicable",
+        "overall": "fail",
+        "version": restart.ABORT_RECOVERY_VERSION,
+        "failed_checks": list(restart.RUNTIME_FULL_EXIT_ABORT_FAILED_CHECKS),
+        "checks": checks,
+    }
+    governed.update(
+        {
+            "status": "halted",
+            "last_discrepancy": discrepancy,
+            "last_discrepancy_local": (
+                restart.RUNTIME_FULL_EXIT_ABORT_INCIDENT_LOCAL
+            ),
+            "last_recovery_failure": copy.deepcopy(failure),
+        }
+    )
+    risk.update(
+        {
+            "halted": True,
+            "halt_reason": restart.RECOVERY_DRIFT_HALT_REASON,
+            "governed_restart_halt_details": copy.deepcopy(failure),
+        }
+    )
+    canonical = {
+        "hook_applied": True,
+        "authoritative_for_new_executions": True,
+        "chain_valid": True,
+        "ledger_sha256": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_SHA256,
+        "row_count": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_ROWS,
+        "current_epoch_rows": 11,
+        "state_current_epoch_rows": 11,
+        "state_projection_parity": True,
+        "missing_from_ledger_count": 0,
+        "missing_from_state_count": 0,
+        "errors": [],
+    }
+    accounting_payload = {
+        "status": "ok",
+        "coverage_complete": True,
+        "coverage_issue_count": 0,
+        "economic_issue_count": 0,
+        "open_positions": {"QQQ": {"qty": 1.0}},
+    }
+    monkeypatch.setattr(restart, "_canonical", lambda unused: canonical)
+    monkeypatch.setattr(
+        restart, "_accounting", lambda unused: accounting_payload
+    )
+    return discrepancy
+
+
+def test_exact_active_full_exit_abort_recovers_without_evidence_rewrite(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    discrepancy = _set_exact_active_full_exit_abort(monkeypatch, core)
+    history_before = copy.deepcopy(core.portfolio["history"])
+    trades_before = copy.deepcopy(core.portfolio["trades"])
+    positions_before = copy.deepcopy(core.portfolio["positions"])
+
+    result = restart.apply(core)
+
+    assert result["status"] == "active"
+    assert result["risk_halted"] is False
+    recovery = result["post_start_full_exit_abort_recovery"]
+    assert recovery["status"] == "recovered"
+    assert recovery["version"] == (
+        restart.RUNTIME_FULL_EXIT_ABORT_RECOVERY_VERSION
+    )
+    assert recovery["incident_evidence_reference"] == (
+        restart.RUNTIME_FULL_EXIT_ABORT_EVIDENCE_REFERENCE
+    )
+    assert result["last_discrepancy"] == discrepancy
+    assert core.portfolio["history"] == history_before
+    assert core.portfolio["trades"] == trades_before
+    assert core.portfolio["positions"] == positions_before
+
+
+def test_active_full_exit_abort_rejects_canonical_digest_drift(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_active_full_exit_abort(monkeypatch, core)
+    monkeypatch.setattr(
+        restart,
+        "_canonical",
+        lambda unused: {
+            "hook_applied": True,
+            "authoritative_for_new_executions": True,
+            "chain_valid": True,
+            "ledger_sha256": "different",
+            "row_count": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_ROWS,
+            "current_epoch_rows": 11,
+            "state_current_epoch_rows": 11,
+            "state_projection_parity": True,
+            "missing_from_ledger_count": 0,
+            "missing_from_state_count": 0,
+            "errors": [],
+        },
+    )
+
+    result = restart.apply(core)
+
+    assert result["status"] == "halted"
+    assert result["risk_halted"] is True
+    assert result["post_start_full_exit_abort_recovery"] is None
+
+
 def test_pr282_successor_rejects_near_match(monkeypatch, tmp_path):
     core = _activate(monkeypatch, tmp_path)
     _set_exact_pr282_failed_recovery(core)

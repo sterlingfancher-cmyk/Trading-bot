@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-07 09:08 CDT
+Last updated: 2026-10-07 09:20 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -23,14 +23,26 @@ chain-valid at 99 rows with digest
 accounting reports zero coverage and economic issues, and equity is
 `13952.04`. No halt was manually cleared and `/paper/run` was not called.
 
-The active branch is `fix/issue84-governed-wrapper-kwarg`. It adds the missing
-`_governed` parameter to the active multi-timeframe full-exit wrapper and
-forwards it only when true, preserving compatibility with ungoverned callers.
-The focused regression proves the governed marker crosses that wrapper with
-the existing market-mode and extra metadata intact; the governed restart suite
-passes 25/25. Exact-head mandatory workflows, review, merge, deployment and
-settled recovery acceptance remain pending. Resume this one repair path; do not
-manually clear the halt or infer acceptance from the local regression.
+PR #296 exact head `79e71ab387f29527a8b7da6a527b0cd8c5217b7a`
+passed all four PR workflows and both exact Gunicorn smokes, then squash-merged
+as `48d754220056ddf25d41e38e5813d5455985b672`. All four merge-head code
+workflows and both Gunicorn smokes passed, and Splendid settled that exact
+commit. Runtime workflow `37634184262`, job `112836535686`, captured all 13
+read-only endpoints but failed closed in the governed evidence builder because
+the fail-closed halt remained. Artifact `11487569435` has ZIP SHA-256
+`2f829af02ecfc2418be5d9c6855f2737caa6be01522a6afee871aaaa2933168b`.
+
+The active branch is `fix/issue84-runtime-full-exit-recovery`. It implements an
+exact, evidence-bound successor for this one post-start full-exit abort. It
+requires the exact intent, timestamp, error, 99-row digest, chain/projection
+parity, zero missing rows, clean accounting, reconciled open symbols, positive
+valuation, unchanged hard-risk limits, the latest 99-row partial-exit receipt,
+and both immutable prior recovery receipts. It preserves the discrepancy and
+all ledger/state/history/day-peak evidence, writes a separate receipt and only
+then releases this exact correctness halt. Exact and digest-drift regressions
+pass with the wider governed restart suite at 27/27. Exact-head workflows,
+review, merge, deployment and settled recovery acceptance remain pending. Do
+not manually clear the halt or infer acceptance from the local result.
 
 ## 2026-10-06 Issue #84 — post-start forward-execution acceptance repaired and accepted
 
