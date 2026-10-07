@@ -275,7 +275,9 @@ def _wrap_enter(core):
 
 def _wrap_exit(core):
     original = _ORIGINALS.get("exit_position")
-    def wrapped(symbol, px, reason, market_mode=None, extra=None):
+    def wrapped(
+        symbol, px, reason, market_mode=None, extra=None, _governed=False
+    ):
         pos = core.portfolio.get("positions", {}).get(symbol)
         if ENABLED and pos and pos.get("side", "long") == "long" and pos.get("trade_class") in {"leader_hold", "swing_candidate"}:
             prof = multi_timeframe_profile(core, symbol, core.portfolio.get("last_market") or {})
@@ -297,7 +299,10 @@ def _wrap_exit(core):
                     "time": int(time.time()),
                 }
                 return None
-        return original(symbol, px, reason, market_mode=market_mode, extra=extra)
+        call_kwargs = {"market_mode": market_mode, "extra": extra}
+        if _governed:
+            call_kwargs["_governed"] = True
+        return original(symbol, px, reason, **call_kwargs)
     core.exit_position = wrapped
 
 

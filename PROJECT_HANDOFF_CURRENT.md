@@ -1,17 +1,38 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-06 09:25 CDT
+Last updated: 2026-10-07 09:08 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `6fb175337fefbdfca31000b99dd0ea8e31102898` (PR #291 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `242c1221442ff7d8a457b3b6ad409895b511b379` (PR #295 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-06 Issue #84 — post-start acceptance rejected valid forward trades
+## 2026-10-07 Issue #84 — governed full-exit wrapper abort — IN PROGRESS
+
+A fresh 13/13 read-only Splendid capture on exact deployed main
+`242c1221442ff7d8a457b3b6ad409895b511b379` found a new active runner error:
+`TypeError: _wrap_exit.<locals>.wrapped() got an unexpected keyword argument
+'_governed'`. The governed operation failed before canonical append, correctly
+restored state and latched the fail-closed risk halt. The canonical ledger is
+chain-valid at 99 rows with digest
+`f06507675ad47f45d4a364358f095d690086f2d2a49c5ad23b49623401dca61f`;
+accounting reports zero coverage and economic issues, and equity is
+`13952.04`. No halt was manually cleared and `/paper/run` was not called.
+
+The active branch is `fix/issue84-governed-wrapper-kwarg`. It adds the missing
+`_governed` parameter to the active multi-timeframe full-exit wrapper and
+forwards it only when true, preserving compatibility with ungoverned callers.
+The focused regression proves the governed marker crosses that wrapper with
+the existing market-mode and extra metadata intact; the governed restart suite
+passes 25/25. Exact-head mandatory workflows, review, merge, deployment and
+settled recovery acceptance remain pending. Resume this one repair path; do not
+manually clear the halt or infer acceptance from the local regression.
+
+## 2026-10-06 Issue #84 — post-start forward-execution acceptance repaired and accepted
 
 PR #294 exact head `9187428ca75654eea9355f7fb320273fdd5bcc73`
 passed all four PR workflows after the three jobs cancelled before acquiring a
@@ -36,16 +57,33 @@ quiet/pass on exact commit `3c152d5`, risk is not halted, and equity was
 `13443.10`. No halt was manually cleared and no execution was appended or
 fabricated by validation.
 
-The active branch is `fix/issue84-poststart-evidence-forward-trades`. It keeps
+The completed branch was `fix/issue84-poststart-evidence-forward-trades`. It keeps
 the immutable 88-row/digest recovery baseline exact while validating lawful
 post-start forward progress by ledger delta, current-epoch/state parity,
 accounting/open-symbol reconciliation and the latest governed execution
 receipt. The exact captured artifact now builds a passing read-only acceptance
 bundle locally; focused tests pass 10/10, including negative regressions for
-row-delta, state-row, position and receipt drift. Next: complete the remaining
-exact-head validation, publish one bounded PR, then require every PR and merge
-gate plus settled exact-main Splendid acceptance. The validated-runtime pointer
-above remains PR #291 until that required governed evidence gate passes.
+row-delta, state-row, position and receipt drift.
+
+PR #295 exact validation head `a7c230c6e22dc9aa0e6581fa3be5ca848f3b887f`
+and tree `762bb5fe3d633e15ac9326e3ff97a3c95e0df97d` passed the
+repository, architecture-debt, Change Safety, refactor and Stage F workflows;
+both exact Gunicorn smokes passed. It squash-merged as
+`242c1221442ff7d8a457b3b6ad409895b511b379`. The same five merge-head
+workflows and both Gunicorn smokes passed. Splendid settled that exact commit,
+and runtime workflow `37479420953`, job `112324130755`, passed the 13/13
+read-only capture and the governed evidence build. Artifact `11420448302` has
+ZIP SHA-256
+`332e4dc88ce728de4ba9f46902f4ca0652da7ce21e9aeb6e5d3ba4a4c6e4dafc`.
+The accepted snapshot is sentinel quiet/pass on the exact merge, self-check and
+daily audit pass, risk unhalted, accounting clean, and ledger chain/projection
+parity valid at 93 rows / 5 current-epoch rows with no missing rows. The bundle
+records every new check true and remains paper-only/read-only with
+`post_start_forward_observations` as the only ongoing blocker; it neither
+performed activation nor granted production authority. Next: continue Issue
+#84 single-owner cutover work and collect ordinary forward lifecycle evidence
+without changing the frozen #202 candidate or treating open-trade profitability
+as a restart prerequisite.
 
 ## 2026-10-05 Issue #84 — governed marker wrapper repair merged; timestamp correction in progress
 
