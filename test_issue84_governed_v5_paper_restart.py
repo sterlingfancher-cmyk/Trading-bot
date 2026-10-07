@@ -10,6 +10,7 @@ import pytest
 import canonical_execution_ledger as ledger
 import clean_epoch_successor_compatibility as clean_compat
 import governed_v5_paper_restart as restart
+import governed_v5_runtime_exit_recovery as exit_recovery
 import issue222_verified_flat_successor as successor
 import market_surge_canonical_execution_bridge as surge_bridge
 import market_surge_deployment_mode as surge_deployment
@@ -916,17 +917,21 @@ def test_runtime_wrapper_abort_rejects_later_recovery_failure_timestamp(
 def _set_exact_active_full_exit_abort(monkeypatch, core):
     governed = core.portfolio["governed_v5_paper_restart"]
     risk = core.portfolio["risk_controls"]
-    core.portfolio["positions"] = {
-        "QQQ": {
-            "side": "long",
-            "entry": 100.0,
-            "last_price": 101.0,
-            "shares": 1.0,
+    core.portfolio.update(
+        {
+            "positions": {
+                "QQQ": {
+                    "side": "long",
+                    "entry": 100.0,
+                    "last_price": 101.0,
+                    "shares": 1.0,
+                }
+            },
+            "trades": [{"action": "entry", "symbol": "QQQ"}],
+            "cash": 10000.0,
+            "equity": 10101.0,
         }
-    }
-    core.portfolio["trades"] = [{"action": "entry", "symbol": "QQQ"}]
-    core.portfolio["cash"] = 10000.0
-    core.portfolio["equity"] = 10101.0
+    )
     governed["preappend_abort_recovery"] = {
         "status": "recovered",
         "version": restart.ABORT_RECOVERY_VERSION,
@@ -942,7 +947,7 @@ def _set_exact_active_full_exit_abort(monkeypatch, core):
     }
     governed["last_execution_receipt"] = {
         "operation": "partial_exit",
-        "canonical_row_count": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_ROWS,
+        "canonical_row_count": exit_recovery.LEDGER_ROWS,
         "canonical_last_execution_id": "latest-execution-id",
     }
     governed["last_execution_checks"] = {
@@ -952,10 +957,10 @@ def _set_exact_active_full_exit_abort(monkeypatch, core):
     }
     discrepancy = {
         "operation": "full_exit",
-        "intent_id": restart.RUNTIME_FULL_EXIT_ABORT_INTENT_ID,
-        "error": restart.RUNTIME_FULL_EXIT_ABORT_ERROR,
-        "canonical_rows_before": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_ROWS,
-        "canonical_rows_after": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_ROWS,
+        "intent_id": exit_recovery.INTENT_ID,
+        "error": exit_recovery.ERROR,
+        "canonical_rows_before": exit_recovery.LEDGER_ROWS,
+        "canonical_rows_after": exit_recovery.LEDGER_ROWS,
         "state_restored": True,
     }
     checks = {
@@ -963,13 +968,13 @@ def _set_exact_active_full_exit_abort(monkeypatch, core):
         for name in restart.PR282_FAILED_RECOVERY_ALL_CHECKS
     }
     checks["recorded_incident_reference_exact"] = True
-    for name in restart.RUNTIME_FULL_EXIT_ABORT_FAILED_CHECKS:
+    for name in exit_recovery.FAILED_CHECKS:
         checks[name] = False
     failure = {
         "status": "not_applicable",
         "overall": "fail",
         "version": restart.ABORT_RECOVERY_VERSION,
-        "failed_checks": list(restart.RUNTIME_FULL_EXIT_ABORT_FAILED_CHECKS),
+        "failed_checks": list(exit_recovery.FAILED_CHECKS),
         "checks": checks,
     }
     governed.update(
@@ -977,7 +982,7 @@ def _set_exact_active_full_exit_abort(monkeypatch, core):
             "status": "halted",
             "last_discrepancy": discrepancy,
             "last_discrepancy_local": (
-                restart.RUNTIME_FULL_EXIT_ABORT_INCIDENT_LOCAL
+                exit_recovery.INCIDENT_LOCAL
             ),
             "last_recovery_failure": copy.deepcopy(failure),
         }
@@ -993,8 +998,8 @@ def _set_exact_active_full_exit_abort(monkeypatch, core):
         "hook_applied": True,
         "authoritative_for_new_executions": True,
         "chain_valid": True,
-        "ledger_sha256": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_SHA256,
-        "row_count": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_ROWS,
+        "ledger_sha256": exit_recovery.LEDGER_SHA256,
+        "row_count": exit_recovery.LEDGER_ROWS,
         "current_epoch_rows": 11,
         "state_current_epoch_rows": 11,
         "state_projection_parity": True,
@@ -1032,10 +1037,10 @@ def test_exact_active_full_exit_abort_recovers_without_evidence_rewrite(
     recovery = result["post_start_full_exit_abort_recovery"]
     assert recovery["status"] == "recovered"
     assert recovery["version"] == (
-        restart.RUNTIME_FULL_EXIT_ABORT_RECOVERY_VERSION
+        exit_recovery.RECOVERY_VERSION
     )
     assert recovery["incident_evidence_reference"] == (
-        restart.RUNTIME_FULL_EXIT_ABORT_EVIDENCE_REFERENCE
+        exit_recovery.EVIDENCE_REFERENCE
     )
     assert result["last_discrepancy"] == discrepancy
     assert core.portfolio["history"] == history_before
@@ -1056,7 +1061,7 @@ def test_active_full_exit_abort_rejects_canonical_digest_drift(
             "authoritative_for_new_executions": True,
             "chain_valid": True,
             "ledger_sha256": "different",
-            "row_count": restart.RUNTIME_FULL_EXIT_ABORT_LEDGER_ROWS,
+            "row_count": exit_recovery.LEDGER_ROWS,
             "current_epoch_rows": 11,
             "state_current_epoch_rows": 11,
             "state_projection_parity": True,
