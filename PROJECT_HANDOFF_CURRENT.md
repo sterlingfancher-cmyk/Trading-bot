@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-07 09:20 CDT
+Last updated: 2026-10-07 09:38 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -32,17 +32,34 @@ read-only endpoints but failed closed in the governed evidence builder because
 the fail-closed halt remained. Artifact `11487569435` has ZIP SHA-256
 `2f829af02ecfc2418be5d9c6855f2737caa6be01522a6afee871aaaa2933168b`.
 
-The active branch is `fix/issue84-runtime-full-exit-recovery`. It implements an
-exact, evidence-bound successor for this one post-start full-exit abort. It
-requires the exact intent, timestamp, error, 99-row digest, chain/projection
-parity, zero missing rows, clean accounting, reconciled open symbols, positive
-valuation, unchanged hard-risk limits, the latest 99-row partial-exit receipt,
-and both immutable prior recovery receipts. It preserves the discrepancy and
-all ledger/state/history/day-peak evidence, writes a separate receipt and only
-then releases this exact correctness halt. Exact and digest-drift regressions
-pass with the wider governed restart suite at 27/27. Exact-head workflows,
-review, merge, deployment and settled recovery acceptance remain pending. Do
-not manually clear the halt or infer acceptance from the local result.
+PR #297 exact head `d15cf015f1fb93c10076cea747645b995c43bc8a`
+passed all four PR workflows and both exact Gunicorn smokes, then merged as
+`5cc8aa26ed8f1679a53c316319003ca8e6c7e748`. All four merge-head code jobs
+and both Gunicorn smokes passed; exact Splendid deployment and a 13/13 read-only
+capture also passed. Runtime job `112846484055` nevertheless failed closed in
+the governed evidence builder. Artifact `11490227329` has ZIP SHA-256
+`a827ddee524ba4a1ca02cf90634f5e77101703a2db54f1c83f256f450749c66e`.
+
+That artifact supersedes the earlier incident signature: at
+`2026-10-07 09:27:59 CDT`, the next full-exit attempt reached the separately
+installed pattern-recognition wrapper and aborted with
+`TypeError: apply.<locals>.patched_exit_position() got an unexpected keyword
+argument '_governed'`, intent
+`ae64864e8f8abe8bfd34c28e2dbf6e062842d3303c3777a2191b629cd9423cbe`.
+State restored true; the chain-valid/parity-valid ledger remained at 99 rows
+and digest `f06507675ad47f45d4a364358f095d690086f2d2a49c5ad23b49623401dca61f`;
+the correctness halt remained latched. PR #297 correctly refused to recover a
+different incident. The durable checkpoint is Issue #84 comment `6040267944`.
+
+The active branch is now `fix/issue84-pattern-exit-governed-marker`. It adds
+the same conditional governed-marker forwarding contract to the
+pattern-recognition exit wrapper, extends the regression across the actual
+multi-timeframe-plus-pattern wrapper order, and rebinds the non-destructive
+successor recovery to this exact later incident and durable checkpoint. The
+governed plus Change Safety test set passes 48/48 locally with zero new
+structural critical findings or warnings. Exact-head workflows, review, merge,
+deployment and settled recovery acceptance remain pending. Do not manually
+clear the halt or infer acceptance from the local result.
 
 ## 2026-10-06 Issue #84 — post-start forward-execution acceptance repaired and accepted
 
