@@ -422,6 +422,78 @@ def _runtime_wrapper_abort_signature(
     return _matched_runtime_wrapper_abort(risk, restart) is not None
 
 
+def _recover_exact_runtime_full_exit_abort(core: Any) -> Dict[str, Any]:
+    """Release only the exact restored full-exit abort after its wrapper fix."""
+    import governed_v5_runtime_exit_recovery as exit_recovery
+
+    with _execution_lock():
+        state = _portfolio(core)
+        epoch = _d(state.get("paper_accounting_epoch"))
+        risk = _d(state.get("risk_controls"))
+        restart = _d(state.get("governed_v5_paper_restart"))
+        evidence = exit_recovery.build_evidence(
+            paper_runtime=_paper_only(),
+            released_lineage=bool(
+                is_exact_v5_successor(epoch) and _release_metadata_exact(epoch)
+            ),
+            risk=risk,
+            restart=restart,
+            canonical=_canonical(core),
+            accounting=_accounting(core),
+            positions=_d(state.get("positions")),
+            cash=_f(state.get("cash"), -1.0),
+            equity=_f(state.get("equity"), -1.0),
+            expected_daily_loss=getattr(core, "MAX_DAILY_LOSS_PCT", None),
+            expected_intraday_drawdown=getattr(
+                core, "MAX_INTRADAY_DRAWDOWN_PCT", None
+            ),
+        )
+        if evidence["failed_checks"]:
+            return {
+                "status": "not_applicable",
+                "overall": "fail",
+                "version": exit_recovery.RECOVERY_VERSION,
+                "failed_checks": evidence["failed_checks"],
+                "checks": evidence["checks"],
+            }
+        risk_before = copy.deepcopy(risk)
+        restart_before = copy.deepcopy(restart)
+        recovered_local = _now(core)
+        recovery = {
+            "status": "recovered",
+            "overall": "pass",
+            "version": exit_recovery.RECOVERY_VERSION,
+            "recovered_local": recovered_local,
+            "prior_halt_reason": RECOVERY_DRIFT_HALT_REASON,
+            "incident_intent_id": exit_recovery.INTENT_ID,
+            "incident_evidence_reference": exit_recovery.EVIDENCE_REFERENCE,
+            "canonical_row_count": exit_recovery.LEDGER_ROWS,
+            "canonical_ledger_sha256": exit_recovery.LEDGER_SHA256,
+            "checks": dict(evidence["checks"]),
+            "historical_discrepancy_preserved": True,
+            "historical_discrepancy_rewritten": False,
+            "recovery_mode": "post_start_runtime_full_exit_abort",
+        }
+        risk["halted"] = False
+        risk["halt_reason"] = ""
+        risk["governed_restart_recovered_halt_reason"] = RECOVERY_DRIFT_HALT_REASON
+        risk["governed_restart_abort_recovered_local"] = recovered_local
+        risk["governed_restart_abort_recovery_version"] = (
+            exit_recovery.RECOVERY_VERSION
+        )
+        restart["status"] = "active"
+        restart["post_start_full_exit_abort_recovery"] = recovery
+        try:
+            _save(core)
+        except Exception:
+            risk.clear()
+            risk.update(risk_before)
+            restart.clear()
+            restart.update(restart_before)
+            raise
+        return recovery
+
+
 def _preappend_abort_recovery_evidence(core: Any) -> Dict[str, Any]:
     """Verify the one demonstrated pre-append wrapper abort without mutation."""
     state = _portfolio(core)
@@ -1235,11 +1307,17 @@ def apply(core: Any = None) -> Dict[str, Any]:
             risk = _d(_portfolio(core).get("risk_controls"))
             restart = _d(_portfolio(core).get("governed_v5_paper_restart"))
             discrepancy = _d(restart.get("last_discrepancy"))
+            import governed_v5_runtime_exit_recovery as exit_recovery
+
+            runtime_full_exit_abort = exit_recovery.matches_signature(
+                risk, restart
+            )
             recovery_candidate = bool(
                 risk.get("halt_reason") == PREAPPEND_ABORT_HALT_REASON
                 or _pr282_failed_recovery_signature(risk, restart)
                 or _successor_wrapper_abort_signature(risk, restart)
                 or _runtime_wrapper_abort_signature(risk, restart)
+                or runtime_full_exit_abort
                 or (
                     restart.get("status") == "halted"
                     and restart.get("preappend_abort_recovery") is None
@@ -1248,7 +1326,11 @@ def apply(core: Any = None) -> Dict[str, Any]:
             )
             if recovery_candidate:
                 try:
-                    recovery = _recover_exact_preappend_wrapper_abort(core)
+                    recovery = (
+                        _recover_exact_runtime_full_exit_abort(core)
+                        if runtime_full_exit_abort
+                        else _recover_exact_preappend_wrapper_abort(core)
+                    )
                     if recovery.get("status") != "recovered":
                         _latch(
                             core,
@@ -1347,6 +1429,9 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         ),
         "post_recovery_runtime_wrapper_abort_recovery": restart.get(
             "post_recovery_runtime_wrapper_abort_recovery"
+        ),
+        "post_start_full_exit_abort_recovery": restart.get(
+            "post_start_full_exit_abort_recovery"
         ),
         "authority": {
             "paper_only": True,
