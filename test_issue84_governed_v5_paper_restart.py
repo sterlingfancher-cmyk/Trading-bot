@@ -357,7 +357,7 @@ def test_governed_entry_flag_crosses_full_runtime_wrapper_stack(monkeypatch):
     assert calls == [True]
 
 
-def test_governed_exit_flag_crosses_multi_timeframe_wrapper(monkeypatch):
+def test_governed_exit_flag_crosses_full_runtime_wrapper_stack(monkeypatch):
     calls = []
 
     def base_exit(
@@ -383,6 +383,7 @@ def test_governed_exit_flag_crosses_multi_timeframe_wrapper(monkeypatch):
         core.exit_position,
     )
     multi_timeframe_swing._wrap_exit(core)
+    assert pattern_recognition_layer.apply(core)["status"] == "ok"
 
     result = core.exit_position(
         "QQQ",
