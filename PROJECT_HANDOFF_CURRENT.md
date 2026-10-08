@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-08 09:19 CDT
+Last updated: 2026-10-08 09:38 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -95,6 +95,28 @@ receipt is exact, and hard-risk limits remain unchanged. Any entry, malformed
 row or unbounded delta fails closed. Positive forward-exit and post-incident
 entry rejection regressions are included. Exact-head workflows, merge,
 deployment and settled acceptance remain pending.
+
+PR #300 exact head `22562d2a6321f817dc29320cc669727d66bdb329`
+passed all four exact-head workflows and both exact Gunicorn smokes, then
+squash-merged as `a0032863385a43f2e5eb03412bbb2d3180b55dee`.
+All four merge-head code gates and both smokes passed; exact Splendid deployment
+and the 13/13 read-only capture also passed. Runtime job `113365955780` failed
+closed only in the governed evidence builder. Artifact `11557756865` has ZIP
+SHA-256
+`176f4321f6dbf00cd23b4ff05bf0054297c2d105f88a9272a02f7bea3e4a6602`.
+
+The captured runtime is otherwise unchanged and internally clean at 101 rows,
+13/13 current epoch/state rows and digest
+`179169d3475a1577ead56acd0395ae07fb4ffa6f336ed262cb7dd4a43b73d825`.
+The v4 successor did not run because the prior v3 failed recovery diagnostic is
+itself the current halt detail, while the matcher still required the older v2
+diagnostic shape. The exact v3 diagnostic is independently captured: version
+`governed-v5-runtime-full-exit-abort-recovery-2026-10-08-v3`, with only
+`canonical_digest_exact`, `canonical_rows_exact`, and
+`last_execution_receipt_exact` false and every other check true. The active
+repair branch is `fix/issue84-v3-failure-successor`; it changes only this
+predecessor-signature gate, requires the complete exact check-key set and
+failure tuple, and rejects near matches.
 
 ## 2026-10-06 Issue #84 — post-start forward-execution acceptance repaired and accepted
 
