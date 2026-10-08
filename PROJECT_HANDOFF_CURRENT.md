@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-07 09:38 CDT
+Last updated: 2026-10-08 09:08 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -51,15 +51,29 @@ and digest `f06507675ad47f45d4a364358f095d690086f2d2a49c5ad23b49623401dca61f`;
 the correctness halt remained latched. PR #297 correctly refused to recover a
 different incident. The durable checkpoint is Issue #84 comment `6040267944`.
 
-The active branch is now `fix/issue84-pattern-exit-governed-marker`. It adds
-the same conditional governed-marker forwarding contract to the
-pattern-recognition exit wrapper, extends the regression across the actual
-multi-timeframe-plus-pattern wrapper order, and rebinds the non-destructive
-successor recovery to this exact later incident and durable checkpoint. The
-governed plus Change Safety test set passes 48/48 locally with zero new
-structural critical findings or warnings. Exact-head workflows, review, merge,
-deployment and settled recovery acceptance remain pending. Do not manually
-clear the halt or infer acceptance from the local result.
+PR #298 exact head `3d97cf391ae193c271eb1a1dbe317bf0f7af18a3`
+passed all four workflows and both exact Gunicorn smokes, then merged as
+`6b9b29421682517bbeda49881f7112afcfb5254f`. All merge-head code gates and
+both smokes passed; exact Splendid deployment and the 13/13 read-only capture
+also passed. Runtime job `113350447691` nevertheless failed closed in the
+governed evidence builder. Artifact `11555831526` has ZIP SHA-256
+`b10ce8a23a34c15027b6091cd258063673048d56b69714cdf34de78b0ed270ec`.
+
+Before PR #298 deployed, the prior code emitted one later instance of the same
+pattern-wrapper abort at `2026-10-08 08:56:48 CDT`, intent
+`659dc62bfb73bf6331d1cf38b3252a31f339ca54a16e0f4656ddc8b6a409b132`.
+The immutable boundary remained 99 rows with the same ledger digest, valid
+chain/projection parity and `state_restored=true`; runner active error is now
+false and sentinel is quiet/pass on exact `6b9b294...`. The halt stayed latched
+because the exact matcher correctly rejected the superseding incident. Issue
+#84 comment `6061648816` is the durable independent record.
+
+The active branch is now `fix/issue84-latest-full-exit-recovery`. It preserves
+the deployed wrapper fix and changes only the evidence-bound recovery identity
+to the latest exact incident/reference. The existing exact recovery,
+digest-drift and full-wrapper-order regressions remain mandatory. Exact-head
+workflows, review, merge, deployment and settled recovery acceptance remain
+pending. Do not manually clear the halt or infer acceptance from deployment.
 
 ## 2026-10-06 Issue #84 — post-start forward-execution acceptance repaired and accepted
 
