@@ -1,7 +1,7 @@
 """Pure evidence contract for the exact latest governed exit abort."""
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Sequence
 
 
 ABORT_RECOVERY_VERSION = (
@@ -23,7 +23,9 @@ INCIDENT_LOCAL = "2026-10-08 08:56:48 CDT"
 LEDGER_ROWS = 99
 LEDGER_SHA256 = "f06507675ad47f45d4a364358f095d690086f2d2a49c5ad23b49623401dca61f"
 EVIDENCE_REFERENCE = "issue-84-comment-6061648816"
-RECOVERY_VERSION = "governed-v5-runtime-full-exit-abort-recovery-2026-10-08-v3"
+RECOVERY_VERSION = "governed-v5-runtime-full-exit-abort-recovery-2026-10-08-v4"
+BASELINE_CURRENT_EPOCH_ROWS = 11
+MAX_RISK_REDUCING_FORWARD_ROWS = 32
 FAILED_CHECKS = (
     "exact_preappend_abort_boundary",
     "exact_incident_time",
@@ -42,6 +44,29 @@ FAILED_CHECKS = (
 
 def _dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _sha256(value: Any) -> bool:
+    text = str(value or "")
+    return len(text) == 64 and all(char in "0123456789abcdef" for char in text)
+
+
+def _forward_rows_are_risk_reducing(
+    trades: Sequence[Mapping[str, Any]], delta: int
+) -> bool:
+    if delta == 0:
+        return True
+    if delta < 0 or delta > MAX_RISK_REDUCING_FORWARD_ROWS or len(trades) < delta:
+        return False
+    rows = trades[-delta:]
+    return all(
+        row.get("action") in {"exit", "partial_exit"}
+        and bool(str(row.get("execution_id") or ""))
+        and bool(str(row.get("canonical_ledger_event_hash") or ""))
+        and str(row.get("accounting_epoch_id") or "")
+        == "stable-paper-v5-20260914-issue222-flat-successor01"
+        for row in rows
+    )
 
 
 def matches_signature(
@@ -97,6 +122,7 @@ def build_evidence(
     canonical: Mapping[str, Any],
     accounting: Mapping[str, Any],
     positions: Mapping[str, Any],
+    trades: Sequence[Mapping[str, Any]],
     cash: float,
     equity: float,
     expected_daily_loss: Any,
@@ -107,6 +133,9 @@ def build_evidence(
     last_receipt = _dict(restart.get("last_execution_receipt"))
     last_checks = _dict(restart.get("last_execution_checks"))
     hard_limits = _dict(restart.get("hard_risk_limits"))
+    current_rows = int(canonical.get("row_count") or -1)
+    forward_delta = current_rows - LEDGER_ROWS
+    forward_rows_valid = _forward_rows_are_risk_reducing(trades, forward_delta)
     checks = {
         "paper_runtime": paper_runtime,
         "exact_released_v5_lineage": released_lineage,
@@ -117,12 +146,18 @@ def build_evidence(
         )
         is True,
         "canonical_chain_valid": canonical.get("chain_valid") is True,
-        "canonical_digest_exact": canonical.get("ledger_sha256") == LEDGER_SHA256,
-        "canonical_rows_exact": bool(
-            canonical.get("row_count") == LEDGER_ROWS
-            and canonical.get("current_epoch_rows") == 11
-            and canonical.get("state_current_epoch_rows") == 11
+        "canonical_incident_boundary_or_risk_reducing_forward_chain": bool(
+            (forward_delta == 0 and canonical.get("ledger_sha256") == LEDGER_SHA256)
+            or (forward_delta > 0 and _sha256(canonical.get("ledger_sha256")))
         ),
+        "canonical_rows_match_forward_delta": bool(
+            0 <= forward_delta <= MAX_RISK_REDUCING_FORWARD_ROWS
+            and canonical.get("current_epoch_rows")
+            == BASELINE_CURRENT_EPOCH_ROWS + forward_delta
+            and canonical.get("state_current_epoch_rows")
+            == BASELINE_CURRENT_EPOCH_ROWS + forward_delta
+        ),
+        "post_incident_rows_risk_reducing_only": forward_rows_valid,
         "canonical_state_projection_parity": canonical.get(
             "state_projection_parity"
         )
@@ -145,8 +180,8 @@ def build_evidence(
         "open_symbols_reconciled": set(positions) == set(accounting_positions),
         "positive_valuation": cash > 0.0 and equity > 0.0,
         "last_execution_receipt_exact": bool(
-            last_receipt.get("canonical_row_count") == LEDGER_ROWS
-            and last_receipt.get("operation") == "partial_exit"
+            last_receipt.get("canonical_row_count") == current_rows
+            and last_receipt.get("operation") in {"partial_exit", "full_exit"}
             and isinstance(last_receipt.get("canonical_last_execution_id"), str)
             and bool(last_receipt.get("canonical_last_execution_id"))
             and last_checks
@@ -163,4 +198,5 @@ def build_evidence(
         "failed_checks": [name for name, passed in checks.items() if not passed],
         "canonical": dict(canonical),
         "accounting": dict(accounting),
+        "forward_row_delta": forward_delta,
     }
