@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-08 09:08 CDT
+Last updated: 2026-10-08 09:19 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -68,12 +68,33 @@ false and sentinel is quiet/pass on exact `6b9b294...`. The halt stayed latched
 because the exact matcher correctly rejected the superseding incident. Issue
 #84 comment `6061648816` is the durable independent record.
 
-The active branch is now `fix/issue84-latest-full-exit-recovery`. It preserves
-the deployed wrapper fix and changes only the evidence-bound recovery identity
-to the latest exact incident/reference. The existing exact recovery,
-digest-drift and full-wrapper-order regressions remain mandatory. Exact-head
-workflows, review, merge, deployment and settled recovery acceptance remain
-pending. Do not manually clear the halt or infer acceptance from deployment.
+PR #299 exact head `950697ae56d48ff9c885078e07757bfd5384b0d8`
+passed all four workflows and both exact Gunicorn smokes, then merged as
+`86125e6fb39a1f528dd5989e037def25d9fe9ea1`. All merge-head code gates and
+both smokes passed; exact Splendid deployment and 13/13 capture passed. Runtime
+job `113356528689` failed closed in the evidence builder. Artifact
+`11556283342` has ZIP SHA-256
+`1674c8b3219f7aa91e341662b300fa125f84de00f5d4612511914a34a1ed1f82`.
+
+The exact abort signature remained intact, but two lawful governed
+risk-reducing actions advanced the chain-valid/parity-valid ledger after the
+99-row incident boundary: full exit COIN and partial exit ZS. Current ledger
+rows are 101, current epoch/state rows are 13/13, digest is
+`179169d3475a1577ead56acd0395ae07fb4ffa6f336ed262cb7dd4a43b73d825`,
+accounting is clean, runner active error is false, and sentinel is quiet/pass on
+exact `86125e6...`. The static 99-row recovery requirement was therefore stale;
+repeatedly rebinding the latest digest would race legitimate risk-reducing
+lifecycle progress. Issue #84 comment `6061952775` is the durable checkpoint.
+
+The active branch is now `fix/issue84-forward-exit-recovery-proof`. It preserves
+the exact incident row/digest boundary but accepts a bounded post-incident delta
+only when every added parity-matched state row is an `exit` or `partial_exit`,
+the ledger remains chain-valid with no missing rows, current-epoch/state counts
+match the delta, accounting and positions reconcile, the latest governed
+receipt is exact, and hard-risk limits remain unchanged. Any entry, malformed
+row or unbounded delta fails closed. Positive forward-exit and post-incident
+entry rejection regressions are included. Exact-head workflows, merge,
+deployment and settled acceptance remain pending.
 
 ## 2026-10-06 Issue #84 — post-start forward-execution acceptance repaired and accepted
 
