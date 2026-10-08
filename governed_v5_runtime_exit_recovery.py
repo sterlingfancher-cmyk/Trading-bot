@@ -1,4 +1,4 @@
-"""Pure evidence contract for the exact 2026-10-07 governed exit abort."""
+"""Pure evidence contract for the exact latest governed exit abort."""
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping
@@ -18,12 +18,12 @@ ERROR = (
     "TypeError: apply.<locals>.patched_exit_position() got an unexpected keyword "
     "argument '_governed'"
 )
-INTENT_ID = "ae64864e8f8abe8bfd34c28e2dbf6e062842d3303c3777a2191b629cd9423cbe"
-INCIDENT_LOCAL = "2026-10-07 09:27:59 CDT"
+INTENT_ID = "659dc62bfb73bf6331d1cf38b3252a31f339ca54a16e0f4656ddc8b6a409b132"
+INCIDENT_LOCAL = "2026-10-08 08:56:48 CDT"
 LEDGER_ROWS = 99
 LEDGER_SHA256 = "f06507675ad47f45d4a364358f095d690086f2d2a49c5ad23b49623401dca61f"
-EVIDENCE_REFERENCE = "issue-84-comment-6040267944"
-RECOVERY_VERSION = "governed-v5-runtime-full-exit-abort-recovery-2026-10-07-v2"
+EVIDENCE_REFERENCE = "issue-84-comment-6061648816"
+RECOVERY_VERSION = "governed-v5-runtime-full-exit-abort-recovery-2026-10-08-v3"
 FAILED_CHECKS = (
     "exact_preappend_abort_boundary",
     "exact_incident_time",
