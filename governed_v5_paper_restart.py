@@ -441,6 +441,9 @@ def _recover_exact_runtime_full_exit_abort(core: Any) -> Dict[str, Any]:
             canonical=_canonical(core),
             accounting=_accounting(core),
             positions=_d(state.get("positions")),
+            trades=[
+                row for row in _l(state.get("trades")) if isinstance(row, dict)
+            ],
             cash=_f(state.get("cash"), -1.0),
             equity=_f(state.get("equity"), -1.0),
             expected_daily_loss=getattr(core, "MAX_DAILY_LOSS_PCT", None),
@@ -467,8 +470,15 @@ def _recover_exact_runtime_full_exit_abort(core: Any) -> Dict[str, Any]:
             "prior_halt_reason": RECOVERY_DRIFT_HALT_REASON,
             "incident_intent_id": exit_recovery.INTENT_ID,
             "incident_evidence_reference": exit_recovery.EVIDENCE_REFERENCE,
-            "canonical_row_count": exit_recovery.LEDGER_ROWS,
-            "canonical_ledger_sha256": exit_recovery.LEDGER_SHA256,
+            "incident_canonical_row_count": exit_recovery.LEDGER_ROWS,
+            "incident_canonical_ledger_sha256": exit_recovery.LEDGER_SHA256,
+            "canonical_row_count": _d(evidence.get("canonical")).get("row_count"),
+            "canonical_ledger_sha256": _d(evidence.get("canonical")).get(
+                "ledger_sha256"
+            ),
+            "post_incident_risk_reducing_row_count": evidence.get(
+                "forward_row_delta"
+            ),
             "checks": dict(evidence["checks"]),
             "historical_discrepancy_preserved": True,
             "historical_discrepancy_rewritten": False,
