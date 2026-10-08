@@ -15,15 +15,15 @@ PRIOR_WRAPPER_INTENT_ID = (
 )
 RECOVERY_DRIFT_HALT_REASON = "governed pre-append abort recovery evidence drift"
 ERROR = (
-    "TypeError: _wrap_exit.<locals>.wrapped() got an unexpected keyword "
+    "TypeError: apply.<locals>.patched_exit_position() got an unexpected keyword "
     "argument '_governed'"
 )
-INTENT_ID = "9ad293caed2106e48decf59fcddd83445e543782d1511c2fa7483631b7e4677d"
-INCIDENT_LOCAL = "2026-10-07 09:08:00 CDT"
+INTENT_ID = "ae64864e8f8abe8bfd34c28e2dbf6e062842d3303c3777a2191b629cd9423cbe"
+INCIDENT_LOCAL = "2026-10-07 09:27:59 CDT"
 LEDGER_ROWS = 99
 LEDGER_SHA256 = "f06507675ad47f45d4a364358f095d690086f2d2a49c5ad23b49623401dca61f"
-EVIDENCE_REFERENCE = "issue-84-comment-6039689252"
-RECOVERY_VERSION = "governed-v5-runtime-full-exit-abort-recovery-2026-10-07-v1"
+EVIDENCE_REFERENCE = "issue-84-comment-6040267944"
+RECOVERY_VERSION = "governed-v5-runtime-full-exit-abort-recovery-2026-10-07-v2"
 FAILED_CHECKS = (
     "exact_preappend_abort_boundary",
     "exact_incident_time",

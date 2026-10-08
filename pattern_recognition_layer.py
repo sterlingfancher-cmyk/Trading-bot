@@ -663,7 +663,14 @@ def apply(m: Any) -> Dict[str, Any]:
     if callable(original_exit):
         setattr(m, "_pattern_original_exit_position", original_exit)
 
-        def patched_exit_position(symbol: str, px: float, reason: str, market_mode: str | None = None, extra: Dict[str, Any] | None = None):
+        def patched_exit_position(
+            symbol: str,
+            px: float,
+            reason: str,
+            market_mode: str | None = None,
+            extra: Dict[str, Any] | None = None,
+            _governed: bool = False,
+        ):
             extra = dict(extra or {})
             try:
                 pos = (getattr(m, "portfolio", {}) or {}).get("positions", {}).get(symbol)
@@ -679,7 +686,10 @@ def apply(m: Any) -> Dict[str, Any]:
                     extra.setdefault("pattern_names", pat.get("patterns_detected", []))
             except Exception:
                 pass
-            return original_exit(symbol, px, reason, market_mode=market_mode, extra=extra)
+            call_kwargs = {"market_mode": market_mode, "extra": extra}
+            if _governed:
+                call_kwargs["_governed"] = True
+            return original_exit(symbol, px, reason, **call_kwargs)
 
         m.exit_position = patched_exit_position
         patched.append("exit_position")
