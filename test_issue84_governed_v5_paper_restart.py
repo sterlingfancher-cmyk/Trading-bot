@@ -966,18 +966,14 @@ def _set_exact_active_full_exit_abort(monkeypatch, core, *, forward_rows=None):
         "canonical_rows_after": exit_recovery.LEDGER_ROWS,
         "state_restored": True,
     }
-    checks = {
-        name: True
-        for name in restart.PR282_FAILED_RECOVERY_ALL_CHECKS
-    }
-    checks["recorded_incident_reference_exact"] = True
-    for name in exit_recovery.FAILED_CHECKS:
+    checks = {name: True for name in exit_recovery.PREDECESSOR_CHECKS}
+    for name in exit_recovery.PREDECESSOR_FAILED_CHECKS:
         checks[name] = False
     failure = {
         "status": "not_applicable",
         "overall": "fail",
-        "version": restart.ABORT_RECOVERY_VERSION,
-        "failed_checks": list(exit_recovery.FAILED_CHECKS),
+        "version": exit_recovery.PREDECESSOR_FAILURE_VERSION,
+        "failed_checks": list(exit_recovery.PREDECESSOR_FAILED_CHECKS),
         "checks": checks,
     }
     governed.update(
@@ -1080,6 +1076,23 @@ def test_active_full_exit_abort_rejects_canonical_digest_drift(
 
     assert result["status"] == "halted"
     assert result["risk_halted"] is True
+    assert result["post_start_full_exit_abort_recovery"] is None
+
+
+def test_active_full_exit_abort_rejects_predecessor_failure_drift(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_active_full_exit_abort(monkeypatch, core)
+    failure = core.portfolio["governed_v5_paper_restart"]["last_recovery_failure"]
+    failure["version"] = restart.ABORT_RECOVERY_VERSION
+    core.portfolio["risk_controls"]["governed_restart_halt_details"] = copy.deepcopy(
+        failure
+    )
+
+    result = restart.apply(core)
+
+    assert result["status"] == "halted"
     assert result["post_start_full_exit_abort_recovery"] is None
 
 
