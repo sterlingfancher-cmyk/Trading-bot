@@ -26,6 +26,34 @@ EVIDENCE_REFERENCE = "issue-84-comment-6061648816"
 RECOVERY_VERSION = "governed-v5-runtime-full-exit-abort-recovery-2026-10-08-v4"
 BASELINE_CURRENT_EPOCH_ROWS = 11
 MAX_RISK_REDUCING_FORWARD_ROWS = 32
+PREDECESSOR_FAILURE_VERSION = (
+    "governed-v5-runtime-full-exit-abort-recovery-2026-10-08-v3"
+)
+PREDECESSOR_FAILED_CHECKS = (
+    "canonical_digest_exact",
+    "canonical_rows_exact",
+    "last_execution_receipt_exact",
+)
+PREDECESSOR_CHECKS = frozenset(
+    {
+        "accounting_clean",
+        "canonical_authoritative",
+        "canonical_chain_valid",
+        "canonical_digest_exact",
+        "canonical_hook_active",
+        "canonical_no_active_errors",
+        "canonical_no_missing_rows",
+        "canonical_rows_exact",
+        "canonical_state_projection_parity",
+        "exact_captured_abort",
+        "exact_released_v5_lineage",
+        "hard_risk_limits_unchanged",
+        "last_execution_receipt_exact",
+        "open_symbols_reconciled",
+        "paper_runtime",
+        "positive_valuation",
+    }
+)
 FAILED_CHECKS = (
     "exact_preappend_abort_boundary",
     "exact_incident_time",
@@ -91,15 +119,18 @@ def matches_signature(
         and prior.get("incident_intent_id") == PRIOR_WRAPPER_INTENT_ID
         and prior.get("historical_discrepancy_preserved") is True
         and prior.get("historical_discrepancy_rewritten") is False
-        and failure.get("version") == ABORT_RECOVERY_VERSION
+        and failure.get("version") == PREDECESSOR_FAILURE_VERSION
         and failure.get("status") == "not_applicable"
         and failure.get("overall") == "fail"
-        and tuple(failure.get("failed_checks") or ()) == FAILED_CHECKS
-        and all(checks.get(name) is False for name in FAILED_CHECKS)
+        and tuple(failure.get("failed_checks") or ()) == PREDECESSOR_FAILED_CHECKS
+        and set(checks) == PREDECESSOR_CHECKS
+        and all(
+            checks.get(name) is False for name in PREDECESSOR_FAILED_CHECKS
+        )
         and all(
             value is True
             for name, value in checks.items()
-            if name not in FAILED_CHECKS
+            if name not in PREDECESSOR_FAILED_CHECKS
         )
         and discrepancy.get("operation") == "full_exit"
         and discrepancy.get("intent_id") == INTENT_ID
