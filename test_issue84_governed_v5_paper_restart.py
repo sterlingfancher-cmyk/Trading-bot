@@ -915,9 +915,11 @@ def test_runtime_wrapper_abort_rejects_later_recovery_failure_timestamp(
     assert result["post_recovery_runtime_wrapper_abort_recovery"] is None
 
 
-def _set_exact_active_full_exit_abort(monkeypatch, core):
+def _set_exact_active_full_exit_abort(monkeypatch, core, *, forward_rows=None):
     governed = core.portfolio["governed_v5_paper_restart"]
     risk = core.portfolio["risk_controls"]
+    forward_rows = list(forward_rows or [])
+    current_rows = exit_recovery.LEDGER_ROWS + len(forward_rows)
     core.portfolio.update(
         {
             "positions": {
@@ -928,7 +930,7 @@ def _set_exact_active_full_exit_abort(monkeypatch, core):
                     "shares": 1.0,
                 }
             },
-            "trades": [{"action": "entry", "symbol": "QQQ"}],
+            "trades": [{"action": "entry", "symbol": "QQQ"}] + forward_rows,
             "cash": 10000.0,
             "equity": 10101.0,
         }
@@ -948,7 +950,7 @@ def _set_exact_active_full_exit_abort(monkeypatch, core):
     }
     governed["last_execution_receipt"] = {
         "operation": "partial_exit",
-        "canonical_row_count": exit_recovery.LEDGER_ROWS,
+        "canonical_row_count": current_rows,
         "canonical_last_execution_id": "latest-execution-id",
     }
     governed["last_execution_checks"] = {
@@ -999,10 +1001,12 @@ def _set_exact_active_full_exit_abort(monkeypatch, core):
         "hook_applied": True,
         "authoritative_for_new_executions": True,
         "chain_valid": True,
-        "ledger_sha256": exit_recovery.LEDGER_SHA256,
-        "row_count": exit_recovery.LEDGER_ROWS,
-        "current_epoch_rows": 11,
-        "state_current_epoch_rows": 11,
+        "ledger_sha256": (
+            exit_recovery.LEDGER_SHA256 if not forward_rows else "a" * 64
+        ),
+        "row_count": current_rows,
+        "current_epoch_rows": 11 + len(forward_rows),
+        "state_current_epoch_rows": 11 + len(forward_rows),
         "state_projection_parity": True,
         "missing_from_ledger_count": 0,
         "missing_from_state_count": 0,
@@ -1076,6 +1080,54 @@ def test_active_full_exit_abort_rejects_canonical_digest_drift(
 
     assert result["status"] == "halted"
     assert result["risk_halted"] is True
+    assert result["post_start_full_exit_abort_recovery"] is None
+
+
+def test_active_full_exit_abort_accepts_only_risk_reducing_forward_rows(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    rows = [
+        {
+            "action": action,
+            "symbol": symbol,
+            "execution_id": f"execution-{symbol}",
+            "canonical_ledger_event_hash": f"hash-{symbol}",
+            "accounting_epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+        }
+        for action, symbol in (("exit", "COIN"), ("partial_exit", "ZS"))
+    ]
+    _set_exact_active_full_exit_abort(monkeypatch, core, forward_rows=rows)
+
+    result = restart.apply(core)
+
+    recovery = result["post_start_full_exit_abort_recovery"]
+    assert result["status"] == "active"
+    assert recovery["post_incident_risk_reducing_row_count"] == 2
+    assert recovery["canonical_row_count"] == exit_recovery.LEDGER_ROWS + 2
+
+
+def test_active_full_exit_abort_rejects_post_incident_entry(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_active_full_exit_abort(
+        monkeypatch,
+        core,
+        forward_rows=[
+            {
+                "action": "entry",
+                "symbol": "NEW",
+                "execution_id": "execution-new",
+                "canonical_ledger_event_hash": "hash-new",
+                "accounting_epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+            }
+        ],
+    )
+
+    result = restart.apply(core)
+
+    assert result["status"] == "halted"
     assert result["post_start_full_exit_abort_recovery"] is None
 
 
