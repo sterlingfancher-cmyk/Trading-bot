@@ -915,7 +915,13 @@ def test_runtime_wrapper_abort_rejects_later_recovery_failure_timestamp(
     assert result["post_recovery_runtime_wrapper_abort_recovery"] is None
 
 
-def _set_exact_active_full_exit_abort(monkeypatch, core, *, forward_rows=None):
+def _set_exact_active_full_exit_abort(
+    monkeypatch,
+    core,
+    *,
+    forward_rows=None,
+    predecessor_failure_version=exit_recovery.PREDECESSOR_FAILURE_VERSION,
+):
     governed = core.portfolio["governed_v5_paper_restart"]
     risk = core.portfolio["risk_controls"]
     forward_rows = list(forward_rows or [])
@@ -966,18 +972,14 @@ def _set_exact_active_full_exit_abort(monkeypatch, core, *, forward_rows=None):
         "canonical_rows_after": exit_recovery.LEDGER_ROWS,
         "state_restored": True,
     }
-    checks = {
-        name: True
-        for name in restart.PR282_FAILED_RECOVERY_ALL_CHECKS
-    }
-    checks["recorded_incident_reference_exact"] = True
-    for name in exit_recovery.FAILED_CHECKS:
+    checks = {name: True for name in exit_recovery.PREDECESSOR_CHECKS}
+    for name in exit_recovery.PREDECESSOR_FAILED_CHECKS:
         checks[name] = False
     failure = {
         "status": "not_applicable",
         "overall": "fail",
-        "version": restart.ABORT_RECOVERY_VERSION,
-        "failed_checks": list(exit_recovery.FAILED_CHECKS),
+        "version": predecessor_failure_version,
+        "failed_checks": list(exit_recovery.PREDECESSOR_FAILED_CHECKS),
         "checks": checks,
     }
     governed.update(
@@ -1080,6 +1082,22 @@ def test_active_full_exit_abort_rejects_canonical_digest_drift(
 
     assert result["status"] == "halted"
     assert result["risk_halted"] is True
+    assert result["post_start_full_exit_abort_recovery"] is None
+
+
+def test_active_full_exit_abort_rejects_predecessor_failure_drift(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    _set_exact_active_full_exit_abort(
+        monkeypatch,
+        core,
+        predecessor_failure_version=restart.ABORT_RECOVERY_VERSION,
+    )
+
+    result = restart.apply(core)
+
+    assert result["status"] == "halted"
     assert result["post_start_full_exit_abort_recovery"] is None
 
 
