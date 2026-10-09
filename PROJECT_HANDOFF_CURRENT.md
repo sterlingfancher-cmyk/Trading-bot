@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-08 09:38 CDT
+Last updated: 2026-10-09 09:08 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -117,6 +117,19 @@ diagnostic shape. The exact v3 diagnostic is independently captured: version
 repair branch is `fix/issue84-v3-failure-successor`; it changes only this
 predecessor-signature gate, requires the complete exact check-key set and
 failure tuple, and rejects near matches.
+
+PR #301 exact head `df3e7ddbb2cbe70d565da69b9741daea20ec39e8`
+passed repository validation and the full refactor/ownership/configuration
+workflow, including the exact Gunicorn smoke. Its focused regressions and the
+Change Safety Gunicorn smoke also passed, but Architecture Debt run
+`37794178160` failed because the new predecessor-drift test used a direct
+dictionary mutation that increased `dynamic_mutation_targets` by one. Change
+Safety run `37794179992` therefore failed only its final aggregate decision.
+Artifact `11558196311` records the exact architecture violation; artifact
+`11557632639` records every other Change Safety component as successful. The
+same PR branch now parameterizes the fixture to exercise predecessor-version
+drift without adding a new mutation target. No production runtime or authority
+changed. Require a fresh completely green exact-head rerun before merge.
 
 ## 2026-10-06 Issue #84 — post-start forward-execution acceptance repaired and accepted
 
