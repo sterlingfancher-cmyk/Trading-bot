@@ -921,6 +921,7 @@ def _set_exact_active_full_exit_abort(
     *,
     forward_rows=None,
     predecessor_failure_version=exit_recovery.PREDECESSOR_FAILURE_VERSION,
+    halt_already_released=False,
 ):
     governed = core.portfolio["governed_v5_paper_restart"]
     risk = core.portfolio["risk_controls"]
@@ -984,7 +985,7 @@ def _set_exact_active_full_exit_abort(
     }
     governed.update(
         {
-            "status": "halted",
+            "status": "active" if halt_already_released else "halted",
             "last_discrepancy": discrepancy,
             "last_discrepancy_local": (
                 exit_recovery.INCIDENT_LOCAL
@@ -994,8 +995,10 @@ def _set_exact_active_full_exit_abort(
     )
     risk.update(
         {
-            "halted": True,
-            "halt_reason": restart.RECOVERY_DRIFT_HALT_REASON,
+            "halted": not halt_already_released,
+            "halt_reason": (
+                "" if halt_already_released else restart.RECOVERY_DRIFT_HALT_REASON
+            ),
             "governed_restart_halt_details": copy.deepcopy(failure),
         }
     )
@@ -1123,6 +1126,36 @@ def test_active_full_exit_abort_accepts_only_risk_reducing_forward_rows(
     assert result["status"] == "active"
     assert recovery["post_incident_risk_reducing_row_count"] == 2
     assert recovery["canonical_row_count"] == exit_recovery.LEDGER_ROWS + 2
+
+
+def test_active_full_exit_abort_records_exact_already_released_successor(
+    monkeypatch, tmp_path
+):
+    core = _activate(monkeypatch, tmp_path)
+    rows = [
+        {
+            "action": "exit",
+            "symbol": f"EXIT{index}",
+            "execution_id": f"execution-{index}",
+            "canonical_ledger_event_hash": f"hash-{index}",
+            "accounting_epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+        }
+        for index in range(5)
+    ]
+    _set_exact_active_full_exit_abort(
+        monkeypatch,
+        core,
+        forward_rows=rows,
+        halt_already_released=True,
+    )
+
+    result = restart.apply(core)
+
+    recovery = result["post_start_full_exit_abort_recovery"]
+    assert result["status"] == "active"
+    assert result["risk_halted"] is False
+    assert recovery["halt_already_released_before_receipt"] is True
+    assert recovery["post_incident_risk_reducing_row_count"] == 5
 
 
 def test_active_full_exit_abort_rejects_post_incident_entry(
