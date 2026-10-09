@@ -915,7 +915,13 @@ def test_runtime_wrapper_abort_rejects_later_recovery_failure_timestamp(
     assert result["post_recovery_runtime_wrapper_abort_recovery"] is None
 
 
-def _set_exact_active_full_exit_abort(monkeypatch, core, *, forward_rows=None):
+def _set_exact_active_full_exit_abort(
+    monkeypatch,
+    core,
+    *,
+    forward_rows=None,
+    predecessor_failure_version=exit_recovery.PREDECESSOR_FAILURE_VERSION,
+):
     governed = core.portfolio["governed_v5_paper_restart"]
     risk = core.portfolio["risk_controls"]
     forward_rows = list(forward_rows or [])
@@ -972,7 +978,7 @@ def _set_exact_active_full_exit_abort(monkeypatch, core, *, forward_rows=None):
     failure = {
         "status": "not_applicable",
         "overall": "fail",
-        "version": exit_recovery.PREDECESSOR_FAILURE_VERSION,
+        "version": predecessor_failure_version,
         "failed_checks": list(exit_recovery.PREDECESSOR_FAILED_CHECKS),
         "checks": checks,
     }
@@ -1083,11 +1089,10 @@ def test_active_full_exit_abort_rejects_predecessor_failure_drift(
     monkeypatch, tmp_path
 ):
     core = _activate(monkeypatch, tmp_path)
-    _set_exact_active_full_exit_abort(monkeypatch, core)
-    failure = core.portfolio["governed_v5_paper_restart"]["last_recovery_failure"]
-    failure["version"] = restart.ABORT_RECOVERY_VERSION
-    core.portfolio["risk_controls"]["governed_restart_halt_details"] = copy.deepcopy(
-        failure
+    _set_exact_active_full_exit_abort(
+        monkeypatch,
+        core,
+        predecessor_failure_version=restart.ABORT_RECOVERY_VERSION,
     )
 
     result = restart.apply(core)
