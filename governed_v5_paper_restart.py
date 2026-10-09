@@ -479,6 +479,9 @@ def _recover_exact_runtime_full_exit_abort(core: Any) -> Dict[str, Any]:
             "post_incident_risk_reducing_row_count": evidence.get(
                 "forward_row_delta"
             ),
+            "halt_already_released_before_receipt": evidence.get(
+                "halt_already_released"
+            ),
             "checks": dict(evidence["checks"]),
             "historical_discrepancy_preserved": True,
             "historical_discrepancy_rewritten": False,
