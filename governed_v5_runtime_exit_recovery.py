@@ -106,10 +106,19 @@ def matches_signature(
     failure = _dict(restart.get("last_recovery_failure"))
     checks = _dict(failure.get("checks"))
     discrepancy = _dict(restart.get("last_discrepancy"))
-    return bool(
+    halted_signature = bool(
         risk.get("halted") is True
         and risk.get("halt_reason") == RECOVERY_DRIFT_HALT_REASON
         and restart.get("status") == "halted"
+    )
+    already_released_signature = bool(
+        risk.get("halted") is False
+        and risk.get("halt_reason") in (None, "")
+        and restart.get("status") == "active"
+        and restart.get("post_start_full_exit_abort_recovery") is None
+    )
+    return bool(
+        (halted_signature or already_released_signature)
         and old.get("status") == "recovered"
         and old.get("version") == ABORT_RECOVERY_VERSION
         and old.get("historical_discrepancy_preserved") is True
@@ -230,4 +239,7 @@ def build_evidence(
         "canonical": dict(canonical),
         "accounting": dict(accounting),
         "forward_row_delta": forward_delta,
+        "halt_already_released": bool(
+            risk.get("halted") is False and restart.get("status") == "active"
+        ),
     }
