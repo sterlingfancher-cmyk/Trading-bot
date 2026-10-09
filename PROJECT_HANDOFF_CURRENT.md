@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-09 09:08 CDT
+Last updated: 2026-10-09 09:16 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -130,6 +130,30 @@ Artifact `11558196311` records the exact architecture violation; artifact
 same PR branch now parameterizes the fixture to exercise predecessor-version
 drift without adding a new mutation target. No production runtime or authority
 changed. Require a fresh completely green exact-head rerun before merge.
+
+The repaired PR #301 exact head
+`41f06f7df04c07a0d37e329b78e3d5cec9cd20ac` passed all four exact-head
+workflows and both Gunicorn smokes, then squash-merged as
+`602adc4a616d89fd49aeecb01012612aa110ad19`. All merge-head code gates and
+both smokes passed; exact Splendid deployment and 13/13 read-only capture
+passed. Runtime job `113858483334` failed closed only in the governed evidence
+builder. Artifact `11622900618` has ZIP SHA-256
+`cfd407c5b094497d9e3df234353ad758fe4e0efa060814ba2d70a36522f3d70e`.
+
+The exact capture proves the risk-day transition had already released the
+transient halt without deleting the immutable discrepancy or exact v3 failed
+recovery diagnostic. Governed status is active/pass, risk halt false, chain and
+projection parity valid, accounting clean, and the canonical ledger is 104
+rows with 16/16 current epoch/state rows and digest
+`6e7142bd1dfb4accb1ecda49c4ab0489f02f88142ad9badcaa23acce59d49d94`.
+All five rows after the 99-row incident are current-epoch canonical
+risk-reducing actions: one partial exit and four full exits. The latest exact
+receipt is a full exit at row 104. The v4 recovery did not write its receipt
+because its matcher required the halt to remain active. The active repair is
+`fix/issue84-already-released-recovery-receipt`: admit only the exact
+already-released active state with no existing receipt, then rerun the same
+chain/parity/accounting/current-receipt/tail proof and record the non-destructive
+recovery receipt. No execution or halt clear is performed by this successor.
 
 ## 2026-10-06 Issue #84 — post-start forward-execution acceptance repaired and accepted
 
