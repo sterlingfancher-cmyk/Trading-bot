@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-09 09:16 CDT
+Last updated: 2026-10-09 09:25 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -154,6 +154,40 @@ because its matcher required the halt to remain active. The active repair is
 already-released active state with no existing receipt, then rerun the same
 chain/parity/accounting/current-receipt/tail proof and record the non-destructive
 recovery receipt. No execution or halt clear is performed by this successor.
+
+PR #302 exact head `def4e69e3774ad87770ab2245ca2c223172e6e5a`
+passed all four exact-head workflows and both Gunicorn smokes, then
+squash-merged as `8e24cf50b376c76cc97664eec682b10ce54e4b81`.
+All four merge-head gates and both smokes passed. Splendid accepted that exact
+commit; runtime job `113863170634` completed the 13/13 read-only capture,
+governed evidence builder and artifact upload successfully. Artifact
+`11623310983` has ZIP SHA-256
+`1944b6a9023e21b9178061e25455e38fba73839537d15cbe5b89b0dc018f2c4a`,
+acceptance SHA-256
+`a5208a653edd5cc470401576191ab7ce478cc35be6bca70d4a46aa98097a5dfc`
+and decision-contract SHA-256
+`3d6d02e80a8cb401777a8a50a71673e15f8d3001c7127301fec35f850884ea16`.
+
+Settled runtime is governed active/pass, validation hold false, risk halt
+false, self-check and daily audit pass, and sentinel quiet/pass with zero
+incidents on exact commit `8e24cf5...`. Canonical ledger is chain-valid and
+projection-parity-valid at 105 rows, current epoch/state rows 17/17, digest
+`eb80d9e73da9691018ebc05b74f6beb14382a8d2721e7f393c1022de2884c424`,
+with zero accounting coverage/economic issues. Equity was `13782.36`; runner
+had no active error and market data passed. A lawful governed entry appended at
+row 105 before capture, so the exact risk-reducing-only recovery successor
+correctly remained non-applicable and wrote no receipt; it did not relax its
+tail proof. The independent abort and v3 failed-recovery diagnostic remain
+preserved, but they no longer represent a current halt or block settled
+post-start acceptance. The evidence builder's ten governed forward-progress,
+receipt, accounting, lineage, hold and risk checks all passed.
+
+No cycle was forced, no halt was manually cleared, no immutable evidence was
+rewritten, and no live, broker, order or AI authority changed. Performance V1
+was still running, V2/ablation/regime were not run, and `hold_10d` / Issue #202
+remain frozen. Resume Issue #84 single-owner transaction/cutover work from
+exact main `8e24cf5...`; do not reopen this settled transient recovery unless a
+new concrete discrepancy appears.
 
 ## 2026-10-06 Issue #84 — post-start forward-execution acceptance repaired and accepted
 
