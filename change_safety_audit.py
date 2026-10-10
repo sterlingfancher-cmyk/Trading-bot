@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-10-01-v17-atomic-transaction-journal"
+VERSION = "change-safety-audit-2026-10-10-v18-ledger-evidence-adapter"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -24,6 +24,7 @@ CORE_TESTS = (
     "test_architecture_stage_f_canary.py",
     "test_issue84_single_owner_transaction.py",
     "test_issue84_atomic_transaction_journal.py",
+    "test_issue84_ledger_evidence_adapter.py",
 )
 RUNTIME_TESTS = (
     "test_runtime_shadow_capture.py",
@@ -57,6 +58,7 @@ PYTEST_REGRESSION_TESTS = frozenset(
     + (
         "test_issue84_single_owner_transaction.py",
         "test_issue84_atomic_transaction_journal.py",
+        "test_issue84_ledger_evidence_adapter.py",
     )
 )
 LEGACY_EXTERNAL_PAPER_RUNNER_TESTS = ("test_legacy_external_paper_runner_retired.py",)
@@ -152,8 +154,10 @@ def _is_single_owner_transaction_path(path: str) -> bool:
     return Path(path.lower()).name in {
         "transaction.py",
         "transaction_journal.py",
+        "ledger.py",
         "test_issue84_single_owner_transaction.py",
         "test_issue84_atomic_transaction_journal.py",
+        "test_issue84_ledger_evidence_adapter.py",
     }
 
 

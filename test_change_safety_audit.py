@@ -34,6 +34,9 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         tests = planned_regressions(("trading/transaction_journal.py",))
         self.assertIn("test_issue84_atomic_transaction_journal.py", tests)
 
+        ledger_tests = planned_regressions(("trading/ledger.py",))
+        self.assertIn("test_issue84_ledger_evidence_adapter.py", ledger_tests)
+
     def test_runner_observability_change_selects_runtime_audits(self) -> None:
         tests = planned_regressions(("fast_self_check_override.py",))
         self.assertIn("test_self_check_runtime_classification.py", tests)
