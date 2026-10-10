@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-10 09:18 CDT
+Last updated: 2026-10-10 09:42 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -10,6 +10,31 @@ projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
+
+## 2026-10-10 Issue #84 — merge-head acceptance receipt vocabulary — IN PROGRESS
+
+PR #303 exact head `93072b0b7c069406d82c713468b1ba737598d07e`
+passed all four mandatory exact-head workflows and both exact Gunicorn smokes,
+then squash-merged as `0b5ca049fb7a9ddfc9ad25e53a191256ab5fc769`.
+All merge-head code gates and both smokes passed, exact Splendid deployment
+settled, and the 13/13 read-only capture passed. The governed evidence builder
+then failed closed only on
+`latest_execution_receipt_matches_ledger`. Artifact `11672363322` has ZIP
+SHA-256
+`80506c6a75cee535f65b45be0c6212f19f989b95e2e8f1bd8bbd2153a26b2e8c`.
+
+The exact capture proves the canonical ledger and receipt agree at row 110,
+including execution id `37e06d4bb5654a1a8d19cf12a0379686`; chain,
+state projection and accounting are clean, the account is flat, governed v5 is
+active/pass and risk is not halted. The false negative is a bounded vocabulary
+drift: the builder accepts only `entry` and the nonexistent generic `exit`,
+while the reviewed coordinator emits `entry`, `partial_exit`, `full_exit`,
+`market_surge_deployment` and `market_surge_queue`. The active repair is
+`fix/issue84-post-start-tail-acceptance`: admit exactly those five installed
+coordinator operations while retaining exact row-count, execution-id, intent,
+chain, parity, accounting and governance checks. Unknown operations still fail
+closed. No execution, halt clear, state/history rewrite, risk-limit change,
+live enablement or AI authority is involved.
 
 ## 2026-10-10 Issue #84 — canonical ledger evidence adapter — IN PROGRESS
 

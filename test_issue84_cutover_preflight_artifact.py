@@ -179,6 +179,74 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
         self.assertFalse(result["activation_performed_by_builder"])
         self.assertEqual(result["blockers"], ["post_start_forward_observations"])
 
+    def test_released_runtime_accepts_every_governed_execution_receipt_operation(self):
+        for operation in (
+            "entry",
+            "partial_exit",
+            "full_exit",
+            "market_surge_deployment",
+            "market_surge_queue",
+        ):
+            with self.subTest(operation=operation):
+                snapshot = self._released_snapshot()
+                audit = snapshot["raw"]["daily_audit"]["payload"]
+                audit["execution_ledger"].update(
+                    {
+                        "row_count": 89,
+                        "ledger_sha256": "c" * 64,
+                        "current_epoch_rows": 1,
+                        "state_current_epoch_rows": 1,
+                    }
+                )
+                audit["accounting_integrity"]["parsed_trade_rows"] = 1
+                governed = snapshot["raw"]["governed_v5_restart"]["payload"]
+                governed["last_execution_receipt"] = {
+                    "canonical_last_execution_id": "execution-1",
+                    "canonical_row_count": 89,
+                    "intent_id": "intent-1",
+                    "operation": operation,
+                }
+
+                evidence, _ = build_artifacts(
+                    runtime_snapshot=snapshot,
+                    deployed_commit_sha=COMMIT,
+                    splendid_deployment_settled=True,
+                )
+
+                self.assertTrue(
+                    evidence["checks"]["latest_execution_receipt_matches_ledger"]
+                )
+
+    def test_released_runtime_rejects_unknown_execution_receipt_operation(self):
+        snapshot = self._released_snapshot()
+        audit = snapshot["raw"]["daily_audit"]["payload"]
+        audit["execution_ledger"].update(
+            {
+                "row_count": 89,
+                "ledger_sha256": "c" * 64,
+                "current_epoch_rows": 1,
+                "state_current_epoch_rows": 1,
+            }
+        )
+        audit["accounting_integrity"]["parsed_trade_rows"] = 1
+        governed = snapshot["raw"]["governed_v5_restart"]["payload"]
+        governed["last_execution_receipt"] = {
+            "canonical_last_execution_id": "execution-1",
+            "canonical_row_count": 89,
+            "intent_id": "intent-1",
+            "operation": "unreviewed_operation",
+        }
+
+        with self.assertRaisesRegex(
+            CanaryInvariantError,
+            "latest_execution_receipt_matches_ledger",
+        ):
+            build_artifacts(
+                runtime_snapshot=snapshot,
+                deployed_commit_sha=COMMIT,
+                splendid_deployment_settled=True,
+            )
+
     def test_released_runtime_accepts_reconciled_forward_entries(self):
         snapshot = self._released_snapshot()
         audit = snapshot["raw"]["daily_audit"]["payload"]

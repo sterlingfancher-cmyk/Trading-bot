@@ -31,7 +31,7 @@ from governed_v5_restart_contract import (
     VERSION as GOVERNED_RESTART_VERSION,
 )
 
-VERSION = "cutover-preflight-ci-artifact-2026-10-06-v3-forward-execution"
+VERSION = "cutover-preflight-ci-artifact-2026-10-10-v4-governed-operation-receipts"
 EXPECTED_PRESTART_LEDGER_ROWS = 88
 EXPECTED_PRESTART_LEDGER_SHA256 = (
     "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
@@ -42,6 +42,15 @@ EXPECTED_ABORT_RECOVERY_VERSION = (
 )
 EXPECTED_ABORT_RECOVERY_MODE = "pr282_failed_recovery_successor"
 EXPECTED_INCIDENT_EVIDENCE_REFERENCE = "issue-84-comment-5897148822"
+GOVERNED_EXECUTION_RECEIPT_OPERATIONS = frozenset(
+    {
+        "entry",
+        "partial_exit",
+        "full_exit",
+        "market_surge_deployment",
+        "market_surge_queue",
+    }
+)
 
 
 def _mapping(value: Any, *, name: str) -> Mapping[str, Any]:
@@ -245,7 +254,8 @@ def _build_post_start_acceptance(
                 and last_execution_receipt.get("canonical_row_count") == ledger_rows
                 and bool(last_execution_receipt.get("canonical_last_execution_id"))
                 and bool(last_execution_receipt.get("intent_id"))
-                and last_execution_receipt.get("operation") in ("entry", "exit")
+                and last_execution_receipt.get("operation")
+                in GOVERNED_EXECUTION_RECEIPT_OPERATIONS
             )
         ),
         "risk_halt_released": (
