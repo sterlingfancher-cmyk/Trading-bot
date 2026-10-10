@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-09 09:16 CDT
+Last updated: 2026-10-10 09:18 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -10,6 +10,45 @@ projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
+
+## 2026-10-10 Issue #84 — canonical ledger evidence adapter — IN PROGRESS
+
+Fresh read-only Splendid evidence on exact deployed main
+`8e24cf50b376c76cc97664eec682b10ce54e4b81` is clean: 13/13 endpoints are
+reachable, self-check and daily audit pass, sentinel is quiet/pass with zero
+incidents, governed v5 is active/pass, and risk is not halted. The account is
+flat at cash/equity approximately `13777.52048 / 13777.52`. The canonical
+ledger advanced through ordinary governed lifecycle activity to 110 rows / 22
+current-v5 rows, digest
+`bf7bf548ddf0562e015e32d60f52b5a7839792b3bac756b111d52029c22b2d4a`,
+with a valid chain, exact state-projection parity, zero missing rows and clean
+accounting. Performance V1 remains running; V2, ablation and regime are
+not-run, so Issue #202 / `hold_10d` remain frozen.
+
+The active branch is `fix/issue84-cutover-commit-activation`. The demonstrated
+architecture gap is that the reviewed single-owner transaction still accepts a
+caller-constructed `LedgerAppendProof`; it has no typed adapter that derives
+that proof from the immutable production ledger format. The bounded repair
+adds a read-only, explicit-path `trading.ledger` adapter. It verifies the full
+hash chain and unique execution IDs, proves the prior prefix digest/terminal
+hash/epoch boundary unchanged, binds that boundary to the current immutable
+StateStore envelope, converts only same-epoch entry/exit/partial-exit rows into
+typed execution snapshots, and emits the exact append proof consumed by the
+existing shadow transaction. Missing, malformed, tampered, duplicate,
+cross-epoch, empty or state-mismatched evidence fails closed. The adapter has
+no append, state write, environment, runtime registration, order, live or AI
+authority. Change Safety now selects its focused regression.
+
+Local validation passes 54/54 focused ledger-adapter, single-owner transaction,
+atomic journal and Change Safety tests plus the complete 99-test impact-aware
+suite. Repository, Railway configuration, structural architecture, ownership,
+typed-configuration and architecture-debt gates pass with zero new critical or
+warning findings. The local exact Gunicorn smoke did not reach `ready` because
+its startup provider probes were rate-limited for SPY and QQQ; this is
+incomplete, not a pass, and the mandatory exact-head CI smokes remain required.
+Exact-head CI, review, merge and settled Splendid acceptance remain pending. No
+paper cycle was forced, `/paper/run` was not called, no halt was cleared and no
+immutable runtime evidence or hard-risk limit changed.
 
 ## 2026-10-07 Issue #84 — governed full-exit wrapper abort — IN PROGRESS
 
