@@ -1,17 +1,42 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-10 09:42 CDT
+Last updated: 2026-10-10 09:47 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `242c1221442ff7d8a457b3b6ad409895b511b379` (PR #295 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `9d529ad23078bd35dc99d55c42f0737cf9f03859` (PR #304 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-10 Issue #84 — merge-head acceptance receipt vocabulary — IN PROGRESS
+## 2026-10-10 Issue #84 — merge-head acceptance receipt vocabulary — ACCEPTED
+
+PR #304 exact head `3fb592a3249743cbd88a7c2a539a0c064025b330`
+passed Repository Safety, Architecture Debt, Stage F Canary, Refactor/Startup
+and Change Safety exact-head workflows, including both exact Gunicorn smokes.
+It squash-merged as `9d529ad23078bd35dc99d55c42f0737cf9f03859`.
+All five merge-head workflows passed; exact Splendid deployment settled; the
+13/13 read-only capture passed; and the governed evidence builder now accepts
+the exact row-110 `full_exit` receipt with all 11 checks true. Runtime
+artifact `11673375320` has ZIP SHA-256
+`e024bd8d8b96ca2b02a98c032bdf296d4904cfaac3d94c3b84dcf3654e77b9ea`;
+its acceptance digest is
+`a1deb4a4f5cc04ab38ca13b8fa86ecdbb7aff7bde304d3f7b8aba54181925e3e`.
+
+Settled runtime remains clean and unchanged economically: governed v5 is
+active/pass, risk is not halted, the account is flat, canonical ledger
+chain/parity/accounting are clean at 110 total / 22 current-epoch rows with
+digest
+`bf7bf548ddf0562e015e32d60f52b5a7839792b3bac756b111d52029c22b2d4a`,
+and the sentinel is quiet/pass on the exact merge commit. V1 remains running
+with 1200 forward rows; V2, ablation and regime remain not-run, so Issue #202
+and `hold_10d` remain frozen. No production writer was activated and no
+execution, halt clear, immutable evidence mutation, risk-limit change, live
+enablement or AI authority occurred. Resume Issue #84 from the next bounded
+single-owner transaction/cutover dependency rather than repeating this
+accepted receipt-vocabulary repair.
 
 PR #303 exact head `93072b0b7c069406d82c713468b1ba737598d07e`
 passed all four mandatory exact-head workflows and both exact Gunicorn smokes,
