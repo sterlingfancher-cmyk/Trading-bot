@@ -4,14 +4,14 @@ Last updated: 2026-10-12 09:20 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `242c1221442ff7d8a457b3b6ad409895b511b379` (PR #295 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `75d4b95fc44fb70b8cca2e8c9027416506295ec1` (PR #305 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-12 Issue #84 — exact ledger-to-projection composition — IN PROGRESS
+## 2026-10-12 Issue #84 — exact ledger-to-projection composition — COMPLETE
 
 Fresh read-only Splendid evidence on exact deployed main
 `9d529ad23078bd35dc99d55c42f0737cf9f03859` is clean: 13/13 endpoints are
@@ -39,11 +39,37 @@ place orders, activate a production writer, change risk limits, or grant live
 or AI authority. Missing marks and all existing malformed, tampered,
 duplicate, cross-epoch or boundary-drift evidence continue to fail closed.
 
-Focused adapter, projection and atomic-journal regressions pass 35/35; compile
-and whitespace checks pass. Impact-aware repository validation, mandatory
-exact-head CI, review, merge-head gates and settled Splendid acceptance remain
-pending. No paper cycle was forced, `/paper/run` was not called, no halt was
-cleared and no immutable runtime evidence changed.
+Focused adapter, projection and atomic-journal regressions passed 35/35 and the
+impact-aware canonical suite passed 99 unittest + 35 pytest tests. Repository,
+Railway, structural audit, ownership, typed-configuration and architecture-debt
+checks passed with zero new critical/warning findings. PR #305 exact head
+`a9ac4974d62f227ae954a19a175d0d09a56f8e4d` passed all four mandatory
+exact-head workflows and both exact Gunicorn smokes, then squash-merged as
+`75d4b95fc44fb70b8cca2e8c9027416506295ec1`. All four merge-head workflows and
+both exact Gunicorn smokes passed.
+
+Splendid settled and accepted that exact merge commit. Runtime workflow
+`38262236007` completed the 13/13 read-only capture and governed evidence
+builder successfully. Artifact `11753208014` has ZIP SHA-256
+`c03150e612b3e0690ddb5315cbe69f169f33590664369c061161e38b87f2737d`;
+the acceptance digest is
+`b3bf6f678ea41e9736bdece49d21f31019259401c1c7605a6e528f666ed9fab2`
+and decision-contract digest is
+`335a163ebaccc0f23babbec52a520bc1f964e91b0f5ebf1834ac6ca5f2563f41`.
+The sentinel is quiet/pass with zero incidents on the exact merge SHA;
+self-check, daily audit, runner, market data, canonical chain/parity and
+accounting all pass; governed v5 remains active/pass with validation hold and
+risk halt false; the account remains flat; and the ledger remains 110 rows / 22
+current-v5 rows at the unchanged digest above. V1 remains running with 1200
+forward rows; V2/ablation/regime remain not-run, so Issue #202 / `hold_10d`
+stay frozen. No paper cycle was forced, `/paper/run` was not called, no halt was
+cleared and no immutable runtime evidence or production authority changed.
+
+Next bounded Issue #84 work should extend the reviewed shadow composition to
+the existing journal/recovery boundary or another demonstrated single-owner
+cutover dependency; do not repeat the completed ledger adapter or composition
+work and do not activate a production writer without a separate reviewed
+cutover decision and acceptance.
 
 ## 2026-10-10 Issue #84 — merge-head acceptance receipt vocabulary — IN PROGRESS
 
