@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-12 09:20 CDT
+Last updated: 2026-10-12 15:42 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -10,6 +10,51 @@ projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
+
+## 2026-10-12 reporting retrieval repair and entry investigation
+
+PR #305 is settled on main `75d4b95fc44fb70b8cca2e8c9027416506295ec1`;
+Issue #84 comment 6126363791 records exact-head and merge-head acceptance.
+Do not repeat its implementation or interpret pending architecture cutover as
+a halt on current governed paper execution.
+
+Fresh observational Splendid reads at 15:36–15:42 CDT succeeded through direct
+HTTPS using Python urllib/curl. Compact daily audit: cash 13777.52047869751,
+equity 13777.52, realized today 0, unrealized 0, no positions; risk not halted,
+runner enabled without active error, complete accounting coverage and clean
+110-row/22-current-epoch ledger parity. Journal timestamps establish six
+executions on October 9 (SNOW entry/partial/full exit; QQQ/ANET/ZS full exits),
+and none October 12. Missing report retrieval is not evidence of zero trades.
+
+Updated the existing pre-close automation, without changing cadence: collect
+runtime first; bounded direct HTTPS and one alternate transport; parse compact
+and full audit schemas; filter journal timestamps in America/Chicago; retain
+successful account fields even when GitHub or a separate P/L field fails.
+Save confirmed by automation update. Future scheduled delivery is not yet
+verified, and the prior task's precise transport error remains unknown.
+
+The stored /paper/reports?full=1 payload is historical: last end-of-day report
+September 12, no intraday history. Current-source run_report_guard.py defers
+store_compiled_report during ordinary cycles to protect runner latency. Do not
+turn heavy inline reports back on or call compiling routes to manufacture a
+fresh report. Use live observational account/journal evidence for summaries.
+
+At 15:40 CDT the blocked-entry and quality diagnostic surfaces showed the last
+cycle's late-day cutoff plus extension/quality rejections. app.py explicitly
+sets feedback self-defense during the final 30 minutes and drops that cutoff
+after close; this explains the late-cycle reason versus post-close risk status.
+It does not prove the cause of all earlier October 12 no-entry cycles. The
+existing scanner audit overwrites the last cycle; shadow history retains counts
+but not historical rejection reasons. No demonstrated execution defect or
+justification for changing thresholds/hard-risk limits was established.
+
+Next executable work: add bounded, timestamped, read-only-consumed per-cycle
+rejection evidence through the existing telemetry owner, with a day/session
+coverage declaration so a partial last-cycle snapshot cannot explain an entire
+day. Check existing durable research captures before adding storage; retain
+paper/risk/ledger authority boundaries. Then resume Issue #84's reviewed
+composition-to-journal/recovery dependency. No production code or state was
+changed in this reporting repair; this checkpoint is not deployment evidence.
 
 ## 2026-10-12 Issue #84 — exact ledger-to-projection composition — IN PROGRESS
 
