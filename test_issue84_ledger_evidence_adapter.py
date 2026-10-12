@@ -9,7 +9,9 @@ import pytest
 from trading.ledger import (
     CanonicalLedgerEvidenceAdapter,
     CanonicalLedgerInvariantError,
+    LedgerProjectionObservation,
 )
+from trading.risk import RiskLimits
 from trading.state import (
     AccountingEpochSnapshot,
     CanonicalStateSnapshot,
@@ -17,6 +19,8 @@ from trading.state import (
     RiskStateSnapshot,
 )
 from trading.state_store import CanonicalStateStore
+from trading.transaction import CanonicalTransactionInvariantError
+from trading.valuation import ProtectedMarkSnapshot
 
 
 def _canonical_json(value):
@@ -218,3 +222,76 @@ def test_adapter_descriptor_has_no_runtime_or_mutation_authority():
     assert descriptor["places_orders"] is False
     assert descriptor["validates_full_hash_chain"] is True
     assert descriptor["proves_immutable_prefix"] is True
+    assert descriptor["prepares_exact_projection"] is True
+
+
+def test_adapter_binds_observed_append_to_exact_projection(tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    first = _row("", "execution-1", "entry")
+    _write(path, (first,))
+    adapter = CanonicalLedgerEvidenceAdapter(path)
+    previous = adapter.observe(epoch_id="stable-paper-v5-test")
+    second = _row(first["event_hash"], "execution-2", "entry")
+    _write(path, (first, second))
+
+    result = adapter.prepare_projection(
+        previous=previous,
+        current_state=_state(total_rows=1, epoch_rows=1),
+        protected_marks=(
+            ProtectedMarkSnapshot(
+                symbol="SPY",
+                price=101.0,
+                source="protected-test-mark",
+                fresh=True,
+                plausible=True,
+                observed_at="2026-10-10 09:00:30 CDT",
+            ),
+        ),
+        risk_date="2026-10-10",
+        risk_limits=RiskLimits(
+            max_daily_loss_fraction=0.03,
+            max_intraday_drawdown_fraction=0.03,
+            hard_realized_loss_fraction=0.02,
+        ),
+        created_at="2026-10-10 09:01:00 CDT",
+    )
+
+    assert isinstance(result, LedgerProjectionObservation)
+    assert result.transaction.ledger == result.append.proof
+    assert result.transaction.next_envelope.revision == 8
+    snapshot = result.transaction.next_envelope.snapshot()
+    assert snapshot.execution_ledger_rows == 2
+    assert snapshot.execution_epoch_rows == 2
+    assert snapshot.portfolio.positions[0].symbol == "SPY"
+    assert snapshot.portfolio.cash == pytest.approx(900.0)
+    assert snapshot.portfolio.equity == pytest.approx(1_001.0)
+    assert result.runtime_registration is False
+    assert result.production_writes is False
+    assert result.order_authority is False
+
+
+def test_adapter_projection_fails_closed_without_exact_marks(tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    first = _row("", "execution-1", "entry")
+    _write(path, (first,))
+    adapter = CanonicalLedgerEvidenceAdapter(path)
+    previous = adapter.observe(epoch_id="stable-paper-v5-test")
+    second = _row(first["event_hash"], "execution-2", "entry")
+    _write(path, (first, second))
+
+    with pytest.raises(
+        CanonicalTransactionInvariantError,
+        match="protected marks",
+    ):
+        adapter.prepare_projection(
+            previous=previous,
+            current_state=_state(total_rows=1, epoch_rows=1),
+            protected_marks=(),
+            risk_date="2026-10-10",
+            risk_limits=RiskLimits(
+                max_daily_loss_fraction=0.03,
+                max_intraday_drawdown_fraction=0.03,
+                hard_realized_loss_fraction=0.02,
+            ),
+            created_at="2026-10-10 09:01:00 CDT",
+        )

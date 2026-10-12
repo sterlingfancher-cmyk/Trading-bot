@@ -14,13 +14,19 @@ import json
 from pathlib import Path
 import re
 from types import MappingProxyType
-from typing import Any, Mapping, Tuple
+from typing import Any, Iterable, Mapping, Tuple
 
 from trading.accounting import ExecutionSnapshot
+from trading.risk import RiskLimits
 from trading.state_store import CanonicalStateEnvelope
-from trading.transaction import LedgerAppendProof
+from trading.transaction import (
+    CanonicalTransactionReceipt,
+    LedgerAppendProof,
+    SingleOwnerProjectionTransaction,
+)
+from trading.valuation import ProtectedMarkSnapshot
 
-VERSION = "stable-paper-core-v3-ledger-evidence-adapter-2026-10-10-v1"
+VERSION = "stable-paper-core-v3-ledger-evidence-adapter-2026-10-12-v2"
 AUTHORITY = "shadow_only"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
@@ -135,6 +141,43 @@ class LedgerAppendObservation:
                 "ledger evidence adapter cannot hold runtime authority"
             )
         object.__setattr__(self, "executions", executions)
+
+
+@dataclass(frozen=True)
+class LedgerProjectionObservation:
+    """One append observation bound to its exact next-revision candidate."""
+
+    append: LedgerAppendObservation
+    transaction: CanonicalTransactionReceipt
+    runtime_registration: bool = False
+    production_writes: bool = False
+    order_authority: bool = False
+    authority: str = AUTHORITY
+    version: str = VERSION
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.append, LedgerAppendObservation):
+            raise CanonicalLedgerInvariantError(
+                "ledger projection requires a typed append observation"
+            )
+        if not isinstance(self.transaction, CanonicalTransactionReceipt):
+            raise CanonicalLedgerInvariantError(
+                "ledger projection requires a typed transaction receipt"
+            )
+        if self.transaction.ledger != self.append.proof:
+            raise CanonicalLedgerInvariantError(
+                "ledger projection transaction changed the observed append proof"
+            )
+        if self.transaction.previous_revision < 0:
+            raise CanonicalLedgerInvariantError(
+                "ledger projection requires a canonical previous revision"
+            )
+        if self.authority != AUTHORITY or any(
+            (self.runtime_registration, self.production_writes, self.order_authority)
+        ):
+            raise CanonicalLedgerInvariantError(
+                "ledger projection cannot hold runtime authority"
+            )
 
 
 class CanonicalLedgerEvidenceAdapter:
@@ -326,6 +369,42 @@ class CanonicalLedgerEvidenceAdapter:
             proof=proof,
         )
 
+    def prepare_projection(
+        self,
+        *,
+        previous: LedgerBoundary,
+        current_state: CanonicalStateEnvelope,
+        protected_marks: Iterable[ProtectedMarkSnapshot],
+        risk_date: str,
+        risk_limits: RiskLimits,
+        created_at: str,
+    ) -> LedgerProjectionObservation:
+        """Derive and project exactly one observed append without writing state.
+
+        Keeping append observation and transaction preparation in one method
+        removes the remaining caller-controlled seam between immutable ledger
+        evidence and the next StateStore revision.  The method remains
+        read-only: the canonical ledger must already contain the append, and
+        the returned envelope is only a shadow candidate.
+        """
+        append = self.prove_append(
+            previous=previous,
+            current_state=current_state,
+        )
+        transaction = SingleOwnerProjectionTransaction.prepare(
+            current=current_state,
+            executions=append.executions,
+            protected_marks=protected_marks,
+            ledger=append.proof,
+            risk_date=risk_date,
+            risk_limits=risk_limits,
+            created_at=created_at,
+        )
+        return LedgerProjectionObservation(
+            append=append,
+            transaction=transaction,
+        )
+
     @classmethod
     def descriptor(cls) -> Mapping[str, Any]:
         return MappingProxyType(
@@ -338,6 +417,7 @@ class CanonicalLedgerEvidenceAdapter:
                 "places_orders": cls.places_orders,
                 "validates_full_hash_chain": True,
                 "proves_immutable_prefix": True,
+                "prepares_exact_projection": True,
                 "version": VERSION,
             }
         )
