@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-10 09:42 CDT
+Last updated: 2026-10-12 09:20 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -10,6 +10,40 @@ projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
+
+## 2026-10-12 Issue #84 — exact ledger-to-projection composition — IN PROGRESS
+
+Fresh read-only Splendid evidence on exact deployed main
+`9d529ad23078bd35dc99d55c42f0737cf9f03859` is clean: 13/13 endpoints are
+reachable; self-check and daily audit pass; sentinel is quiet/pass with zero
+incidents; runner and market-data accounting pass; governed v5 is active/pass;
+risk is not halted; and the account is flat at cash/equity approximately
+`13777.52048 / 13777.52`. The canonical ledger remains chain-valid and
+projection-parity-valid at 110 rows / 22 current-v5 rows with digest
+`bf7bf548ddf0562e015e32d60f52b5a7839792b3bac756b111d52029c22b2d4a`
+and zero accounting coverage/economic issues. Performance V1 remains running
+at 1200 forward rows; V2, ablation and regime are not-run, so Issue #202 /
+`hold_10d` remain frozen.
+
+The active branch is `fix/issue84-single-owner-orchestration-20261012`. The
+next bounded single-owner gap is the remaining caller-controlled seam between
+the reviewed immutable-ledger adapter and the reviewed projection transaction:
+a caller could derive an append observation, then separately construct the
+transaction inputs. The repair adds one shadow-only adapter composition method
+that derives the typed append observation and immediately feeds those exact
+executions and that exact proof into the single-owner accounting / protected
+valuation / risk / next-StateStore-revision transaction. A typed composition
+receipt proves that the transaction retained the observed append proof. It
+does not append or rewrite the ledger, commit state, register with the runtime,
+place orders, activate a production writer, change risk limits, or grant live
+or AI authority. Missing marks and all existing malformed, tampered,
+duplicate, cross-epoch or boundary-drift evidence continue to fail closed.
+
+Focused adapter, projection and atomic-journal regressions pass 35/35; compile
+and whitespace checks pass. Impact-aware repository validation, mandatory
+exact-head CI, review, merge-head gates and settled Splendid acceptance remain
+pending. No paper cycle was forced, `/paper/run` was not called, no halt was
+cleared and no immutable runtime evidence changed.
 
 ## 2026-10-10 Issue #84 — merge-head acceptance receipt vocabulary — IN PROGRESS
 
