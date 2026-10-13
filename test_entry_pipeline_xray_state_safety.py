@@ -1,7 +1,11 @@
+import datetime as dt
+
 import entry_pipeline_xray as xray
 
 
 class FakeCore:
+    AUTO_RUN_INTERVAL_SECONDS = 300
+
     def __init__(self):
         self.portfolio = {
             "cash": 13200.0,
@@ -68,3 +72,89 @@ def test_xray_persist_never_reloads_or_replaces_live_portfolio():
     assert core.load_state_calls == 0
     assert core.save_state_calls == 0
     assert core.portfolio["entry_pipeline_xray"]["last_cycle"]["stage_counts"]["raw_total_signals"] == 27
+
+
+def test_compact_diagnostics_retain_reasons_without_full_symbol_payload():
+    core = FakeCore()
+    cycle = _cycle()
+    cycle.update({
+        "new_entries_allowed": False,
+        "entry_block_reason": "late_day_new_entry_cutoff",
+        "market_mode": "neutral",
+        "top_rejection_reasons": [{"reason": "entry_quality_block:extension", "count": 9}],
+        "symbol_paths": [{"symbol": "A" * 1000}],
+        "blocked_preview": [{"symbol": "B" * 1000}],
+    })
+
+    xray._persist(core, cycle)
+
+    row = core.portfolio["entry_pipeline_xray"]["recent_cycle_diagnostics"][-1]
+    assert row["entry_block_reason"] == "late_day_new_entry_cutoff"
+    assert row["top_rejection_reasons"] == [
+        {"reason": "entry_quality_block:extension", "count": 9}
+    ]
+    assert "symbol_paths" not in row
+    assert "blocked_preview" not in row
+
+
+def test_session_coverage_never_promotes_latest_cycle_to_whole_day():
+    rows = [xray._compact_cycle_diagnostic({
+        **_cycle(),
+        "generated_local": "2026-10-12 15:40:00 CDT",
+        "new_entries_allowed": False,
+        "entry_block_reason": "late_day_new_entry_cutoff",
+    })]
+
+    coverage = xray._session_coverage(rows, 300)
+
+    assert coverage["whole_session_claim_eligible"] is False
+    assert coverage["latest_cycle_alone_proves_whole_session_cause"] is False
+    assert coverage["reason"] == "retained_evidence_does_not_span_regular_session"
+
+
+def test_session_coverage_requires_span_and_no_detected_cycle_gap():
+    rows = []
+    for timestamp in (
+        "2026-10-12 08:30:00 CDT",
+        "2026-10-12 08:35:00 CDT",
+        "2026-10-12 14:55:00 CDT",
+        "2026-10-12 15:00:00 CDT",
+    ):
+        rows.append(xray._compact_cycle_diagnostic({**_cycle(), "generated_local": timestamp}))
+
+    coverage = xray._session_coverage(rows, 300)
+
+    assert coverage["spans_regular_session"] is True
+    assert coverage["gap_check_passed"] is False
+    assert coverage["whole_session_claim_eligible"] is False
+    assert coverage["reason"] == "retained_evidence_has_cycle_gap"
+
+
+def test_session_coverage_is_eligible_only_with_contiguous_full_session_rows():
+    rows = []
+    timestamp = dt.datetime(2026, 10, 12, 8, 30)
+    while timestamp <= dt.datetime(2026, 10, 12, 14, 55):
+        rows.append(xray._compact_cycle_diagnostic({
+            **_cycle(),
+            "generated_local": timestamp.strftime("%Y-%m-%d %H:%M:%S CDT"),
+        }))
+        timestamp += dt.timedelta(minutes=5)
+
+    coverage = xray._session_coverage(rows, 300)
+
+    assert coverage["whole_session_claim_eligible"] is True
+    assert coverage["retained_cycle_count"] == 78
+    assert coverage["maximum_observed_gap_seconds"] == 300
+    assert coverage["latest_cycle_alone_proves_whole_session_cause"] is False
+
+
+def test_session_diagnostic_history_is_bounded(monkeypatch):
+    core = FakeCore()
+    monkeypatch.setattr(xray, "MAX_SESSION_DIAGNOSTICS", 3)
+
+    for minute in range(5):
+        xray._persist(core, {**_cycle(), "generated_local": f"2026-10-12 08:{30 + minute:02d}:00 CDT"})
+
+    diagnostics = core.portfolio["entry_pipeline_xray"]["recent_cycle_diagnostics"]
+    assert len(diagnostics) == 3
+    assert diagnostics[0]["generated_local"] == "2026-10-12 08:32:00 CDT"
