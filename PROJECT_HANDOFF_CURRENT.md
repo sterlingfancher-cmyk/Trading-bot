@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-13 09:08 CDT
+Last updated: 2026-10-13 09:20 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -11,7 +11,7 @@ projection / valuation / risk cutover). Active frozen research issue: #202
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-13 Issue #84 — all-day entry diagnostics — IN PROGRESS
+## 2026-10-13 Issue #84 — all-day entry diagnostics — RUNTIME CAPTURE PENDING
 
 The October 12 evidence review is complete. The reason-bearing Entry Pipeline
 X-Ray persisted only 25 full cycles, approximately 125 minutes at the configured
@@ -44,14 +44,30 @@ repository URL is a Railway-hosted domain and this execution environment
 prohibits treating Railway access as the authoritative Splendid reader. This
 is a specific runtime-read access-path failure, not a claim that GitHub or all
 Splendid evidence is unavailable, and it does not supersede the accepted
-October 12 Splendid capture. Exact-head workflows, both Gunicorn smokes,
-review, merge-head gates and settled post-deploy Splendid acceptance remain
-pending. No `/paper/run` call, halt clear or runtime mutation was attempted.
+October 12 Splendid capture.
 
-Next executable step: publish this exact branch/head and open the single repair
-PR; run every exact-head mandatory workflow and both smokes. If all pass,
-review and merge, require merge-head gates and settled Splendid acceptance, then
-resume Issue #84's composition-to-journal/recovery dependency.
+PR #306 exact head `06ad34caf6214013cc6d0540695217f5ab1f3418`
+passed Repository Safety run 38411149825, Architecture Debt run 38411150070,
+Refactor/runtime run 38411149622 and Change Safety run 38411149111; both exact
+Gunicorn smokes passed. The reviewed 5-file diff squash-merged as exact main
+`f0efd1fee7887a90cda4609c0f8986f8df6d7045`.
+
+Merge-head repository validation run 38411543599 and Change Safety run
+38411543297 pass; the latter includes the impact-aware regressions, architecture
+debt block, exact Gunicorn bootstrap smoke and final exact-head decision.
+Refactor/runtime run 38411546562 passed its exact Gunicorn smoke and Splendid's
+authoritative deployment context settled success on the exact merge. Its
+separate runtime-research-snapshot job 115345596302 remains in progress at
+step 6, `Capture read-only Railway research state`; no artifact or read-only
+runtime conclusion exists yet. The unrelated legacy Railway deployment remains
+pending and is not authoritative. No `/paper/run` call, halt clear or runtime
+mutation was attempted.
+
+Next executable step: resume workflow 38411546562 / job 115345596302 without
+rerunning completed gates. If the bounded capture completes, inspect its artifact
+and record settled read-only acceptance or the exact endpoint failure. Only then
+collect new X-Ray coverage after ordinary cycles populate it and resume Issue
+#84's composition-to-journal/recovery dependency.
 
 ## 2026-10-12 reporting retrieval repair and entry investigation
 
