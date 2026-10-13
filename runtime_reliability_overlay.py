@@ -17,7 +17,7 @@ import datetime as dt
 import sys
 from typing import Any, Dict, List
 
-VERSION = "runtime-reliability-overlay-2026-07-21-v2-entry-contract"
+VERSION = "runtime-reliability-overlay-2026-10-13-v3-session-diagnostics"
 _PATCHED = False
 
 
@@ -91,58 +91,11 @@ def _patch_xray(core: Any) -> Dict[str, Any]:
                 return
 
             def mutate(state: Dict[str, Any]) -> Dict[str, Any]:
-                xrow = state.setdefault("entry_pipeline_xray", {})
-                if not isinstance(xrow, dict):
-                    xrow = {}
-                    state["entry_pipeline_xray"] = xrow
-
-                xrow.update({
-                    "version": xray.VERSION,
-                    "patch_target": "app.try_entries_and_rotations",
-                    "updated_local": cycle.get("generated_local"),
-                    "last_cycle": cycle,
-                    "last_bottleneck": cycle.get("bottleneck"),
-                    "last_stage_counts": cycle.get("stage_counts"),
-                    "last_top_rejection_reasons": cycle.get("top_rejection_reasons"),
-                    "last_symbol_paths": cycle.get("symbol_paths"),
-                    "wrapped_callable": cycle.get("wrapped_callable"),
-                    "composition": cycle.get("composition"),
-                })
-
-                recent = xrow.get("recent_cycles") if isinstance(xrow.get("recent_cycles"), list) else []
-                recent.append(cycle)
-                xrow["recent_cycles"] = recent[-max(1, xray.MAX_RECENT_CYCLES):]
-
-                meaningful = bool(xray._is_meaningful(cycle))
-                if meaningful:
-                    xrow["last_meaningful_cycle"] = cycle
-                    xrow["last_meaningful_stage_counts"] = cycle.get("stage_counts")
-                    xrow["last_meaningful_bottleneck"] = cycle.get("bottleneck")
-                    xrow["last_meaningful_symbol_paths"] = cycle.get("symbol_paths")
-                    scanner = state.get("scanner_audit")
-                    if isinstance(scanner, dict) and int(scanner.get("signals_found") or 0) > 0:
-                        xrow["last_meaningful_scanner_audit"] = xray._json_safe(scanner)
-
-                if cycle.get("error"):
-                    errors = xrow.get("recent_errors") if isinstance(xrow.get("recent_errors"), list) else []
-                    errors.append({
-                        "generated_local": cycle.get("generated_local"),
-                        "error": cycle.get("error"),
-                        "wrapped_callable": cycle.get("wrapped_callable"),
-                        "market_mode": cycle.get("market_mode"),
-                        "stage_counts": cycle.get("stage_counts"),
-                    })
-                    xrow["recent_errors"] = errors[-max(1, xray.MAX_RECENT_ERRORS):]
-                    xrow["last_error"] = xrow["recent_errors"][-1]
-
-                counters = xrow.setdefault("counters", {})
-                if isinstance(counters, dict):
-                    counters["cycles_total"] = int(counters.get("cycles_total") or 0) + 1
-                    counters["active_callsite_invocations_total"] = int(counters.get("active_callsite_invocations_total") or 0) + 1
-                    key = f"bottleneck_{cycle.get('bottleneck') or 'unknown'}_total"
-                    counters[key] = int(counters.get(key) or 0) + 1
-                    if meaningful:
-                        counters["meaningful_cycles_total"] = int(counters.get("meaningful_cycles_total") or 0) + 1
+                xray._update_telemetry(
+                    state,
+                    cycle,
+                    int(getattr(c, "AUTO_RUN_INTERVAL_SECONDS", 300) or 300),
+                )
                 return state
 
             update_state(mutate, source="entry_pipeline_xray")
@@ -186,6 +139,8 @@ def _patch_xray(core: Any) -> Dict[str, Any]:
             "last_meaningful_scanner_audit": telemetry.get("last_meaningful_scanner_audit") or {},
             "last_error": telemetry.get("last_error") or {},
             "recent_errors": telemetry.get("recent_errors") or [],
+            "recent_cycle_diagnostics": telemetry.get("recent_cycle_diagnostics") or [],
+            "session_coverage": telemetry.get("session_coverage") or {},
             "counters": telemetry.get("counters") or {},
             "inspection_read_only": True,
             "transactional_persistence": callable(getattr(c, "update_state", None)) if c is not None else False,

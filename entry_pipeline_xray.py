@@ -24,10 +24,11 @@ import sys
 from collections import Counter
 from typing import Any, Dict, Iterable, List
 
-VERSION = "entry-pipeline-xray-2026-07-14-v3-composition-errors"
+VERSION = "entry-pipeline-xray-2026-10-13-v4-session-diagnostics"
 ENABLED = os.environ.get("ENTRY_PIPELINE_XRAY_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 MAX_SYMBOL_ROWS = int(os.environ.get("ENTRY_PIPELINE_XRAY_MAX_SYMBOL_ROWS", "50"))
 MAX_RECENT_CYCLES = int(os.environ.get("ENTRY_PIPELINE_XRAY_MAX_RECENT_CYCLES", "25"))
+MAX_SESSION_DIAGNOSTICS = int(os.environ.get("ENTRY_PIPELINE_XRAY_MAX_SESSION_DIAGNOSTICS", "120"))
 MAX_RECENT_ERRORS = int(os.environ.get("ENTRY_PIPELINE_XRAY_MAX_RECENT_ERRORS", "20"))
 REGISTERED_APP_IDS: set[int] = set()
 _PATCHED = False
@@ -302,8 +303,122 @@ def _is_meaningful(cycle: Dict[str, Any]) -> bool:
     )
 
 
-def _persist(core: Any, cycle: Dict[str, Any]) -> None:
-    state = _state(core)
+def _parse_local_timestamp(value: Any) -> dt.datetime | None:
+    try:
+        return dt.datetime.strptime(str(value or "")[:19], "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+
+
+def _session_bucket(value: Any) -> str:
+    observed = _parse_local_timestamp(value)
+    if observed is None:
+        return "unknown"
+    minute = observed.hour * 60 + observed.minute
+    if minute < 8 * 60 + 30:
+        return "pre_open"
+    if minute <= 15 * 60:
+        return "regular_session"
+    return "after_close"
+
+
+def _compact_cycle_diagnostic(cycle: Dict[str, Any]) -> Dict[str, Any]:
+    observed = _parse_local_timestamp(cycle.get("generated_local"))
+    counts = _d(cycle.get("stage_counts"))
+    return {
+        "generated_local": cycle.get("generated_local"),
+        "session_date": observed.date().isoformat() if observed else None,
+        "session_bucket": _session_bucket(cycle.get("generated_local")),
+        "new_entries_allowed": bool(cycle.get("new_entries_allowed")),
+        "entry_block_reason": cycle.get("entry_block_reason"),
+        "market_mode": cycle.get("market_mode"),
+        "bottleneck": cycle.get("bottleneck"),
+        "stage_counts": {
+            key: int(counts.get(key) or 0)
+            for key in (
+                "raw_total_signals",
+                "prepared_candidates",
+                "entries_returned",
+                "rotations_returned",
+                "blocked_rows_returned",
+                "quality_blocked_rows",
+                "participation_valve_reached_rows",
+                "candidates_without_final_row",
+            )
+        },
+        "top_rejection_reasons": [
+            {
+                "reason": row.get("reason"),
+                "count": int(row.get("count") or 0),
+            }
+            for row in _l(cycle.get("top_rejection_reasons"))[:8]
+            if isinstance(row, dict)
+        ],
+        "error": cycle.get("error"),
+    }
+
+
+def _session_coverage(rows: List[Dict[str, Any]], interval_seconds: int) -> Dict[str, Any]:
+    dated = [row for row in rows if row.get("session_date")]
+    if not dated:
+        return {
+            "scope": "bounded_observed_xray_invocations",
+            "session_date": None,
+            "whole_session_claim_eligible": False,
+            "reason": "no_timestamped_cycle_diagnostics",
+        }
+    session_date = str(dated[-1]["session_date"])
+    current = [row for row in dated if str(row.get("session_date")) == session_date]
+    timestamps = [
+        parsed
+        for parsed in (_parse_local_timestamp(row.get("generated_local")) for row in current)
+        if parsed is not None
+    ]
+    gaps = [int((right - left).total_seconds()) for left, right in zip(timestamps, timestamps[1:])]
+    first = timestamps[0] if timestamps else None
+    last = timestamps[-1] if timestamps else None
+    max_gap = max(gaps, default=0)
+    expected_interval = max(30, int(interval_seconds or 300))
+    spans_regular_session = bool(
+        first
+        and last
+        and first.time() <= dt.time(8, 35)
+        and last.time() >= dt.time(14, 55)
+    )
+    gap_limit = int(expected_interval * 2.5)
+    gap_check_passed = bool(timestamps) and max_gap <= gap_limit
+    eligible = spans_regular_session and gap_check_passed
+    if not spans_regular_session:
+        reason = "retained_evidence_does_not_span_regular_session"
+    elif not gap_check_passed:
+        reason = "retained_evidence_has_cycle_gap"
+    else:
+        reason = "retained_evidence_spans_regular_session_without_detected_gap"
+    return {
+        "scope": "bounded_observed_xray_invocations",
+        "session_date": session_date,
+        "first_observed_local": current[0].get("generated_local") if current else None,
+        "last_observed_local": current[-1].get("generated_local") if current else None,
+        "retained_cycle_count": len(current),
+        "regular_session_cycle_count": sum(
+            row.get("session_bucket") == "regular_session" for row in current
+        ),
+        "configured_interval_seconds": expected_interval,
+        "maximum_observed_gap_seconds": max_gap,
+        "gap_limit_seconds": gap_limit,
+        "spans_regular_session": spans_regular_session,
+        "gap_check_passed": gap_check_passed,
+        "whole_session_claim_eligible": eligible,
+        "reason": reason,
+        "latest_cycle_alone_proves_whole_session_cause": False,
+        "interpretation": (
+            "Whole-session attribution is permitted only from the retained per-cycle rows "
+            "when whole_session_claim_eligible is true; latest-cycle reasons are insufficient."
+        ),
+    }
+
+
+def _update_telemetry(state: Dict[str, Any], cycle: Dict[str, Any], interval_seconds: int = 300) -> None:
     xray = state.setdefault("entry_pipeline_xray", {})
     if not isinstance(xray, dict):
         xray = {}
@@ -325,6 +440,15 @@ def _persist(core: Any, cycle: Dict[str, Any]) -> None:
     recent = xray.get("recent_cycles") if isinstance(xray.get("recent_cycles"), list) else []
     recent.append(cycle)
     xray["recent_cycles"] = recent[-max(1, MAX_RECENT_CYCLES):]
+
+    diagnostics = xray.get("recent_cycle_diagnostics") if isinstance(xray.get("recent_cycle_diagnostics"), list) else []
+    diagnostic = _compact_cycle_diagnostic(cycle)
+    if not diagnostics or diagnostics[-1].get("generated_local") != diagnostic.get("generated_local"):
+        diagnostics.append(diagnostic)
+    xray["recent_cycle_diagnostics"] = diagnostics[-max(1, MAX_SESSION_DIAGNOSTICS):]
+    xray["session_coverage"] = _session_coverage(
+        xray["recent_cycle_diagnostics"], interval_seconds
+    )
 
     if _is_meaningful(cycle):
         xray["last_meaningful_cycle"] = cycle
@@ -355,6 +479,15 @@ def _persist(core: Any, cycle: Dict[str, Any]) -> None:
         counters[key] = int(counters.get(key) or 0) + 1
         if _is_meaningful(cycle):
             counters["meaningful_cycles_total"] = int(counters.get("meaningful_cycles_total") or 0) + 1
+
+
+def _persist(core: Any, cycle: Dict[str, Any]) -> None:
+    state = _state(core)
+    _update_telemetry(
+        state,
+        cycle,
+        int(getattr(core, "AUTO_RUN_INTERVAL_SECONDS", 300) or 300),
+    )
 
     _save(core, state)
 
@@ -474,6 +607,8 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
         "last_meaningful_scanner_audit": telemetry.get("last_meaningful_scanner_audit") or {},
         "last_error": telemetry.get("last_error") or {},
         "recent_errors": telemetry.get("recent_errors") or [],
+        "recent_cycle_diagnostics": telemetry.get("recent_cycle_diagnostics") or [],
+        "session_coverage": telemetry.get("session_coverage") or {},
         "counters": telemetry.get("counters") or {},
         "policy": {
             "diagnostic_only": True,
@@ -489,8 +624,11 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "does_not_replace_authoritative_portfolio": True,
             "preserves_last_meaningful_cycle": True,
             "captures_recent_errors": True,
+            "captures_bounded_session_reasons": True,
+            "latest_cycle_is_not_whole_session_evidence": True,
             "max_symbol_rows": MAX_SYMBOL_ROWS,
             "max_recent_cycles": MAX_RECENT_CYCLES,
+            "max_session_diagnostics": MAX_SESSION_DIAGNOSTICS,
             "max_recent_errors": MAX_RECENT_ERRORS,
         },
     }

@@ -32,7 +32,10 @@ RUNTIME_TESTS = (
     "test_daily_operational_audit.py",
 )
 STATE_TESTS = ("test_state_store_stage_c.py",)
-DECISION_TESTS = ("test_shadow_decision_stage_d.py",)
+DECISION_TESTS = (
+    "test_shadow_decision_stage_d.py",
+    "test_entry_pipeline_xray_state_safety.py",
+)
 CONFIG_TESTS = ("test_architecture_stage_b.py",)
 PROVENANCE_TESTS = (
     "test_verified_snapshot_provenance_status.py",
@@ -59,6 +62,7 @@ PYTEST_REGRESSION_TESTS = frozenset(
         "test_issue84_single_owner_transaction.py",
         "test_issue84_atomic_transaction_journal.py",
         "test_issue84_ledger_evidence_adapter.py",
+        "test_entry_pipeline_xray_state_safety.py",
     )
 )
 LEGACY_EXTERNAL_PAPER_RUNNER_TESTS = ("test_legacy_external_paper_runner_retired.py",)
