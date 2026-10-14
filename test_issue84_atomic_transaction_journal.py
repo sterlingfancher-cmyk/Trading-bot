@@ -6,6 +6,11 @@ import json
 import pytest
 
 from trading.accounting import ExecutionSnapshot
+from trading.ledger import (
+    LedgerAppendObservation,
+    LedgerBoundary,
+    LedgerProjectionObservation,
+)
 from trading.risk import RiskLimits
 from trading.state import (
     AccountingEpochSnapshot,
@@ -161,6 +166,39 @@ def _observed_next():
         chain_valid=True,
         execution_ids=("execution-89",),
     )
+
+
+def _projection():
+    receipt = _receipt()
+    execution = ExecutionSnapshot(
+        sequence=89,
+        symbol="SPY",
+        event="entry",
+        side="long",
+        quantity=1.0,
+        price=100.0,
+        timestamp="2026-10-01 08:01:00 CDT",
+        execution_id="execution-89",
+    )
+    append = LedgerAppendObservation(
+        previous=LedgerBoundary(
+            epoch_id="stable-paper-v5-test",
+            total_rows=88,
+            epoch_rows=0,
+            ledger_sha256="a" * 64,
+            terminal_event_hash="c" * 64,
+        ),
+        current=LedgerBoundary(
+            epoch_id="stable-paper-v5-test",
+            total_rows=89,
+            epoch_rows=1,
+            ledger_sha256="b" * 64,
+            terminal_event_hash="d" * 64,
+        ),
+        executions=(execution,),
+        proof=receipt.ledger,
+    )
+    return LedgerProjectionObservation(append=append, transaction=receipt)
 
 
 def _sandbox(tmp_path):
@@ -345,6 +383,69 @@ def test_repeated_ledger_settlement_preserves_record_bytes_and_digest(tmp_path):
 
     assert repeated == settled
     assert journal.path.read_bytes() == settled_bytes
+
+
+def test_projection_bound_settlement_derives_exact_observed_append(tmp_path):
+    _, journal = _sandbox(tmp_path)
+    projection = _projection()
+    journal.begin(
+        projection.transaction,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+
+    settled = journal.settle_projection(
+        projection,
+        recorded_at="2026-10-01 08:01:02 CDT",
+    )
+
+    assert settled.phase == "ledger_settled"
+    assert settled.next_ledger_sha256 == projection.append.current.ledger_sha256
+    assert settled.execution_ids == projection.append.proof.appended_execution_ids
+
+
+def test_projection_bound_recovery_rolls_forward_exactly_one_revision(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    projection = _projection()
+    journal.begin(
+        projection.transaction,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+
+    recovery = journal.recover_projection(
+        projection,
+        state,
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+
+    assert recovery.action == "state_commit_replayed"
+    assert recovery.replayed_state_commit is True
+    assert state.read_sandbox().revision == 8
+    assert journal.read_sandbox().phase == "state_committed"
+
+
+def test_projection_bound_recovery_rejects_untyped_caller_observation(tmp_path):
+    state, journal = _sandbox(tmp_path)
+    receipt = _receipt()
+    journal.begin(
+        receipt,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:01 CDT",
+    )
+
+    with pytest.raises(
+        TransactionJournalInvariantError,
+        match="typed ledger projection observation",
+    ):
+        journal.recover_projection(
+            _observed_next(),
+            state,
+            recorded_at="2026-10-01 08:01:03 CDT",
+        )
+
+    assert state.read_sandbox().revision == 7
+    assert journal.read_sandbox().phase == "prepared"
 
 
 def test_repeated_ledger_settlement_rejects_boundary_drift_without_mutation(tmp_path):

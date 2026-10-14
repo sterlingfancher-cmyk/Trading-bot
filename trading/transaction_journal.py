@@ -20,10 +20,11 @@ import threading
 from types import MappingProxyType
 from typing import Any, Mapping, Tuple
 
+from trading.ledger import LedgerProjectionObservation
 from trading.state_store import CanonicalStateStore
 from trading.transaction import CanonicalTransactionReceipt
 
-VERSION = "stable-paper-core-v3-transaction-journal-2026-10-05-v5"
+VERSION = "stable-paper-core-v3-transaction-journal-2026-10-14-v6"
 AUTHORITY = "shadow_only"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PHASES = frozenset(
@@ -464,6 +465,43 @@ class SandboxTransactionJournal:
             self._write_locked(settled)
             return self._read_locked()
 
+    @staticmethod
+    def _observed_projection(
+        projection: LedgerProjectionObservation,
+    ) -> ObservedLedgerState:
+        """Derive the recovery boundary from one typed ledger observation.
+
+        This prevents a recovery caller from pairing a reviewed projection with
+        a separately constructed ledger boundary.  It remains observational:
+        no ledger or StateStore write occurs here.
+        """
+        if not isinstance(projection, LedgerProjectionObservation):
+            raise TransactionJournalInvariantError(
+                "projection recovery requires a typed ledger projection observation"
+            )
+        append = projection.append
+        return ObservedLedgerState(
+            total_rows=append.current.total_rows,
+            epoch_rows=append.current.epoch_rows,
+            ledger_sha256=append.current.ledger_sha256,
+            chain_valid=True,
+            execution_ids=append.proof.appended_execution_ids,
+        )
+
+    def settle_projection(
+        self,
+        projection: LedgerProjectionObservation,
+        *,
+        recorded_at: str,
+    ) -> TransactionJournalRecord:
+        """Settle the journal against the exact observed append and receipt."""
+        observed = self._observed_projection(projection)
+        return self.settle_ledger(
+            projection.transaction,
+            observed,
+            recorded_at=recorded_at,
+        )
+
     def recover(
         self,
         receipt: CanonicalTransactionReceipt,
@@ -584,6 +622,22 @@ class SandboxTransactionJournal:
                 replayed_state_commit=replayed,
             )
 
+    def recover_projection(
+        self,
+        projection: LedgerProjectionObservation,
+        store: CanonicalStateStore,
+        *,
+        recorded_at: str,
+    ) -> TransactionRecoveryReceipt:
+        """Recover from the exact append already bound to the projection."""
+        observed = self._observed_projection(projection)
+        return self.recover(
+            projection.transaction,
+            observed,
+            store,
+            recorded_at=recorded_at,
+        )
+
     def read_sandbox(self) -> TransactionJournalRecord:
         self._assert_sandbox()
         with self._lock, self._process_lock():
@@ -601,6 +655,8 @@ class SandboxTransactionJournal:
                 "preappend_recovery": "abort_without_mutation",
                 "postappend_recovery": "roll_forward_one_bound_state_revision",
                 "ledger_settlement": "immutable_idempotent_record",
+                "projection_bound_settlement": True,
+                "projection_bound_recovery": True,
                 "terminal_rollover": "immutable_digest_archive_before_reuse",
                 "terminal_recovery": "immutable_idempotent_receipt",
                 "rewrites_canonical_ledger": False,

@@ -1,17 +1,69 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-13 09:08 CDT
+Last updated: 2026-10-14 09:11 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `75d4b95fc44fb70b8cca2e8c9027416506295ec1` (PR #305 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `f0efd1fee7887a90cda4609c0f8986f8df6d7045` (PR #306 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-13 Issue #84 — all-day entry diagnostics — IN PROGRESS
+## 2026-10-14 Issue #84 — PR #306 accepted; projection-bound recovery — IN PROGRESS
+
+PR #306 is fully settled on exact main
+`f0efd1fee7887a90cda4609c0f8986f8df6d7045`. Runtime workflow
+`38411546562`, job `115345596302`, completed successfully after the prior
+checkpoint. Every job step passed, including exact-head Splendid acceptance,
+the 13/13 read-only runtime capture, governed evidence construction, artifact
+upload and research snapshot status. Artifact `11821698070` has ZIP SHA-256
+`fccb792dc66f36c8bb8f47df604126c53f6b28288fb4d0aa93ccdd3f08a72b41`;
+its deployed commit is exact, acceptance digest is
+`3b83e1e3f0ac9bd81de137872fec170ffb4123869da09e6db57bf8c285fef026`
+and decision digest is
+`3cbc1645bbcec8b41359187d4263c382e3e0fcc1b4b68e3e6198b8524802ad56`.
+
+The accepted capture is clean and observational: self-check, compact daily
+audit, sentinel, runner, market data, accounting, ledger chain/projection and
+risk all pass; the account is flat at cash/equity approximately
+`13777.52048 / 13777.52`; risk is not halted; governed v5 is active/pass; and
+the canonical ledger remains 110 rows / 22 current-epoch rows with digest
+`bf7bf548ddf0562e015e32d60f52b5a7839792b3bac756b111d52029c22b2d4a`.
+Performance V1 remains running at 1200 rows; V2 and ablation remain not-run,
+and forward shadow remains ineligible, so Issue #202 / `hold_10d` stay frozen.
+The capture did not request `/paper/entry-pipeline-xray-status`; consequently
+the new 120-cycle X-Ray retention is deployed but no whole-session coverage or
+all-day cause is claimed. Ordinary cycles must populate and a later read-only
+observation must inspect that exact endpoint.
+
+The next bounded Issue #84 seam was then resumed on branch
+`fix/issue84-projection-recovery-binding-20261014`, implementation commit
+`623e7b4ff40b9bf729e64779fa68516d7d9a0016`. The sandbox journal's post-append
+settlement and recovery can no longer pair a reviewed `LedgerProjectionObservation`
+with a separately caller-constructed `ObservedLedgerState`; new typed methods
+derive the row counts, epoch counts, digest and execution IDs directly from the
+already validated projection observation. Existing journal binding and
+StateStore revision checks remain fail-closed. This is shadow/sandbox-only: it
+does not append or rewrite the canonical ledger, register with runtime, change
+production state, place orders, change strategy or risk, or grant live/AI
+authority.
+
+Local compile and three direct focused regressions pass. The 21-test Change
+Safety gate suite, repository/Railway validation, structural audit,
+architecture ownership, typed configuration and architecture-debt checks pass
+with zero new critical or warning findings. The local environment has no
+pytest, so the complete focused pytest suite and all exact-head workflows,
+including both exact Gunicorn smokes, remain required on the published PR.
+No `/paper/run`, halt clear, runtime mutation or order action was attempted.
+
+Next executable step: publish this exact branch/head, open the single Issue #84
+repair PR, and require every mandatory exact-head workflow and both exact
+Gunicorn smokes. Review the exact diff and merge only if all gates pass; then
+require merge-head gates and settled exact-commit Splendid acceptance.
+
+## 2026-10-13 Issue #84 — all-day entry diagnostics — ACCEPTED
 
 The October 12 evidence review is complete. The reason-bearing Entry Pipeline
 X-Ray persisted only 25 full cycles, approximately 125 minutes at the configured
