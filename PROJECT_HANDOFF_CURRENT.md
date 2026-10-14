@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-14 09:11 CDT
+Last updated: 2026-10-14 09:21 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -11,7 +11,7 @@ projection / valuation / risk cutover). Active frozen research issue: #202
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-14 Issue #84 — PR #306 accepted; projection-bound recovery — IN PROGRESS
+## 2026-10-14 Issue #84 — projection-bound recovery — RUNTIME CAPTURE PENDING
 
 PR #306 is fully settled on exact main
 `f0efd1fee7887a90cda4609c0f8986f8df6d7045`. Runtime workflow
@@ -38,9 +38,9 @@ the new 120-cycle X-Ray retention is deployed but no whole-session coverage or
 all-day cause is claimed. Ordinary cycles must populate and a later read-only
 observation must inspect that exact endpoint.
 
-The next bounded Issue #84 seam was then resumed on branch
-`fix/issue84-projection-recovery-binding-20261014`, implementation commit
-`623e7b4ff40b9bf729e64779fa68516d7d9a0016`. The sandbox journal's post-append
+The next bounded Issue #84 seam was then completed in PR #307, exact remote
+head `dc4bfc6a45ce24dc5a75a7dbb7ebd7bfcd94c1de`, and squash-merged as
+`957d418f90fda012eaf475916b77a8d48aa808c2`. The sandbox journal's post-append
 settlement and recovery can no longer pair a reviewed `LedgerProjectionObservation`
 with a separately caller-constructed `ObservedLedgerState`; new typed methods
 derive the row counts, epoch counts, digest and execution IDs directly from the
@@ -50,18 +50,29 @@ does not append or rewrite the canonical ledger, register with runtime, change
 production state, place orders, change strategy or risk, or grant live/AI
 authority.
 
-Local compile and three direct focused regressions pass. The 21-test Change
-Safety gate suite, repository/Railway validation, structural audit,
-architecture ownership, typed configuration and architecture-debt checks pass
-with zero new critical or warning findings. The local environment has no
-pytest, so the complete focused pytest suite and all exact-head workflows,
-including both exact Gunicorn smokes, remain required on the published PR.
-No `/paper/run`, halt clear, runtime mutation or order action was attempted.
+Local compile and three direct focused regressions passed. The exact PR diff
+was reviewed and its three remote blobs matched the local files by Git blob
+SHA. All four mandatory exact-head workflows passed at `dc4bfc6...`, including
+both exact Gunicorn smokes: Repository Safety `38578571073`, Architecture Debt
+`38578571130`, Refactor/runtime `38578571110`, and Change Safety
+`38578571008`. All merge-head code gates and both smokes also passed at
+`957d418...`: Repository Safety `38579023968`, Architecture Debt
+`38579023985`, Refactor/runtime `38579024169`, and Change Safety
+`38579023948`. The authoritative `splendid-creativity - web` deployment
+settled success and the runtime job independently verified exact-head Splendid
+acceptance.
 
-Next executable step: publish this exact branch/head, open the single Issue #84
-repair PR, and require every mandatory exact-head workflow and both exact
-Gunicorn smokes. Review the exact diff and merge only if all gates pass; then
-require merge-head gates and settled exact-commit Splendid acceptance.
+The only remaining item is the same merge-head runtime job
+`115904303637`, currently in progress at step 6, `Capture read-only Railway
+research state`, after deployment acceptance. It has not yet produced an
+artifact or runtime conclusion. Completed workflows were not rerun, and the
+unrelated legacy deployment context remains non-authoritative. No `/paper/run`,
+halt clear, runtime mutation or order action was attempted.
+
+Next executable step: resume workflow `38579024169`, job `115904303637`.
+When it completes, inspect the immutable artifact and record settled read-only
+acceptance or the exact endpoint/evidence failure; do not infer success from
+the already-settled deployment status alone.
 
 ## 2026-10-13 Issue #84 — all-day entry diagnostics — ACCEPTED
 
