@@ -4,14 +4,14 @@ Last updated: 2026-10-15 09:48 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `957d418f90fda012eaf475916b77a8d48aa808c2` (PR #307 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `9e1290795b46f0902d128003155ebd26378fb70c` (PR #308 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-15 Issue #84 — settled projection recovery; pre-append intent — IN PROGRESS
+## 2026-10-15 Issue #84 — pre-append intent — ACCEPTED
 
 PR #307 is fully settled on exact main
 `957d418f90fda012eaf475916b77a8d48aa808c2`. Merge-head Refactor/runtime
@@ -51,23 +51,47 @@ boundary, StateStore digest and every execution field exactly match the
 intent; substitution, sequence drift, ledger movement and StateStore drift
 fail closed.
 
-This is an intermediate architecture repair, not writer activation or a
+This remains an intermediate architecture repair, not writer activation or a
 completed write-ahead journal. The descriptor explicitly reports
 `production_writer_accepts_intent=false` and `write_ahead_journal_ready=false`.
 It performs no ledger/state write, runtime registration, order action, risk or
-strategy change, live action or AI authority grant. Focused ledger adapter,
-single-owner transaction and atomic-journal regressions pass 42/42; compile
-and whitespace checks pass. Exact-diff review, impact-aware validation,
-mandatory exact-head workflows, both Gunicorn smokes, review, merge and
-settled Splendid acceptance remain pending.
+strategy change, live action or AI authority grant.
 
-Next executable step: publish this exact branch as the single Issue #84 repair
-path, open its PR, run every mandatory exact-head gate, and review the exact
-diff. If all gates pass, merge and require merge-head gates plus settled
-read-only Splendid acceptance. The subsequent bounded seam is persistence of
-the typed intent in the sandbox journal and an explicit writer handoff; do not
-claim write-ahead readiness or production activation before those separately
-reviewed stages exist.
+PR #308 exact head `8b283528bc54a219144fa444f453b747a198d140`
+passed focused 42/42 and impact-aware 99 unittest + 42 pytest regressions. Its
+three remote blobs matched the reviewed local files exactly. Every mandatory
+exact-head workflow and both Gunicorn smokes passed: Repository Safety
+`38748892756`, Architecture Debt `38748892761`, Change Safety `38748892584`
+and Refactor/runtime `38748893001`. It squash-merged as exact main
+`9e1290795b46f0902d128003155ebd26378fb70c`. All merge-head code gates and
+both smokes passed: Repository Safety `38749283098`, Architecture Debt
+`38749283019`, Change Safety `38749282878` and Refactor/runtime
+`38749282902`.
+
+The merge-head deployment and read-only acceptance settled successfully in
+runtime job `116471707777`. Artifact `11979344664` has independently verified
+ZIP SHA-256
+`c9e4af52967fc4b7498666a91a98bb54826b776d65d27ee29756405cef1592f6`,
+acceptance digest
+`c5dff4e318031415b7612dbedd6bc400ed07418365e02248dfd36c31c9b6b47e`
+and decision digest
+`b3a9d3ee130332e2b9b94b9b13dc26f8cea25336d17209014d7cb362e8a92e55`.
+All 13 standard endpoints are reachable; self-check, compact audit, sentinel,
+runner, market data, accounting, chain/projection and risk pass; governed v5
+is active/pass; risk is not halted; and the account is flat at cash
+`13771.850490032683` / equity `13771.85`, with current-day realized and
+unrealized P/L both zero. The chain-valid, parity-clean ledger is 114 rows at
+digest `d461677e0ac178c809831fa20b6cc64c508bada2aa1be78cd8c3bfc9d2b19acb`.
+Performance V1 remains running at 1200 rows; V2 and ablation remain not-run,
+and forward shadow remains ineligible. Issue #202 / `hold_10d` stay frozen.
+The standard capture still did not request the X-Ray endpoint, so no
+whole-session no-entry attribution is claimed.
+
+Next executable step: persist the accepted typed intent in the sandbox journal
+before an append, then bind the exact settled append back to that immutable
+intent record. Keep the production writer handoff, WAL readiness and any
+activation as later separately reviewed stages; do not infer them from PR
+#308 acceptance.
 
 ## 2026-10-14 Issue #84 — PR #306 accepted; projection-bound recovery — IN PROGRESS
 
