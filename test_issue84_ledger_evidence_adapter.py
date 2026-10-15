@@ -9,8 +9,10 @@ import pytest
 from trading.ledger import (
     CanonicalLedgerEvidenceAdapter,
     CanonicalLedgerInvariantError,
+    LedgerAppendIntent,
     LedgerProjectionObservation,
 )
+from trading.accounting import ExecutionSnapshot
 from trading.risk import RiskLimits
 from trading.state import (
     AccountingEpochSnapshot,
@@ -223,6 +225,151 @@ def test_adapter_descriptor_has_no_runtime_or_mutation_authority():
     assert descriptor["validates_full_hash_chain"] is True
     assert descriptor["proves_immutable_prefix"] is True
     assert descriptor["prepares_exact_projection"] is True
+    assert descriptor["prepares_preappend_intent"] is True
+    assert descriptor["binds_settled_append_to_intent"] is True
+    assert descriptor["production_writer_accepts_intent"] is False
+    assert descriptor["write_ahead_journal_ready"] is False
+
+
+def _intended_execution(
+    sequence=2,
+    *,
+    event="exit",
+    price=101.0,
+    execution_id="execution-2",
+):
+    return ExecutionSnapshot(
+        sequence=sequence,
+        symbol="SPY",
+        event=event,
+        side="long",
+        quantity=1.0,
+        price=price,
+        timestamp="2026-10-10 09:00:00 CDT",
+        execution_id=execution_id,
+    )
+
+
+def test_preappend_intent_binds_exact_boundary_and_settled_identity(tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    first = _row("", "execution-1", "entry")
+    _write(path, (first,))
+    adapter = CanonicalLedgerEvidenceAdapter(path)
+    state = _state(total_rows=1, epoch_rows=1)
+    previous = adapter.observe(epoch_id="stable-paper-v5-test")
+    original = path.read_bytes()
+
+    intent = adapter.prepare_intent(
+        previous=previous,
+        current_state=state,
+        executions=(_intended_execution(),),
+    )
+
+    assert isinstance(intent, LedgerAppendIntent)
+    assert len(intent.intent_sha256) == 64
+    assert intent.previous_state_payload_sha256 == state.payload_sha256
+    assert intent.production_writes is False
+    assert path.read_bytes() == original
+
+    second = _row(first["event_hash"], "execution-2", "exit")
+    _write(path, (first, second))
+    settled = adapter.prove_intent(intent=intent, current_state=state)
+
+    assert settled.executions == intent.executions
+    assert settled.proof.appended_execution_ids == ("execution-2",)
+    assert settled.current.total_rows == 2
+
+
+def test_preappend_intent_rejects_sequence_boundary_and_preparation_drift(tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    first = _row("", "execution-1", "entry")
+    _write(path, (first,))
+    adapter = CanonicalLedgerEvidenceAdapter(path)
+    state = _state(total_rows=1, epoch_rows=1)
+    previous = adapter.observe(epoch_id="stable-paper-v5-test")
+
+    with pytest.raises(CanonicalLedgerInvariantError, match="sequences"):
+        adapter.prepare_intent(
+            previous=previous,
+            current_state=state,
+            executions=(_intended_execution(sequence=3),),
+        )
+
+    second = _row(first["event_hash"], "execution-2", "exit")
+    _write(path, (first, second))
+    with pytest.raises(CanonicalLedgerInvariantError, match="changed before"):
+        adapter.prepare_intent(
+            previous=previous,
+            current_state=state,
+            executions=(_intended_execution(),),
+        )
+
+
+def test_preappend_intent_rejects_substituted_or_changed_append(tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    first = _row("", "execution-1", "entry")
+    _write(path, (first,))
+    adapter = CanonicalLedgerEvidenceAdapter(path)
+    state = _state(total_rows=1, epoch_rows=1)
+    previous = adapter.observe(epoch_id="stable-paper-v5-test")
+    intent = adapter.prepare_intent(
+        previous=previous,
+        current_state=state,
+        executions=(_intended_execution(),),
+    )
+
+    substituted = _row(first["event_hash"], "execution-other", "exit")
+    _write(path, (first, substituted))
+    with pytest.raises(CanonicalLedgerInvariantError, match="does not exactly match"):
+        adapter.prove_intent(intent=intent, current_state=state)
+
+    with pytest.raises(CanonicalLedgerInvariantError, match="StateStore changed"):
+        adapter.prove_intent(
+            intent=intent,
+            current_state=_state(total_rows=0, epoch_rows=0),
+        )
+
+
+def test_preappend_intent_projection_requires_exact_fulfillment(tmp_path):
+    path = tmp_path / "ledger.jsonl"
+    first = _row("", "execution-1", "entry")
+    _write(path, (first,))
+    adapter = CanonicalLedgerEvidenceAdapter(path)
+    state = _state(total_rows=1, epoch_rows=1)
+    previous = adapter.observe(epoch_id="stable-paper-v5-test")
+    intent = adapter.prepare_intent(
+        previous=previous,
+        current_state=state,
+        executions=(_intended_execution(event="entry", price=100.0),),
+    )
+    second = _row(first["event_hash"], "execution-2", "entry")
+    _write(path, (first, second))
+
+    result = adapter.prepare_intent_projection(
+        intent=intent,
+        current_state=state,
+        protected_marks=(
+            ProtectedMarkSnapshot(
+                symbol="SPY",
+                price=101.0,
+                source="protected-test-mark",
+                fresh=True,
+                plausible=True,
+                observed_at="2026-10-10 09:00:30 CDT",
+            ),
+        ),
+        risk_date="2026-10-10",
+        risk_limits=RiskLimits(
+            max_daily_loss_fraction=0.03,
+            max_intraday_drawdown_fraction=0.03,
+            hard_realized_loss_fraction=0.02,
+        ),
+        created_at="2026-10-10 09:01:00 CDT",
+    )
+
+    assert isinstance(result, LedgerProjectionObservation)
+    assert result.append.executions == intent.executions
+    assert result.transaction.ledger == result.append.proof
 
 
 def test_adapter_binds_observed_append_to_exact_projection(tmp_path):
