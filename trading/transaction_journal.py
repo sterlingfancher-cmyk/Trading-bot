@@ -20,11 +20,16 @@ import threading
 from types import MappingProxyType
 from typing import Any, Mapping, Tuple
 
-from trading.ledger import LedgerProjectionObservation
-from trading.state_store import CanonicalStateStore
+from trading.ledger import (
+    LedgerAppendIntent,
+    LedgerBoundary,
+    LedgerProjectionObservation,
+)
+from trading.state_store import CanonicalStateEnvelope, CanonicalStateStore
 from trading.transaction import CanonicalTransactionReceipt
 
 VERSION = "stable-paper-core-v3-transaction-journal-2026-10-14-v6"
+INTENT_JOURNAL_VERSION = "stable-paper-core-v3-append-intent-journal-2026-10-16-v1"
 AUTHORITY = "shadow_only"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PHASES = frozenset(
@@ -145,7 +150,10 @@ class TransactionJournalRecord:
             "next_ledger_sha256",
         ):
             object.__setattr__(self, name, _exact_sha(getattr(self, name), name))
-        if not str(self.created_at or "").strip() or not str(self.updated_at or "").strip():
+        if (
+            not str(self.created_at or "").strip()
+            or not str(self.updated_at or "").strip()
+        ):
             raise TransactionJournalInvariantError("journal timestamps are required")
         object.__setattr__(self, "transaction_id", transaction_id)
         object.__setattr__(self, "phase", phase)
@@ -238,6 +246,152 @@ class TransactionRecoveryReceipt:
             raise TransactionJournalInvariantError("recovery receipt exceeds shadow authority")
         _exact_sha(self.ledger_sha256, "ledger_sha256")
         _exact_sha(self.state_payload_sha256, "state_payload_sha256")
+
+
+@dataclass(frozen=True)
+class AppendIntentJournalRecord:
+    """Durable sandbox receipt for one pre-append identity contract."""
+
+    transaction_id: str
+    phase: str
+    intent_sha256: str
+    previous_state_sha256: str
+    previous_total_rows: int
+    previous_epoch_rows: int
+    previous_ledger_sha256: str
+    previous_terminal_event_hash: str
+    execution_ids: Tuple[str, ...]
+    created_at: str
+    updated_at: str
+    settled_ledger_sha256: str = ""
+    record_sha256: str = ""
+    authority: str = AUTHORITY
+    version: str = INTENT_JOURNAL_VERSION
+
+    def __post_init__(self) -> None:
+        transaction_id = str(self.transaction_id or "").strip()
+        if not transaction_id:
+            raise TransactionJournalInvariantError("transaction_id is required")
+        if self.phase not in {
+            "intent_prepared",
+            "append_bound",
+            "aborted_before_append",
+        }:
+            raise TransactionJournalInvariantError("unexpected append intent phase")
+        if self.authority != AUTHORITY or self.version != INTENT_JOURNAL_VERSION:
+            raise TransactionJournalInvariantError(
+                "append intent journal must remain shadow-only"
+            )
+        for name in ("previous_total_rows", "previous_epoch_rows"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise TransactionJournalInvariantError(
+                    f"{name} must be a non-negative integer"
+                )
+        if self.previous_epoch_rows > self.previous_total_rows:
+            raise TransactionJournalInvariantError(
+                "intent epoch rows cannot exceed total rows"
+            )
+        execution_ids = tuple(str(value or "").strip() for value in self.execution_ids)
+        if (
+            not execution_ids
+            or any(not value for value in execution_ids)
+            or len(execution_ids) != len(set(execution_ids))
+        ):
+            raise TransactionJournalInvariantError(
+                "append intent execution ids must be non-empty and unique"
+            )
+        for name in (
+            "intent_sha256",
+            "previous_state_sha256",
+            "previous_ledger_sha256",
+        ):
+            object.__setattr__(self, name, _exact_sha(getattr(self, name), name))
+        terminal_hash = str(self.previous_terminal_event_hash or "").lower().strip()
+        if self.previous_total_rows == 0:
+            if terminal_hash:
+                raise TransactionJournalInvariantError(
+                    "empty intent boundary cannot have a terminal event hash"
+                )
+        elif not _SHA256.fullmatch(terminal_hash):
+            raise TransactionJournalInvariantError(
+                "append intent boundary requires an exact terminal event hash"
+            )
+        settled = str(self.settled_ledger_sha256 or "").lower().strip()
+        if self.phase == "append_bound":
+            settled = _exact_sha(settled, "settled_ledger_sha256")
+            if settled == self.previous_ledger_sha256:
+                raise TransactionJournalInvariantError(
+                    "bound append must advance the ledger digest"
+                )
+        elif settled:
+            raise TransactionJournalInvariantError(
+                "only a bound append may carry a settled ledger digest"
+            )
+        if (
+            not str(self.created_at or "").strip()
+            or not str(self.updated_at or "").strip()
+        ):
+            raise TransactionJournalInvariantError(
+                "append intent journal timestamps are required"
+            )
+        object.__setattr__(self, "transaction_id", transaction_id)
+        object.__setattr__(self, "execution_ids", execution_ids)
+        object.__setattr__(self, "previous_terminal_event_hash", terminal_hash)
+        object.__setattr__(self, "settled_ledger_sha256", settled)
+        expected = self.digest()
+        supplied = str(self.record_sha256 or "").lower().strip()
+        if supplied and supplied != expected:
+            raise TransactionJournalInvariantError(
+                "append intent journal record digest mismatch"
+            )
+        object.__setattr__(self, "record_sha256", expected)
+
+    def unsigned_dict(self) -> dict[str, Any]:
+        return {
+            "transaction_id": self.transaction_id,
+            "phase": self.phase,
+            "intent_sha256": self.intent_sha256,
+            "previous_state_sha256": self.previous_state_sha256,
+            "previous_total_rows": self.previous_total_rows,
+            "previous_epoch_rows": self.previous_epoch_rows,
+            "previous_ledger_sha256": self.previous_ledger_sha256,
+            "previous_terminal_event_hash": self.previous_terminal_event_hash,
+            "execution_ids": list(self.execution_ids),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "settled_ledger_sha256": self.settled_ledger_sha256,
+            "authority": self.authority,
+            "version": self.version,
+        }
+
+    def digest(self) -> str:
+        return sha256(_canonical_bytes(self.unsigned_dict())).hexdigest()
+
+    def to_dict(self) -> Mapping[str, Any]:
+        return MappingProxyType(
+            {**self.unsigned_dict(), "record_sha256": self.record_sha256}
+        )
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, Any]) -> "AppendIntentJournalRecord":
+        return cls(
+            transaction_id=raw.get("transaction_id"),
+            phase=raw.get("phase"),
+            intent_sha256=raw.get("intent_sha256"),
+            previous_state_sha256=raw.get("previous_state_sha256"),
+            previous_total_rows=raw.get("previous_total_rows"),
+            previous_epoch_rows=raw.get("previous_epoch_rows"),
+            previous_ledger_sha256=raw.get("previous_ledger_sha256"),
+            previous_terminal_event_hash=raw.get("previous_terminal_event_hash"),
+            execution_ids=tuple(raw.get("execution_ids") or ()),
+            created_at=raw.get("created_at"),
+            updated_at=raw.get("updated_at"),
+            settled_ledger_sha256=raw.get("settled_ledger_sha256", ""),
+            record_sha256=raw.get("record_sha256", ""),
+            authority=raw.get("authority"),
+            version=raw.get("version"),
+        )
 
 
 class SandboxTransactionJournal:
@@ -662,5 +816,296 @@ class SandboxTransactionJournal:
                 "rewrites_canonical_ledger": False,
                 "interprocess_locking": True,
                 "version": VERSION,
+            }
+        )
+
+
+class SandboxAppendIntentJournal:
+    """Persist and settle a pre-append identity contract in sandbox only.
+
+    This journal is deliberately separate from the settled transaction journal
+    until an atomic handoff is reviewed.  It neither invokes the production
+    ledger writer nor commits StateStore.  Its only terminal outcomes are an
+    exact append binding or an exact pre-append abort.
+    """
+
+    authority = AUTHORITY
+    runtime_registered = False
+    production_write_enabled = False
+    places_orders = False
+    transaction_journal_handoff_ready = False
+
+    def __init__(self, path: Path | str, *, sandbox_io_enabled: bool = False):
+        self.path = Path(path)
+        self.lock_path = self.path.with_name(f".{self.path.name}.lock")
+        self.sandbox_io_enabled = bool(sandbox_io_enabled)
+        self._lock = threading.RLock()
+
+    def _assert_sandbox(self) -> None:
+        if not self.sandbox_io_enabled:
+            raise PermissionError("append intent journal requires explicit sandbox I/O")
+
+    @contextmanager
+    def _process_lock(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(self.lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        descriptor = os.open(str(path), os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def _write_locked(self, record: AppendIntentJournalRecord) -> None:
+        temporary = self.path.with_name(
+            f".{self.path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        try:
+            with temporary.open("wb") as handle:
+                handle.write(_canonical_bytes(record.to_dict()))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+            self._fsync_directory(self.path.parent)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _read_locked(self) -> AppendIntentJournalRecord:
+        raw = json.loads(self.path.read_text(encoding="utf-8"))
+        if not isinstance(raw, Mapping):
+            raise TransactionJournalInvariantError(
+                "append intent journal root must be an object"
+            )
+        return AppendIntentJournalRecord.from_dict(raw)
+
+    @staticmethod
+    def _record_for(
+        intent: LedgerAppendIntent,
+        *,
+        transaction_id: str,
+        phase: str,
+        created_at: str,
+        updated_at: str,
+        settled_ledger_sha256: str = "",
+    ) -> AppendIntentJournalRecord:
+        return AppendIntentJournalRecord(
+            transaction_id=transaction_id,
+            phase=phase,
+            intent_sha256=intent.intent_sha256,
+            previous_state_sha256=intent.previous_state_payload_sha256,
+            previous_total_rows=intent.previous.total_rows,
+            previous_epoch_rows=intent.previous.epoch_rows,
+            previous_ledger_sha256=intent.previous.ledger_sha256,
+            previous_terminal_event_hash=intent.previous.terminal_event_hash,
+            execution_ids=tuple(row.execution_id for row in intent.executions),
+            created_at=created_at,
+            updated_at=updated_at,
+            settled_ledger_sha256=settled_ledger_sha256,
+        )
+
+    @staticmethod
+    def _assert_bound(
+        record: AppendIntentJournalRecord,
+        intent: LedgerAppendIntent,
+    ) -> None:
+        expected = SandboxAppendIntentJournal._record_for(
+            intent,
+            transaction_id=record.transaction_id,
+            phase=record.phase,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            settled_ledger_sha256=record.settled_ledger_sha256,
+        )
+        if expected.unsigned_dict() != record.unsigned_dict():
+            raise TransactionJournalInvariantError(
+                "append intent journal is not bound to the supplied intent"
+            )
+
+    def _archive_terminal_locked(self, record: AppendIntentJournalRecord) -> Path:
+        if record.phase not in {"append_bound", "aborted_before_append"}:
+            raise TransactionJournalInvariantError(
+                "only a terminal append intent record can be archived"
+            )
+        archive = self.path.with_name(
+            f".{self.path.name}.{record.record_sha256}.terminal.json"
+        )
+        payload = _canonical_bytes(record.to_dict())
+        if archive.exists():
+            if archive.read_bytes() != payload:
+                raise TransactionJournalInvariantError(
+                    "append intent terminal archive is not immutable"
+                )
+            return archive
+        temporary = archive.with_name(
+            f".{archive.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        try:
+            with temporary.open("xb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            try:
+                os.link(temporary, archive)
+            except FileExistsError:
+                if archive.read_bytes() != payload:
+                    raise TransactionJournalInvariantError(
+                        "append intent terminal archive is not immutable"
+                    )
+            self._fsync_directory(archive.parent)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return archive
+
+    def begin(
+        self,
+        intent: LedgerAppendIntent,
+        *,
+        transaction_id: str,
+        recorded_at: str,
+    ) -> AppendIntentJournalRecord:
+        self._assert_sandbox()
+        if not isinstance(intent, LedgerAppendIntent):
+            raise TransactionJournalInvariantError(
+                "append intent journal requires a typed intent"
+            )
+        candidate = self._record_for(
+            intent,
+            transaction_id=transaction_id,
+            phase="intent_prepared",
+            created_at=recorded_at,
+            updated_at=recorded_at,
+        )
+        with self._lock, self._process_lock():
+            if self.path.exists():
+                current = self._read_locked()
+                if current.transaction_id == candidate.transaction_id:
+                    self._assert_bound(current, intent)
+                    return current
+                if current.phase == "intent_prepared":
+                    raise TransactionJournalInvariantError(
+                        "another append intent already owns the journal"
+                    )
+                self._archive_terminal_locked(current)
+            self._write_locked(candidate)
+            return self._read_locked()
+
+    def bind_projection(
+        self,
+        intent: LedgerAppendIntent,
+        projection: LedgerProjectionObservation,
+        *,
+        recorded_at: str,
+    ) -> AppendIntentJournalRecord:
+        """Persist exact fulfillment without committing StateStore."""
+        self._assert_sandbox()
+        if not isinstance(projection, LedgerProjectionObservation):
+            raise TransactionJournalInvariantError(
+                "intent settlement requires a typed ledger projection"
+            )
+        intent.bind(projection.append)
+        with self._lock, self._process_lock():
+            current = self._read_locked()
+            self._assert_bound(current, intent)
+            if current.phase == "aborted_before_append":
+                raise TransactionJournalInvariantError(
+                    "aborted append intent cannot bind a later append"
+                )
+            if current.phase == "append_bound":
+                if (
+                    current.settled_ledger_sha256
+                    != projection.append.current.ledger_sha256
+                ):
+                    raise TransactionJournalInvariantError(
+                        "bound append ledger digest changed"
+                    )
+                return current
+            settled = replace(
+                current,
+                phase="append_bound",
+                updated_at=recorded_at,
+                settled_ledger_sha256=projection.append.current.ledger_sha256,
+                record_sha256="",
+            )
+            self._write_locked(settled)
+            return self._read_locked()
+
+    def abort_before_append(
+        self,
+        intent: LedgerAppendIntent,
+        current_boundary: LedgerBoundary,
+        current_state: CanonicalStateEnvelope,
+        *,
+        recorded_at: str,
+    ) -> AppendIntentJournalRecord:
+        """Abort only while ledger and StateStore remain at the exact prior boundary."""
+        self._assert_sandbox()
+        if not isinstance(current_boundary, LedgerBoundary):
+            raise TransactionJournalInvariantError(
+                "intent abort requires a typed ledger boundary"
+            )
+        if not isinstance(current_state, CanonicalStateEnvelope):
+            raise TransactionJournalInvariantError(
+                "intent abort requires a canonical StateStore envelope"
+            )
+        if current_boundary != intent.previous:
+            raise TransactionJournalInvariantError(
+                "intent abort requires the exact previous ledger boundary"
+            )
+        if current_state.payload_sha256 != intent.previous_state_payload_sha256:
+            raise TransactionJournalInvariantError(
+                "intent abort requires the exact previous StateStore payload"
+            )
+        with self._lock, self._process_lock():
+            current = self._read_locked()
+            self._assert_bound(current, intent)
+            if current.phase == "append_bound":
+                raise TransactionJournalInvariantError(
+                    "bound append intent cannot be aborted"
+                )
+            if current.phase == "aborted_before_append":
+                return current
+            terminal = replace(
+                current,
+                phase="aborted_before_append",
+                updated_at=recorded_at,
+                record_sha256="",
+            )
+            self._write_locked(terminal)
+            return self._read_locked()
+
+    def read_sandbox(self) -> AppendIntentJournalRecord:
+        self._assert_sandbox()
+        with self._lock, self._process_lock():
+            return self._read_locked()
+
+    @classmethod
+    def descriptor(cls) -> Mapping[str, Any]:
+        return MappingProxyType(
+            {
+                "target_interface": (
+                    "trading.transaction_journal.SandboxAppendIntentJournal"
+                ),
+                "authority": cls.authority,
+                "runtime_registered": cls.runtime_registered,
+                "production_write_enabled": cls.production_write_enabled,
+                "places_orders": cls.places_orders,
+                "persists_preappend_intent": True,
+                "binds_exact_settled_projection": True,
+                "preappend_abort": "exact_boundary_only_without_state_mutation",
+                "terminal_rollover": "immutable_digest_archive_before_reuse",
+                "transaction_journal_handoff_ready": (
+                    cls.transaction_journal_handoff_ready
+                ),
+                "invokes_production_writer": False,
+                "commits_state_store": False,
+                "version": INTENT_JOURNAL_VERSION,
             }
         )
