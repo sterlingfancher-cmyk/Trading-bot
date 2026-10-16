@@ -1,56 +1,53 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-16 09:02 CDT
+Last updated: 2026-10-16 09:16 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `9e1290795b46f0902d128003155ebd26378fb70c` (PR #308 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `d424db053363dc05a5f56b3945cdfcdbb075853a` (PR #309 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-16 Issue #84 — durable pre-append intent journal — IN PROGRESS
+## 2026-10-16 Issue #84 — durable pre-append intent journal — ACCEPTED; HANDOFF NEXT
 
-PR #308 is fully settled on exact main
-`9e1290795b46f0902d128003155ebd26378fb70c`. Its exact PR head
-`8b283528bc54a219144fa444f453b747a198d140` passed Repository workflow
-`38748892756`, Architecture workflow `38748892761`, Change Safety workflow
-`38748892584` and Refactor/runtime workflow `38748893001`, including both
-exact Gunicorn smokes. The squash merge passed exact merge-head Repository
-workflow `38749283098`, Architecture workflow `38749283019`, Change Safety
-workflow `38749282878` and Refactor/runtime workflow `38749282902`; runtime
-job `116471707777` completed successfully. Acceptance artifact `11979344664`
-has independently verified ZIP SHA-256
-`c9e4af52967fc4b7498666a91a98bb54826b776d65d27ee29756405cef1592f6`,
+PR #309 was squash-merged as exact main
+`d424db053363dc05a5f56b3945cdfcdbb075853a`. Its exact PR head
+`8f5a68d20d7490177a99bc21e8eaf72f2fe32e37` passed Repository workflow
+`38912964748`, Architecture workflow `38912964772`, Change Safety workflow
+`38912965023` and Refactor/runtime workflow `38912964700`. Both required
+exact-head Gunicorn smokes passed. The merge head passed Repository workflow
+`38913329582`, Architecture workflow `38913329320`, Change Safety workflow
+`38913330056` and Refactor/runtime workflow `38913329220`. Runtime job
+`117014941259` completed successfully: exact-head Splendid deployment
+acceptance, the read-only capture, governed evidence build and artifact upload
+all passed. Acceptance artifact `12052105469` has independently verified ZIP
+SHA-256
+`89dba92b640fefbbda3dde28e338a7bf7b2ab0d3438ed4ca9334721ddf828ce5`,
 acceptance digest
-`c5dff4e318031415b7612dbedd6bc400ed07418365e02248dfd36c31c9b6b47e`
+`dd688437b025854f7646d7431afb8ceddac0baad5a40a7ad03a35ca72065ea32`
 and decision digest
-`b3a9d3ee130332e2b9b94b9b13dc26f8cea25336d17209014d7cb362e8a92e55`.
+`54863f7ecec955730cc464d5e6743fa9ec7a269c85a7ea21f86f20e09a3738b0`.
 
-The latest independent scheduled capture is workflow `38834961754`, runtime
-job `116761906488`, artifact `12018168934`, produced from that exact main on
-2026-10-15 at 20:24:49 CDT. Its downloaded ZIP SHA-256 is
-`76f36fbef8d78ba0c56d9b3a2d501142e99cba93636f9152683fc0a8d55551be`.
+The settled acceptance capture was generated on 2026-10-16 at 09:14:49 CDT.
 All 13 read-only surfaces are reachable; listener/application readiness,
 self-check, compact audit, accounting, canonical chain/projection, risk,
 runner, market data and sentinel pass. The account is flat at cash
-`13771.293025192768` / equity `13771.29`, with realized-today P/L `-0.56`.
-Risk is not halted. The canonical ledger is chain-valid and parity-clean at
-116 rows with digest
+`13771.293025192768` / equity `13771.29`, with realized-today P/L `0.0`.
+Risk is not halted and the fresh risk baseline is clean at the same equity.
+The canonical ledger is chain-valid and parity-clean at 116 rows with digest
 `ad1b56f81fa98efb98419d6695352c2129d2cb80cbb4cd747297e824dc3406d1`;
 the latest MRNA entry/exit lifecycle is terminal. Governed v5 remains
 active/pass. Performance V1 remains running at 1200 rows; V2 and ablation
 remain not-run, and forward shadow remains ineligible, so Issue #202 /
 `hold_10d` stay frozen. The standard capture again omitted the X-Ray endpoint.
 It cannot establish whole-session X-Ray coverage or the cause of an all-day
-no-entry session; that investigation remains inconclusive. A direct browser
-read of Splendid was blocked by `net::ERR_BLOCKED_BY_CLIENT`, so the successful
-independent workflow artifact is the current fresh observational source.
+no-entry session; that investigation remains inconclusive.
 
-The active branch is `fix/issue84-intent-journal-20261016` from exact main.
-It adds a separate sandbox-only `SandboxAppendIntentJournal` for the typed
+The accepted change adds a separate sandbox-only
+`SandboxAppendIntentJournal` for the typed
 `LedgerAppendIntent` introduced by PR #308. The journal durably records the
 pre-append identity contract before any append, binds only the exact settled
 `LedgerProjectionObservation`, permits an abort only while both the immutable
@@ -68,17 +65,16 @@ change risk/strategy behavior, clear a halt or grant live/AI authority. Its
 descriptor reports `transaction_journal_handoff_ready=false`,
 `invokes_production_writer=false` and `commits_state_store=false`. Focused
 atomic-journal, ledger-adapter and single-owner regressions pass 49/49;
-compile and whitespace checks pass locally. Exact-diff review, impact-aware
-validation, mandatory exact-head workflows, both Gunicorn smokes, review,
-merge and settled Splendid acceptance remain pending.
+the impact-aware audit passed 99 canonical invariants plus the 49 focused
+tests. Exact-diff review, every mandatory exact-head and merge-head gate, both
+Gunicorn smokes, review, merge and settled Splendid acceptance are complete.
 
-Next executable step: publish this exact branch as the sole Issue #84 repair
-path, open its PR and run every mandatory exact-head gate. If all gates pass,
-merge and require merge-head gates plus settled read-only Splendid acceptance.
-The subsequent bounded seam is an explicit atomic handoff from this durable
-intent journal through the production append into the settled transaction
-journal; do not claim write-ahead completeness or activate the writer before
-that separately reviewed transition exists.
+Next executable step: implement the subsequent bounded seam on a fresh branch
+from exact current main—an explicit atomic handoff from this durable intent
+journal through the production append into the settled transaction journal.
+Require focused crash-window, duplicate, restart and concurrency regressions;
+do not claim write-ahead completeness or activate the writer before that
+separately reviewed transition exists.
 
 ## 2026-10-15 Issue #84 — settled projection recovery; pre-append intent — IN PROGRESS
 
