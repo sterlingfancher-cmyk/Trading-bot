@@ -7,6 +7,7 @@ import pytest
 
 from trading.accounting import ExecutionSnapshot
 from trading.ledger import (
+    LedgerAppendIntent,
     LedgerAppendObservation,
     LedgerBoundary,
     LedgerProjectionObservation,
@@ -22,6 +23,7 @@ from trading.state_store import CanonicalStateStore
 from trading.transaction import LedgerAppendProof, SingleOwnerProjectionTransaction
 from trading.transaction_journal import (
     ObservedLedgerState,
+    SandboxAppendIntentJournal,
     SandboxTransactionJournal,
     TransactionJournalInvariantError,
 )
@@ -199,6 +201,17 @@ def _projection():
         proof=receipt.ledger,
     )
     return LedgerProjectionObservation(append=append, transaction=receipt)
+
+
+def _intent():
+    projection = _projection()
+    return LedgerAppendIntent(
+        previous=projection.append.previous,
+        previous_state_payload_sha256=(
+            projection.transaction.ledger.previous_state_payload_sha256
+        ),
+        executions=projection.append.executions,
+    )
 
 
 def _sandbox(tmp_path):
@@ -771,4 +784,269 @@ def test_journal_has_no_runtime_or_order_authority(tmp_path):
             _receipt(),
             transaction_id="transaction-89",
             recorded_at="2026-10-01 08:01:01 CDT",
+        )
+
+
+def test_append_intent_journal_persists_and_binds_exact_projection(tmp_path):
+    path = tmp_path / "append-intent-journal.json"
+    journal = SandboxAppendIntentJournal(path, sandbox_io_enabled=True)
+    intent = _intent()
+
+    prepared = journal.begin(
+        intent,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:00:59 CDT",
+    )
+    prepared_bytes = path.read_bytes()
+
+    assert prepared.phase == "intent_prepared"
+    assert prepared.intent_sha256 == intent.intent_sha256
+    assert prepared.execution_ids == ("execution-89",)
+    assert prepared.settled_ledger_sha256 == ""
+    assert SandboxAppendIntentJournal(
+        path, sandbox_io_enabled=True
+    ).begin(
+        intent,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:00:59 CDT",
+    ) == prepared
+    assert path.read_bytes() == prepared_bytes
+
+    settled = journal.bind_projection(
+        intent,
+        _projection(),
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+
+    assert settled.phase == "append_bound"
+    assert settled.settled_ledger_sha256 == "b" * 64
+    assert path.read_bytes() != prepared_bytes
+    assert SandboxAppendIntentJournal(
+        path, sandbox_io_enabled=True
+    ).bind_projection(
+        intent,
+        _projection(),
+        recorded_at="2026-10-01 08:01:04 CDT",
+    ) == settled
+
+
+def test_append_intent_journal_aborts_only_at_exact_previous_boundary(tmp_path):
+    path = tmp_path / "append-intent-journal.json"
+    journal = SandboxAppendIntentJournal(path, sandbox_io_enabled=True)
+    intent = _intent()
+    current = _current()
+    journal.begin(
+        intent,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:00:59 CDT",
+    )
+
+    with pytest.raises(TransactionJournalInvariantError, match="ledger boundary"):
+        journal.abort_before_append(
+            intent,
+            _projection().append.current,
+            current,
+            recorded_at="2026-10-01 08:01:00 CDT",
+        )
+    with pytest.raises(TransactionJournalInvariantError, match="StateStore payload"):
+        journal.abort_before_append(
+            intent,
+            intent.previous,
+            _receipt().next_envelope,
+            recorded_at="2026-10-01 08:01:00 CDT",
+        )
+
+    baseline = current.to_dict()
+    aborted = journal.abort_before_append(
+        intent,
+        intent.previous,
+        current,
+        recorded_at="2026-10-01 08:01:00 CDT",
+    )
+
+    assert aborted.phase == "aborted_before_append"
+    assert current.to_dict() == baseline
+    assert journal.abort_before_append(
+        intent,
+        intent.previous,
+        current,
+        recorded_at="2026-10-01 08:01:01 CDT",
+    ) == aborted
+    with pytest.raises(TransactionJournalInvariantError, match="cannot bind"):
+        journal.bind_projection(
+            intent,
+            _projection(),
+            recorded_at="2026-10-01 08:01:02 CDT",
+        )
+
+
+def test_append_intent_journal_rejects_identity_substitution_and_active_owner(
+    tmp_path,
+):
+    path = tmp_path / "append-intent-journal.json"
+    journal = SandboxAppendIntentJournal(path, sandbox_io_enabled=True)
+    intent = _intent()
+    journal.begin(
+        intent,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:00:59 CDT",
+    )
+    other = LedgerAppendIntent(
+        previous=intent.previous,
+        previous_state_payload_sha256=intent.previous_state_payload_sha256,
+        executions=(
+            ExecutionSnapshot(
+                sequence=89,
+                symbol="QQQ",
+                event="entry",
+                side="long",
+                quantity=1.0,
+                price=100.0,
+                timestamp="2026-10-01 08:01:00 CDT",
+                execution_id="execution-other",
+            ),
+        ),
+    )
+
+    with pytest.raises(TransactionJournalInvariantError, match="not bound"):
+        journal.begin(
+            other,
+            transaction_id="transaction-89",
+            recorded_at="2026-10-01 08:00:59 CDT",
+        )
+    with pytest.raises(TransactionJournalInvariantError, match="already owns"):
+        journal.begin(
+            other,
+            transaction_id="transaction-other",
+            recorded_at="2026-10-01 08:00:59 CDT",
+        )
+
+
+def test_append_intent_terminal_rollover_archives_immutable_receipt(tmp_path):
+    path = tmp_path / "append-intent-journal.json"
+    journal = SandboxAppendIntentJournal(path, sandbox_io_enabled=True)
+    first = _intent()
+    journal.begin(
+        first,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:00:59 CDT",
+    )
+    terminal = journal.bind_projection(
+        first,
+        _projection(),
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+    terminal_bytes = path.read_bytes()
+    other = LedgerAppendIntent(
+        previous=LedgerBoundary(
+            epoch_id="stable-paper-v5-test",
+            total_rows=89,
+            epoch_rows=1,
+            ledger_sha256="b" * 64,
+            terminal_event_hash="d" * 64,
+        ),
+        previous_state_payload_sha256=_receipt().next_envelope.payload_sha256,
+        executions=(
+            ExecutionSnapshot(
+                sequence=90,
+                symbol="SPY",
+                event="exit",
+                side="long",
+                quantity=1.0,
+                price=102.0,
+                timestamp="2026-10-01 08:02:00 CDT",
+                execution_id="execution-90",
+            ),
+        ),
+    )
+
+    active = journal.begin(
+        other,
+        transaction_id="transaction-90",
+        recorded_at="2026-10-01 08:02:01 CDT",
+    )
+
+    archives = list(tmp_path.glob(".append-intent-journal.json.*.terminal.json"))
+    assert active.phase == "intent_prepared"
+    assert active.transaction_id == "transaction-90"
+    assert len(archives) == 1
+    assert archives[0].name == (
+        f".append-intent-journal.json.{terminal.record_sha256}.terminal.json"
+    )
+    assert archives[0].read_bytes() == terminal_bytes
+
+
+def test_append_intent_bind_and_abort_are_process_serialized(tmp_path):
+    path = tmp_path / "append-intent-journal.json"
+    journal = SandboxAppendIntentJournal(path, sandbox_io_enabled=True)
+    intent = _intent()
+    journal.begin(
+        intent,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:00:59 CDT",
+    )
+
+    def bind_or_abort(action):
+        peer = SandboxAppendIntentJournal(path, sandbox_io_enabled=True)
+        try:
+            if action == "bind":
+                return peer.bind_projection(
+                    intent,
+                    _projection(),
+                    recorded_at="2026-10-01 08:01:03 CDT",
+                ).phase
+            return peer.abort_before_append(
+                intent,
+                intent.previous,
+                _current(),
+                recorded_at="2026-10-01 08:01:03 CDT",
+            ).phase
+        except TransactionJournalInvariantError:
+            return "rejected"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(bind_or_abort, ("bind", "abort")))
+
+    assert outcomes.count("rejected") == 1
+    assert journal.read_sandbox().phase in {
+        "append_bound",
+        "aborted_before_append",
+    }
+
+
+def test_append_intent_journal_rejects_record_tampering(tmp_path):
+    path = tmp_path / "append-intent-journal.json"
+    journal = SandboxAppendIntentJournal(path, sandbox_io_enabled=True)
+    journal.begin(
+        _intent(),
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:00:59 CDT",
+    )
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["previous_total_rows"] = 87
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(TransactionJournalInvariantError, match="digest mismatch"):
+        journal.read_sandbox()
+
+
+def test_append_intent_journal_declares_incomplete_handoff_and_no_authority(
+    tmp_path,
+):
+    descriptor = SandboxAppendIntentJournal.descriptor()
+    assert descriptor["authority"] == "shadow_only"
+    assert descriptor["runtime_registered"] is False
+    assert descriptor["production_write_enabled"] is False
+    assert descriptor["places_orders"] is False
+    assert descriptor["persists_preappend_intent"] is True
+    assert descriptor["binds_exact_settled_projection"] is True
+    assert descriptor["transaction_journal_handoff_ready"] is False
+    assert descriptor["invokes_production_writer"] is False
+    assert descriptor["commits_state_store"] is False
+
+    with pytest.raises(PermissionError):
+        SandboxAppendIntentJournal(tmp_path / "intent.json").begin(
+            _intent(),
+            transaction_id="transaction-89",
+            recorded_at="2026-10-01 08:00:59 CDT",
         )
