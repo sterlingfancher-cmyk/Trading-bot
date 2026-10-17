@@ -30,6 +30,7 @@ from trading.transaction import CanonicalTransactionReceipt
 
 VERSION = "stable-paper-core-v3-transaction-journal-2026-10-14-v6"
 INTENT_JOURNAL_VERSION = "stable-paper-core-v3-append-intent-journal-2026-10-16-v1"
+HANDOFF_VERSION = "stable-paper-core-v3-journal-handoff-2026-10-17-v1"
 AUTHORITY = "shadow_only"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _PHASES = frozenset(
@@ -391,6 +392,83 @@ class AppendIntentJournalRecord:
             record_sha256=raw.get("record_sha256", ""),
             authority=raw.get("authority"),
             version=raw.get("version"),
+        )
+
+
+@dataclass(frozen=True)
+class TransactionJournalHandoffReceipt:
+    """Digest-bound proof that one intent reached the settled journal."""
+
+    transaction_id: str
+    intent_sha256: str
+    intent_record_sha256: str
+    transaction_record_sha256: str
+    settled_ledger_sha256: str
+    execution_ids: Tuple[str, ...]
+    recorded_at: str
+    receipt_sha256: str = ""
+    authority: str = AUTHORITY
+    version: str = HANDOFF_VERSION
+
+    def __post_init__(self) -> None:
+        transaction_id = str(self.transaction_id or "").strip()
+        if not transaction_id:
+            raise TransactionJournalInvariantError(
+                "handoff transaction_id is required"
+            )
+        if self.authority != AUTHORITY or self.version != HANDOFF_VERSION:
+            raise TransactionJournalInvariantError(
+                "journal handoff must remain shadow-only"
+            )
+        for name in (
+            "intent_sha256",
+            "intent_record_sha256",
+            "transaction_record_sha256",
+            "settled_ledger_sha256",
+        ):
+            object.__setattr__(self, name, _exact_sha(getattr(self, name), name))
+        execution_ids = tuple(str(value or "").strip() for value in self.execution_ids)
+        if (
+            not execution_ids
+            or any(not value for value in execution_ids)
+            or len(execution_ids) != len(set(execution_ids))
+        ):
+            raise TransactionJournalInvariantError(
+                "journal handoff execution ids must be non-empty and unique"
+            )
+        if not str(self.recorded_at or "").strip():
+            raise TransactionJournalInvariantError(
+                "journal handoff timestamp is required"
+            )
+        object.__setattr__(self, "transaction_id", transaction_id)
+        object.__setattr__(self, "execution_ids", execution_ids)
+        expected = self.digest()
+        supplied = str(self.receipt_sha256 or "").lower().strip()
+        if supplied and supplied != expected:
+            raise TransactionJournalInvariantError(
+                "journal handoff receipt digest mismatch"
+            )
+        object.__setattr__(self, "receipt_sha256", expected)
+
+    def unsigned_dict(self) -> dict[str, Any]:
+        return {
+            "transaction_id": self.transaction_id,
+            "intent_sha256": self.intent_sha256,
+            "intent_record_sha256": self.intent_record_sha256,
+            "transaction_record_sha256": self.transaction_record_sha256,
+            "settled_ledger_sha256": self.settled_ledger_sha256,
+            "execution_ids": list(self.execution_ids),
+            "recorded_at": self.recorded_at,
+            "authority": self.authority,
+            "version": self.version,
+        }
+
+    def digest(self) -> str:
+        return sha256(_canonical_bytes(self.unsigned_dict())).hexdigest()
+
+    def to_dict(self) -> Mapping[str, Any]:
+        return MappingProxyType(
+            {**self.unsigned_dict(), "receipt_sha256": self.receipt_sha256}
         )
 
 
@@ -833,7 +911,7 @@ class SandboxAppendIntentJournal:
     runtime_registered = False
     production_write_enabled = False
     places_orders = False
-    transaction_journal_handoff_ready = False
+    transaction_journal_handoff_ready = True
 
     def __init__(self, path: Path | str, *, sandbox_io_enabled: bool = False):
         self.path = Path(path)
@@ -849,6 +927,30 @@ class SandboxAppendIntentJournal:
     def _process_lock(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(self.lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+    @contextmanager
+    def _handoff_process_lock(self, journal: SandboxTransactionJournal):
+        intent_parent = self.path.parent.resolve()
+        transaction_parent = journal.path.parent.resolve()
+        if intent_parent != transaction_parent:
+            raise TransactionJournalInvariantError(
+                "journal handoff requires one sandbox persistence directory"
+            )
+        if self.path.resolve() == journal.path.resolve():
+            raise TransactionJournalInvariantError(
+                "intent and transaction journals require distinct paths"
+            )
+        lock_path = intent_parent / (
+            f".{self.path.name}.{journal.path.name}.handoff.lock"
+        )
+        intent_parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX)
             yield
@@ -1081,6 +1183,90 @@ class SandboxAppendIntentJournal:
             self._write_locked(terminal)
             return self._read_locked()
 
+    def handoff_projection(
+        self,
+        intent: LedgerAppendIntent,
+        projection: LedgerProjectionObservation,
+        transaction_journal: SandboxTransactionJournal,
+        *,
+        transaction_id: str,
+        recorded_at: str,
+    ) -> TransactionJournalHandoffReceipt:
+        """Recoverably hand an exact settled append to the transaction journal.
+
+        The caller must already hold exact post-append projection evidence.
+        This method does not invoke the ledger writer or commit StateStore.
+        Each durable step is idempotent, so retry closes crashes after intent
+        binding, transaction preparation, or transaction settlement.
+        """
+        self._assert_sandbox()
+        if not isinstance(transaction_journal, SandboxTransactionJournal):
+            raise TransactionJournalInvariantError(
+                "handoff requires a sandbox transaction journal"
+            )
+        if not transaction_journal.sandbox_io_enabled:
+            raise PermissionError(
+                "handoff requires explicit sandbox transaction-journal I/O"
+            )
+        normalized_id = str(transaction_id or "").strip()
+        if not normalized_id:
+            raise TransactionJournalInvariantError(
+                "handoff transaction_id is required"
+            )
+        if not isinstance(projection, LedgerProjectionObservation):
+            raise TransactionJournalInvariantError(
+                "handoff requires a typed ledger projection"
+            )
+        intent.bind(projection.append)
+
+        with self._handoff_process_lock(transaction_journal):
+            prepared_intent = self.read_sandbox()
+            self._assert_bound(prepared_intent, intent)
+            if prepared_intent.transaction_id != normalized_id:
+                raise TransactionJournalInvariantError(
+                    "handoff transaction identity changed"
+                )
+            if prepared_intent.phase == "aborted_before_append":
+                raise TransactionJournalInvariantError(
+                    "aborted append intent cannot be handed off"
+                )
+
+            bound_intent = self.bind_projection(
+                intent,
+                projection,
+                recorded_at=recorded_at,
+            )
+            transaction_journal.begin(
+                projection.transaction,
+                transaction_id=normalized_id,
+                recorded_at=recorded_at,
+            )
+            settled_transaction = transaction_journal.settle_projection(
+                projection,
+                recorded_at=recorded_at,
+            )
+            if settled_transaction.phase != "ledger_settled":
+                raise TransactionJournalInvariantError(
+                    "handoff did not reach the settled transaction phase"
+                )
+            if (
+                bound_intent.execution_ids != settled_transaction.execution_ids
+                or bound_intent.settled_ledger_sha256
+                != settled_transaction.next_ledger_sha256
+            ):
+                raise TransactionJournalInvariantError(
+                    "handoff journals disagree on the settled append"
+                )
+            return TransactionJournalHandoffReceipt(
+                transaction_id=normalized_id,
+                intent_sha256=intent.intent_sha256,
+                intent_record_sha256=bound_intent.record_sha256,
+                transaction_record_sha256=settled_transaction.record_sha256,
+                settled_ledger_sha256=bound_intent.settled_ledger_sha256,
+                execution_ids=bound_intent.execution_ids,
+                recorded_at=settled_transaction.updated_at,
+            )
+
     def read_sandbox(self) -> AppendIntentJournalRecord:
         self._assert_sandbox()
         with self._lock, self._process_lock():
@@ -1104,6 +1290,7 @@ class SandboxAppendIntentJournal:
                 "transaction_journal_handoff_ready": (
                     cls.transaction_journal_handoff_ready
                 ),
+                "handoff_recovery": "idempotent_stepwise_retry",
                 "invokes_production_writer": False,
                 "commits_state_store": False,
                 "version": INTENT_JOURNAL_VERSION,

@@ -7,6 +7,7 @@ import pytest
 
 from trading.accounting import ExecutionSnapshot
 from trading.ledger import (
+    CanonicalLedgerInvariantError,
     LedgerAppendIntent,
     LedgerAppendObservation,
     LedgerBoundary,
@@ -1030,7 +1031,7 @@ def test_append_intent_journal_rejects_record_tampering(tmp_path):
         journal.read_sandbox()
 
 
-def test_append_intent_journal_declares_incomplete_handoff_and_no_authority(
+def test_append_intent_journal_declares_recoverable_handoff_and_no_authority(
     tmp_path,
 ):
     descriptor = SandboxAppendIntentJournal.descriptor()
@@ -1040,7 +1041,8 @@ def test_append_intent_journal_declares_incomplete_handoff_and_no_authority(
     assert descriptor["places_orders"] is False
     assert descriptor["persists_preappend_intent"] is True
     assert descriptor["binds_exact_settled_projection"] is True
-    assert descriptor["transaction_journal_handoff_ready"] is False
+    assert descriptor["transaction_journal_handoff_ready"] is True
+    assert descriptor["handoff_recovery"] == "idempotent_stepwise_retry"
     assert descriptor["invokes_production_writer"] is False
     assert descriptor["commits_state_store"] is False
 
@@ -1050,3 +1052,231 @@ def test_append_intent_journal_declares_incomplete_handoff_and_no_authority(
             transaction_id="transaction-89",
             recorded_at="2026-10-01 08:00:59 CDT",
         )
+
+
+def _handoff_journals(tmp_path):
+    intent_journal = SandboxAppendIntentJournal(
+        tmp_path / "append-intent-journal.json",
+        sandbox_io_enabled=True,
+    )
+    transaction_journal = SandboxTransactionJournal(
+        tmp_path / "transaction-journal.json",
+        sandbox_io_enabled=True,
+    )
+    intent_journal.begin(
+        _intent(),
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:00:59 CDT",
+    )
+    return intent_journal, transaction_journal
+
+
+def test_append_intent_handoff_settles_both_journals_idempotently(tmp_path):
+    intent_journal, transaction_journal = _handoff_journals(tmp_path)
+
+    receipt = intent_journal.handoff_projection(
+        _intent(),
+        _projection(),
+        transaction_journal,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:03 CDT",
+    )
+    intent_bytes = intent_journal.path.read_bytes()
+    transaction_bytes = transaction_journal.path.read_bytes()
+
+    assert intent_journal.read_sandbox().phase == "append_bound"
+    assert transaction_journal.read_sandbox().phase == "ledger_settled"
+    assert receipt.transaction_id == "transaction-89"
+    assert receipt.intent_sha256 == _intent().intent_sha256
+    assert receipt.settled_ledger_sha256 == "b" * 64
+    assert receipt.execution_ids == ("execution-89",)
+    assert receipt.receipt_sha256 == receipt.digest()
+
+    restarted = SandboxAppendIntentJournal(
+        intent_journal.path,
+        sandbox_io_enabled=True,
+    ).handoff_projection(
+        _intent(),
+        _projection(),
+        SandboxTransactionJournal(
+            transaction_journal.path,
+            sandbox_io_enabled=True,
+        ),
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:05:00 CDT",
+    )
+
+    assert restarted == receipt
+    assert intent_journal.path.read_bytes() == intent_bytes
+    assert transaction_journal.path.read_bytes() == transaction_bytes
+
+
+def test_append_intent_handoff_recovers_crash_after_intent_binding(
+    tmp_path, monkeypatch
+):
+    intent_journal, transaction_journal = _handoff_journals(tmp_path)
+    original_begin = transaction_journal.begin
+
+    def fail_begin(*args, **kwargs):
+        raise RuntimeError("simulated crash before transaction prepare")
+
+    monkeypatch.setattr(transaction_journal, "begin", fail_begin)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        intent_journal.handoff_projection(
+            _intent(),
+            _projection(),
+            transaction_journal,
+            transaction_id="transaction-89",
+            recorded_at="2026-10-01 08:01:03 CDT",
+        )
+
+    assert intent_journal.read_sandbox().phase == "append_bound"
+    assert not transaction_journal.path.exists()
+
+    monkeypatch.setattr(transaction_journal, "begin", original_begin)
+    recovered = intent_journal.handoff_projection(
+        _intent(),
+        _projection(),
+        transaction_journal,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:04 CDT",
+    )
+    assert recovered.transaction_id == "transaction-89"
+    assert transaction_journal.read_sandbox().phase == "ledger_settled"
+
+
+def test_append_intent_handoff_recovers_crash_after_transaction_prepare(
+    tmp_path, monkeypatch
+):
+    intent_journal, transaction_journal = _handoff_journals(tmp_path)
+    original_settle = transaction_journal.settle_projection
+
+    def fail_settle(*args, **kwargs):
+        raise RuntimeError("simulated crash before transaction settlement")
+
+    monkeypatch.setattr(transaction_journal, "settle_projection", fail_settle)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        intent_journal.handoff_projection(
+            _intent(),
+            _projection(),
+            transaction_journal,
+            transaction_id="transaction-89",
+            recorded_at="2026-10-01 08:01:03 CDT",
+        )
+
+    assert intent_journal.read_sandbox().phase == "append_bound"
+    assert transaction_journal.read_sandbox().phase == "prepared"
+
+    monkeypatch.setattr(transaction_journal, "settle_projection", original_settle)
+    recovered = intent_journal.handoff_projection(
+        _intent(),
+        _projection(),
+        transaction_journal,
+        transaction_id="transaction-89",
+        recorded_at="2026-10-01 08:01:04 CDT",
+    )
+    assert recovered.transaction_id == "transaction-89"
+    assert transaction_journal.read_sandbox().phase == "ledger_settled"
+
+
+def test_append_intent_handoff_rejects_identity_and_projection_substitution(
+    tmp_path,
+):
+    intent_journal, transaction_journal = _handoff_journals(tmp_path)
+
+    with pytest.raises(TransactionJournalInvariantError, match="identity changed"):
+        intent_journal.handoff_projection(
+            _intent(),
+            _projection(),
+            transaction_journal,
+            transaction_id="transaction-other",
+            recorded_at="2026-10-01 08:01:03 CDT",
+        )
+    assert intent_journal.read_sandbox().phase == "intent_prepared"
+    assert not transaction_journal.path.exists()
+
+    substituted = LedgerAppendIntent(
+        previous=_intent().previous,
+        previous_state_payload_sha256=_intent().previous_state_payload_sha256,
+        executions=(
+            ExecutionSnapshot(
+                sequence=89,
+                symbol="QQQ",
+                event="entry",
+                side="long",
+                quantity=1.0,
+                price=100.0,
+                timestamp="2026-10-01 08:01:00 CDT",
+                execution_id="execution-other",
+            ),
+        ),
+    )
+    with pytest.raises(CanonicalLedgerInvariantError):
+        intent_journal.handoff_projection(
+            substituted,
+            _projection(),
+            transaction_journal,
+            transaction_id="transaction-89",
+            recorded_at="2026-10-01 08:01:03 CDT",
+        )
+    assert intent_journal.read_sandbox().phase == "intent_prepared"
+    assert not transaction_journal.path.exists()
+
+
+def test_append_intent_handoff_rejects_unsafe_journal_layout(tmp_path):
+    intent_journal, _ = _handoff_journals(tmp_path)
+
+    with pytest.raises(
+        TransactionJournalInvariantError,
+        match="one sandbox persistence directory",
+    ):
+        intent_journal.handoff_projection(
+            _intent(),
+            _projection(),
+            SandboxTransactionJournal(
+                tmp_path / "other" / "transaction-journal.json",
+                sandbox_io_enabled=True,
+            ),
+            transaction_id="transaction-89",
+            recorded_at="2026-10-01 08:01:03 CDT",
+        )
+
+    with pytest.raises(TransactionJournalInvariantError, match="distinct paths"):
+        intent_journal.handoff_projection(
+            _intent(),
+            _projection(),
+            SandboxTransactionJournal(
+                intent_journal.path,
+                sandbox_io_enabled=True,
+            ),
+            transaction_id="transaction-89",
+            recorded_at="2026-10-01 08:01:03 CDT",
+        )
+
+    assert intent_journal.read_sandbox().phase == "intent_prepared"
+
+
+def test_append_intent_handoff_serializes_duplicate_recovery(tmp_path):
+    intent_journal, transaction_journal = _handoff_journals(tmp_path)
+
+    def handoff(_):
+        return SandboxAppendIntentJournal(
+            intent_journal.path,
+            sandbox_io_enabled=True,
+        ).handoff_projection(
+            _intent(),
+            _projection(),
+            SandboxTransactionJournal(
+                transaction_journal.path,
+                sandbox_io_enabled=True,
+            ),
+            transaction_id="transaction-89",
+            recorded_at="2026-10-01 08:01:03 CDT",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        receipts = list(pool.map(handoff, range(2)))
+
+    assert receipts[0] == receipts[1]
+    assert intent_journal.read_sandbox().phase == "append_bound"
+    assert transaction_journal.read_sandbox().phase == "ledger_settled"
