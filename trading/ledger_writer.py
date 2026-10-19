@@ -1,3 +1,4 @@
+"""Sandbox-only exact-intent writer seam for Issue #84.
 
 The production canonical ledger remains owned by ``canonical_execution_ledger``.
 This module proves that a durable pre-append intent can drive an exact,
@@ -254,4 +255,3 @@ class SandboxLedgerIntentWriter:
                 "version": VERSION,
             }
         )
-
