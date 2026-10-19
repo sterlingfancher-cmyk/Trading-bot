@@ -1,23 +1,95 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-17 09:00 CDT
+Last updated: 2026-10-19 09:31 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `d424db053363dc05a5f56b3945cdfcdbb075853a` (PR #309 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `3d4b478c290a5b10cda2e93aba8b7abea3b7eea9` (PR #310 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-17 Issue #84 — recoverable intent-to-transaction handoff — IN PROGRESS
+## 2026-10-19 Issue #84 — durable-intent sandbox writer — IN PROGRESS
 
-Exact runtime-code main remains
-`d424db053363dc05a5f56b3945cdfcdbb075853a`; PR #309 remains fully accepted
-and there is no competing active repair PR. Fresh scheduled workflow
+Exact main remains `3d4b478c290a5b10cda2e93aba8b7abea3b7eea9`; no competing
+repair PR is open. The saved PR #310 runtime job `117415182117` completed
+successfully. Artifact `12103532158` is bound to exact main and its connector
+digest independently matches the downloaded ZIP SHA-256
+`9acdf00c50477b80ae9d8941342c67df67d4bd5745f1ba4e9f890cf4099cd2cd`.
+The 2026-10-17 09:09:49 CDT settled snapshot is PASS with 13/13 reachable,
+sentinel quiet on exact main, self-check/audit/accounting/chain/parity/risk,
+runner and market data passing. The account is flat at cash
+`13047.46948294168` / equity `13047.47`; the fresh risk day is not halted.
+The immutable ledger remains chain-valid and parity-clean at 118 rows, digest
+`0c521518fabcbd90745d8a61f78aec8a2ba2e7f3c9d1523f7843dd076047998b`.
+Governed v5 is active/pass. V1 remains running at 1200 rows; V2 and ablation
+remain not-run; forward shadow remains ineligible; Issue #202 / `hold_10d`
+remain frozen. Standard capture still omits X-Ray, so whole-session no-entry
+attribution remains inconclusive. Scheduled workflow `39143055675` passed on
+exact main on 2026-10-18, including its Gunicorn smoke, but its runtime snapshot
+job was skipped; it provides no newer runtime observation and no duplicate
+capture was launched.
+
+The active branch is `fix/issue84-durable-intent-writer-20261019`. It adds a
+separate `SandboxLedgerIntentWriter` that requires explicit sandbox I/O, the
+typed `LedgerAppendIntent`, its exact digest-valid
+`AppendIntentJournalRecord`, and the unchanged prior StateStore envelope. The
+writer verifies the full existing chain and exact prior boundary, fixes every
+row identity and hash from the durable intent, appends only the missing suffix
+under an interprocess lock, fsyncs each row and directory, and deterministically
+recovers a crash after any partial multi-row append. An already-complete retry
+is byte-idempotent. Substituted records, StateStore drift, prefix/boundary drift,
+precision drift, extra rows and any non-exact partial row fail closed before a
+new mutation.
+
+The focused proof now covers exact identity, restart idempotence, partial-append
+recovery, substitution and divergent-prefix rejection, duplicate concurrent
+callers, sandbox authority, and the full durable-intent → append → projection →
+settled-journal handoff. Ledger-adapter, atomic-journal and single-owner tests
+pass 63/63 locally. This remains a bounded shadow seam: it is not runtime
+registered, cannot target production without explicit sandbox enablement, does
+not call the production writer, commit StateStore, place orders, clear risk,
+or change strategy/live/AI authority. PR #311 is the sole active repair path.
+Its first exact head `f9b92b92093d02283b3b5af765e594c1216c5375`
+failed architecture run `39267264575`, job `118109993615`: artifact
+`12194031586` proved that the new writer's nine-line process-lock body
+duplicated the transaction-journal implementation, adding exactly one
+duplicate-function group and one informational finding, with no new critical
+or warning findings. The bounded repair uses an equivalent context-managed
+file lock. Focused writer tests pass 19/19, and the full structural report
+returns duplicate groups from 81 to the base 80 and info findings from 138 to
+137 while critical/warning totals remain unchanged. The validated final writer
+blob is `f1898c9215846660ef5cf70da1c55698ab44c3e1`. The exact repaired PR-head
+workflows remain pending; no failed old-head workflow was rerun.
+
+Next executable step: inspect every mandatory exact-head PR #311 workflow,
+including both Gunicorn smokes. If all pass, merge under an exact-head guard,
+then require every merge-head gate and settled Splendid acceptance. The next
+separately reviewed seam remains the explicit production-writer
+interface/cutover contract; this branch does not activate it.
+
+## 2026-10-17 Issue #84 — recoverable intent-to-transaction handoff — MERGED; SETTLED DEPLOYMENT ACCEPTED
+
+PR #310 was squash-merged as exact main
+`3d4b478c290a5b10cda2e93aba8b7abea3b7eea9`. Its exact PR head
+`f75ee82bb4dd3e5cb633be068c5df6fc4d6c2cb1` passed all mandatory gates:
+repository validation `39039053176`, architecture debt `39039053185`, change
+safety `39039053114`, and refactor/runtime `39039053113`; both exact-head
+Gunicorn smokes passed. Merge-head repository validation `39039174616`,
+architecture debt `39039174540`, change safety `39039174663`, and
+refactor/runtime `39039174553` also passed their code gates and both Gunicorn
+smokes. Runtime job `117415182117` passed the explicit exact-head Splendid
+deployment-acceptance step for `3d4b478c...`, completed its read-only capture,
+governed evidence build and artifact upload, and settled successfully. Artifact
+`12103532158` has verified ZIP SHA-256
+`9acdf00c50477b80ae9d8941342c67df67d4bd5745f1ba4e9f890cf4099cd2cd`.
+
+The pre-merge fresh scheduled workflow
 `38990420815`, runtime job `117271370876`, completed successfully on that
-exact main. Artifact `12084343044` has independently verified ZIP SHA-256
+then-current main `d424db...`. Artifact `12084343044` has independently
+verified ZIP SHA-256
 `51125ee010906559e14595352ef5389eab72647c8b3caa43a6c48d24312b4e6d`.
 Its observational snapshot was generated 2026-10-16 at 20:20:30 CDT and is
 WARN solely because the hard daily-loss protection is active. All 13 surfaces
@@ -35,9 +107,8 @@ Issue #202 / `hold_10d` remain frozen. The standard capture still omits X-Ray,
 so it does not prove whole-session coverage or the cause of the prior all-day
 no-entry session.
 
-The active branch is `fix/issue84-atomic-journal-handoff-20261017`, based on
-the exact accepted PR #309 code tree plus its durable handoff checkpoint. It
-adds a digest-bound `TransactionJournalHandoffReceipt` and a sandbox-only
+The merged implementation adds a digest-bound
+`TransactionJournalHandoffReceipt` and a sandbox-only
 `SandboxAppendIntentJournal.handoff_projection(...)` transition. After an
 exact immutable append has already been observed and projected, the handoff
 serializes one coordinator lock, verifies the original intent and transaction
@@ -55,14 +126,13 @@ continues to report `invokes_production_writer=false` and
 `commits_state_store=false`; it now reports only the reviewed journal-to-journal
 handoff as ready with `handoff_recovery=idempotent_stepwise_retry`. Focused
 atomic-journal, ledger-adapter and single-owner regressions pass 55/55 locally.
-Impact-aware validation, exact-diff review and all remote exact-head gates
-remain pending.
+Local impact-aware validation also passed at its exact local commit: 99
+architecture/policy tests plus 55 focused regressions, with zero new critical
+findings. The remote branch was exactly one commit ahead / zero behind main,
+and the three published blobs matched their local Git object IDs.
 
-Next executable step: complete local impact-aware validation, publish the exact
-branch and run every mandatory exact-head gate including both Gunicorn smokes.
-If accepted, the subsequent separately reviewed seam is a fail-closed writer
-adapter that accepts the exact durable intent; no runtime cutover or StateStore
-commit is authorized by this handoff.
+The subsequent separately reviewed writer-adapter seam is now active above;
+no runtime cutover or StateStore commit is authorized by this handoff.
 
 ## 2026-10-16 Issue #84 — durable pre-append intent journal — ACCEPTED; HANDOFF NEXT
 
