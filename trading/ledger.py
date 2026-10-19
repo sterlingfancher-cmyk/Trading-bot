@@ -629,6 +629,7 @@ class CanonicalLedgerEvidenceAdapter:
                 "binds_settled_append_to_intent": True,
                 "production_writer_accepts_intent": False,
                 "write_ahead_journal_ready": False,
+                "sandbox_durable_intent_writer_ready": True,
                 "version": VERSION,
             }
         )

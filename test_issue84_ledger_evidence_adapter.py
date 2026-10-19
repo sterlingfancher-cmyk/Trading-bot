@@ -12,6 +12,7 @@ from trading.ledger import (
     LedgerAppendIntent,
     LedgerProjectionObservation,
 )
+from trading.ledger_writer import SandboxLedgerIntentWriter
 from trading.accounting import ExecutionSnapshot
 from trading.risk import RiskLimits
 from trading.state import (
@@ -22,6 +23,11 @@ from trading.state import (
 )
 from trading.state_store import CanonicalStateStore
 from trading.transaction import CanonicalTransactionInvariantError
+from trading.transaction_journal import (
+    AppendIntentJournalRecord,
+    SandboxAppendIntentJournal,
+    SandboxTransactionJournal,
+)
 from trading.valuation import ProtectedMarkSnapshot
 
 
@@ -229,6 +235,7 @@ def test_adapter_descriptor_has_no_runtime_or_mutation_authority():
     assert descriptor["binds_settled_append_to_intent"] is True
     assert descriptor["production_writer_accepts_intent"] is False
     assert descriptor["write_ahead_journal_ready"] is False
+    assert descriptor["sandbox_durable_intent_writer_ready"] is True
 
 
 def _intended_execution(
@@ -248,6 +255,249 @@ def _intended_execution(
         timestamp="2026-10-10 09:00:00 CDT",
         execution_id=execution_id,
     )
+
+
+def _intent_record(intent, *, transaction_id="transaction-84"):
+    return AppendIntentJournalRecord(
+        transaction_id=transaction_id,
+        phase="intent_prepared",
+        intent_sha256=intent.intent_sha256,
+        previous_state_sha256=intent.previous_state_payload_sha256,
+        previous_total_rows=intent.previous.total_rows,
+        previous_epoch_rows=intent.previous.epoch_rows,
+        previous_ledger_sha256=intent.previous.ledger_sha256,
+        previous_terminal_event_hash=intent.previous.terminal_event_hash,
+        execution_ids=tuple(row.execution_id for row in intent.executions),
+        created_at="2026-10-10 09:00:30 CDT",
+        updated_at="2026-10-10 09:00:30 CDT",
+    )
+
+
+def _durable_intent_fixture(tmp_path, *, executions=None):
+    path = tmp_path / "ledger.jsonl"
+    first = _row("", "execution-1", "entry")
+    _write(path, (first,))
+    adapter = CanonicalLedgerEvidenceAdapter(path)
+    state = _state(total_rows=1, epoch_rows=1)
+    intent = adapter.prepare_intent(
+        previous=adapter.observe(epoch_id="stable-paper-v5-test"),
+        current_state=state,
+        executions=executions or (_intended_execution(),),
+    )
+    return path, state, intent, _intent_record(intent)
+
+
+def test_durable_intent_writer_appends_exact_identity_and_restarts_idempotently(
+    tmp_path,
+):
+    path, state, intent, record = _durable_intent_fixture(tmp_path)
+    prefix = path.read_bytes()
+    writer = SandboxLedgerIntentWriter(path, sandbox_io_enabled=True)
+
+    observation = writer.append_intent(intent, record, state)
+    settled = path.read_bytes()
+
+    assert settled.startswith(prefix)
+    assert observation.executions == intent.executions
+    assert observation.proof.appended_execution_ids == ("execution-2",)
+    assert observation.current.total_rows == 2
+
+    restarted = SandboxLedgerIntentWriter(
+        path,
+        sandbox_io_enabled=True,
+    ).append_intent(intent, record, state)
+    assert restarted == observation
+    assert path.read_bytes() == settled
+
+
+def test_durable_intent_writer_recovers_partial_append(tmp_path, monkeypatch):
+    executions = (
+        _intended_execution(),
+        _intended_execution(
+            sequence=3,
+            event="entry",
+            price=102.0,
+            execution_id="execution-3",
+        ),
+    )
+    path, state, intent, record = _durable_intent_fixture(
+        tmp_path,
+        executions=executions,
+    )
+    writer = SandboxLedgerIntentWriter(path, sandbox_io_enabled=True)
+    original = writer._append_row_locked
+    calls = 0
+
+    def fail_second(row):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("simulated crash after one durable row")
+        original(row)
+
+    monkeypatch.setattr(writer, "_append_row_locked", fail_second)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        writer.append_intent(intent, record, state)
+
+    assert CanonicalLedgerEvidenceAdapter(path).observe(
+        epoch_id="stable-paper-v5-test"
+    ).total_rows == 2
+
+    recovered = SandboxLedgerIntentWriter(
+        path,
+        sandbox_io_enabled=True,
+    ).append_intent(intent, record, state)
+    assert recovered.executions == executions
+    assert recovered.current.total_rows == 3
+
+
+def test_durable_intent_writer_rejects_substitution_before_mutation(tmp_path):
+    path, state, intent, record = _durable_intent_fixture(tmp_path)
+    original = path.read_bytes()
+    writer = SandboxLedgerIntentWriter(path, sandbox_io_enabled=True)
+    substituted = replace(record, intent_sha256="a" * 64, record_sha256="")
+
+    with pytest.raises(CanonicalLedgerInvariantError, match="does not exactly bind"):
+        writer.append_intent(intent, substituted, state)
+    with pytest.raises(CanonicalLedgerInvariantError, match="StateStore changed"):
+        writer.append_intent(
+            intent,
+            record,
+            _state(total_rows=0, epoch_rows=0),
+        )
+
+    assert path.read_bytes() == original
+
+
+def test_durable_intent_writer_rejects_precision_drift_before_mutation(tmp_path):
+    path, state, intent, record = _durable_intent_fixture(
+        tmp_path,
+        executions=(_intended_execution(price=101.0000001),),
+    )
+    original = path.read_bytes()
+
+    with pytest.raises(CanonicalLedgerInvariantError, match="price.*precision"):
+        SandboxLedgerIntentWriter(
+            path,
+            sandbox_io_enabled=True,
+        ).append_intent(intent, record, state)
+
+    assert path.read_bytes() == original
+
+
+def test_durable_intent_writer_rejects_divergent_partial_append(tmp_path):
+    path, state, intent, record = _durable_intent_fixture(tmp_path)
+    rows = CanonicalLedgerEvidenceAdapter(path)._read_rows()
+    divergent = _row(rows[-1]["event_hash"], "execution-other", "exit")
+    _write(path, (*(dict(row) for row in rows), divergent))
+    original = path.read_bytes()
+
+    with pytest.raises(CanonicalLedgerInvariantError, match="partial.*diverged"):
+        SandboxLedgerIntentWriter(
+            path,
+            sandbox_io_enabled=True,
+        ).append_intent(intent, record, state)
+
+    assert path.read_bytes() == original
+
+
+def test_durable_intent_writer_serializes_duplicate_callers(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    path, state, intent, record = _durable_intent_fixture(tmp_path)
+
+    def append(_):
+        return SandboxLedgerIntentWriter(
+            path,
+            sandbox_io_enabled=True,
+        ).append_intent(intent, record, state)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        observations = list(pool.map(append, range(2)))
+
+    assert observations[0] == observations[1]
+    assert observations[0].current.total_rows == 2
+
+
+def test_durable_intent_writer_completes_journal_handoff_chain(tmp_path):
+    intended = _intended_execution(event="entry", price=100.0)
+    path, state, intent, _ = _durable_intent_fixture(
+        tmp_path,
+        executions=(intended,),
+    )
+    intent_journal = SandboxAppendIntentJournal(
+        tmp_path / "append-intent-journal.json",
+        sandbox_io_enabled=True,
+    )
+    record = intent_journal.begin(
+        intent,
+        transaction_id="transaction-84",
+        recorded_at="2026-10-10 09:00:30 CDT",
+    )
+
+    SandboxLedgerIntentWriter(
+        path,
+        sandbox_io_enabled=True,
+    ).append_intent(intent, record, state)
+    projection = CanonicalLedgerEvidenceAdapter(path).prepare_intent_projection(
+        intent=intent,
+        current_state=state,
+        protected_marks=(
+            ProtectedMarkSnapshot(
+                symbol="SPY",
+                price=101.0,
+                source="protected-test-mark",
+                fresh=True,
+                plausible=True,
+                observed_at="2026-10-10 09:00:45 CDT",
+            ),
+        ),
+        risk_date="2026-10-10",
+        risk_limits=RiskLimits(
+            max_daily_loss_fraction=0.03,
+            max_intraday_drawdown_fraction=0.03,
+            hard_realized_loss_fraction=0.02,
+        ),
+        created_at="2026-10-10 09:01:00 CDT",
+    )
+    transaction_journal = SandboxTransactionJournal(
+        tmp_path / "transaction-journal.json",
+        sandbox_io_enabled=True,
+    )
+    handoff = intent_journal.handoff_projection(
+        intent,
+        projection,
+        transaction_journal,
+        transaction_id="transaction-84",
+        recorded_at="2026-10-10 09:01:01 CDT",
+    )
+
+    assert handoff.intent_sha256 == intent.intent_sha256
+    assert handoff.execution_ids == ("execution-2",)
+    assert intent_journal.read_sandbox().phase == "append_bound"
+    assert transaction_journal.read_sandbox().phase == "ledger_settled"
+    assert state.revision == 7
+
+
+def test_durable_intent_writer_declares_sandbox_only_authority(tmp_path):
+    descriptor = SandboxLedgerIntentWriter.descriptor()
+    assert descriptor["authority"] == "shadow_only"
+    assert descriptor["runtime_registered"] is False
+    assert descriptor["production_write_enabled"] is False
+    assert descriptor["sandbox_write_enabled"] is True
+    assert descriptor["places_orders"] is False
+    assert descriptor["accepts_durable_append_intent"] is True
+    assert descriptor["idempotent_partial_append_recovery"] is True
+    assert descriptor["append_call_can_override_intent_identity"] is False
+    assert descriptor["commits_state_store"] is False
+    assert descriptor["production_writer_connected"] is False
+
+    with pytest.raises(PermissionError):
+        SandboxLedgerIntentWriter(tmp_path / "ledger.jsonl").append_intent(
+            object(),
+            object(),
+            object(),
+        )
 
 
 def test_preappend_intent_binds_exact_boundary_and_settled_identity(tmp_path):
