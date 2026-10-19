@@ -1,4 +1,3 @@
-"""Sandbox-only exact-intent writer seam for Issue #84.
 
 The production canonical ledger remains owned by ``canonical_execution_ledger``.
 This module proves that a durable pre-append intent can drive an exact,
@@ -56,13 +55,12 @@ class SandboxLedgerIntentWriter:
     @contextmanager
     def _process_lock(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(self.lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
-            yield
-        finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
+        with self.lock_path.open("a+b") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     @staticmethod
     def _assert_record(
@@ -256,3 +254,4 @@ class SandboxLedgerIntentWriter:
                 "version": VERSION,
             }
         )
+
