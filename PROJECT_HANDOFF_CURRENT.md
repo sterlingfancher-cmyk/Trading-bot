@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-19 09:06 CDT
+Last updated: 2026-10-19 09:31 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
@@ -51,13 +51,24 @@ settled-journal handoff. Ledger-adapter, atomic-journal and single-owner tests
 pass 63/63 locally. This remains a bounded shadow seam: it is not runtime
 registered, cannot target production without explicit sandbox enablement, does
 not call the production writer, commit StateStore, place orders, clear risk,
-or change strategy/live/AI authority. Exact impact-aware validation, remote
-publication and every exact-head gate remain pending.
+or change strategy/live/AI authority. PR #311 is the sole active repair path.
+Its first exact head `f9b92b92093d02283b3b5af765e594c1216c5375`
+failed architecture run `39267264575`, job `118109993615`: artifact
+`12194031586` proved that the new writer's nine-line process-lock body
+duplicated the transaction-journal implementation, adding exactly one
+duplicate-function group and one informational finding, with no new critical
+or warning findings. The bounded repair uses an equivalent context-managed
+file lock. Focused writer tests pass 19/19, and the full structural report
+returns duplicate groups from 81 to the base 80 and info findings from 138 to
+137 while critical/warning totals remain unchanged. The validated final writer
+blob is `f1898c9215846660ef5cf70da1c55698ab44c3e1`. The exact repaired PR-head
+workflows remain pending; no failed old-head workflow was rerun.
 
-Next executable step: complete exact-diff and impact-aware validation, then
-publish a focused PR. If every exact-head and merge-head gate plus settled
-Splendid acceptance passes, the next separately reviewed seam is the explicit
-production-writer interface/cutover contract; this branch does not activate it.
+Next executable step: inspect every mandatory exact-head PR #311 workflow,
+including both Gunicorn smokes. If all pass, merge under an exact-head guard,
+then require every merge-head gate and settled Splendid acceptance. The next
+separately reviewed seam remains the explicit production-writer
+interface/cutover contract; this branch does not activate it.
 
 ## 2026-10-17 Issue #84 — recoverable intent-to-transaction handoff — MERGED; SETTLED DEPLOYMENT ACCEPTED
 
