@@ -1,24 +1,33 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-19 09:31 CDT
+Last updated: 2026-10-19 09:35 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `3d4b478c290a5b10cda2e93aba8b7abea3b7eea9` (PR #310 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `b7a2a99b931c24642800698dd94252ad63bee802` (PR #311 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-19 Issue #84 — durable-intent sandbox writer — IN PROGRESS
+## 2026-10-19 Issue #84 — durable-intent sandbox writer — MERGED; SETTLED DEPLOYMENT ACCEPTED
 
-Exact main remains `3d4b478c290a5b10cda2e93aba8b7abea3b7eea9`; no competing
-repair PR is open. The saved PR #310 runtime job `117415182117` completed
-successfully. Artifact `12103532158` is bound to exact main and its connector
-digest independently matches the downloaded ZIP SHA-256
-`9acdf00c50477b80ae9d8941342c67df67d4bd5745f1ba4e9f890cf4099cd2cd`.
-The 2026-10-17 09:09:49 CDT settled snapshot is PASS with 13/13 reachable,
+PR #311 was squash-merged as exact main
+`b7a2a99b931c24642800698dd94252ad63bee802`; no competing repair PR is
+open. Its exact repaired PR head
+`1f1ac5b7f76b422219e99f6f0f7edd1836697ca4` passed repository validation
+`39268068336`, architecture debt `39268068476`, change safety `39268068428`,
+and refactor/runtime `39268068533`; both exact-head Gunicorn smokes passed.
+Merge-head repository validation `39268428949`, architecture debt
+`39268429099`, change safety `39268429082`, and refactor/runtime
+`39268429303` also passed, including both merge-head Gunicorn smokes.
+Runtime job `118114801446` passed the explicit exact-head Splendid acceptance,
+read-only capture, governed evidence build and artifact upload. Artifact
+`12193854528` is bound to exact main and its connector digest independently
+matches the downloaded ZIP SHA-256
+`756f578562feded350b2f930f75683c922b1e7a856038c9067dfa84994a90dd9`.
+The 2026-10-19 09:29:18 CDT settled snapshot is PASS with 13/13 reachable,
 sentinel quiet on exact main, self-check/audit/accounting/chain/parity/risk,
 runner and market data passing. The account is flat at cash
 `13047.46948294168` / equity `13047.47`; the fresh risk day is not halted.
@@ -27,10 +36,8 @@ The immutable ledger remains chain-valid and parity-clean at 118 rows, digest
 Governed v5 is active/pass. V1 remains running at 1200 rows; V2 and ablation
 remain not-run; forward shadow remains ineligible; Issue #202 / `hold_10d`
 remain frozen. Standard capture still omits X-Ray, so whole-session no-entry
-attribution remains inconclusive. Scheduled workflow `39143055675` passed on
-exact main on 2026-10-18, including its Gunicorn smoke, but its runtime snapshot
-job was skipped; it provides no newer runtime observation and no duplicate
-capture was launched.
+attribution remains inconclusive. No duplicate research or capture job was
+launched.
 
 The active branch is `fix/issue84-durable-intent-writer-20261019`. It adds a
 separate `SandboxLedgerIntentWriter` that requires explicit sandbox I/O, the
@@ -51,8 +58,8 @@ settled-journal handoff. Ledger-adapter, atomic-journal and single-owner tests
 pass 63/63 locally. This remains a bounded shadow seam: it is not runtime
 registered, cannot target production without explicit sandbox enablement, does
 not call the production writer, commit StateStore, place orders, clear risk,
-or change strategy/live/AI authority. PR #311 is the sole active repair path.
-Its first exact head `f9b92b92093d02283b3b5af765e594c1216c5375`
+or change strategy/live/AI authority. PR #311's first exact head
+`f9b92b92093d02283b3b5af765e594c1216c5375`
 failed architecture run `39267264575`, job `118109993615`: artifact
 `12194031586` proved that the new writer's nine-line process-lock body
 duplicated the transaction-journal implementation, adding exactly one
@@ -61,14 +68,14 @@ or warning findings. The bounded repair uses an equivalent context-managed
 file lock. Focused writer tests pass 19/19, and the full structural report
 returns duplicate groups from 81 to the base 80 and info findings from 138 to
 137 while critical/warning totals remain unchanged. The validated final writer
-blob is `f1898c9215846660ef5cf70da1c55698ab44c3e1`. The exact repaired PR-head
-workflows remain pending; no failed old-head workflow was rerun.
+blob is `f1898c9215846660ef5cf70da1c55698ab44c3e1`; no failed old-head workflow
+was rerun.
 
-Next executable step: inspect every mandatory exact-head PR #311 workflow,
-including both Gunicorn smokes. If all pass, merge under an exact-head guard,
-then require every merge-head gate and settled Splendid acceptance. The next
-separately reviewed seam remains the explicit production-writer
-interface/cutover contract; this branch does not activate it.
+Next executable step: resume Issue #84 with the next separately reviewed seam,
+the explicit production-writer interface/cutover contract. Preserve the
+accepted sandbox proof and require a new focused PR and all exact-head,
+merge-head and settled acceptance gates; PR #311 did not activate a production
+writer or StateStore commit.
 
 ## 2026-10-17 Issue #84 — recoverable intent-to-transaction handoff — MERGED; SETTLED DEPLOYMENT ACCEPTED
 
