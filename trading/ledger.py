@@ -630,6 +630,7 @@ class CanonicalLedgerEvidenceAdapter:
                 "production_writer_accepts_intent": False,
                 "write_ahead_journal_ready": False,
                 "sandbox_durable_intent_writer_ready": True,
+                "production_writer_interface_contract_ready": True,
                 "version": VERSION,
             }
         )
