@@ -1,61 +1,77 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-20 09:12 CDT
+Last updated: 2026-10-20 09:20 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `b7a2a99b931c24642800698dd94252ad63bee802` (PR #311 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `7bb5b43c857566a164367ebfcd0ed24b341f4747` (PR #312 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
 Active engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
-## 2026-10-20 Issue #84 — production-writer interface contract — IN PROGRESS
+## 2026-10-20 Issue #84 — production-writer interface contract — MERGED; SETTLED DEPLOYMENT ACCEPTED
 
-Exact main remains `b7a2a99b931c24642800698dd94252ad63bee802` and no
-competing repair PR is open. Scheduled run `39355742816`, runtime job
-`118409979777`, passed on exact main. Artifact `12235675564` is bound to that
-commit; its connector digest independently matches the downloaded ZIP SHA-256
-`8f39638295d14b80611a37fa1e8bcd821da6d704ae54427b951fb6815488d3ff`.
-The 2026-10-19 20:51:47 CDT observational snapshot is PASS with 13/13
-reachable, sentinel quiet on exact main, self-check/audit/accounting/canonical
-chain/parity/risk/runner/market data passing, and the account flat at cash
+PR #312 exact head `a0c9fa1f22aa116de39cc4587678eee845463fe5`
+passed repository validation `39436815776`, architecture debt `39436815943`,
+change safety `39436815817` and refactor/runtime `39436815833`, including both
+exact-head Gunicorn smokes. It squash-merged as exact main
+`7bb5b43c857566a164367ebfcd0ed24b341f4747`. Merge-head repository validation
+`39437117511`, architecture debt `39437117566`, change safety `39437117666`
+and refactor/runtime `39437117596` all passed, including both merge-head
+Gunicorn smokes. Runtime job `118677622118` passed exact-head Splendid
+deployment acceptance, the 13-endpoint observational capture, governed evidence
+build and artifact upload.
+
+Artifact `12273430679` has connector digest and independently downloaded ZIP
+SHA-256
+`661bfcf3a110b0d274e3921579269b39cf23bf75063b2b846324414fed5db186`.
+The 2026-10-20 09:18:19 CDT snapshot is PASS with 13/13 reachable, sentinel
+quiet on exact main, self-check/audit/accounting/canonical chain/parity/risk,
+runner and market data passing, and the account flat at cash
 `13047.46948294168` / equity `13047.47`. The fresh risk day is not halted. The
 immutable ledger remains chain-valid and parity-clean at 118 rows, digest
 `0c521518fabcbd90745d8a61f78aec8a2ba2e7f3c9d1523f7843dd076047998b`.
-Governed v5 remains active/pass. V1 remains running at 1200 rows; V2 and
-ablation remain not-run; forward shadow is ineligible; Issue #202 / `hold_10d`
-remain frozen. Standard capture still omits X-Ray, so whole-session no-entry
-attribution remains inconclusive; no duplicate capture or research job was
-launched.
+Governed v5 remains active/pass. The governed evidence state is
+`active_pending_forward_observations`; its sole blocker is
+`post_start_forward_observations`, production authority is false, evidence SHA
+is `18a3bf80431043cdb6b73f54d2d8316882fb252f713bac06c277033b3e1f7d9b`
+and decision SHA is
+`1f0833c1da261d8fbbf940c75d49cf54fa0fbadb7c71f55089e6c8aca202379e`.
+V1 remains running at 1200 rows; V2 and ablation remain not-run; forward shadow
+is ineligible; Issue #202 / `hold_10d` remain frozen. Standard capture still
+omits X-Ray, so whole-session no-entry attribution remains inconclusive; no
+duplicate capture or research job was launched.
 
-The active branch is
-`fix/issue84-production-writer-interface-20261020`. It adds the typed
-`LedgerIntentWriter` protocol and a digest-bound
-`ProductionWriterCutoverContract`. Inspection is read-only and requires a
-candidate to accept the exact durable intent plus its journal record and
-unchanged StateStore envelope; validate the full chain; recover partial appends
-idempotently under an interprocess lock; and forbid caller-selected identity,
-StateStore commit, order authority, runtime registration and production writes.
-The resulting contract retains the existing
-`canonical_execution_ledger.append_execution` owner and records five mandatory
-blockers: independent cutover review, production adapter implementation,
-single-writer runtime registration, StateStore commit coordination and a
-default-armed rollback switch. It cannot self-approve, activate or hold paper,
-live or AI execution authority, and inspection never invokes the candidate.
+The merged contract adds the typed `LedgerIntentWriter` protocol and a
+digest-bound `ProductionWriterCutoverContract`. Inspection is read-only and
+requires a candidate to accept the exact durable intent plus its journal record
+and unchanged StateStore envelope; validate the full chain; recover partial
+appends idempotently under an interprocess lock; and forbid caller-selected
+identity, StateStore commit, order authority, runtime registration and
+production writes. It retains
+`canonical_execution_ledger.append_execution` as the current owner and records
+five mandatory blockers: independent cutover review, production adapter
+implementation, single-writer runtime registration, StateStore commit
+coordination and a default-armed rollback switch. It cannot self-approve or
+activate paper, live or AI execution authority, and inspection never invokes
+the candidate.
 
 Focused production-contract, ledger-adapter, atomic-journal and single-owner
-regressions pass 77/77. The staged full structural audit remains at 80 duplicate
-groups, 137 informational findings, 32 critical findings and 104 warnings—the
-same counts as accepted main—with no finding in the new module. Compile and
-exact-diff checks pass. Impact-aware validation, remote publication and every
-mandatory exact-head gate remain pending.
+regressions passed 77/77; impact-aware canonical architecture/policy tests
+passed 99/99 and selected regressions passed 63/63. The full structural audit
+remained at accepted-main counts—80 duplicate groups, 137 informational
+findings, 32 critical findings and 104 warnings—with no finding in the new
+module. No production writer was implemented, registered or activated; no
+StateStore or canonical evidence was mutated; no order was placed; and no
+risk, strategy, live or AI authority changed.
 
-Next executable step: complete local impact-aware validation, publish one
-focused PR and require every exact-head gate including both Gunicorn smokes.
-This contract does not implement or activate a production adapter; that remains
-a separately reviewed future seam after this contract is accepted.
+Next executable step: implement the smallest separately reviewed sandbox
+adapter behind this accepted interface and prove its intent/journal/chain/
+recovery behavior without runtime registration or production activation. Keep
+the five cutover blockers fail-closed until their own reviewed implementation,
+exact-head gates and settled deployment acceptance are complete.
 
 ## 2026-10-19 Issue #84 — durable-intent sandbox writer — MERGED; SETTLED DEPLOYMENT ACCEPTED
 
