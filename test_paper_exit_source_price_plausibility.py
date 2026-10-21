@@ -1,5 +1,7 @@
 import time
 
+import pandas as pd
+
 import paper_exit_price_integrity_guard as guard
 
 
@@ -59,6 +61,17 @@ class FakeCore:
         self.save_calls += 1
 
 
+class WrongSymbolCore(FakeCore):
+    def download_prices(self, symbol, period="5d", interval="5m"):
+        return pd.DataFrame(
+            [[527.9], [528.2], [528.0], [528.4], [528.1], [528.3], [528.5], [528.61]],
+            columns=pd.MultiIndex.from_tuples([("Close", "META")]),
+        )
+
+    def price_series(self, frame, column="Close"):
+        return list(frame[(column, "META")])
+
+
 def test_catastrophic_terminal_outlier_is_rejected_before_cache():
     core = FakeCore([311.8, 312.2, 312.5, 312.7, 312.4, 312.9, 313.1, 18.401199340820312])
     guard.apply(core)
@@ -89,6 +102,44 @@ def test_plausible_terminal_price_is_returned_and_cached():
     core._prices = [1.0]
     assert core.latest_price("LRCX") == 313.25
     assert core.download_calls == 1
+
+
+def test_wrong_explicit_response_symbol_is_rejected_before_price_extraction():
+    core = WrongSymbolCore([])
+    guard.apply(core)
+
+    assert core.latest_price("SNOW") is None
+    assert "SNOW" not in core._price_cache["data"]
+    block = guard.status_payload(core)["source_plausibility"]["last_block"]
+    assert block["reason"] == "response_symbol_mismatch"
+    assert block["requested_symbol"] == "SNOW"
+    assert block["response_symbols"] == ["META"]
+
+
+def test_october_16_snow_unverified_short_exit_is_blocked_and_halts():
+    core = FakeCore([527.9, 528.2, 528.0, 528.4, 528.1, 528.3, 528.5, 528.61])
+    core.portfolio.update(
+        {
+            "positions": {
+                "SNOW": {
+                    "side": "short",
+                    "entry": 310.80,
+                    "shares": 3.323188,
+                    "last_price": 310.80,
+                }
+            }
+        }
+    )
+    guard.apply(core)
+
+    assert core.latest_price("SNOW") is None
+    assert core.exit_position("SNOW", 528.61, "structure_stop_short") is None
+    assert core.exit_calls == 0
+    block = guard.status_payload(core)["active_block"]
+    assert block["symbol"] == "SNOW"
+    assert block["reason"] == "catastrophic_short_exit_price_outlier"
+    assert block["price_to_entry_ratio"] > 1.70
+    assert core.portfolio["risk_controls"]["halted"] is True
 
 
 def test_poisoned_fresh_cached_qqq_price_is_blocked_before_return():
@@ -267,12 +318,12 @@ def test_sls_catastrophic_favorable_stored_mark_cannot_poison_equity_again():
 
 
 def test_plausible_long_winner_below_integrity_ceiling_is_not_blocked():
-    core = FakeCore([29.0] * 8)
+    core = FakeCore([20.0] * 8)
     _seed_sls_position(core)
     guard.apply(core)
 
-    result = core.reduce_position("SLS", 29.0, 0.33, "partial_profit_long")
+    result = core.reduce_position("SLS", 20.0, 0.33, "partial_profit_long")
 
-    assert result == {"symbol": "SLS", "price": 29.0}
+    assert result == {"symbol": "SLS", "price": 20.0}
     assert core.reduce_calls == 1
     assert guard.status_payload(core)["active_block"] is None

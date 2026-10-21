@@ -6,9 +6,10 @@ protects three independent boundaries:
 
 1. ``latest_price`` rejects a catastrophically implausible terminal 5-minute
    close relative to recent same-symbol bars before that value is cached or
-   returned to position management, and rejects catastrophic entry-relative
-   marks for an already-open position even when the provider series itself is
-   internally self-consistent (for example, a split-scale mismatch).
+   returned to position management, rejects an explicitly wrong response
+   symbol, and rejects unverified entry-relative moves for an already-open
+   position even when the provider series itself is internally self-consistent
+   (for example, a wrong-symbol or split-scale response).
 2. ``calculate_equity`` refuses to reuse a catastrophically implausible stored
    ``last_price`` when no independently trusted fresh quote can be obtained.
 3. Full and partial paper exits retain the existing entry-anchored fail-closed
@@ -26,11 +27,14 @@ import statistics
 import time
 from typing import Any, Dict
 
-VERSION = "paper-exit-price-integrity-2026-08-21-v3-symmetric-position-anchor"
-LONG_MIN_PRICE_RATIO = 0.40
-LONG_MAX_PRICE_RATIO = 2.50
-SHORT_MIN_PRICE_RATIO = 0.40
-SHORT_MAX_PRICE_RATIO = 2.50
+VERSION = "paper-exit-price-integrity-2026-10-21-v4-symbol-provenance"
+# These are quote-verification boundaries, not profit or stop thresholds. A
+# move outside this deliberately broad envelope is held for independent quote
+# review rather than booked from one unverified provider response.
+LONG_MIN_PRICE_RATIO = 2.0 / 3.0
+LONG_MAX_PRICE_RATIO = 1.50
+SHORT_MIN_PRICE_RATIO = 2.0 / 3.0
+SHORT_MAX_PRICE_RATIO = 1.50
 SOURCE_MIN_PRIOR_BARS = 6
 SOURCE_RECENT_PRIOR_BARS = 24
 SOURCE_MIN_PRICE_RATIO = 0.40
@@ -39,6 +43,14 @@ SOURCE_CACHE_TTL_SECONDS = 60
 _APPLIED_CORE_IDS: set[int] = set()
 _REGISTERED_APP_IDS: set[int] = set()
 _LAST_SOURCE_BLOCK: Dict[str, Any] = {}
+_PRICE_FIELD_NAMES = {
+    "ADJ CLOSE",
+    "CLOSE",
+    "HIGH",
+    "LOW",
+    "OPEN",
+    "VOLUME",
+}
 
 
 def _d(value: Any) -> Dict[str, Any]:
@@ -79,7 +91,7 @@ def anomaly(pos: Dict[str, Any], px: Any) -> Dict[str, Any] | None:
     SLS split-scale mismatch showed that a wildly favorable mark is equally
     dangerous: it can inflate position peak, account equity, realized P&L and
     the monotonic intraday risk peak before later collapsing back to reality.
-    The same very-wide 0.40x..2.50x integrity envelope is therefore applied
+    The same broad independent-verification envelope is therefore applied
     symmetrically. This is quote plausibility, not a trading/profit threshold.
     """
     price = _f(px, 0.0)
@@ -127,6 +139,47 @@ def anomaly(pos: Dict[str, Any], px: Any) -> Dict[str, Any] | None:
             "side": "long",
         }
     return None
+
+
+def _frame_symbol_issue(frame: Any, requested_symbol: str) -> Dict[str, Any] | None:
+    """Reject a provider frame that explicitly identifies a different ticker.
+
+    yfinance-style multi-index frames retain both price-field and ticker names.
+    The old extraction path selected the first matching price field without
+    proving that its ticker matched the request. Flat single-ticker frames do
+    not expose identity, so they remain eligible for the independent price
+    plausibility checks instead of being falsely rejected.
+    """
+    columns = getattr(frame, "columns", None)
+    if columns is None:
+        return None
+    try:
+        raw_columns = list(columns)
+    except Exception:
+        return None
+
+    response_symbols: set[str] = set()
+    saw_multi_part_column = False
+    for column in raw_columns:
+        if not isinstance(column, tuple) or len(column) < 2:
+            continue
+        saw_multi_part_column = True
+        for part in column:
+            token = str(part or "").upper().strip()
+            if not token or token in _PRICE_FIELD_NAMES:
+                continue
+            response_symbols.add(token)
+
+    if not saw_multi_part_column or not response_symbols:
+        return None
+    requested = str(requested_symbol or "").upper().strip()
+    if response_symbols == {requested}:
+        return None
+    return {
+        "reason": "response_symbol_mismatch",
+        "requested_symbol": requested,
+        "response_symbols": sorted(response_symbols),
+    }
 
 
 def _source_issue(prices: Any) -> Dict[str, Any] | None:
@@ -254,8 +307,10 @@ def _wrap_latest_price(core: Any) -> bool:
                         issue = {"reason": "cached_price_plausibility_unverified", "price": cached_price, "prior_bars_used": 0}
                     else:
                         frame = download(key, period="1d", interval="5m")
-                        prices = price_series(frame, "Close")
-                        issue = _cached_source_issue(cached_price, prices)
+                        issue = _frame_symbol_issue(frame, key)
+                        if issue is None:
+                            prices = price_series(frame, "Close")
+                            issue = _cached_source_issue(cached_price, prices)
                 except Exception:
                     issue = {"reason": "cached_price_plausibility_unverified", "price": cached_price, "prior_bars_used": 0}
                 if issue is not None:
@@ -272,6 +327,10 @@ def _wrap_latest_price(core: Any) -> bool:
             if not callable(download):
                 return None
             frame = download(key, period="1d", interval="5m")
+            symbol_issue = _frame_symbol_issue(frame, key)
+            if symbol_issue is not None:
+                _mark_source_block(key, symbol_issue)
+                return None
             prices = price_series(frame, "Close")
             if len(prices) == 0:
                 return None
@@ -456,6 +515,7 @@ def status_payload(core: Any = None) -> Dict[str, Any]:
             "min_price_ratio": SOURCE_MIN_PRICE_RATIO,
             "max_price_ratio": SOURCE_MAX_PRICE_RATIO,
             "position_entry_anchor_enabled": True,
+            "explicit_response_symbol_binding_enabled": True,
             "last_block": dict(_LAST_SOURCE_BLOCK) if _LAST_SOURCE_BLOCK else None,
         },
         "valuation_fallback": {
