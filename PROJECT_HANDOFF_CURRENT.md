@@ -11,6 +11,40 @@ projection / valuation / risk cutover). Active frozen research issue: #202
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
 remains unresolved and non-promotable.
 
+## 2026-10-21 Issue #313 merge and performance-priority checkpoint
+
+User directed completion of necessary repairs followed by performance focus.
+PR #314 reviewed exact head 567fa6e89c5c7aec96b39b7bb3ca1c5b7e606906
+passed all four completed mandatory workflows, including both Gunicorn smokes.
+Guarded squash merge succeeded as 46cc50394b0c8f0ca7a439289c9ce62e18a031e5.
+Issue #313 remains open for settled acceptance and reporting/evidence work.
+Merge-head runs: repository39672181445, architecture39672181507,
+change-safety39672181272, refactor/runtime39672181513. Do not rerun passed
+gates or claim deployment acceptance until the exact merge and v4 guard settle.
+At 15:40 CDT observational runtime still served v3; daily audit passed, flat
+equity13033.52, realized_today-12.48, no halt, chain/parity-valid132/44 rows.
+
+Finite priority checklist:
+1. Finish exact merge-head gates and settled runtime acceptance of v4 quote
+   provenance guard; preserve every immutable historical execution.
+2. Verify report collection against real journal executions, including per-exit
+   pnl_dollars; an unavailable collector is not zero activity. Confirm actual
+   scheduled output before declaring reporting repaired.
+3. Keep invalid/unverified price outcomes from silently qualifying performance
+   or ML evaluation; preserve original rows and explicit exclusion provenance.
+4. Then prioritize deterministic baseline-versus-one-variable performance
+   work under VALIDATION_POLICY.md; optional architecture cleanup/contracts
+   must not indefinitely delay it. Required correctness dependencies still gate.
+5. Recover the user's reported early +$3k profitable week from dated trades/code
+   and compare verified prices, costs, exposure, strategy and regime. Do not
+   presume the reported gains valid or invalid; no invented replacement trades.
+
+AI availability/request-limit handling and completed-outcome binding remain
+required before AI promotion, but do not block deterministic rules research.
+Keep hold_10d frozen under its existing tests, AI shadow-only, and hard-risk
+limits unchanged. Existing engineering task priority updated; cadence unchanged.
+This checkpoint records completed merge, not completed repair or performance gain.
+
 ## 2026-10-20 Issue #84 — production-writer interface contract — IN PROGRESS
 
 Exact main remains `b7a2a99b931c24642800698dd94252ad63bee802` and no
