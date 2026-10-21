@@ -3729,3 +3729,58 @@ never rewrites a canonical ledger row. It holds no production state, order,
 live or AI authority. Focused transaction/journal and audit tests currently
 pass. Continue through exact-diff inspection and every mandatory exact-head
 gate before merge and settled read-only deployment acceptance.
+
+
+## 2026-10-21 Issue #313 — SNOW price provenance repair — EXACT-HEAD GATE WAIT
+
+Issue #313 is the active repair. PR #314, branch
+`fix/issue313-price-provenance-reporting`, exact head
+`567fa6e89c5c7aec96b39b7bb3ca1c5b7e606906`, is based on main
+`7bb5b43c857566a164367ebfcd0ed24b341f4747`.
+
+The immutable v5 evidence remains unchanged: SNOW short entry 310.80, recorded
+exit 528.61 at 2026-10-16 12:16:57 CDT, and recorded P/L -723.82. Independent
+October 16 market history reports OHLC 339.81 / 343.88 / 302.24 / 306.84, so
+528.61 is not a valid October 16 SNOW market price. The retained execution row
+does not prove the exact provider failure path and no replacement exit was
+invented. Code inspection demonstrated two prospective gaps: explicit
+MultiIndex response ticker identity was not bound to the requested symbol, and
+the old 0.40x..2.50x entry-relative guard allowed the 1.7008x mark.
+
+PR #314 rejects explicit response-symbol mismatches before extraction or cache
+validation and fail-closes paper quote processing outside a broad
+0.667x..1.50x entry-relative independent-verification envelope. Exact
+regressions cover a wrong-symbol response and the SNOW 310.80 -> 528.61 short
+exit. It changes no immutable row/state, strategy, sizing, hard-risk limit,
+live or AI authority. Local focused tests passed, 116 change-safety and
+architecture B-F unittests passed, and exact-base structural comparison has no
+new warning or debt metric.
+
+Exact-head Change Safety run `39614175100` passed, including exact Gunicorn
+smoke; artifact `12350429450` has digest
+`sha256:3c2a276a69f3c61c184a98ce5f42f6fedf57b184fddbda1ec21c3806d8e8dab0`.
+Refactor/runtime run `39614175220` and Architecture Debt run `39614175332`
+passed. Repository Safety run `39614179602` has a successful only job but its
+workflow-run status remained `in_progress`; it is not yet counted complete and
+must not be replaced by combined-status evidence.
+
+Fresh observational runtime on deployed main at about 09:12 CDT was healthy:
+sentinel quiet/pass with zero incidents, accounting and canonical parity pass,
+126 chain-valid rows with digest
+`bd0951802ee98b38505516367e2dd5c88981a610feadb2a83dde57c6a1117599`,
+flat equity 13046.00, realized today 0.00, risk unhalted, runner last success
+09:07:47 CDT, and market-data pass. The deployed guard correctly remains v3
+until this repair merges. Runtime reads were observational; no cycle was
+forced.
+
+The October 20 omitted-trades report was separately traced to its 14:46 CDT
+runtime audit/journal retrieval failure; the later 17:50 audit contained
+HAS/WDC/APP/AAL and realized_today -1.47. No repository date-filter defect is
+demonstrated, and no prompt update is claimed as a runtime fix. Issue #313
+comment `6318211556` is the durable engineering checkpoint.
+
+Resume by checking workflow `39614179602` once. Merge PR #314 only after that
+workflow itself settles success, then require exact merge-head gates, Splendid
+deployment and settled read-only acceptance proving v4 installed. Do not
+rewrite the October 16 row or fabricate an exit. Resume Issue #84 architecture
+contracts only after this bounded repair settles.
