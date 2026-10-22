@@ -13,7 +13,7 @@ import os
 import sys
 from typing import Any, Dict, Iterable, List, Tuple
 
-VERSION = "ml-pre3a-shadow-validation-2026-06-26-v1"
+VERSION = "ml-pre3a-shadow-validation-2026-10-22-v2-price-integrity"
 PHASE = "phase_2_5_pre_3a_shadow_validation"
 ENABLED = os.environ.get("ML_PRE3A_SHADOW_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 MIN_EXECUTION_ROWS = int(os.environ.get("ML_PRE3A_MIN_EXECUTION_ROWS", "150"))
@@ -120,6 +120,24 @@ def _exit_rows(state: Dict[str, Any]) -> List[Dict[str, Any]]:
         if action in {"exit", "sell", "close"} or "exit" in reason or "stop" in reason or has_pnl:
             rows.append(row)
     return rows
+
+
+def _exit_integrity_partition(state: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    try:
+        import journal_truth
+        return journal_truth.partition_performance_exit_rows(_trades(state))
+    except Exception as exc:
+        # ML qualification fails closed if the integrity classifier itself is
+        # unavailable.  Execution/accounting rows are not modified.
+        return [], [{
+            "row": None,
+            "integrity": {
+                "eligible_for_performance_or_ml": False,
+                "reason": "outcome_integrity_classifier_unavailable",
+                "error": str(exc),
+                "canonical_row_preserved": True,
+            },
+        }]
 
 
 def _pnl(row: Dict[str, Any]) -> float:
@@ -249,9 +267,9 @@ def _scorecard(rows: List[Dict[str, Any]], field: str) -> List[Dict[str, Any]]:
     return cards[:MAX_SCORECARD_ITEMS]
 
 
-def _scorecards(state: Dict[str, Any]) -> Dict[str, Any]:
+def _scorecards(state: Dict[str, Any], *, outcome_integrity_blocked: bool = False) -> Dict[str, Any]:
     labeled = _labeled_ml_rows(state)
-    return {
+    payload = {
         "labeled_rows_used": len(labeled),
         "min_rows_for_weighting": MIN_SCORECARD_ROWS,
         "by_symbol": _scorecard(labeled, "symbol"),
@@ -260,6 +278,13 @@ def _scorecards(state: Dict[str, Any]) -> Dict[str, Any]:
         "by_regime": _scorecard(labeled, "regime"),
         "by_decision": _scorecard(labeled, "decision"),
     }
+    if outcome_integrity_blocked:
+        for key in ("by_symbol", "by_bucket", "by_sector", "by_regime", "by_decision"):
+            for card in payload[key]:
+                card["usable_for_weighting"] = False
+                card["weighting_block_reason"] = "suspect_execution_outcome_integrity"
+    payload["outcome_integrity_blocked"] = bool(outcome_integrity_blocked)
+    return payload
 
 
 def _mae_mfe_coverage(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -296,7 +321,8 @@ def _mae_mfe_coverage(state: Dict[str, Any]) -> Dict[str, Any]:
 def _walk_forward(state: Dict[str, Any]) -> Dict[str, Any]:
     rows = []
     dates = set()
-    for trade in _exit_rows(state):
+    eligible_exits, _ = _exit_integrity_partition(state)
+    for trade in eligible_exits:
         date_value = _date_from_row(trade)
         if not date_value:
             continue
@@ -366,11 +392,12 @@ def _gate(name: str, current: Any, required: Any, passed: bool, detail: str) -> 
 
 def payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
     trades = _trades(state)
-    exits = _exit_rows(state)
+    raw_exits = _exit_rows(state)
+    exits, excluded_exits = _exit_integrity_partition(state)
     ml_rows = _ml_rows(state)
     labeled = _labeled_ml_rows(state)
     observed_outcomes = len(exits)
-    scorecards = _scorecards(state)
+    scorecards = _scorecards(state, outcome_integrity_blocked=bool(excluded_exits))
     mae_mfe = _mae_mfe_coverage(state)
     wf = _walk_forward(state)
     regimes = _regimes_seen(state)
@@ -378,6 +405,7 @@ def payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
     gates = [
         _gate("execution_rows", len(trades), MIN_EXECUTION_ROWS, len(trades) >= MIN_EXECUTION_ROWS, "Actual state.trades rows."),
         _gate("observed_exit_outcomes", observed_outcomes, MIN_OBSERVED_OUTCOMES, observed_outcomes >= MIN_OBSERVED_OUTCOMES, "Realized exits with outcome data."),
+        _gate("price_integrity_outcomes", len(excluded_exits), 0, not excluded_exits, "Suspect or unverifiable execution-price outcomes are excluded from ML/performance qualification without rewriting source rows."),
         _gate("labeled_ml_rows", len(labeled), MIN_LABELED_ROWS, len(labeled) >= MIN_LABELED_ROWS, "ML dataset rows with attached outcome labels."),
         _gate("mae_mfe_coverage", mae_mfe.get("coverage_ready"), True, bool(mae_mfe.get("coverage_ready")), "MAE/MFE or path telemetry exists."),
         _gate("regime_coverage", len(regimes), MIN_REGIME_COUNT, len(regimes) >= MIN_REGIME_COUNT, "Distinct regimes in state/ML rows."),
@@ -408,7 +436,16 @@ def payload(state: Dict[str, Any], mod: Any = None) -> Dict[str, Any]:
         "gates_passed": len(gates) - len(failed),
         "gates_failed": len(failed),
         "gates": gates,
-        "execution_summary": {"execution_rows": len(trades), "observed_exit_outcomes": observed_outcomes, **_trade_metrics(exits)},
+        "execution_summary": {
+            "execution_rows": len(trades),
+            "raw_exit_outcomes": len(raw_exits),
+            "observed_exit_outcomes": observed_outcomes,
+            "excluded_exit_outcomes": len(excluded_exits),
+            "outcome_integrity_status": "inconclusive" if excluded_exits else "eligible",
+            "outcome_integrity_exclusions": excluded_exits[-10:],
+            "immutable_source_rows_rewritten": False,
+            **_trade_metrics(exits),
+        },
         "ml_dataset_summary": {"rows_total": len(ml_rows), "labeled_rows": len(labeled), "pending_rows": max(0, len(ml_rows) - len(labeled)), "stored_predictions": len(_l(_d(state.get("ml_phase2")).get("last_predictions")))},
         "mae_mfe": mae_mfe,
         "walk_forward": wf,

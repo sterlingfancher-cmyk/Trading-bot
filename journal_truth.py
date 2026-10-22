@@ -32,7 +32,7 @@ import os
 import time
 from typing import Any, Dict, List, Tuple
 
-VERSION = "journal-truth-state-primary-2026-05-13"
+VERSION = "journal-truth-state-primary-2026-10-22-price-integrity"
 
 STATE_DIR = os.environ.get("STATE_DIR") or os.environ.get("PERSISTENT_STATE_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 TRADE_JOURNAL_FILE = os.path.join(STATE_DIR, "trade_journal.json")
@@ -45,6 +45,8 @@ _PATCHED = False
 REAL_EXECUTION_ACTIONS = {"entry", "exit", "partial_exit", "reduce", "reduce_position", "scale_out"}
 ENTRY_ACTIONS = {"entry"}
 EXIT_ACTIONS = {"exit", "partial_exit", "reduce", "reduce_position", "scale_out"}
+OUTCOME_MIN_PRICE_RATIO = 2.0 / 3.0
+OUTCOME_MAX_PRICE_RATIO = 1.50
 REVIEW_ACTIONS = {"blocked", "rejected", "rotation", "review", "watch", "signal"}
 REVIEW_SOURCE_HINTS = (
     "weakest_position_for_rotation",
@@ -220,6 +222,98 @@ def is_execution_row(row: Any) -> bool:
     return True
 
 
+def _execution_price(row: Dict[str, Any], *, entry: bool = False) -> float | None:
+    keys = ("entry_price", "price", "fill_price") if entry else ("price", "exit_price", "fill_price")
+    for key in keys:
+        value = _float_or_none(row.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def partition_performance_exit_rows(
+    rows: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Partition realized exits without rewriting immutable execution rows.
+
+    Accounting retains every canonical/state outcome.  Qualification evidence
+    is stricter: an exit needs a positive entry anchor and an exit price inside
+    the same deliberately broad independent-verification envelope used by the
+    prospective paper exit guard.  Suspect rows remain visible with a reason,
+    but cannot silently improve or degrade ML/performance promotion metrics.
+    """
+    anchors: Dict[Tuple[str, str], float] = {}
+    eligible: List[Dict[str, Any]] = []
+    excluded: List[Dict[str, Any]] = []
+
+    for row in _sort_execution_rows([r for r in rows if isinstance(r, dict)]):
+        action = _action(row)
+        if action not in REAL_EXECUTION_ACTIONS:
+            continue
+        symbol = _symbol(row)
+        side = _side(row) or "long"
+        key = (symbol, side)
+
+        if action in ENTRY_ACTIONS:
+            entry_price = _execution_price(row, entry=True)
+            if symbol and entry_price is not None and entry_price > 0.0:
+                anchors[key] = entry_price
+            continue
+        if action not in EXIT_ACTIONS:
+            continue
+
+        entry_price = _float_or_none(row.get("entry_price"))
+        if entry_price is None or entry_price <= 0.0:
+            entry_price = anchors.get(key)
+        if (entry_price is None or entry_price <= 0.0) and symbol:
+            symbol_anchors = [value for (anchor_symbol, _), value in anchors.items() if anchor_symbol == symbol]
+            if len(symbol_anchors) == 1:
+                entry_price = symbol_anchors[0]
+        exit_price = _execution_price(row)
+
+        reason = None
+        ratio = None
+        explicit_status = str(
+            row.get("price_integrity_status")
+            or row.get("execution_price_integrity_status")
+            or row.get("outcome_integrity_status")
+            or ""
+        ).strip().lower()
+        if explicit_status in {"fail", "failed", "blocked", "invalid", "quarantined", "suspect", "unverified"}:
+            reason = "explicit_price_integrity_failure"
+        elif entry_price is None or entry_price <= 0.0:
+            reason = "missing_positive_entry_anchor"
+        elif exit_price is None or exit_price <= 0.0:
+            reason = "missing_positive_exit_price"
+        else:
+            ratio = exit_price / entry_price
+            if ratio <= OUTCOME_MIN_PRICE_RATIO or ratio >= OUTCOME_MAX_PRICE_RATIO:
+                reason = "price_to_entry_outside_verification_envelope"
+
+        if reason is None:
+            eligible.append(row)
+        else:
+            excluded.append({
+                "row": row,
+                "integrity": {
+                    "eligible_for_performance_or_ml": False,
+                    "reason": reason,
+                    "symbol": symbol,
+                    "side": side,
+                    "entry_price": entry_price,
+                    "exit_price": exit_price,
+                    "price_to_entry_ratio": ratio,
+                    "verification_envelope": [OUTCOME_MIN_PRICE_RATIO, OUTCOME_MAX_PRICE_RATIO],
+                    "canonical_row_preserved": True,
+                },
+            })
+
+        if action == "exit":
+            anchors.pop(key, None)
+
+    return eligible, excluded
+
+
 def is_review_row(row: Any) -> bool:
     if not isinstance(row, dict):
         return True
@@ -364,6 +458,7 @@ def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
 
     entries = [t for t in execution if _action(t) in ENTRY_ACTIONS]
     exits = [t for t in execution if _action(t) in EXIT_ACTIONS]
+    performance_eligible_exits, performance_excluded_exits = partition_performance_exit_rows(execution)
     stop_exits = [t for t in exits if "stop" in str(t.get("exit_reason", "")).lower()]
     partial_exits = [t for t in exits if _action(t) == "partial_exit"]
     wins = [t for t in exits if _float(t.get("pnl_dollars", 0.0)) > 0]
@@ -400,6 +495,26 @@ def execution_summary(journal: Dict[str, Any]) -> Dict[str, Any]:
         "realized_reconciliation_note": "State trades/recent_trades are the primary source. Journal rows are supplemental only when newer than the latest state execution and not fuzzy duplicates.",
         "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss > 0 else None,
         "win_rate_pct": round(len(wins) / len(exits) * 100, 2) if exits else None,
+        "performance_evidence_status": "inconclusive" if performance_excluded_exits else "eligible",
+        "performance_eligible_exits_count": len(performance_eligible_exits),
+        "performance_excluded_exits_count": len(performance_excluded_exits),
+        "performance_exclusion_reasons": {
+            reason: sum(
+                1 for item in performance_excluded_exits
+                if item.get("integrity", {}).get("reason") == reason
+            )
+            for reason in sorted({
+                str(item.get("integrity", {}).get("reason"))
+                for item in performance_excluded_exits
+            })
+        },
+        "recent_performance_excluded_exits": performance_excluded_exits[-10:],
+        "performance_outcome_integrity_policy": {
+            "price_to_entry_ratio_envelope": [OUTCOME_MIN_PRICE_RATIO, OUTCOME_MAX_PRICE_RATIO],
+            "immutable_source_rows_rewritten": False,
+            "accounting_outcomes_preserved": True,
+            "excluded_rows_may_not_qualify_performance_or_ml_promotion": True,
+        },
         "latest_execution_trade": latest_execution,
         "latest_trade": latest_execution,
         "latest_review_row": review[-1] if review else None,

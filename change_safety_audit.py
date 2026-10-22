@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-VERSION = "change-safety-audit-2026-10-10-v18-ledger-evidence-adapter"
+VERSION = "change-safety-audit-2026-10-22-v19-outcome-integrity"
 
 CORE_TESTS = (
     "test_architecture_stage_b.py",
@@ -83,6 +83,7 @@ STATE_SERIALIZATION_TESTS = (
     "test_issue222_verified_flat_successor.py",
 )
 PERFORMANCE_EVIDENCE_INTEGRITY_TESTS = (
+    "test_issue313_suspect_outcome_exclusion.py",
     "test_issue167_forward_evidence_integrity.py",
     "test_issue170_performance_atr_integrity.py",
     "test_issue193_performance_v2_isolation.py",
@@ -206,6 +207,9 @@ def _is_state_serialization_path(path: str) -> bool:
 
 def _is_performance_evidence_integrity_path(path: str) -> bool:
     return Path(path.lower()).name in {
+        "journal_truth.py",
+        "ml_pre3a_shadow_validation.py",
+        "test_issue313_suspect_outcome_exclusion.py",
         "performance_audit_lab.py",
         "performance_audit_lab_v2.py",
         "performance_validation_evidence.py",
