@@ -303,6 +303,8 @@ class ChangeSafetyAuditTests(unittest.TestCase):
 
     def test_performance_evidence_change_selects_complete_integrity_regressions(self) -> None:
         for path in (
+            "daily_performance_scorecard.py",
+            "research_evidence/daily_performance_scorecard_2026-10-22.json",
             "performance_audit_lab.py",
             "performance_audit_lab_v2.py",
             "journal_truth.py",
@@ -311,6 +313,7 @@ class ChangeSafetyAuditTests(unittest.TestCase):
             "test_issue170_performance_atr_integrity.py",
         ):
             tests = planned_regressions((path,))
+            self.assertIn("test_daily_performance_scorecard.py", tests)
             self.assertIn("test_issue313_suspect_outcome_exclusion.py", tests)
             self.assertIn("test_issue167_forward_evidence_integrity.py", tests)
             self.assertIn("test_issue170_performance_atr_integrity.py", tests)

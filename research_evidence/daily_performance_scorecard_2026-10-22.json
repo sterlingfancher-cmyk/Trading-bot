@@ -1,0 +1,105 @@
+{
+  "schema_version": "daily-performance-scorecard-2026-10-23-v1",
+  "observed_at": "2026-10-23T14:01:50Z",
+  "session_date": "2026-10-22",
+  "accounting_epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+  "provenance": {
+    "runtime_endpoint": "https://web-production-e1796.up.railway.app/paper/journal-truth-status",
+    "runtime_generated_local": "2026-10-23 14:01:50",
+    "runtime_timezone_not_exposed": true,
+    "state_source": "/app/data/state.json:trades",
+    "canonical_ledger_version": "canonical-execution-ledger-2026-09-25-v6-fail-closed-append",
+    "scorecard_code_base_commit": "4cd3ae975795dc609d9a67c8a5a4e98edca66d93",
+    "runtime_deployed_commit": null,
+    "runtime_commit_limitation": "the journal observation did not expose an exact deployed commit binding",
+    "source_scope": "recent state-primary rows exposed by journal truth; full-day row coverage and account close were not independently proven; no balance-delta inference"
+  },
+  "session_completeness": {
+    "complete": false,
+    "execution_rows_observed": 7,
+    "expected_execution_rows": null,
+    "reason": "journal rows prove 4 entries and 3 final exits, but no independent end-of-session account snapshot was available",
+    "missing_fields": ["canonical_daily_pnl", "unrealized_pnl", "equity", "gross_exposure", "fees", "slippage"]
+  },
+  "event_counts": {"entries": 4, "final_exits": 3, "partial_exits": 0},
+  "canonical_reporting": {
+    "completed_matched_trades": 3,
+    "wins": 0,
+    "losses": 3,
+    "flat_trades": 0,
+    "realized_pnl_from_matched_rows": -109.40,
+    "canonical_daily_pnl": null,
+    "unrealized_pnl": null,
+    "equity": null,
+    "gross_exposure": null,
+    "average_win": null,
+    "average_loss": -36.47,
+    "win_rate_pct": 0.0,
+    "profit_factor": 0.0,
+    "largest_loss": -75.68,
+    "fees": null,
+    "slippage": null,
+    "fee_slippage_coverage": "unknown",
+    "long_short": {
+      "long": {"completed_trades": 1, "realized_pnl": -0.62, "wins": 0, "losses": 1},
+      "short": {"completed_trades": 2, "realized_pnl": -108.78, "wins": 0, "losses": 2}
+    },
+    "exit_reasons": {"market_regime_protection": 1, "structure_stop_short": 2},
+    "open_at_session_end": [{"symbol": "MOD", "side": "short", "entry_price": 135.37, "shares": 7.220710}],
+    "completed_trade_lifecycles": [
+      {"execution_path_id": "PANW|long|1792677923|359.650000", "symbol": "PANW", "side": "long", "pnl_dollars": -0.62, "exit_reason": "market_regime_protection"},
+      {"execution_path_id": "FPS|short|1792696188|23.325000", "symbol": "FPS", "side": "short", "pnl_dollars": -75.68, "exit_reason": "structure_stop_short"},
+      {"execution_path_id": "TTMI|short|1792696627|71.945000", "symbol": "TTMI", "side": "short", "pnl_dollars": -33.10, "exit_reason": "structure_stop_short"}
+    ]
+  },
+  "eligible_research_metrics": {
+    "completed_matched_trades": 3,
+    "realized_pnl": -109.40,
+    "wins": 0,
+    "losses": 3,
+    "research_exclusions": []
+  },
+  "loss_driver_classification": {
+    "proven": [],
+    "hypotheses": [
+      {"category": "exit_timing", "evidence": "all three completed Oct22 lifecycles exited at a loss; two shorts exited via structure_stop_short and one long via market_regime_protection, but no counterfactual exit path proves avoidability"},
+      {"category": "market_regime", "evidence": "exit rows record risk_off/crash_warning when positions were closed; this proves context, not causal loss attribution"},
+      {"category": "position_sizing_or_exposure", "evidence": "FPS supplied 69.2% of matched session loss; this is concentration evidence, not causal proof"},
+      {"category": "entry_selection", "evidence": "both completed short entries stopped in crash_warning conditions, but one session is insufficient to attribute a selection defect"}
+    ],
+    "bad_data_or_execution": "no Oct22 lifecycle in this bounded journal extract has an independent suspect-price finding",
+    "unclassified": ["fees_and_slippage"]
+  },
+  "rolling_5_session": {"available_comparable_sessions": 0, "requested_sessions": 5, "session_dates": [], "missing_sessions": ["2026-10-16", "2026-10-19", "2026-10-20", "2026-10-21"], "noncomparable_sessions": ["2026-10-22"], "insufficient_for_full_window": true, "reason": "Oct22 matched journal metrics are reconciled, but the session lacks a provable end-of-session account snapshot"},
+  "rolling_20_session": {"available_comparable_sessions": 0, "requested_sessions": 20, "session_dates": [], "missing_sessions": "prior expected sessions not yet backfilled from provable same-epoch source coverage", "noncomparable_sessions": ["2026-10-22"], "insufficient_for_full_window": true},
+  "suspect_fill_policy": {
+    "canonical_rows_preserved": true,
+    "eligible_research_exclusion_required": true,
+    "known_suspect_path_outside_this_session": "SNOW|short|1792151344|310.800000",
+    "invented_corrected_fill": false
+  },
+  "specialist_assignment": {
+    "assigned_at": "2026-10-23T14:00:34Z",
+    "question": "Can a durable scorecard reconcile the prior completed session without mutating canonical history or treating suspect fills as eligible research outcomes?",
+    "status": "delivered_and_primary_reviewed",
+    "implementation": "standalone read-only scorecard builder, focused regressions, and this dated checkpoint",
+    "validation": "focused unit tests, Python compilation, JSON parse, and whitespace validation pass; exact-head CI remains required"
+  },
+  "bounded_experiment": {
+    "status": "hypothesis_only_not_started",
+    "measurable_question": "During risk_off sessions, does admitting at most one new short lifecycle reduce valid realized drawdown without degrading risk-adjusted return?",
+    "baseline": "current risk_off short admission",
+    "one_variable_candidate": "cap new short lifecycles at one per market session while risk_off",
+    "unchanged": ["ranker", "position sizing", "exit rules", "hard-risk limits", "runner"],
+    "motivation_not_proof": "Oct22 FPS and TTMI shorts lost a combined 108.78 after MOD was already open; one session cannot establish causation or justify retuning",
+    "required_validation": [
+      "same-epoch history with suspect outcomes excluded but preserved in canonical reporting",
+      "untouched holdout and walk-forward comparison",
+      "fees and slippage coverage",
+      "regime and concentration analysis",
+      "forward shadow observation",
+      "all VALIDATION_POLICY sample, duration, stress, and promotion gates"
+    ]
+  },
+  "guardrails": {"immutable_history_modified": false, "balance_change_used_as_pnl": false, "cross_epoch_comparison": false, "automatic_promotion": false}
+}
