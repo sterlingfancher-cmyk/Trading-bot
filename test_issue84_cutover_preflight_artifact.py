@@ -179,6 +179,69 @@ class Issue84CutoverPreflightArtifactTests(unittest.TestCase):
         self.assertFalse(result["activation_performed_by_builder"])
         self.assertEqual(result["blockers"], ["post_start_forward_observations"])
 
+    def test_released_runtime_accepts_only_bounded_nonhalting_risk_warn(self):
+        snapshot = self._released_snapshot()
+        audit = snapshot["raw"]["daily_audit"]["payload"]
+        audit["overall"] = "warn"
+        audit["risk"].update(
+            {
+                "status": "warn",
+                "halted": False,
+                "self_defense_active": False,
+                "intraday_drawdown_pct": 1.478,
+            }
+        )
+        audit["runner"] = {"status": "pass", "active_error": False}
+        audit["market_data"] = {
+            "status": "pass",
+            "provider_circuit_open": False,
+            "in_flight_or_unclassified_requests": 0,
+        }
+
+        evidence, result = build_artifacts(
+            runtime_snapshot=snapshot,
+            deployed_commit_sha=COMMIT,
+            splendid_deployment_settled=True,
+        )
+
+        self.assertTrue(evidence["checks"]["daily_audit_safe"])
+        self.assertEqual(result["state"], "active_pending_forward_observations")
+
+    def test_released_runtime_rejects_unsafe_daily_audit_warn(self):
+        for mutation in ("halt", "self_defense", "runner", "market_data"):
+            with self.subTest(mutation=mutation):
+                snapshot = self._released_snapshot()
+                audit = snapshot["raw"]["daily_audit"]["payload"]
+                audit["overall"] = "warn"
+                audit["risk"].update(
+                    {
+                        "status": "warn",
+                        "halted": False,
+                        "self_defense_active": False,
+                    }
+                )
+                audit["runner"] = {"status": "pass", "active_error": False}
+                audit["market_data"] = {
+                    "status": "pass",
+                    "provider_circuit_open": False,
+                    "in_flight_or_unclassified_requests": 0,
+                }
+                if mutation == "halt":
+                    audit["risk"]["halted"] = True
+                elif mutation == "self_defense":
+                    audit["risk"]["self_defense_active"] = True
+                elif mutation == "runner":
+                    audit["runner"]["active_error"] = True
+                else:
+                    audit["market_data"]["status"] = "warn"
+
+                with self.assertRaisesRegex(CanaryInvariantError, "daily_audit_safe"):
+                    build_artifacts(
+                        runtime_snapshot=snapshot,
+                        deployed_commit_sha=COMMIT,
+                        splendid_deployment_settled=True,
+                    )
+
     def test_released_runtime_accepts_every_governed_execution_receipt_operation(self):
         for operation in (
             "entry",

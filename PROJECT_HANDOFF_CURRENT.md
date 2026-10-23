@@ -3758,3 +3758,39 @@ tests pass 36/36; broader unittest discovery ran 411 tests and was blocked only
 by ten missing-environment dependencies (`pytest`, `flask`, `yfinance`), which
 the mandatory workflow installs. Exact-head CI, review, merge, deployment, and
 settled runtime acceptance remain pending.
+## 2026-10-23 Issue #313 — deployed exact head; bounded risk-warn acceptance repair
+
+PR #315 passed every exact-head workflow at
+`236da829129ea439510258e46b7ab6748b62e3a5` and squash-merged as
+`4cd3ae975795dc609d9a67c8a5a4e98edca66d93`. All merge-head code gates also
+passed (`39966263493`, `39966263892`, `39966263945`, and the refactor job in
+`39966264119`). Runtime job `120457491985` proved the exact Splendid deployment:
+13/13 endpoints reachable, sentinel quiet/pass with zero incidents and exact
+generated commit `4cd3ae9...`, self-check pass, 141-row chain-valid canonical
+ledger with clean projection parity and 53 current-epoch rows, accounting zero
+coverage/economic issues, and a flat account at equity `12952.06`. Artifact
+`12507716442` has ZIP digest
+`sha256:78a8f76b2f0bf6bd741628dd559e012899dbca5b3586fcaaf79681362c7a692f`.
+
+Settled governed acceptance nevertheless failed only at `daily_audit_pass`.
+The daily audit was `warn` because the non-halting risk status reported 1.478%
+intraday drawdown; risk halt was false, self-defense was clear, runner and
+market data passed, the provider circuit was closed, and there were zero
+unclassified requests. This is an acceptance-contract mismatch, not a code
+deployment, accounting, ledger, price-integrity or runtime failure.
+
+Branch `fix/issue313-safe-risk-warn-acceptance` narrowly permits `warn` only
+for that bounded safe combination. Any audit failure, risk halt, self-defense,
+runner error, market-data warning, open provider circuit or unclassified
+request remains fail closed; every existing sentinel, exact-commit,
+accounting, ledger, projection, epoch, recovery and hard-risk condition remains
+unchanged. Thirty-five focused artifact and Change Safety tests pass. Replaying
+the exact merge-head artifact now emits governed post-start acceptance with
+`daily_audit_safe=true`; the only blocker is the already-established
+`post_start_forward_observations`. Exact-head CI, review, merge, redeployment
+and settled runtime acceptance are still required before Issue #313 is closed.
+
+Issue #316 holds the separate scorecard checkpoint at remote branch
+`feat/daily-performance-scorecard-20261023`, exact head
+`c77a34efe655e98be779c99cfd2e895fa4a1187a`; resume it only after this repair
+is accepted.
