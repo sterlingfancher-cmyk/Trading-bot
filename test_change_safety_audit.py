@@ -305,10 +305,13 @@ class ChangeSafetyAuditTests(unittest.TestCase):
         for path in (
             "performance_audit_lab.py",
             "performance_audit_lab_v2.py",
+            "journal_truth.py",
+            "ml_pre3a_shadow_validation.py",
             "test_issue167_forward_evidence_integrity.py",
             "test_issue170_performance_atr_integrity.py",
         ):
             tests = planned_regressions((path,))
+            self.assertIn("test_issue313_suspect_outcome_exclusion.py", tests)
             self.assertIn("test_issue167_forward_evidence_integrity.py", tests)
             self.assertIn("test_issue170_performance_atr_integrity.py", tests)
             self.assertIn("test_issue193_performance_v2_isolation.py", tests)

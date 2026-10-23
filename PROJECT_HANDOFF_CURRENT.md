@@ -3729,3 +3729,32 @@ never rewrites a canonical ledger row. It holds no production state, order,
 live or AI authority. Focused transaction/journal and audit tests currently
 pass. Continue through exact-diff inspection and every mandatory exact-head
 gate before merge and settled read-only deployment acceptance.
+
+## 2026-10-22 Issue #313 — price-integrity deployment blocked; evidence exclusion in progress
+
+PR #314 merged as `46cc50394b0c8f0ca7a439289c9ce62e18a031e5`. Its merge-head
+Repository Safety run `39672181445`, Architecture Debt run `39672181507`,
+Change Safety run `39672181272`, and refactor-audit job in run `39672181513`
+all passed; the Change Safety exact Gunicorn smoke passed. The same refactor
+run's runtime job `119473262955` failed at the mandatory settled Splendid step
+after timing out for the exact merge commit. A later scheduled read-only
+snapshot (`39706329925`, artifact `12395560661`, ZIP digest
+`sha256:da9c580235e6ab39dd201569f5ca599ca4b6654c34dc3062e4c844c9e58cffeb`)
+was operationally healthy, but did not prove exact-head deployment. A fresh
+direct read of `/paper/exit-price-integrity-status` still returned v3 with the
+old 0.40–2.50 envelope, not PR #314's v4 0.667–1.50 guard. Therefore PR #314
+is merged but not deployed or accepted; do not close that gate from the later
+generic snapshot. No cycle was forced and no halt or evidence was changed.
+
+The active follow-up branch is `fix/issue313-suspect-outcome-exclusion`, based
+on exact current main `46cc5039...`. It preserves every immutable execution and
+accounting row while partitioning suspect or unverifiable exit outcomes out of
+performance/ML qualification. The concrete SNOW 310.80 short entry to 528.61
+exit is retained as accounting history but classified inconclusive at ratio
+1.7008. ML pre-3A observed-outcome, walk-forward, readiness, and weighting gates
+fail closed when such an exclusion exists. The Change Safety selector now binds
+this surface to the complete performance-integrity regressions. Focused local
+tests pass 36/36; broader unittest discovery ran 411 tests and was blocked only
+by ten missing-environment dependencies (`pytest`, `flask`, `yfinance`), which
+the mandatory workflow installs. Exact-head CI, review, merge, deployment, and
+settled runtime acceptance remain pending.
