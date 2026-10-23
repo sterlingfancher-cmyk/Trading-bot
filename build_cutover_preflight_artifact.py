@@ -31,7 +31,7 @@ from governed_v5_restart_contract import (
     VERSION as GOVERNED_RESTART_VERSION,
 )
 
-VERSION = "cutover-preflight-ci-artifact-2026-10-10-v4-governed-operation-receipts"
+VERSION = "cutover-preflight-ci-artifact-2026-10-23-v5-safe-risk-warn"
 EXPECTED_PRESTART_LEDGER_ROWS = 88
 EXPECTED_PRESTART_LEDGER_SHA256 = (
     "f8ef69407af64f4c2eafc41bd95b9dcc01d0cea51d1aa577431c6f65367f0166"
@@ -164,6 +164,36 @@ def _position_symbols(value: Any, *, name: str) -> set[str]:
     return {str(symbol) for symbol in symbols}
 
 
+def _daily_audit_safe_for_acceptance(daily_audit: Mapping[str, Any]) -> bool:
+    """Accept a warning only when it is the bounded, non-halting risk warning.
+
+    Strategy drawdown is not a deployment-integrity failure.  Every failure,
+    halt, self-defense state, runner error, and market-data warning remains
+    fail closed; accounting and ledger invariants are checked independently by
+    the post-start acceptance contract below.
+    """
+    overall = daily_audit.get("overall")
+    if overall == "pass":
+        return True
+    if overall != "warn":
+        return False
+    risk = _mapping(daily_audit.get("risk"), name="daily_audit.risk")
+    runner = _mapping(daily_audit.get("runner"), name="daily_audit.runner")
+    market_data = _mapping(
+        daily_audit.get("market_data"), name="daily_audit.market_data"
+    )
+    return bool(
+        risk.get("status") == "warn"
+        and risk.get("halted") is False
+        and risk.get("self_defense_active") is False
+        and runner.get("status") == "pass"
+        and runner.get("active_error") is False
+        and market_data.get("status") == "pass"
+        and market_data.get("provider_circuit_open") is False
+        and market_data.get("in_flight_or_unclassified_requests") == 0
+    )
+
+
 def _build_post_start_acceptance(
     *,
     runtime_snapshot: Mapping[str, Any],
@@ -204,7 +234,7 @@ def _build_post_start_acceptance(
         )
 
     checks = {
-        "daily_audit_pass": daily_audit.get("overall") == "pass",
+        "daily_audit_safe": _daily_audit_safe_for_acceptance(daily_audit),
         "exact_epoch": epoch.get("epoch_id") == TARGET_EPOCH_ID,
         "validation_hold_released": (
             epoch.get("validation_hold") is False
