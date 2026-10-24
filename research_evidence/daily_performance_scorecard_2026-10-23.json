@@ -1,0 +1,180 @@
+{
+  "schema_version": "daily-performance-scorecard-2026-10-23-v1",
+  "observed_at": "2026-10-24 09:19:26 CDT",
+  "session_date": "2026-10-23",
+  "accounting_epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+  "provenance": {
+    "runtime_endpoint": "https://web-production-e1796.up.railway.app/paper/trade-journal?full=1",
+    "runtime_deployed_commit": "ee2fab8595ade9fba147d83c1d075cb13f10ec04",
+    "runtime_journal_version": "trade-journal-event-hook-2026-05-08",
+    "runtime_journal_updated_local": "2026-10-24 14:18:12",
+    "state_source": "/app/data/state.json:trades",
+    "source_of_truth": "state_primary",
+    "state_execution_rows_observed": 53,
+    "latest_state_execution_id": "fa0c58838d494004b14725169293096e",
+    "scorecard_code_base_commit": "ee2fab8595ade9fba147d83c1d075cb13f10ec04",
+    "source_scope": "All 53 current state-primary execution rows were read observationally from the durable full trade journal. Chicago session bounds 2026-10-23T05:00:00Z through 2026-10-24T04:59:59Z select exactly the final two state-primary rows; duplicate function-hook rows were excluded by exact journal_source and execution_id. No balance-delta return inference was used."
+  },
+  "session_completeness": {
+    "complete": false,
+    "execution_rows_observed": 2,
+    "expected_execution_rows": 2,
+    "execution_row_coverage": "proven from the full ordered state-primary sequence: Oct23 rows are indices 51 and 52 of 53 and row 52 is the summary-bound latest execution",
+    "execution_lifecycle_complete": true,
+    "account_close_complete": false,
+    "fee_slippage_coverage_known": false,
+    "reason": "The exact Oct23 execution lifecycle is reconciled, but no independently time-bound Oct23 session-close account snapshot or fee/slippage ledger is exposed. The Oct24 self-check is a later flat-account observation, not a substituted Oct23 close.",
+    "missing_fields": [
+      "canonical_daily_pnl",
+      "session_close_equity",
+      "session_close_unrealized_pnl",
+      "session_close_gross_exposure",
+      "fees",
+      "slippage"
+    ]
+  },
+  "event_counts": {
+    "entries": 0,
+    "final_exits": 1,
+    "partial_exits": 1
+  },
+  "canonical_reporting": {
+    "completed_matched_trades": 1,
+    "wins": 1,
+    "losses": 0,
+    "flat_trades": 0,
+    "realized_pnl_from_session_exit_rows": 27.94,
+    "canonical_daily_pnl": null,
+    "unrealized_pnl": null,
+    "equity": null,
+    "gross_exposure": null,
+    "average_win": 27.94,
+    "average_loss": null,
+    "win_rate_pct": 100.0,
+    "profit_factor": "infinite",
+    "largest_loss": null,
+    "fees": null,
+    "slippage": null,
+    "fee_slippage_coverage": "unknown",
+    "long_short": {
+      "long": {
+        "completed_trades": 0,
+        "realized_pnl": 0.0,
+        "wins": 0,
+        "losses": 0
+      },
+      "short": {
+        "completed_trades": 1,
+        "realized_pnl": 27.94,
+        "wins": 1,
+        "losses": 0
+      }
+    },
+    "exit_reasons": {
+      "partial_profit_short": 1,
+      "trailing_stop_short": 1
+    },
+    "completed_trade_lifecycles": [
+      {
+        "execution_path_id": "MOD|short|1792692613|135.370000",
+        "symbol": "MOD",
+        "side": "short",
+        "entry_time_utc": "2026-10-22T18:10:13Z",
+        "entry_price": 135.37,
+        "entry_shares": 7.22071,
+        "partial_exit_time_utc": "2026-10-23T13:34:28Z",
+        "partial_exit_price": 131.5,
+        "partial_exit_shares": 2.382834,
+        "partial_exit_pnl": 9.22,
+        "final_exit_time_utc": "2026-10-23T13:34:46Z",
+        "final_exit_price": 131.5,
+        "final_exit_shares": 4.837876,
+        "final_exit_pnl": 18.72,
+        "pnl_dollars": 27.94,
+        "partial_exit_count": 1,
+        "final_exit_reason": "trailing_stop_short",
+        "market_mode": "risk_off",
+        "execution_ids": [
+          "58b76ff2b74d433f8a250111bc96bfde",
+          "7dc6570958484f539cda7e7139b4d621",
+          "fa0c58838d494004b14725169293096e"
+        ]
+      }
+    ]
+  },
+  "post_session_observation": {
+    "observed_at": "2026-10-24 09:19:26 CDT",
+    "source": "/paper/self-check",
+    "overall": "pass",
+    "cash": 12952.062262711646,
+    "equity": 12952.06,
+    "open_positions_count": 0,
+    "unrealized_pnl": 0.0,
+    "execution_rows": 53,
+    "limitation": "This proves the account was flat at observation time and no later execution row existed; it does not independently prove the Oct23 session-close equity or daily P/L."
+  },
+  "eligible_research_metrics": {
+    "completed_matched_trades": 1,
+    "realized_pnl": 27.94,
+    "wins": 1,
+    "losses": 0,
+    "research_exclusions": [],
+    "promotion_eligible": false,
+    "ineligibility_reason": "session-close accounting and fee/slippage coverage are incomplete"
+  },
+  "research_exclusions": [],
+  "loss_driver_classification": {
+    "proven": [],
+    "hypotheses": [],
+    "note": "No losing completed lifecycle occurred on Oct23. The positive MOD outcome is one observation and is not evidence for retuning or promotion."
+  },
+  "rolling_5_session": {
+    "available_comparable_sessions": 0,
+    "requested_sessions": 5,
+    "session_dates": [],
+    "missing_sessions": [
+      "2026-10-19",
+      "2026-10-20",
+      "2026-10-21"
+    ],
+    "noncomparable_sessions": [
+      "2026-10-22",
+      "2026-10-23"
+    ],
+    "insufficient_for_full_window": true,
+    "reason": "Both retained dated observations lack a provable same-session account close and known fee/slippage coverage."
+  },
+  "rolling_20_session": {
+    "available_comparable_sessions": 0,
+    "requested_sessions": 20,
+    "session_dates": [],
+    "missing_sessions": "Prior expected sessions are not backfilled without provable same-epoch full-source coverage.",
+    "noncomparable_sessions": [
+      "2026-10-22",
+      "2026-10-23"
+    ],
+    "insufficient_for_full_window": true
+  },
+  "suspect_fill_policy": {
+    "canonical_rows_preserved": true,
+    "eligible_research_exclusion_required": true,
+    "session_suspect_paths": [],
+    "known_suspect_path_outside_this_session": "SNOW|short|1792165858|310.800000",
+    "invented_corrected_fill": false
+  },
+  "bounded_experiment": {
+    "experiment": "risk_off_new_short_cap_one_per_session",
+    "status": "insufficient_evidence_no_improvement_claim",
+    "exact_evaluator_commit": "ee2fab8595ade9fba147d83c1d075cb13f10ec04",
+    "oct23_effect": "none; MOD was entered on Oct22, so Oct23 supplies an exit outcome but no Oct23 risk_off short admission comparison",
+    "next_required_source": "exact ordered risk_off admission decisions joined to valid matched net-after-cost outcomes across complete same-epoch sessions, followed by untouched holdout, walk-forward, regime, concentration, stress, and forward-shadow gates"
+  },
+  "guardrails": {
+    "immutable_history_modified": false,
+    "balance_change_used_as_pnl": false,
+    "partial_exits_counted_as_separate_wins": false,
+    "cross_epoch_comparison": false,
+    "automatic_promotion": false,
+    "runner_or_strategy_changed": false
+  }
+}
