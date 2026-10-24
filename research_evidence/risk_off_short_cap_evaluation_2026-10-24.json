@@ -1,0 +1,58 @@
+{
+  "schema_version": "risk-off-short-cap-evaluator-2026-10-24-v1",
+  "observed_at": "2026-10-24T14:00:00Z",
+  "repository_main_checkpoint": "f3417292c633ecc65ae39942faf254f9997d5e84",
+  "source_issue": 316,
+  "accounting_epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+  "question": "Does a one-new-risk_off-short-lifecycle-per-session cap improve eligible same-epoch deterministic performance?",
+  "one_variable": {"risk_off_new_short_cap_per_session": 1},
+  "unchanged": ["ranker", "position_sizing", "exit_rules", "cost_model", "hard_risk_limits", "runner"],
+  "verdict": "insufficient_evidence",
+  "promotion_ready": false,
+  "source_coverage": {
+    "available_checkpoint": "research_evidence/daily_performance_scorecard_2026-10-22.json",
+    "observed_sessions": ["2026-10-22"],
+    "complete_comparable_sessions": 0,
+    "eligible_completed_risk_off_short_lifecycles_with_entry_order_and_costs": 0,
+    "research_partition_sessions": 0,
+    "untouched_holdout_sessions": 0,
+    "known_oct22_rows": "4 entries, 3 final exits, 3 matched lifecycles; MOD remained open",
+    "known_oct22_matched_realized_pnl": -109.40
+  },
+  "contamination_and_exclusion_rules": [
+    "same accounting epoch only",
+    "entry market mode must be explicitly risk_off",
+    "short side and exact entry timestamp required",
+    "full-day entry universe and completed lifecycle outcome required",
+    "suspect-price or otherwise integrity-ineligible outcomes remain canonical but are excluded",
+    "net outcome after explicit fee/slippage coverage required",
+    "research and untouched holdout partitions must be separate",
+    "partial exits remain part of one lifecycle",
+    "no synthetic replacement fills or balance-delta returns"
+  ],
+  "blockers": [
+    "Oct22 is explicitly non-comparable because full-day row coverage and session-close account evidence are unavailable",
+    "the dated checkpoint does not provide exact ordered risk_off admission records with net-after-cost outcomes",
+    "fees and slippage coverage is unknown",
+    "there are zero complete same-epoch research sessions and zero untouched holdout sessions",
+    "one observed losing day cannot satisfy sample, duration, regime, concentration, cost, stress, walk-forward, or forward-shadow gates"
+  ],
+  "observed_hypothesis_only": {
+    "detail": "Oct22 FPS and TTMI short losses totaled -108.78 after MOD was already open",
+    "why_not_a_result": "the source is incomplete and does not prove the candidate's exact ordered admission set, cost-adjusted outcomes, or counterfactual path"
+  },
+  "implementation": {
+    "module": "risk_off_short_cap_evaluator.py",
+    "test": "test_risk_off_short_cap_evaluator.py",
+    "behavior": "read-only static admission replay that fails closed on coverage, integrity, cost, epoch, sample, or holdout gaps"
+  },
+  "next_evidence_step": "Export complete same-epoch lifecycle rows with entry timestamps/regime, integrity eligibility, net-after-cost outcomes, and per-session full-coverage receipts; predeclare research/holdout partitions before rerunning.",
+  "guardrails": {
+    "runner_or_execution_changed": false,
+    "risk_limits_changed": false,
+    "immutable_history_changed": false,
+    "canonical_suspect_outcomes_rewritten": false,
+    "invented_outcomes": false,
+    "automatic_promotion": false
+  }
+}
