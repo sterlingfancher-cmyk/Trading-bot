@@ -3794,3 +3794,45 @@ Issue #316 holds the separate scorecard checkpoint at remote branch
 `feat/daily-performance-scorecard-20261023`, exact head
 `c77a34efe655e98be779c99cfd2e895fa4a1187a`; resume it only after this repair
 is accepted.
+
+## 2026-10-23 Issues #313/#316 — exact deployment proven; risk-warn acceptance repair required
+
+PR #315 exact head `236da829129ea439510258e46b7ab6748b62e3a5`
+passed Repository Safety (`39792816332`), Architecture Debt
+(`39792816400`), Change Safety including the exact Gunicorn smoke
+(`39792816367`), and the refactor audit (`39792816285`). It squash-merged as
+`4cd3ae975795dc609d9a67c8a5a4e98edca66d93`. All four merge-head code
+workflows also passed (`39966263493`, `39966263892`, `39966263945`, and the
+refactor job in `39966264119`).
+
+The merge-head runtime job `120457491985` then proved the exact Splendid
+deployment: 13/13 endpoints were reachable, sentinel was quiet/pass with zero
+incidents and exact generated commit `4cd3ae9...`, self-check passed, the
+141-row canonical ledger was chain-valid and projection-clean at 53 current
+epoch rows, accounting had zero coverage/economic issues, and the account was
+flat at equity `12952.06`. Artifact `12507716442` has ZIP digest
+`sha256:78a8f76b2f0bf6bd741628dd559e012899dbca5b3586fcaaf79681362c7a692f`.
+However, governed acceptance correctly remains open: the daily audit was
+`warn` solely because risk reported a non-halting 1.478% intraday drawdown;
+market data and runner passed, risk was not halted, and self-defense was clear.
+The acceptance builder still required literal `daily_audit.overall=pass` and
+failed `daily_audit_pass`. Repair that bounded acceptance-contract mismatch
+without weakening any accounting, ledger, halt, sentinel, hard-risk or
+deployment requirement, then repeat every exact-head gate and settled runtime
+acceptance. Do not describe PR #315 as fully accepted before that succeeds.
+
+Issue #316 owns the separate daily performance scorecard. The specialist's
+bounded 2026-10-22 observation proves 4 entries, 3 final exits and 3 completed
+matched lifecycles with matched realized P/L `-109.40`: PANW long `-0.62`, FPS
+short `-75.68`, and TTMI short `-33.10`; MOD short remained open. The missing
+session-close account snapshot means canonical daily P/L, unrealized P/L,
+equity, exposure, fees and slippage are unknown, so the observation is
+explicitly non-comparable and rolling 5/20 samples remain zero. The standalone
+read-only scorecard builder preserves prior observations on correction, never
+mutates source rows, does not infer P/L from balance changes, and keeps suspect
+fills canonical while excluding them from eligible research. Fifty-eight
+focused scorecard, Change Safety and performance-integrity regressions pass
+locally. The one-variable `risk_off` short-admission cap is recorded only as a
+hypothesis with full VALIDATION_POLICY gates; it has not started and is not a
+promotion. Branch `feat/daily-performance-scorecard-20261023` is the durable
+checkpoint; hold it behind the Issue #313 acceptance repair before PR review.
