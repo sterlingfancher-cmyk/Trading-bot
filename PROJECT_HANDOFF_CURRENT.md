@@ -3860,8 +3860,13 @@ sizing, hard-risk limit, live or AI authority changed.
 Daily scorecard PR #318 exact head
 `5c5835355e660377bf1056333b8b2b5401f26a02` passed every exact-head PR gate,
 including both Gunicorn smokes, and squash-merged as
-`f3417292c633ecc65ae39942faf254f9997d5e84`. The scorecard is read-only and
-keeps 2026-10-22 explicitly incomplete/non-comparable: four entries, three
+`f3417292c633ecc65ae39942faf254f9997d5e84`. Every merge-head code gate also
+passed, including both exact Gunicorn smokes. Refactor/runtime run
+`40100655913` completed successfully with settled exact-head Splendid
+acceptance; runtime artifact `12563001313` has digest
+`sha256:b70aa70943ccf24a20f751691713b9af61a5942366cf52692fba2d246f0ba50a`.
+The scorecard is read-only and keeps 2026-10-22 explicitly
+incomplete/non-comparable: four entries, three
 final exits, three matched lifecycles and matched realized P/L `-109.40`;
 MOD remained open and no provable session-close account, equity, exposure or
 cost snapshot exists. Rolling comparable 5/20 samples remain zero.
