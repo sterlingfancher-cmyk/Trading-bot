@@ -3836,3 +3836,53 @@ locally. The one-variable `risk_off` short-admission cap is recorded only as a
 hypothesis with full VALIDATION_POLICY gates; it has not started and is not a
 promotion. Branch `feat/daily-performance-scorecard-20261023` is the durable
 checkpoint; hold it behind the Issue #313 acceptance repair before PR review.
+
+## 2026-10-24 Issues #313/#316 — correctness accepted; scorecard merged; one-variable research bounded
+
+Issue #313 is settled at exact deployed main
+`9b1e78622be5279a2aacbf4c97c07485e5f77d01`. Repository Safety
+`39968447911`, Architecture Debt `39968447769`, Change Safety
+`39968447858`, Stage F `39968447642`, and refactor audit
+`39968447865` all passed; both exact Gunicorn smokes passed. Splendid and
+runtime job `120465167617` passed. Runtime artifact `12508412973` has digest
+`sha256:2b3d340cb336112a3df301cf29c10a29bb58d06ba469eab4ef90c1579f922d8c`.
+It proves 13/13 endpoints, exact sentinel commit `9b1e786...`, sentinel
+pass/quiet with zero incidents, self-check pass, 141 chain-valid canonical rows
+with clean projection parity and 53 current-epoch rows, zero accounting
+coverage/economic issues, no risk halt, and flat equity `12952.06`. The
+bounded non-halting 1.478% risk warning now passes only through
+`daily_audit_safe=true`; every accounting, ledger, halt, runner, market-data,
+sentinel and exact-commit gate remained true. Governed state is
+`active_pending_forward_observations`, with only
+`post_start_forward_observations` remaining. No immutable evidence, strategy,
+sizing, hard-risk limit, live or AI authority changed.
+
+Daily scorecard PR #318 exact head
+`5c5835355e660377bf1056333b8b2b5401f26a02` passed every exact-head PR gate,
+including both Gunicorn smokes, and squash-merged as
+`f3417292c633ecc65ae39942faf254f9997d5e84`. Every merge-head code gate also
+passed, including both exact Gunicorn smokes. Refactor/runtime run
+`40100655913` completed successfully with settled exact-head Splendid
+acceptance; runtime artifact `12563001313` has digest
+`sha256:b70aa70943ccf24a20f751691713b9af61a5942366cf52692fba2d246f0ba50a`.
+The scorecard is read-only and keeps 2026-10-22 explicitly
+incomplete/non-comparable: four entries, three
+final exits, three matched lifecycles and matched realized P/L `-109.40`;
+MOD remained open and no provable session-close account, equity, exposure or
+cost snapshot exists. Rolling comparable 5/20 samples remain zero.
+
+The single performance specialist then evaluated the predeclared one-variable
+candidate: cap new `risk_off` short lifecycles at one per session while
+holding ranker, sizing, exits and cost model constant. The result is
+`insufficient_evidence`, not improvement: zero complete comparable same-epoch
+sessions; no exact ordered `risk_off` admission rows with net-after-cost
+outcomes; unknown fees/slippage; no research/holdout partitions; and absent
+sample, duration, regime, concentration, stress, walk-forward and forward-shadow
+gates. The Oct. 22 FPS+TTMI combined `-108.78` after MOD is hypothesis
+motivation only. Branch `research/issue316-risk-off-short-cap-20261024` adds a
+fail-closed, isolated static-admission evaluator, focused tests and a dated
+evidence record; it never synthesizes fills or changes runner authority.
+Validate its exact diff and all exact-head gates before review. The next
+executable performance step is to repair/collect the specifically missing
+ordered admission plus net-after-cost source coverage, then rerun the same
+predeclared baseline/candidate without retuning.
