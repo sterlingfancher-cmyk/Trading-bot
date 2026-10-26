@@ -1,11 +1,12 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-20 09:12 CDT
+Last updated: 2026-10-26 09:20 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `b7a2a99b931c24642800698dd94252ad63bee802` (PR #311 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
-Active engineering issue: #84 (authoritative single-owner StateStore / ledger
+Validated runtime-code `main`: `a5f42663dda1ef73e05fb8c7a080cf09043f5db6` (scorecard PR #320 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Active bounded evidence issue: #321 (fail-closed session performance evidence
+adapter). Deferred engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
 (`hold_10d` read-only forward-shadow validation). Issue #222 is safely
 reconciled under the verified-flat v5 validation hold; its prior discrepancy
@@ -3886,3 +3887,42 @@ Validate its exact diff and all exact-head gates before review. The next
 executable performance step is to repair/collect the specifically missing
 ordered admission plus net-after-cost source coverage, then rerun the same
 predeclared baseline/candidate without retuning.
+
+
+## 2026-10-26 Issue #321 — fail-closed session evidence adapter — IN PROGRESS
+
+Exact accepted main at session start is
+`a5f42663dda1ef73e05fb8c7a080cf09043f5db6`; no competing PR was open. The
+prior completed market session remains Friday 2026-10-23 and is already
+preserved by the merged scorecard. Monday activity is in progress and is not a
+completed-session scorecard.
+
+The bounded source audit proves the exact missing coverage rather than assuming
+more observations will solve it. Existing trade-journal snapshots are bounded
+timestamped observations, not session-close receipts: they have no close
+window contract, direct epoch identity, canonical daily P/L, persisted gross
+exposure or cost coverage. Canonical plus state-primary execution rows can
+prove gross executed lifecycles and execution order, but there is no exact
+fees/slippage ledger and no complete durable ordered rule-admission universe.
+Latest-cycle scanner rows remain insufficient for all-day causation. The
+`risk_off` cap experiment therefore remains `insufficient_evidence`; no policy
+or promotion state changed.
+
+Branch `fix/session-performance-evidence-adapter` adds a pure archived-JSON
+adapter. It verifies the complete canonical hash chain, requires one-to-one
+execution-ID joins to state-primary journal rows, enforces Chicago session and
+accounting epoch, groups partial and final exits into one lifecycle, exposes a
+close observation only inside a declared window, preserves suspect paths while
+excluding them from eligible research, and refuses net-after-cost output unless
+every joined execution has explicit fees and slippage. It labels the only
+currently provable ordering as `executed_admission_order_only`, declares the
+complete entry universe unavailable, and cannot promote a candidate. It does
+not import the runner or write runtime/accounting/history state. Twelve focused
+adapter and scorecard regressions plus compile and exact-diff checks pass
+locally. Mandatory exact-head CI, review, merge, deployment and settled
+acceptance remain pending.
+
+Next executable step: publish the focused Issue #321 PR, run every exact-head
+gate including the exact Gunicorn smoke, and merge/deploy only if all required
+checks pass. After acceptance, use a digest-bound archived artifact as adapter
+input; missing close or cost sources must remain explicit rather than inferred.
