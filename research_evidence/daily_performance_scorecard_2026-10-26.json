@@ -1,0 +1,202 @@
+{
+  "schema_version": "daily-performance-scorecard-2026-10-27-v1",
+  "observed_at": "2026-10-27 09:06:25 CDT",
+  "session_date": "2026-10-26",
+  "accounting_epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+  "provenance": {
+    "runtime_endpoints": [
+      "https://web-production-e1796.up.railway.app/paper/journal-truth-status",
+      "https://web-production-e1796.up.railway.app/paper/ml-shadow-validation",
+      "https://web-production-e1796.up.railway.app/paper/ml-counterfactual-training-dataset?limit=1000",
+      "https://web-production-e1796.up.railway.app/paper/system-sentinel-status"
+    ],
+    "runtime_deployed_commit": "92c23ed45ea9abcf074956bb37d326239de47768",
+    "runtime_journal_generated_local": "2026-10-27 14:05:21",
+    "state_source": "/app/data/state.json:trades",
+    "source_of_truth": "state_primary",
+    "canonical_ledger_version": "canonical-execution-ledger-2026-09-25-v6-fail-closed-append",
+    "state_execution_rows_observed": 61,
+    "source_scope": "The ordered state-primary tail proves all six Oct26 execution rows and three complete entry-to-final-exit lifecycles. Function-hook mirrors were excluded. No balance-delta return inference was used."
+  },
+  "session_completeness": {
+    "complete": false,
+    "execution_rows_observed": 6,
+    "expected_execution_rows": 6,
+    "execution_lifecycle_complete": true,
+    "account_close_complete": false,
+    "fee_slippage_coverage_known": false,
+    "reason": "Execution coverage is proven by the ordered state-primary sequence, but no independently time-bound Oct26 close account snapshot or fee/slippage ledger is exposed.",
+    "missing_fields": [
+      "canonical_daily_pnl",
+      "session_close_equity",
+      "session_close_unrealized_pnl",
+      "session_close_gross_exposure",
+      "fees",
+      "slippage"
+    ]
+  },
+  "event_counts": {
+    "entries": 3,
+    "final_exits": 3,
+    "partial_exits": 0
+  },
+  "canonical_reporting": {
+    "completed_matched_trades": 3,
+    "wins": 0,
+    "losses": 3,
+    "flat_trades": 0,
+    "realized_pnl_from_session_exit_rows": -55.02,
+    "canonical_daily_pnl": null,
+    "unrealized_pnl": null,
+    "equity": null,
+    "average_win": null,
+    "average_loss": -18.34,
+    "win_rate_pct": 0.0,
+    "profit_factor": 0.0,
+    "largest_loss": -35.95,
+    "fees": null,
+    "slippage": null,
+    "fee_slippage_coverage": "unknown",
+    "gross_exposure": {
+      "maximum_observed_entry_notional": 971.4,
+      "simultaneous_positions_from_session_lifecycles": 1,
+      "limitation": "This is lifecycle-order evidence, not a session-close account exposure snapshot."
+    },
+    "long_short": {
+      "long": {"completed_trades": 0, "realized_pnl": 0.0, "wins": 0, "losses": 0},
+      "short": {"completed_trades": 3, "realized_pnl": -55.02, "wins": 0, "losses": 3}
+    },
+    "exit_reasons": {"structure_stop_short": 3},
+    "completed_trade_lifecycles": [
+      {
+        "execution_path_id": "ACLS|short|1793022333|106.730000",
+        "symbol": "ACLS",
+        "side": "short",
+        "entry_time_utc": "2026-10-26T13:45:33Z",
+        "entry_execution_id": "2da92c0d6030432aa7a158b981b867c6",
+        "entry_price": 106.73,
+        "entry_shares": 9.101513,
+        "entry_notional": 971.4,
+        "planned_stop": 107.5838,
+        "exit_time_utc": "2026-10-26T14:08:18Z",
+        "exit_execution_id": "a9e4df40153d44c3b85b2aa2a9916990",
+        "exit_price": 107.71,
+        "pnl_dollars": -8.92,
+        "pnl_pct": -0.92,
+        "exit_reason": "structure_stop_short",
+        "market_mode": "risk_off"
+      },
+      {
+        "execution_path_id": "SNDK|short|1793024837|1239.503100",
+        "symbol": "SNDK",
+        "side": "short",
+        "entry_time_utc": "2026-10-26T14:27:17Z",
+        "entry_execution_id": "6ed9228cd3e04d899c2b00a3576ca41b",
+        "entry_price": 1239.5031,
+        "entry_shares": 0.783165,
+        "entry_notional": 970.74,
+        "planned_stop": 1251.1215,
+        "exit_time_utc": "2026-10-26T14:52:37Z",
+        "exit_execution_id": "a8d04ebd66da4c9d885342bb862451cd",
+        "exit_price": 1252.465,
+        "pnl_dollars": -10.15,
+        "pnl_pct": -1.05,
+        "exit_reason": "structure_stop_short",
+        "market_mode": "risk_off"
+      },
+      {
+        "execution_path_id": "XP|short|1793027214|14.705000",
+        "symbol": "XP",
+        "side": "short",
+        "entry_time_utc": "2026-10-26T15:06:54Z",
+        "entry_execution_id": "3553963dd29c45599a4fbe81a9dca4f3",
+        "entry_price": 14.705,
+        "entry_shares": 65.962207,
+        "entry_notional": 969.97,
+        "planned_stop": 15.0895,
+        "exit_time_utc": "2026-10-26T15:32:10Z",
+        "exit_execution_id": "574f004c1e9246808569d5542dac7478",
+        "exit_price": 15.25,
+        "pnl_dollars": -35.95,
+        "pnl_pct": -3.71,
+        "exit_reason": "structure_stop_short",
+        "market_mode": "risk_off"
+      }
+    ]
+  },
+  "eligible_research_metrics": {
+    "completed_matched_trades": 3,
+    "realized_pnl": -55.02,
+    "wins": 0,
+    "losses": 3,
+    "research_exclusions": [],
+    "promotion_eligible": false,
+    "ineligibility_reason": "session-close accounting and explicit fee/slippage coverage are incomplete"
+  },
+  "research_exclusions": [],
+  "suspect_fill_policy": {
+    "canonical_rows_preserved": true,
+    "session_suspect_paths": [],
+    "known_suspect_path_outside_this_session": "SNOW|short|1792165858|310.800000",
+    "invented_corrected_fill": false
+  },
+  "loss_driver_classification": {
+    "proven": [
+      {
+        "category": "exit_timing",
+        "evidence": "All three exact short lifecycles exited through structure_stop_short after price moved above entry; the stop lifecycle executed rather than silently remaining open."
+      },
+      {
+        "category": "concentration",
+        "evidence": "XP contributed 65.3% of the session's matched gross loss (-35.95 of -55.02)."
+      }
+    ],
+    "hypotheses": [
+      {
+        "category": "entry_selection",
+        "evidence": "Three sequential risk_off shorts all stopped, motivating the already-declared one-new-short-per-session candidate; one session does not establish causality."
+      },
+      {
+        "category": "execution",
+        "evidence": "XP exited above its planned stop, but the available journal does not isolate quote path, trigger latency, spread, or slippage cost, so cause is unproven."
+      }
+    ],
+    "bad_data": "No Oct26 price ratio breaches the active integrity envelope.",
+    "unclassified": ["fees", "slippage"]
+  },
+  "rolling_5_session": {
+    "available_comparable_sessions": 0,
+    "requested_sessions": 5,
+    "session_dates": [],
+    "missing_sessions": ["2026-10-19", "2026-10-20", "2026-10-21"],
+    "noncomparable_sessions": ["2026-10-22", "2026-10-23", "2026-10-26"],
+    "insufficient_for_full_window": true,
+    "reason": "Retained sessions lack provable same-session account close and explicit fee/slippage coverage."
+  },
+  "rolling_20_session": {
+    "available_comparable_sessions": 0,
+    "requested_sessions": 20,
+    "session_dates": [],
+    "missing_sessions": "Prior expected sessions are not backfilled without provable same-epoch full-source coverage.",
+    "noncomparable_sessions": ["2026-10-22", "2026-10-23", "2026-10-26"],
+    "insufficient_for_full_window": true
+  },
+  "bounded_experiment": {
+    "experiment": "risk_off_new_short_cap_one_per_session",
+    "status": "test_pending_inconclusive",
+    "baseline_observed_gross_pnl": -55.02,
+    "candidate_observed_subset_gross_pnl": -8.92,
+    "candidate_observed_subset_delta": 46.1,
+    "candidate_replay": "A one-new-risk_off-short cap would retain first admission ACLS and omit later SNDK and XP in this exact ordered session.",
+    "limitation": "This is one incomplete, pre-cost session and cannot satisfy sample, holdout, walk-forward, regime, concentration, stress, capacity, or forward-shadow gates.",
+    "disposition": "assigned_test_pending"
+  },
+  "guardrails": {
+    "immutable_history_modified": false,
+    "balance_change_used_as_pnl": false,
+    "partial_exits_counted_as_separate_wins": false,
+    "cross_epoch_comparison": false,
+    "automatic_promotion": false,
+    "runner_or_strategy_changed": false
+  }
+}
