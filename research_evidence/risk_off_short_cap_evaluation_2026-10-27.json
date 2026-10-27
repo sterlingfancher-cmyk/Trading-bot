@@ -1,0 +1,42 @@
+{
+  "schema_version": "risk-off-short-cap-evaluation-2026-10-27-v1",
+  "observed_at": "2026-10-27 09:06:25 CDT",
+  "repository_main_checkpoint": "92c23ed45ea9abcf074956bb37d326239de47768",
+  "source_issue": 316,
+  "accounting_epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+  "question": "Does a one-new-risk_off-short-lifecycle-per-session cap improve eligible same-epoch deterministic performance?",
+  "one_variable": {"risk_off_new_short_cap_per_session": 1},
+  "unchanged": ["ranker", "position_sizing", "exit_rules", "hard_risk_limits", "runner"],
+  "verdict": "insufficient_evidence",
+  "promotion_ready": false,
+  "new_session_observation": {
+    "session_date": "2026-10-26",
+    "ordered_risk_off_short_paths": [
+      "ACLS|short|1793022333|106.730000",
+      "SNDK|short|1793024837|1239.503100",
+      "XP|short|1793027214|14.705000"
+    ],
+    "baseline_completed_trades": 3,
+    "baseline_gross_pnl": -55.02,
+    "candidate_completed_trades": 1,
+    "candidate_gross_pnl": -8.92,
+    "observed_subset_delta": 46.1,
+    "candidate_omitted_observed_pnl": -46.1,
+    "cost_coverage": "unknown",
+    "session_complete_for_promotion": false
+  },
+  "cumulative_source_coverage": {
+    "dated_sessions": ["2026-10-22", "2026-10-23", "2026-10-26"],
+    "complete_comparable_sessions": 0,
+    "untouched_holdout_sessions": 0,
+    "reason": "Every dated session lacks independently proven same-session account close and explicit fee/slippage coverage."
+  },
+  "disposition": "assigned_test_pending",
+  "next_evidence_step": "Continue read-only collection of complete same-epoch admission order and valid matched net-after-cost outcomes; predeclare research and untouched holdout partitions before aggregate evaluation.",
+  "guardrails": {
+    "runner_or_execution_changed": false,
+    "risk_limits_changed": false,
+    "immutable_history_changed": false,
+    "automatic_promotion": false
+  }
+}
