@@ -1,0 +1,71 @@
+{
+  "schema_version": "daily-trade-ai-feedback-loop-2026-10-27-v1",
+  "reviewed_at": "2026-10-27 09:06:25 CDT",
+  "runtime_commit": "92c23ed45ea9abcf074956bb37d326239de47768",
+  "accounting_epoch_id": "stable-paper-v5-20260914-issue222-flat-successor01",
+  "reviewed_through": {
+    "completed_execution_time_utc": "2026-10-26T15:32:10Z",
+    "completed_execution_id": "574f004c1e9246808569d5542dac7478",
+    "execution_path_id": "XP|short|1793027214|14.705000",
+    "state_execution_row_index_zero_based": 58,
+    "state_execution_rows_observed": 61
+  },
+  "incremental_trade_review": {
+    "completed_lifecycles_reviewed": 3,
+    "execution_ids": [
+      "2da92c0d6030432aa7a158b981b867c6",
+      "a9e4df40153d44c3b85b2aa2a9916990",
+      "6ed9228cd3e04d899c2b00a3576ca41b",
+      "a8d04ebd66da4c9d885342bb862451cd",
+      "3553963dd29c45599a4fbe81a9dca4f3",
+      "574f004c1e9246808569d5542dac7478"
+    ],
+    "execution_path_ids": [
+      "ACLS|short|1793022333|106.730000",
+      "SNDK|short|1793024837|1239.503100",
+      "XP|short|1793027214|14.705000"
+    ],
+    "gross_realized_pnl": -55.02,
+    "newer_completed_lifecycles_at_review_time": 0,
+    "newer_open_entries_not_counted_as_completed": [
+      "PLTR|short|1793108921|197.750000",
+      "COIN|short|1793109783|158.155000"
+    ]
+  },
+  "ai_shadow_review": {
+    "sources": [
+      "/paper/ml-shadow-validation",
+      "/paper/ml-counterfactual-ledger-status",
+      "/paper/ml-counterfactual-training-dataset?limit=1000"
+    ],
+    "review_verified": false,
+    "exact_lifecycle_matches": 0,
+    "missing_exact_bindings": [
+      "AI training rows expose source_event_id but no canonical execution_id",
+      "AI training rows expose no execution_path_id",
+      "the same realized outcome is copied across multiple same-symbol observations",
+      "SNDK's visible executed-realized row predates the Oct26 execution and is a blocked observation rather than the accepted entry"
+    ],
+    "ambiguous_same_symbol_observations": {
+      "ACLS": "accepted short observation is neutral and carries -8.92, but lacks exact execution binding",
+      "XP": "two accepted short observations at the same local second disagree between recommend_enter and neutral and both carry -35.95, without exact execution binding",
+      "SNDK": "no accepted Oct26 executed observation is present in the returned 1000-row window"
+    },
+    "promotion_evidence_status": "ineligible_unmatched",
+    "learning_claimed": false
+  },
+  "learning": {
+    "supported_finding": "Three sequential risk_off shorts completed as losses through structure_stop_short. The deterministic one-short cap would have retained ACLS (-8.92) and omitted SNDK plus XP (-46.10 combined) in this session's exact admission order.",
+    "unsupported_or_unresolved": "No conclusion is supported about whether AI recommendations would have improved the session because exact lifecycle binding is absent and the visible AI rows are duplicated or temporally mismatched.",
+    "highest_value_actionable_hypothesis": "Cap new risk_off short lifecycles at one per session while holding ranker, sizing, exits, hard-risk limits, and runner constant.",
+    "disposition": "assigned_test_pending",
+    "next_action": "Accumulate complete same-epoch sessions with exact ordered admissions, explicit costs, price-integrity eligibility, and predeclared research/holdout partitions; separately add or verify execution_id plus execution_path_id binding before any AI outcome evaluation."
+  },
+  "guardrails": {
+    "runner_changed": false,
+    "strategy_changed": false,
+    "automatic_adoption": false,
+    "immutable_history_changed": false,
+    "ai_execution_authority": false
+  }
+}
