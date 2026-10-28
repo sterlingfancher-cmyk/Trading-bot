@@ -1,10 +1,10 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-10-26 09:20 CDT
+Last updated: 2026-10-28 09:05 CDT
 Repository: `sterlingfancher-cmyk/Trading-bot`  
 Authoritative paper runtime: Splendid / `https://web-production-e1796.up.railway.app`  
 Non-authoritative legacy state lineage: `https://trading-bot-clean.up.railway.app`  
-Validated runtime-code `main`: `a5f42663dda1ef73e05fb8c7a080cf09043f5db6` (scorecard PR #320 deployed and accepted exactly; governed v5 paper execution is active pending post-start forward observations).
+Validated runtime-code `main`: `92c23ed45ea9abcf074956bb37d326239de47768` (deployed identically to Clean and Splendid; the services retain separate persistent state and are not economically comparable).
 Active bounded evidence issue: #321 (fail-closed session performance evidence
 adapter). Deferred engineering issue: #84 (authoritative single-owner StateStore / ledger
 projection / valuation / risk cutover). Active frozen research issue: #202
@@ -3926,3 +3926,74 @@ Next executable step: publish the focused Issue #321 PR, run every exact-head
 gate including the exact Gunicorn smoke, and merge/deploy only if all required
 checks pass. After acceptance, use a digest-bound archived artifact as adapter
 input; missing close or cost sources must remain explicit rather than inferred.
+
+
+## 2026-10-28 Issues #324/#325 — emergency broker/runtime stabilization checkpoint
+
+All strategy features, ML promotion, performance optimization and optional
+architecture work are frozen. Exact current main is
+`92c23ed45ea9abcf074956bb37d326239de47768`. PR #323 was closed unmerged as
+nonessential; its evidence branch remains preserved.
+
+Read-only runtime evidence collected 09:00–09:03 CDT proves both Railway
+services deploy the same code but are independent internal simulation writers
+to separate volumes. Clean is `dazzling-dedication / Clean / Trading-bot`,
+state `/data/state.json`; Splendid is
+`splendid-creativity / production / web`, state `/app/data/state.json`.
+Both internal auto-runners are enabled at 300-second intervals. Clean is flat
+at equity/cash `-26064.31`, halted, daily-audit FAIL, with 193 accounting
+coverage issues and 18 canonical current-epoch executions missing from the
+mutable state projection; its canonical ledger is not authoritative for new
+executions. Clean's latest internal execution is
+`e746b3e674654f9199402c8904df1f43` at 2026-08-14T13:51:07Z. Splendid is
+flat at equity/cash `12879.85`; sentinel, audit, accounting, canonical chain
+and projection, risk, runner and market data pass. Its ledger is authoritative
+for internal executions. Splendid's latest execution is
+`9c87c9a3f3d44fb4ad8729cc078fee85`, a PLTR short exit at
+2026-10-27T15:03:18Z.
+
+Exact-SHA source inspection proves the deployed application is an internal
+simulator: the entry/exit functions only update internal portfolio state and
+append internal execution rows. Current runtime source has no Alpaca SDK
+import/client, broker REST endpoint, or submit/place/create-order call path.
+The Alpaca dependency is declared but unused by runtime code; no other tracked
+broker integration was found. The retired GitHub paper runner is manual-only
+and performs no HTTP request. Consequently neither current Railway runtime can
+be identified as the source of the user-observed Alpaca PAPER positions from
+the available evidence. Those six broker positions do not match either flat
+runtime.
+
+Broker identity remains the blocking gap: neither runtime exposes a broker
+account fingerprint, broker positions/open orders or broker order/client IDs,
+and the connected Alpaca surface is market-data-only. Do not compare broker
+and internal P/L, claim a single brokerage writer, or stop Clean. Obtain
+read-only Alpaca PAPER account fingerprint (non-secret hash), positions, open
+orders, recent order IDs/client IDs/timestamps and fills, then match them
+one-to-one to journal/execution IDs or list explicit exceptions. Until then the
+brokerage writer is unassigned and blocked. The proposed internal single-writer
+boundary is Splendid; Clean remains evidence-only/consolidation-candidate, but
+both continue internal cycles today.
+
+Acceptance before any Clean compute stop: prove PAPER endpoint and non-secret
+account identity; match broker orders/fills/positions against named ownership;
+separate broker from simulation reporting; recheck SHA, risk, accounting,
+ledger and runner; prove no other credential consumer/order writer; measure the
+Railway monthly cost baseline and savings; preserve/export Clean deployment
+configuration; retain its volume; and prove rollback can reattach the volume.
+Only then propose an operator-reviewed Clean compute stop and duplicate
+auto-deploy disable. Never delete the project/volume or rotate credentials as
+a blind first action.
+
+One route named `/paper/runtime-controls-repair-status` unexpectedly performs
+an atomic rewrite of `runtime_controls.json`. It was called once on each
+service while inspecting permission boundaries. Both calls reported successful
+rewrites with no trading action, no canonical/history edit, and no strategy,
+threshold, sizing, risk, live or ML authority change. It is not an
+observational endpoint and must not be called again for evidence capture. No
+`/paper/run`, EOD report, reset, close-all, service, volume, credential,
+halt-clear or broker action was performed.
+
+Issue #324 comment 6471095866 holds the detailed map and acceptance checklist.
+Issue #325 comment 6471096281 records milestone accountability: 34 days remain
+to the 2026-12-01 hard review. Next executable step is direct read-only Alpaca
+PAPER account/order/position evidence and exact order-to-execution matching.
