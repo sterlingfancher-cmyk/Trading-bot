@@ -3997,3 +3997,73 @@ Issue #324 comment 6471095866 holds the detailed map and acceptance checklist.
 Issue #325 comment 6471096281 records milestone accountability: 34 days remain
 to the 2026-12-01 hard review. Next executable step is direct read-only Alpaca
 PAPER account/order/position evidence and exact order-to-execution matching.
+
+## 2026-10-29 Issues #324/#325 — Alpaca screenshot reconciliation narrows ownership gap
+
+Emergency stabilization remains the only objective; no strategy, ML, research,
+merge, deployment, service, credential, volume or automation change was made.
+Exact repository main and both runtime deployments remain
+`92c23ed45ea9abcf074956bb37d326239de47768`.
+
+Three user-supplied Alpaca screenshots were inspected as read-only broker
+evidence. `IMG_2415.png`
+(`sha256:7f2a8eddbdec4eff4a4e4f97bb602ddea794982188b9146813c6db826d48a283`)
+explicitly says Paper Trading and shows the Open-orders filter with zero rows.
+`IMG_2413.png` and `IMG_2414.png`
+(`sha256:35656864fe80795757d0239ad24d710d5198aecf6b9a7a5038d1306a1e12ab2f`
+and
+`sha256:ff0a72cc85cfaad9aed51b3df9ad764afda0921468a3e5b7d763cee79364238a`)
+show the same separate broker context: current equity `169719.66`, cash
+`45969.45`, long market value `123936.11`, short market value `-185.90`
+and last-close equity `169712.09`. No account number or credential was
+captured or recorded. The user separately reports that Alpaca shows no trades
+after 2026-04-22. This is useful first-party attestation, but the screenshots
+do not expose the all-orders export, order/client IDs, fills or a non-secret
+account fingerprint, so the exact broker writer remains unassigned.
+
+The 09:01–09:06 CDT read-only runtime refresh strengthens separation rather
+than proving broker ownership. Clean is still flat at `-26064.31`, halted,
+with its 300-second runner active but entry-blocked; its audit still fails with
+193 coverage issues, 18 state-projection omissions and a non-authoritative
+current ledger. Its latest internal execution remains
+`e746b3e674654f9199402c8904df1f43`. Splendid is flat at `12876.37`,
+with its 300-second runner active and capable of new internal entries. Its
+audit passes: 159 chain-valid ledger rows, 71 current-epoch rows, zero
+accounting coverage/economic issues and exact state parity. Since the prior
+checkpoint it added 18 internal execution rows; the latest is
+`72f24a8d09f4426c938b5fb6892d0bdd`, a RIOT long
+`market_regime_protection` exit. The broker screenshots and user-reported
+2026-04-22 last-trade boundary therefore do not match these current internal
+execution IDs. At this exact SHA, the tracked runtime has no broker submit
+path, so these are internal-simulation executions, not evidence of Alpaca
+orders.
+
+Current safe boundary: Splendid is the sole proposed owner of the internal
+simulation ledger; Clean is a halted evidence-preservation/consolidation
+candidate. This is not yet an accepted single broker writer. Clean still runs
+read-only/blocked cycles, Splendid still writes internal simulation evidence,
+and an external Alpaca API consumer cannot be excluded until read-only broker
+order history and connected-client evidence are obtained. Do not stop Clean,
+disable auto-deploy, rotate keys or compare broker/internal P/L yet.
+
+Acceptance remains fail closed:
+
+1. Export/read the Alpaca PAPER all-orders and fills history with immutable
+   order ID, client order ID, status and timestamps; derive only a non-secret
+   account fingerprint.
+2. Match every broker position and fill to a named writer and internal
+   execution ID, or record an explicit exception; separately prove zero open
+   broker orders.
+3. Confirm no other API-key consumer or broker integration can submit orders.
+4. Recheck exact deploy SHA, risk, accounting, canonical chain/projection and
+   runner state for both runtimes.
+5. Capture the Railway monthly cost baseline and expected Clean savings;
+   export Clean deployment/volume attachment configuration and prove rollback.
+6. Only after 1–5 pass, submit an operator-reviewed proposal to stop Clean
+   compute while retaining its volume and disabling duplicate auto-deploy.
+
+There are 33 days to the 2026-12-01 hard review. The next executable step is
+the read-only Alpaca PAPER all-orders/fills export plus connected API-client
+inventory. If that cannot be obtained through the current tools, the exact
+user-only action is to export those records from Alpaca without changing or
+revoking credentials; no pause or consolidation is claimed.
