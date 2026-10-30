@@ -4067,3 +4067,75 @@ the read-only Alpaca PAPER all-orders/fills export plus connected API-client
 inventory. If that cannot be obtained through the current tools, the exact
 user-only action is to export those records from Alpaca without changing or
 revoking credentials; no pause or consolidation is claimed.
+
+## 2026-10-30 Issues #324/#325 — paper endpoint and account fingerprint bound, key ownership still open
+
+Emergency stabilization remains the only objective. Exact repository main and
+both deployments are still
+`92c23ed45ea9abcf074956bb37d326239de47768`; no merge, deployment,
+service, runner, credential, volume, halt, strategy, ML, research or
+automation mutation was performed.
+
+Two new user-supplied screenshots add a non-secret broker identity and
+dependency boundary without exposing credentials. Alpaca profile screenshot
+`IMG_2420.png`
+(`sha256:d12f0803f3033b09e22f16e57bf6962676759969213fdfeeb176902ea7987ee7`)
+shows a distinct Paper Account whose identifier is recorded only as the
+one-way, truncated fingerprint `sha256:9870d64de4a2fa5e`; its paper API
+endpoint is `https://paper-api.alpaca.markets/v2`. The same page separately
+shows Alpaca's live endpoint, but no live-account identity or live order
+evidence was captured. Railway Clean screenshot `IMG_2421.png`
+(`sha256:3d0c68e6e0d281260e30a670c53623cef48ae01f9c438439bc7f48f6307fd47a`)
+shows `ALPACA_BASE_URL` configured to the paper endpoint family and masked
+Alpaca key variables plus an `AUTO_TRADING` variable. No secret value was
+read, copied or recorded.
+
+This proves Clean is configured with paper-broker credentials and a paper
+endpoint, but it does **not** prove those masked keys belong to the displayed
+paper account and does not prove Clean submitted any order. Current exact-SHA
+source still has no runtime Alpaca client or broker-submit path, and both
+deployment-info surfaces declare `places_orders=false`. A focused repository
+history check cannot resolve the 2026-04-22 ownership boundary because the
+available Git history begins on 2026-09-08; no April deployment/source commit
+is present locally to inspect. Historical Clean ownership therefore remains an
+explicit exception, not an inference.
+
+Read-only runtime observations at 08:49–08:57 CDT remain unchanged in all
+material identity fields. Clean is flat at `-26064.31`, halted and
+entry-blocked while its 300-second runner continues; latest internal execution
+is still `e746b3e674654f9199402c8904df1f43`. Splendid is flat at
+`12876.37`, not halted, with its 300-second runner capable of internal
+entries; latest internal execution remains
+`72f24a8d09f4426c938b5fb6892d0bdd`. There are no new internal executions
+since the 2026-10-29 checkpoint. The prior exact-SHA accounting/ledger audit
+remains reusable because deploy SHA and execution boundaries are unchanged:
+Clean failed with 193 coverage issues and 18 state-projection omissions;
+Splendid passed with 159 chain-valid rows, 71 current-epoch rows, zero
+coverage/economic issues and exact projection parity.
+
+Single-writer boundary remains proposed, not accepted: Splendid is the sole
+intended internal-simulation writer; Clean is a halted
+evidence-preservation/consolidation candidate. Broker ownership remains
+unassigned because the paper account fingerprint is not cryptographically
+bound to Clean's masked keys and there is no all-orders/fills export or API
+client inventory. Do not stop Clean, disable auto-deploy, rotate keys or
+compare broker/internal P/L.
+
+Acceptance checklist remains fail closed:
+
+1. Obtain read-only PAPER account/order/fill data using the account fingerprint
+   above; capture immutable order ID, client order ID, status and timestamps.
+2. Bind the masked Clean credential set to the fingerprint without revealing
+   secrets, then match every fill and current position to a named writer and
+   internal execution ID or an explicit exception.
+3. Obtain an Alpaca connected-client/key-usage inventory or equivalent audit
+   proving no other submitter, and independently confirm zero open orders.
+4. Recheck both runtime SHAs and risk/accounting/ledger/runner state.
+5. Measure Railway monthly cost, export Clean configuration/volume attachment,
+   and prove retained-volume rollback before any stop proposal.
+
+There are 32 days to the 2026-12-01 hard review. Next executable step is a
+read-only Alpaca PAPER API account/orders/fills call using already configured
+credentials through an approved, non-logging path, or an Alpaca-generated
+order/activity statement if API access cannot be safely exposed. No broker
+pause or consolidation is claimed.
