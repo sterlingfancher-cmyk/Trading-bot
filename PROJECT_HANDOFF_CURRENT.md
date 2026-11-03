@@ -4319,3 +4319,107 @@ deployment entries for the four boundary commits. Do not reveal credentials.
 If unintentional paper submission remains possible, pause only the identified
 submitter with its documented control after pre-state capture and verify no new
 orders; no pause is claimed here.
+
+## 2026-11-03 Issues #324/#325 — Railway status binds the submit-capable revision to Clean
+
+Emergency stabilization remains the only objective. GitHub commit-status
+evidence now resolves the historical runtime assignment left open on Nov 2:
+the exact final Alpaca PAPER submit-capable revision ran on Clean, while its
+contemporaneous Splendid deployment failed. No runtime, service, credential,
+volume, runner, halt, strategy, ML, research, deployment or automation mutation
+was performed.
+
+The exact deployment sequence is:
+
+- `c24fd2b482257fb60dbede38fa77d833c6d4da31`, the final inspected revision
+  containing Alpaca PAPER `submit_order` calls and the import-started scheduler,
+  received Railway **SUCCESS** for `dazzling-dedication - Trading-bot` at
+  `2026-04-22T01:59:56Z`. The status target identifies the same Clean project,
+  service and environment IDs exposed by today's runtime, and deployment
+  `be304d7c-cc62-47cc-a384-e8b570c356f5`. Splendid's deployment for this exact
+  commit **FAILED** at `2026-04-22T02:00:09Z` (deployment
+  `1fc1b59e-baad-4c59-8baf-ee4e150cec51`).
+- `82cee66fbf322e95234bfa1160bbfab8d1f12238`, which removed `run_bot`, the
+  scheduler, liquidation and both submit calls, reached Clean **SUCCESS** at
+  `2026-04-22T02:04:17Z` (deployment
+  `777877a8-7629-491e-9341-2ce60f53c776`); its Splendid deployment failed.
+  Clean therefore had a bounded 4 minute 21 second successful-deployment window
+  on the final submit-capable source before the submit path removal settled.
+- `3dc611493a4be1e0e730d77d3cc2cf7b962160ab`, which removed the Alpaca client
+  and APCA credential use, reached Clean **SUCCESS** at
+  `2026-04-22T02:10:20Z` (deployment
+  `4e95b877-9535-47b0-a2c7-8d4adafe4ae7`) and Splendid success one second
+  earlier. Clean retained the non-submitting Alpaca client for a further 6
+  minutes 3 seconds before that removal settled.
+
+This establishes Clean as the historical runtime owner of the exact
+submit-capable source, not merely a candidate. It does **not** prove that a
+particular broker order or fill was submitted: the scheduler calls `run_bot()`
+before its first 300-second sleep, so one immediate attempt was possible, but
+no retained runtime log or broker order ID proves that the attempt completed or
+submitted. The successful deployment began after regular hours; accepted day
+orders could have remained for Apr 22 even after code removal. Splendid's failed
+deployment excludes it as the running owner of this exact submit-capable
+revision. The GitHub deployments REST collection was unavailable through the
+connector, but commit statuses provided the exact Railway service/environment,
+settle time and deployment target; this scoped endpoint limitation does not
+invalidate the status evidence.
+
+Read-only runtime observations at 09:02–09:05 CST keep current contexts
+separate. Clean and Splendid both run exact SHA
+`92c23ed45ea9abcf074956bb37d326239de47768` and declare
+`places_orders=false`. Clean remains flat at `-26064.31`, halted and
+entry-blocked, with latest internal execution
+`e746b3e674654f9199402c8904df1f43`. Splendid continued internal simulation
+and was flat at the observation: equity/cash `12975.08`, canonical realized P/L
+today `30.68`, with three completed trade paths today (SNDK `-0.79`, STX
+`-5.00`, LITE `+36.47`; prior partial exits are not counted as separate
+completed trades). Latest internal execution is
+`cab83753537f4b8ca04e7496c1bacf99`. These are internal ledger executions, not
+broker orders.
+
+Splendid's execution boundary changed, so its compact audit was rerun
+read-only. It passes at `2026-11-03 09:05:34 CST`: 180 chain-valid ledger rows,
+92 current-epoch rows, exact state projection parity, zero accounting coverage
+or economic issues, reconstructed flat state matching cash/equity, risk PASS
+and runner PASS. Clean's exact SHA and execution boundary remain unchanged, so
+its recorded 193 accounting coverage issues and 18 state-projection omissions
+remain the applicable evidence without a redundant audit.
+
+The explicit ownership boundary is now:
+
+- **historical Alpaca submit-capable runtime:** Clean, verified at exact source
+  and successful Railway deployment;
+- **current internal-simulation writer:** Splendid, verified read-only and
+  currently healthy;
+- **current broker writer:** none in current repository runtime code, but an
+  external/manual/API-key consumer cannot be excluded without current Alpaca
+  order and key-client evidence;
+- **broker fill ownership:** still unaccepted until immutable broker IDs bind
+  each fill to Clean or an explicit exception.
+
+Consolidation remains fail closed. Acceptance requires:
+
+1. Alpaca PAPER all-orders/fills for the Apr 10–22 window with order ID, client
+   order ID, `submitted_at`, fill time, status and symbol, plus current open
+   order count. Match each to Clean or record an explicit exception.
+2. Bind Clean's masked credential set to paper-account fingerprint
+   `sha256:9870d64de4a2fa5e` without revealing secrets and obtain Alpaca
+   key/client-usage inventory. Source coverage directly explains only
+   CRWD/PANW/MSFT; SNOW/ARM/NFLX remain unresolved exceptions.
+3. Confirm no other current submitter can act; if this cannot be proved,
+   recommend an operator-controlled pause only after identifying the submitter
+   and capturing pre-state. No pause is claimed.
+4. Recheck exact SHA, positions/open orders, risk, accounting, ledger and runner
+   state at the consolidation decision boundary, preserving broker and
+   simulation P/L as separate contexts.
+5. Measure Railway monthly cost, export Clean configuration and volume
+   attachment, and prove retained-volume rollback before proposing a Clean
+   compute stop or duplicate auto-deploy disable.
+
+There are 28 days to the 2026-12-01 hard review. The next executable step is a
+read-only Alpaca PAPER order/activity export and key/client inventory. The
+minimum operator capture is order-detail evidence for the Apr 21–22 orders,
+including immutable order/client IDs and submitted/filled timestamps, without
+revealing account numbers or credentials. No Clean stop, auto-deploy change or
+single-writer acceptance is authorized yet.
