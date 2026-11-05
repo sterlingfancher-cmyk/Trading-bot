@@ -4559,3 +4559,115 @@ remains the Alpaca-generated PAPER order/activity export plus key/client usage
 inventory. A recovered Clean `trading.db` is optional corroborating attempt
 evidence only and must not be treated as the broker ledger. No consolidation,
 pause or single-writer acceptance is claimed.
+
+## 2026-11-05 Issues #324/#325 — Alpaca screenshots prove API orders but contradict the final Clean revision
+
+Emergency stabilization remains the only objective. Eight user-supplied Alpaca
+PAPER order-table screenshots (`IMG_2455.png` through `IMG_2462.png`) were
+inspected read-only and hashed locally; the SHA-256 checksum-manifest digest is
+`818d6a84ac09b43a678727125ee345c67348713b0bb181a0a3c876b4460bb353`.
+They materially narrow the ownership question without changing any runtime,
+service, credential, volume, runner, halt, strategy, ML, research, deployment
+or automation state.
+
+Every visible broker row is a market order with status `filled` and source
+`access_key`. This is independent evidence that the displayed orders were
+submitted by an API-key consumer rather than through the manual dashboard.
+The screenshots do not expose immutable order ID or client order ID and do not
+identify which service held the key, so they cannot yet establish a
+deterministic runtime-to-order join.
+
+The dominant Apr 22 group contains at least 24 distinct visible filled rows,
+all showing submitted time `Apr 22, 2026, 03:01:15 AM`. Representative rows
+include NVDA sell 78, AVGO sell 1, ARM buy 85, PANW buys 12/100/1, CRWD buys
+1/4, MSFT buys 5/1, AMD sell 154, NFLX sells, META sell 25, INTC sell 327 and
+SNOW buy 100. Fill times cluster between 08:30 and 08:33 AM. The table itself
+does not state its display timezone; ownership conclusions below therefore do
+not rely on timezone conversion.
+
+This Apr 22 group is incompatible with the exact final Clean revision
+`c24fd2b482257fb60dbede38fa77d833c6d4da31` as a complete explanation:
+
+- the group is at least six times the revision's four-entry-per-cycle cap;
+- it mixes buys and sells in one submitted-time group, while the revision's
+  entry path is buy-only and its only sell path liquidates all open positions
+  after a drawdown trigger;
+- NVDA, AVGO, ARM, NFLX, META, INTC and SNOW are outside that revision's
+  ten-symbol entry universe; and
+- the shared submitted time is later than the successful Clean removal of the
+  submit path (`82cee66...` at `2026-04-22T02:04:17Z`) and Alpaca client
+  (`3dc61149...` at `2026-04-22T02:10:20Z`) if the dashboard uses either UTC
+  or a United States local timezone. The source incompatibilities stand even
+  if the dashboard timezone is not one of those.
+
+The screenshots also show an older access-key sequence: INTC buy 327 submitted
+Apr 21 13:22:09 and sell 9 submitted 13:21:58, INTC buy 9 and AVGO buy 1 near
+09:07, plus NVDA buy 78, META buy 25 and AMD buys 73/81 on Apr 13. Focused
+history inspection found an earlier Alpaca-PAPER implementation at
+`ff8069701902d4e1d56448ff035f4c868e23a3ca`: it supports both long and short
+entries, manages both directions, and includes NVDA/AMD/META/AVGO/NFLX/INTC in
+its universe. GitHub commit status binds that exact commit to a successful
+Clean deployment (`dazzling-dedication - Trading-bot`, deployment
+`12250b02-5487-4f0b-a1be-dda64d1498ca`) while Splendid failed it. This makes
+Clean a credible historical API-key consumer for the Apr 13/21 symbol set, but
+still not a proven order owner: that implementation has a three-position cap,
+checks that the market is open, does not provide a client-order namespace and
+does not retain broker IDs. Symbol overlap and a successful deployment are
+corroboration, not a fill join.
+
+The corrected ownership map is therefore:
+
+- **historical API-key consumer:** Clean is verified to have run multiple
+  Alpaca PAPER submit-capable revisions, including the mixed-direction April
+  implementation and the bounded final revision;
+- **Apr 22 broker batch owner:** an unidentified `access_key` consumer,
+  earlier revision or external process. The final Clean revision is excluded
+  as a complete source and must not be credited with this batch without new
+  broker/key evidence;
+- **current internal-simulation writer:** Splendid;
+- **current broker writer:** none in tracked current runtime code, but active
+  external/untracked key consumers and current Alpaca open orders remain
+  unverified.
+
+Read-only runtime observations at 09:03–09:06 CST show both services have
+advanced together to exact main SHA
+`78d36138198eeec0895ecef998539467e4943edb`; both deployment-info endpoints
+declare `places_orders=false`. Clean remains flat at `-26064.31`, halted and
+entry-blocked. Splendid holds internal-simulation MU and MTZ shorts, with
+equity `13151.38`, cash `11673.959501518026`, unrealized P/L `171.38`, and a
+profit-guard entry pause. These are not broker positions. Splendid's compact
+audit passes at `2026-11-05 09:06:28 CST`: 186 chain-valid ledger rows, 98
+current-epoch rows, exact state-projection parity, zero accounting coverage or
+economic issues, reconstructed MU/MTZ state matching the account, and
+risk/runner/market-data PASS. Clean's retained accounting and ledger failures
+remain a separate context.
+
+Consolidation remains fail closed. Acceptance now requires this smaller,
+explicit checklist:
+
+1. Export Alpaca PAPER order details for the Apr 13–22 rows with immutable
+   order ID, broker/client order ID, submitted/accepted/filled/canceled times,
+   side, quantity and status; record current broker positions and open-order
+   count from the same dated source.
+2. Obtain masked Alpaca key/client usage evidence and bind each key fingerprint
+   to a service or explicit exception without revealing account numbers or
+   credentials. Treat the Apr 22 03:01 batch as unresolved until this is done.
+3. Match broker orders/fills/positions against candidate runtime rows and
+   deployment windows. Preserve unmatched records; never infer fill prices or
+   P/L from local attempt rows.
+4. At the decision boundary verify exact deployed SHA parity, risk,
+   accounting, canonical-ledger parity, runner permissions and rollback state,
+   while keeping broker and simulation reporting source/date separated.
+5. Measure Railway monthly cost and prove Clean configuration plus persistent
+   volume retention/restore before proposing a Clean compute stop or duplicate
+   auto-deploy disable.
+
+There are 26 days to the 2026-12-01 hard review. Because no evidence yet proves
+that all API-key submitters are inactive, the precise operator-controlled
+pause recommendation is unchanged: first identify the active key consumer and
+capture broker/service pre-state; then pause only that submitter through its
+documented writer control (or revoke only its key after dependency and rollback
+verification), and confirm no new orders. No pause, stop, credential change,
+consolidation or single-writer acceptance is claimed. The next executable step
+is the immutable Alpaca order-detail/client-key export for the Apr 22 batch,
+not another strategy or architecture change.
