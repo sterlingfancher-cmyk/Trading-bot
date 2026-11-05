@@ -1,9 +1,9 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-11-04 (checkpoint consolidation; latest runtime evidence below is dated 08:59:53 CST)
+Last updated: 2026-11-05 (checkpoint consolidation; latest runtime evidence below is dated 09:06:28 CST)
 Repository: `sterlingfancher-cmyk/Trading-bot`
 Current priority: **Issue #325 emergency stabilization and broker/runtime reconciliation**, with related Issue #324.
-Latest verified runtime-code commit: `92c23ed45ea9abcf074956bb37d326239de47768`, recorded on both Clean and Splendid in the November 4 checkpoint.
+Latest verified runtime-code commit: `78d36138198eeec0895ecef998539467e4943edb`, recorded on both Clean and Splendid in the November 5 checkpoint.
 This documentation update does not establish a new deployment or runtime acceptance.
 
 ## Current status and next executable action
@@ -15,24 +15,23 @@ historical broker-submit conclusion.
 
 | Context | Latest verified finding | Remaining limitation |
 | --- | --- | --- |
-| Splendid / `web-production-e1796.up.railway.app` | Authoritative internal paper simulation; November 4 audit passed with 181 chain-valid ledger rows, 93 current-epoch rows, exact projection parity and clean accounting/risk/runner/market data. One MU simulated short was open. | Internal simulation activity is not evidence of Alpaca broker orders or broker P/L. |
-| Clean / `trading-bot-clean.up.railway.app` | Historical submit-capable source was successfully deployed here. Current tracked code has no active broker-order path. Legacy internal state remains halted and unreconciled. | Clean is not yet proven dispensable; preserve its configuration, volume and rollback evidence. |
-| Alpaca PAPER brokerage | Separate account and evidence source. Clean's historical source/deployment can corroborate some possible order origins. | Immutable order/fill IDs, key-to-account binding, current open orders and other credential consumers remain unverified. |
+| Splendid / `web-production-e1796.up.railway.app` | Authoritative internal paper simulation; November 5 audit passed with 186 chain-valid ledger rows, 98 current-epoch rows, exact projection parity and clean accounting/risk/runner/market data. Simulated MU/MTZ shorts were open. | Internal simulation activity is not evidence of Alpaca broker orders or broker P/L. |
+| Clean / `trading-bot-clean.up.railway.app` | Verified historical Alpaca PAPER API-key consumer across multiple successfully deployed revisions. Current tracked code has no active broker-order path. Legacy internal state remains halted and unreconciled. | Individual broker fills are not joined to Clean; preserve its configuration, volume and rollback evidence. |
+| Alpaca PAPER brokerage | Screenshots prove the displayed April orders were filled market orders from source `access_key`. The large Apr 22 batch is incompatible with the exact final Clean submit-capable revision as a complete source. | Immutable order/client IDs, key-to-service binding, current open orders and other credential consumers remain unverified. |
 
-**Completed investigation:** the submit-capable Clean revision
-`c24fd2b482257fb60dbede38fa77d833c6d4da31` did not retain broker order IDs,
-statuses or fill prices. Its local SQLite rows record submit attempts using a
-pre-submit quote; they cannot establish fill ownership or broker P/L. The
-inspected source universe does not explain SNOW/ARM/NFLX. Current tracked
-runtime code has no active broker submitter, but this does not exclude manual
-orders, an external service or another credential consumer.
+**Completed investigation:** Alpaca screenshots prove API-key submission but
+not service ownership. At least 24 Apr 22 orders share one submitted timestamp,
+mix buys and sells, and include symbols outside final Clean revision
+`c24fd2b...`; the batch cannot be assigned to that revision as a complete
+source. Earlier mixed-direction revision `ff806970...` was successfully
+deployed on Clean and overlaps older Apr 13/21 broker rows, proving a historical
+API consumer but not a fill join. Neither revision retained broker IDs.
 
-**Next executable action:** obtain read-only Alpaca PAPER April 10–22
-order/activity evidence with immutable order/client IDs, timestamps, status,
-quantity and fill prices, plus current open orders and key/client usage.
-Bind Clean's configured keys to the recorded paper-account fingerprint without
-exposing secrets. Match fills to Clean or explicit exceptions, retaining
-ambiguity. Recovered `trading.db` rows are optional corroboration only.
+**Next executable action:** obtain read-only Alpaca PAPER April 13–22 order
+details with immutable order/client IDs, timestamps, status, quantity and fill
+prices, plus current broker positions/open orders and masked key/client usage.
+Bind every order to a named writer or explicit exception without exposing
+secrets. Recovered local rows remain optional corroboration only.
 
 **Consolidation remains blocked:** establish current broker ownership and
 reconciliation, then capture Railway cost baseline, Clean configuration/volume
@@ -50,8 +49,12 @@ or restart descriptions as permission to manually change current state.
 `checkpoint/emergency-stabilization-20261104`, commit
 `1e31ba7eae628503cf266cc5f2224a4b31a7ef80`, source blob
 `58f3ec31dce4db0fcaed2ce4282ae7cff46a2dec`.
-Latest issue record:
-https://github.com/sterlingfancher-cmyk/Trading-bot/issues/325#issuecomment-6634006832.
+Latest issue records:
+https://github.com/sterlingfancher-cmyk/Trading-bot/issues/324#issuecomment-6661535477
+and
+https://github.com/sterlingfancher-cmyk/Trading-bot/issues/325#issuecomment-6661535962.
+The November 5 checkpoint is on
+`checkpoint/emergency-stabilization-20261105`.
 The existing main history and all checkpoint sections are preserved below.
 When resuming, read current main and the latest Issue #325 checkpoint; verify
 fresh runtime evidence before any operational decision.
