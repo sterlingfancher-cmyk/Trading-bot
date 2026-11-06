@@ -53,11 +53,11 @@ or restart descriptions as permission to manually change current state.
 `1e31ba7eae628503cf266cc5f2224a4b31a7ef80`, source blob
 `58f3ec31dce4db0fcaed2ce4282ae7cff46a2dec`.
 Latest issue records:
-https://github.com/sterlingfancher-cmyk/Trading-bot/issues/324#issuecomment-6661535477
+https://github.com/sterlingfancher-cmyk/Trading-bot/issues/324#issuecomment-6688080677
 and
-https://github.com/sterlingfancher-cmyk/Trading-bot/issues/325#issuecomment-6661535962.
-The November 5 checkpoint is on
-`checkpoint/emergency-stabilization-20261105`.
+https://github.com/sterlingfancher-cmyk/Trading-bot/issues/325#issuecomment-6688080015.
+The November 6 checkpoint is on
+`checkpoint/emergency-stabilization-20261106`.
 The existing main history and all checkpoint sections are preserved below.
 When resuming, read current main and the latest Issue #325 checkpoint; verify
 fresh runtime evidence before any operational decision.
