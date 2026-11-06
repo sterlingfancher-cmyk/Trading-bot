@@ -1,9 +1,9 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-11-05 (checkpoint consolidation; latest runtime evidence below is dated 09:06:28 CST)
+Last updated: 2026-11-06 (checkpoint consolidation; latest runtime evidence below is dated 09:06:58 CST)
 Repository: `sterlingfancher-cmyk/Trading-bot`
 Current priority: **Issue #325 emergency stabilization and broker/runtime reconciliation**, with related Issue #324.
-Latest verified runtime-code commit: `78d36138198eeec0895ecef998539467e4943edb`, recorded on both Clean and Splendid in the November 5 checkpoint.
+Latest verified runtime-code commit: `78d36138198eeec0895ecef998539467e4943edb`, recorded on both Clean and Splendid in the November 6 checkpoint.
 This documentation update does not establish a new deployment or runtime acceptance.
 
 ## Current status and next executable action
@@ -15,23 +15,26 @@ historical broker-submit conclusion.
 
 | Context | Latest verified finding | Remaining limitation |
 | --- | --- | --- |
-| Splendid / `web-production-e1796.up.railway.app` | Authoritative internal paper simulation; November 5 audit passed with 186 chain-valid ledger rows, 98 current-epoch rows, exact projection parity and clean accounting/risk/runner/market data. Simulated MU/MTZ shorts were open. | Internal simulation activity is not evidence of Alpaca broker orders or broker P/L. |
-| Clean / `trading-bot-clean.up.railway.app` | Verified historical Alpaca PAPER API-key consumer across multiple successfully deployed revisions. Current tracked code has no active broker-order path. Legacy internal state remains halted and unreconciled. | Individual broker fills are not joined to Clean; preserve its configuration, volume and rollback evidence. |
-| Alpaca PAPER brokerage | Screenshots prove the displayed April orders were filled market orders from source `access_key`. The large Apr 22 batch is incompatible with the exact final Clean submit-capable revision as a complete source. | Immutable order/client IDs, key-to-service binding, current open orders and other credential consumers remain unverified. |
+| Splendid / `web-production-e1796.up.railway.app` | Authoritative internal paper simulation; November 6 audit passed with 188 chain-valid ledger rows, 100 current-epoch rows, exact projection parity and clean accounting/risk/runner/market data. The MU/MTZ simulated shorts closed and the account was flat. | Internal simulation activity is not evidence of Alpaca broker orders or broker P/L. |
+| Clean / `trading-bot-clean.up.railway.app` | Verified historical Alpaca PAPER API-key consumer. Nine successive April 21 ARM/SNOW-capable submit revisions ran successfully only here; current tracked code has no active broker-order path. Legacy state remains halted and unreconciled. | The repeated-deploy mechanism is strong attribution evidence but individual broker fills are not joined; preserve configuration, volume and rollback evidence. |
+| Alpaca PAPER brokerage | Screenshots prove displayed April orders were filled market orders from source `access_key`; the user's no-manual-trades statement is retained as operator attestation. The Apr 22 batch is compatible with Clean's broader April revision family, not with only the final revision. | Immutable order/client IDs, key-to-service binding, current open orders, exact timestamp timezone and other credential consumers remain unverified. |
 
 **Completed investigation:** Alpaca screenshots prove API-key submission but
-not service ownership. At least 24 Apr 22 orders share one submitted timestamp,
-mix buys and sells, and include symbols outside final Clean revision
-`c24fd2b...`; the batch cannot be assigned to that revision as a complete
-source. Earlier mixed-direction revision `ff806970...` was successfully
-deployed on Clean and overlaps older Apr 13/21 broker rows, proving a historical
-API consumer but not a fill join. Neither revision retained broker IDs.
+not deterministic service ownership. At least 24 Apr 22 orders share one
+submitted timestamp, mix buys and sells, and include symbols outside final
+Clean revision `c24fd2b...`; that one revision cannot explain the complete
+batch. Focused history now proves nine successive ARM/SNOW-capable, mixed-order
+revisions were successfully deployed on Clean and failed on Splendid. Their
+ungated import-started schedulers and lack of open-order deduplication provide a
+credible rapid-redeploy duplication path. No revision retained broker IDs, so
+this remains strong attribution rather than an exact fill join.
 
 **Next executable action:** obtain read-only Alpaca PAPER April 13–22 order
-details with immutable order/client IDs, timestamps, status, quantity and fill
-prices, plus current broker positions/open orders and masked key/client usage.
-Bind every order to a named writer or explicit exception without exposing
-secrets. Recovered local rows remain optional corroboration only.
+details with immutable order/client IDs and timestamp timezone, plus current
+broker positions/open orders and masked key/client usage. Test the Apr 22 batch
+against the nine Clean deployment IDs and bind every order to Clean or an
+explicit exception without exposing secrets. Recovered local rows remain
+optional corroboration only.
 
 **Consolidation remains blocked:** establish current broker ownership and
 reconciliation, then capture Railway cost baseline, Clean configuration/volume
@@ -4674,3 +4677,117 @@ verification), and confirm no new orders. No pause, stop, credential change,
 consolidation or single-writer acceptance is claimed. The next executable step
 is the immutable Alpaca order-detail/client-key export for the Apr 22 batch,
 not another strategy or architecture change.
+
+## 2026-11-06 Issues #324/#325 — Clean deployment family explains the missing ARM/SNOW source path
+
+Emergency stabilization remains the only objective. The focused action was to
+test the unresolved Apr 22 `access_key` batch against the complete nearby
+submit-capable source/deployment lineage rather than only the final revision.
+No runtime, service, credential, volume, runner, halt, strategy, ML, research,
+deployment or automation mutation was performed.
+
+Nine successive April 21 revisions contain Alpaca PAPER submit calls and a
+universe that includes ARM and SNOW. Every one received a successful Railway
+status for Clean (`dazzling-dedication - Trading-bot`) and a failed status for
+Splendid (`splendid-creativity - web`):
+
+- `704a34e478a9f9663c3ebfb67545de45d24d7070`
+- `0912cb7c8e00954736403c66e6aa983053c4c296`
+- `2f25136962a162a4761c6e83f68a589269d454a7`
+- `3c7569708b34592097d9d9e403dec9cfd96f1564`
+- `0997200bb7f718729d29ef4b950dd71f48a7d932`
+- `6f1096ddf525224c795e9e1047512894f0cd8431`
+- `b83e403d70c9524eae009fe0ef0b2ae9ba15f106`
+- `ab7bb485f4dfbd7294a942bee084fe4da77140fb`
+- `5e1414ebb00c9d1a9f26c7e23e5dc85a962a6f1a`
+
+The sequence spans source commits from 16:55:13 through 18:12:06 CDT. The
+first and last Clean deployment IDs are
+`d2dcbddb-a145-4467-9800-ac8b005e6c7f` and
+`6de37584-cd1d-4ef8-a9e0-5d46d73a0273`. Each inspected revision uses the
+hard-coded `https://paper-api.alpaca.markets` endpoint, reads APCA credentials,
+starts a scheduler during module import, invokes `run_bot()` before its first
+300-second sleep, and has neither a broker-market-clock gate nor an
+`AUTO_TRADING` gate. Each sets `MAX_POSITIONS = 5`; the family supports market
+buys and market sells through entry, trailing-stop, rotation and, in some
+revisions, short logic. Across the family its universe covers the screenshot
+symbols including ARM, SNOW, NVDA, AVGO, AMD, META, INTC, NFLX, MSFT, PANW and
+CRWD.
+
+None of these revisions queries or deduplicates open orders, supplies a
+`client_order_id`, or persists the returned broker order. Rapid successful
+redeploys could therefore start a fresh immediate scheduler nine times and
+submit overlapping pending orders before positions or orders were visible to a
+new process. A five-entry cap applies per process cycle, not across the deploy
+sequence, and sell paths can add further orders. This is a concrete mechanism
+capable of producing more than the 24 visible Apr 22 rows and resolves the
+previous source-universe objection for ARM/SNOW. The immediately following
+`ce24a544f9b72bf6d199fa5604531cc572eb5b5d` at 18:19:27 CDT retained the
+universe/scheduler but no longer submitted orders; it also succeeded only on
+Clean (deployment `8cb9d9c5-b412-4282-80df-8237ee182904`).
+
+This does not complete broker attribution. The screenshots' shared submitted
+time `Apr 22, 2026, 03:01:15 AM` has no displayed timezone and is not yet bound
+to an individual deployment/order attempt. The screenshots omit immutable
+order and client-order IDs. The user's statement that no manual trades were
+placed is retained as operator attestation and makes an automated API consumer
+the expected source, but it is not independent key-to-service evidence. Clean
+is now the only tracked, successfully deployed runtime family proven capable
+of the full symbol/direction pattern; another untracked/external consumer of
+the key cannot yet be excluded.
+
+Fresh read-only runtime evidence keeps current contexts separate. At
+09:01–09:06 CST, Clean and Splendid both remain on exact main SHA
+`78d36138198eeec0895ecef998539467e4943edb` and both declare
+`places_orders=false` and `read_only=true`. Clean remains flat at
+`-26064.31`, halted and entry-blocked. Its 09:06:58 compact audit remains FAIL
+with 193 accounting coverage issues, 50 economic issues, 18 state rows missing
+from the canonical projection, parity false, and risk/self-defense latched;
+the runner itself is active and PASS. No halt was cleared.
+
+Splendid closed the internal-simulation MU short under execution
+`d446a3eebd604431a0c98f947a502d43` for `+104.37` and the MTZ short under
+execution `3c8ddf5913f54c1fa9accb6c41445412` for `+70.94`; these are internal
+ledger executions, not broker orders. At 09:05:49 CST Splendid was flat at
+cash/equity `13155.30757677119` / `13155.31`. Its compact audit passes with
+188 chain-valid ledger rows, 100 current-epoch rows, exact state-projection
+parity, zero accounting coverage/economic issues, reconstructed flat state,
+and risk/runner/market-data PASS.
+
+The explicit owner boundary is now:
+
+- **historical tracked broker-capable runtime:** Clean, verified across the
+  exact full-symbol revision family and successful deployments;
+- **Apr 22 batch attribution:** strongly consistent with repeated Clean
+  redeploys, but not accepted order-by-order without broker IDs/timezone and
+  key-client evidence;
+- **current internal-simulation writer:** Splendid, healthy and currently
+  flat;
+- **current broker writer:** none in tracked current code; current Alpaca
+  positions/open orders and other key consumers remain unverified.
+
+Consolidation remains fail closed. The acceptance checklist is:
+
+1. Obtain immutable Alpaca PAPER order/client IDs and timestamp timezone for
+   Apr 13–22, plus a dated current broker position and open-order count.
+2. Bind the masked key/client usage to Clean's nine deployment IDs or retain an
+   explicit external/unmatched exception; never expose credentials or account
+   numbers.
+3. Match broker orders/fills/positions to submitted time, symbol, side and
+   quantity plus any recovered local attempt rows. Do not invent missing fills
+   or combine broker and simulation P/L.
+4. At the decision boundary verify exact SHA parity, order permissions,
+   risk/accounting/canonical-ledger state, rollback, and source-dated reporting.
+5. Measure Railway monthly cost and prove Clean configuration plus persistent
+   volume retention/restore before proposing a Clean compute stop or duplicate
+   auto-deploy disable.
+
+There are 25 days to the 2026-12-01 hard review. The exact blocker is private
+broker/key evidence unavailable through the connected Alpaca market-data tool:
+immutable order/client IDs, timestamp timezone, current open orders and
+key-client usage. The safe operator-controlled action remains read-only capture
+of those fields. If a still-active unintentional submitter is identified,
+capture pre-state and pause only that writer through its documented control (or
+revoke only its key after dependency/rollback verification), then confirm no
+new broker orders. No pause, stop, credential change, consolidation or
+single-writer acceptance is claimed.
