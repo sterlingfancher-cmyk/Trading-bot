@@ -1,6 +1,6 @@
 # Project Handoff — Authoritative Current Trading Runtime
 
-Last updated: 2026-11-06 (checkpoint consolidation; latest runtime evidence below is dated 09:06:58 CST)
+Last updated: 2026-11-07 (checkpoint consolidation; latest runtime identity evidence below is dated 09:03:10 CST)
 Repository: `sterlingfancher-cmyk/Trading-bot`
 Current priority: **Issue #325 emergency stabilization and broker/runtime reconciliation**, with related Issue #324.
 Latest verified runtime-code commit: `78d36138198eeec0895ecef998539467e4943edb`, recorded on both Clean and Splendid in the November 6 checkpoint.
@@ -18,6 +18,7 @@ historical broker-submit conclusion.
 | Splendid / `web-production-e1796.up.railway.app` | Authoritative internal paper simulation; November 6 audit passed with 188 chain-valid ledger rows, 100 current-epoch rows, exact projection parity and clean accounting/risk/runner/market data. The MU/MTZ simulated shorts closed and the account was flat. | Internal simulation activity is not evidence of Alpaca broker orders or broker P/L. |
 | Clean / `trading-bot-clean.up.railway.app` | Verified historical Alpaca PAPER API-key consumer. Nine successive April 21 ARM/SNOW-capable submit revisions ran successfully only here; current tracked code has no active broker-order path. Legacy state remains halted and unreconciled. | The repeated-deploy mechanism is strong attribution evidence but individual broker fills are not joined; preserve configuration, volume and rollback evidence. |
 | Alpaca PAPER brokerage | Screenshots prove displayed April orders were filled market orders from source `access_key`; the user's no-manual-trades statement is retained as operator attestation. The Apr 22 batch is compatible with Clean's broader April revision family, not with only the final revision. | Immutable order/client IDs, key-to-service binding, current open orders, exact timestamp timezone and other credential consumers remain unverified. |
+| Historical Tradier integration | Focused November 7 scan found an Apr 9-10 production-endpoint Tradier option-order function in 83 revisions deployed across both Railway projects. The function was dead in every inspected snapshot: exactly one `place_trade(` occurrence (its definition), no scheduler, and the `/webhook` route never called it. A successor without Tradier deployed successfully to both services. | This is evidence of historical provider configuration, not evidence that a Tradier order executed. Current Railway credential presence remains unavailable without authenticated configuration access. |
 
 **Completed investigation:** Alpaca screenshots prove API-key submission but
 not deterministic service ownership. At least 24 Apr 22 orders share one
@@ -33,8 +34,9 @@ this remains strong attribution rather than an exact fill join.
 details with immutable order/client IDs and timestamp timezone, plus current
 broker positions/open orders and masked key/client usage. Test the Apr 22 batch
 against the nine Clean deployment IDs and bind every order to Clean or an
-explicit exception without exposing secrets. Recovered local rows remain
-optional corroboration only.
+explicit exception without exposing secrets. Also capture only the presence or
+absence (never values) of any retained Tradier credential variables in both
+Railway services. Recovered local rows remain optional corroboration only.
 
 **Consolidation remains blocked:** establish current broker ownership and
 reconciliation, then capture Railway cost baseline, Clean configuration/volume
@@ -56,8 +58,8 @@ Latest issue records:
 https://github.com/sterlingfancher-cmyk/Trading-bot/issues/324#issuecomment-6688080677
 and
 https://github.com/sterlingfancher-cmyk/Trading-bot/issues/325#issuecomment-6688080015.
-The November 6 checkpoint is on
-`checkpoint/emergency-stabilization-20261106`.
+The November 7 checkpoint is on
+`checkpoint/emergency-stabilization-20261107`.
 The existing main history and all checkpoint sections are preserved below.
 When resuming, read current main and the latest Issue #325 checkpoint; verify
 fresh runtime evidence before any operational decision.
@@ -4791,3 +4793,98 @@ capture pre-state and pause only that writer through its documented control (or
 revoke only its key after dependency/rollback verification), then confirm no
 new broker orders. No pause, stop, credential change, consolidation or
 single-writer acceptance is claimed.
+
+## 2026-11-07 Issues #324/#325 — historical Tradier path bounded; no tracked current broker submitter
+
+Emergency stabilization remains the only objective. The focused action was to
+enumerate other tracked broker integrations and determine whether any current
+or historical Railway path could independently place orders. No service,
+credential, volume, runner, halt, strategy, ML, research, deployment or
+automation mutation was performed.
+
+The scan covered 547 locally available commit objects: 213 reachable from
+current refs and 334 retained unreachable objects. It found no tracked
+Robinhood or Interactive Brokers implementation. It did find a historical
+Tradier integration in 83 successive `App.py`/`app.py` snapshots from
+2026-04-09 17:24:45 through 2026-04-10 02:25:11 CDT. Every snapshot used the
+production endpoint `https://api.tradier.com/v1`; none used the Tradier sandbox.
+Each defined a `requests.post` option order using `buy_to_open`, a limit price,
+day duration and an OTOOCO-style stop/profit structure.
+
+That order function was not reachable from the deployed application in any of
+the 83 snapshots. Each contained exactly one `place_trade(` occurrence, which
+was the function definition itself. There was no scheduler. The `/webhook`
+route performed signal/ML checks and returned `ready` but never called
+`place_trade`; the Procfile ran only `python app.py`. Therefore the repository
+proves historical Tradier order-capable code and credential-variable consumption,
+but does not prove any Tradier order submission. Direct external import/use and
+retained Railway credentials cannot be excluded without authenticated
+configuration evidence.
+
+GitHub/Railway combined statuses independently show 82 of the 83 Tradier
+revisions had deployment status records. Fifty-four succeeded on Clean and 53
+succeeded on Splendid; the first successful revision was
+`0088321fac60bb24fdc355344783c5ddaef7ecbb` at 17:31:35 CDT, and the last was
+`3d818b57981c117a2999450a78bb45c54bf22053` at 02:25:11 CDT. The last deployed
+successfully to both services (Clean deployment
+`67a9b079-f5dc-4da3-aa9b-4976510d9f89`; Splendid deployment
+`b03c1484-b3fb-4e9b-b59a-37bf6c9088b9`). The next inspected revision,
+`482e1221c9ebf999c621f0b80fd3901f45982e36` at 02:53:50 CDT, removed the
+Tradier endpoint/order function and also deployed successfully to both services
+(Clean `f93e30fd-b051-4fb4-b065-f6696011290f`; Splendid
+`58af7dfb-7ead-4770-b7f6-0460c2049044`). This bounds the tracked Tradier code
+window to Apr 9-10 and excludes it as the source of Alpaca `access_key` fills.
+
+Current main still includes the `alpaca-trade-api` package dependency, but a
+focused source scan found no current provider import, Alpaca/Tradier endpoint,
+or broker submit/place/send/create-order call outside tests and repository
+safety scanners. The package alone is not execution authority. At 09:03:06-10
+CST, fresh read-only deployment-info from both runtimes remained on exact main
+`78d36138198eeec0895ecef998539467e4943edb`, with `places_orders=false`.
+Clean deployment `e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` had both been running since Nov 5; no
+new deployment or code divergence was observed.
+
+Authenticated private evidence remains unavailable in this run. The connected
+Alpaca tool exposes market data only, and the direct Alpaca PAPER dashboard
+opened at a login screen. Railway configuration also opened at a login screen.
+Because this automation is non-interactive, no credential request or login was
+initiated. No credential value, account number or secret was read or printed.
+This is a scoped access blocker, not evidence that no broker orders, positions,
+open orders or retained credentials exist.
+
+The owner boundary is now:
+
+- **historical tracked Alpaca PAPER submitter:** Clean's Apr 21 full-symbol
+  revision family, strongly consistent with the Apr 22 batch but still missing
+  order-by-order IDs/timezone;
+- **historical tracked Tradier code:** present Apr 9-10 across both Railway
+  projects, production endpoint but dead/uninvoked in all inspected snapshots;
+- **current tracked broker submitter:** none in exact current code;
+- **current internal simulation writer:** Splendid;
+- **untracked/external broker writer and current broker state:** still
+  unverified until private Alpaca and masked Railway configuration evidence is
+  available.
+
+Consolidation remains fail closed. Acceptance requires:
+
+1. Read-only Alpaca PAPER immutable order/client IDs and timezone for Apr 13-22,
+   plus dated current positions/open orders and a masked account fingerprint.
+2. Masked key/client usage binding for the Alpaca key and presence/absence only
+   of retained Tradier credential variables in Clean and Splendid.
+3. Broker-order/fill/position matching to Clean deployment attempts or explicit
+   exceptions, without combining broker and simulation P/L.
+4. Exact SHA/order-permission parity plus risk, accounting, canonical-ledger,
+   reporting and rollback checks at the consolidation decision boundary.
+5. Railway cost baseline and proof that Clean configuration and persistent
+   volume remain recoverable before proposing a compute stop or auto-deploy
+   disable.
+
+There are 24 days to the 2026-12-01 hard review. Concrete progress: the “other
+broker integration” question is no longer unknown for tracked repository
+history, and the Tradier path is bounded as historical and uninvoked. The exact
+remaining blocker is authenticated private account/configuration evidence. The
+next executable action is a read-only Alpaca order/state export or authenticated
+dashboard capture plus masked Railway variable-name/configuration capture. No
+pause, stop, credential change, consolidation, live-order claim or single-writer
+acceptance is claimed.
