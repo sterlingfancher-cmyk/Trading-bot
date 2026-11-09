@@ -4888,3 +4888,77 @@ next executable action is a read-only Alpaca order/state export or authenticated
 dashboard capture plus masked Railway variable-name/configuration capture. No
 pause, stop, credential change, consolidation, live-order claim or single-writer
 acceptance is claimed.
+
+## 2026-11-09 Issues #324/#325 — unchanged deployment identity; new internal rows bounded
+
+Emergency stabilization remains the only objective. This run performed only
+read-only GitHub and public-runtime checks. No service, credential, volume,
+runner, halt, strategy, ML, research, deployment or automation state was
+changed.
+
+At 09:04–09:05 CST, GitHub main, Clean and Splendid all remained on exact SHA
+`78d36138198eeec0895ecef998539467e4943edb`. Clean deployment
+`e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` were unchanged and had both been
+running since November 5. Both deployment-info responses continued to declare
+`places_orders=false`; the compact status responses were read-only and reported
+zero internal positions. These application declarations do not prove the
+current Alpaca PAPER open-order count, key-client inventory or absence of an
+external credential consumer.
+
+Clean remained flat at cash/equity `-26064.308324919723` / `-26064.31`, with
+the daily-loss halt and self-defense latch still active. Its 09:05:44 compact
+audit remained FAIL: 193 accounting coverage issues, 50 economic issues, 18
+canonical rows missing from state, projection parity false, and risk halted.
+The runner remained enabled/PASS but entry-blocked by the retained safety
+controls. No halt was cleared.
+
+Splendid remained a separate internal simulation and was flat at cash/equity
+`13124.874992017432` / `13124.87`. Its canonical ledger advanced since the
+November 7 checkpoint from 188 total / 100 current-epoch rows to 192 total /
+104 current-epoch rows. The newly visible bounded lifecycle pairs were the
+internal WULF short entry `3c5fe83e985e4b97920881d2457afd7d` and exit
+`13104cd436b2434cbef3bda19d01d99c`, and the internal WDC short entry
+`17e8431b69ac4bc3a31edcb53f066e50` and exit
+`8821035526c94b65a1fa7e9bfc3f539b`. They are canonical internal simulation
+executions, not Alpaca broker order IDs. Splendid's 09:05:50 compact audit
+passed with exact state-projection parity, zero accounting coverage/economic
+issues, chain-valid authoritative ledger, clean risk/runner/market data and no
+open internal position.
+
+The explicit owner boundary is unchanged:
+
+- historical tracked Alpaca PAPER submitter: Clean's April 21 full-symbol
+  revision family, strongly consistent with the April 22 batch but not joined
+  order-by-order;
+- current tracked broker submitter: none in exact current source;
+- current internal simulation writer: Splendid;
+- current broker state and untracked/external credential consumers: unverified.
+
+Consolidation remains fail closed. Before any Clean compute-stop proposal:
+
+1. Capture source-dated Alpaca PAPER immutable order/client IDs, timestamp
+   timezone, masked account fingerprint, current positions and open orders.
+2. Bind masked key/client usage to Clean or retain explicit unmatched/external
+   exceptions; record only variable names/presence, never secrets.
+3. Match broker orders, fills and positions to Clean deployment attempts or
+   explicit exceptions without mixing broker and simulation P/L.
+4. Recheck exact SHA/order permissions, risk, accounting, canonical-ledger,
+   reporting and rollback evidence at the decision boundary.
+5. Obtain authenticated Railway usage/billing evidence for a monthly cost
+   baseline and prove Clean configuration plus persistent-volume retention and
+   restore before proposing compute stop or duplicate auto-deploy disable.
+
+There are 22 days to the 2026-12-01 hard review. Concrete progress is a bounded
+fresh-state checkpoint: no deployment or declared order-authority change was
+observed, while four new Splendid internal ledger rows were identified and kept
+separate from broker evidence. Alpaca order-by-order ownership, current broker
+positions/open orders, masked key-client binding, Railway credential presence,
+broker/internal reconciliation, cost reduction and single-writer acceptance
+remain open. The exact blocker is authenticated private Alpaca and Railway
+account/configuration/usage evidence. The next executable step remains a
+read-only Alpaca order/state export plus masked Railway variable-name and
+usage/cost capture. If an unintentional submitter is identified, capture pre-
+state and pause only that verified writer through its documented control, then
+confirm no new broker orders. No pause, stop, credential change, consolidation
+or single-writer acceptance is claimed.
