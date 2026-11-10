@@ -4962,3 +4962,111 @@ usage/cost capture. If an unintentional submitter is identified, capture pre-
 state and pause only that verified writer through its documented control, then
 confirm no new broker orders. No pause, stop, credential change, consolidation
 or single-writer acceptance is claimed.
+
+## 2026-11-10 Issues #324/#325 — Clean volume dependency and rollback boundary mapped
+
+Emergency stabilization remains the only objective. This run advanced the
+evidence-retention/rollback gate required before any Clean compute-stop
+proposal. It performed source inspection plus read-only GitHub and
+`/paper/deployment-info` checks only. No service, credential, volume, backup,
+runner, halt, strategy, ML, research, deployment or automation state was
+changed.
+
+At 09:03 CST, GitHub main, Clean and Splendid still matched exact SHA
+`78d36138198eeec0895ecef998539467e4943edb`. Clean deployment
+`e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` were unchanged and both continued to
+declare `places_orders=false`. Only deployment-info was called. This is
+deliberate: exact current source wraps many `/paper` status, journal, report and
+risk views with a post-response `trade_journal.mirror_state(...)` hook, so a
+nominally informational view can write journal/status files. Runtime reads must
+not be described as observational unless the selected endpoint avoids that
+wrapper or its write behavior is explicitly accounted for.
+
+Exact current source resolves its persistent root in this order:
+`STATE_DIR`, then `PERSISTENT_STATE_DIR`, then
+`RAILWAY_VOLUME_MOUNT_PATH`. The repository does not declare the actual Clean
+volume identity, mount path, capacity or backup schedule. Those remain private
+Railway configuration evidence. Within the resolved root, the consolidation
+dependency map is:
+
+- **active account/runtime state:** configured state basename (normally
+  `state.json`), including cash/equity, positions, trades/history, day peak,
+  risk halt and runner telemetry;
+- **immutable execution source:** `canonical_execution_ledger.jsonl`;
+- **independent journal evidence:** `trade_journal.json` and
+  `trade_journal_backup.json`, plus journal/hook status files;
+- **state recovery evidence:** `state.json.bak`,
+  `state_backup_latest.json`, `state_backup_largest.json`,
+  `state_backup_prewrite.json`, timestamped `state_pre_restore_*.json`,
+  `state_recovery_status.json` and `state_io_status.json`;
+- **bounded snapshots:** `state_snapshots/` and its `manifest.json`;
+- **forensic/cutover evidence:** `forensic_archives/` plus clean/successor/
+  reconciliation marker JSON files, including the Issue #222 verified-flat
+  successor marker;
+- **operational evidence:** `runtime_controls.json`, `runtime_errors.json` and
+  `module_load_trace.json`;
+- **ephemeral coordination:** `.state_io.lock`,
+  `.governed_v5_paper_execution.lock` and temporary write files. These are not
+  substitutes for the durable evidence above and must not be treated as proof
+  of a completed transaction or blindly promoted as recovery state.
+
+The restart boundary is material. `wsgi.py` calls
+`state_guard.preflight_recover()` before importing `app.py`; the guard also
+runs on module import. With `STATE_RECOVERY_ENABLED` defaulting true, startup
+may copy `state_backup_largest.json` over `state.json` and
+`state_backup_latest.json` when the current state is materially smaller and the
+backup has more trades/history or newer runner telemetry. It writes
+`state_recovery_status.json` and can create a timestamped pre-restore copy.
+Therefore a restart is not observational, and merely retaining the volume does
+not prove byte-for-byte rollback.
+
+Provider documentation adds a safe, testable rollback primitive. Railway
+volume backups cover arbitrary files in a mounted volume. A restore creates a
+new volume mounted at the same location, retains the prior volume unmounted,
+and requires a deployment to apply the staged restore. Manual backups are
+limited to 50% of volume capacity. Restore is therefore a reviewed deployment
+operation, not a read-only check, and was not attempted. Sources:
+https://docs.railway.com/volumes/backups and
+https://docs.railway.com/volumes/reference.
+
+The pre-stop evidence/rollback acceptance checklist is now concrete:
+
+1. Authenticated Railway capture of Clean project/environment/service,
+   persistent volume ID/name, mount path, capacity, attachment, backup schedule
+   and current backup IDs/timestamps; record configuration variable names and
+   presence only, never values.
+2. Create and verify a provider-native manual volume backup without restoring
+   it. Record backup ID/time and incremental size. Also capture a read-only file
+   manifest for the durable classes above with byte sizes and SHA-256 digests;
+   exclude secret values and classify transient lock/tmp files separately.
+3. Confirm the backup fits Railway's manual-backup capacity limit. Do not wipe,
+   detach, restore or redeploy. A future restore test must use the staged-new-
+   volume workflow, preserve the old volume unmounted, and pass an exact-digest
+   comparison before any production attachment change.
+4. Record the exact deployed SHA, startup/recovery variable names, order
+   permissions, auto-deploy source/setting and a rollback target before a stop.
+   Because startup may restore state, post-rollback acceptance must recheck the
+   state/ledger/journal digests and recovery-status decision before trusting
+   account output.
+5. Capture Clean service-level CPU, RAM, egress, volume and backup cost for a
+   defined billing window from authenticated Railway usage evidence. Railway's
+   official `railway usage` service breakdown or project Usage page is the
+   required source; public list pricing alone is not a measured saving. Source:
+   https://docs.railway.com/cli/usage.
+6. Only after Alpaca order ownership/current open-order state and the preceding
+   evidence gates pass may an operator-reviewed proposal compare the measured
+   cost of continued Clean compute with retaining its volume/backups and
+   disabling duplicate auto-deploy. No stop is authorized by this map.
+
+There are 21 days to the 2026-12-01 hard review. Concrete progress: the Clean
+rollback dependency set, startup mutation hazard, safe provider backup
+primitive and measured-cost source are now explicit. Still blocked are the
+authenticated Clean volume/configuration/usage capture and private Alpaca
+order/key evidence. The next executable step is an authenticated read-only
+Railway capture of the named fields plus an operator-approved manual volume
+backup; backup creation is a future external action and is not claimed here.
+Alpaca order-by-order ownership, current broker positions/open orders,
+broker/internal reconciliation, cost reduction and single-writer acceptance
+remain open. No pause, stop, backup, restore, credential change, deployment,
+consolidation or acceptance is claimed.
