@@ -5070,3 +5070,84 @@ Alpaca order-by-order ownership, current broker positions/open orders,
 broker/internal reconciliation, cost reduction and single-writer acceptance
 remain open. No pause, stop, backup, restore, credential change, deployment,
 consolidation or acceptance is claimed.
+
+## 2026-11-11 Issues #324/#325 — containment controls resolved; `AUTO_TRADING` is not a broker pause
+
+Emergency stabilization remains the only objective. This run resolved one
+control ambiguity needed for a safe single-writer plan: whether Clean's
+`AUTO_TRADING` variable can contain the proven Alpaca PAPER writer. It cannot.
+The work was exact-source inspection plus read-only GitHub and
+`/paper/deployment-info` checks only. No service, runner, halt, variable,
+credential, order, volume, deployment, strategy, ML, research or automation
+state was changed.
+
+At 08:59 CST, Clean deployment
+`e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` both remained on exact main SHA
+`78d36138198eeec0895ecef998539467e4943edb`; both declared
+`places_orders=false`. Clean identified project `dazzling-dedication`,
+environment `Clean`, service `Trading-bot`; Splendid identified project
+`splendid-creativity`, environment `production`, service `web`. Only
+deployment-info was called, avoiding the current post-response journal-mirror
+write wrapper on many nominal status routes.
+
+All nine previously identified April 21 Clean-only submit-capable revisions
+were rechecked commit-by-commit. Each hard-codes the Alpaca PAPER endpoint,
+reads `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY`, calls
+`api.submit_order(...)`, and starts an import-time daemon scheduler whose first
+action is `run_bot()` before sleeping. None reads `AUTO_TRADING`,
+`AUTO_RUN_ENABLED` or another enable/disable gate. Therefore changing
+`AUTO_TRADING=false` would not have paused that writer family.
+
+Exact current source contains no `APCA_API_KEY_ID`,
+`APCA_API_SECRET_KEY`, `AUTO_TRADING`, Alpaca PAPER URL or tracked
+`submit_order(...)` call; only the unused `alpaca-trade-api` dependency remains.
+The current internal scheduler uses `AUTO_RUN_ENABLED` (and worker registration
+accepts `AUTO_RUN_REQUESTED` falling back to it) to control internal simulation
+cycles. Thus `AUTO_RUN_ENABLED=false` would affect the current internal runner,
+not prove brokerage containment. It would not stop a historical deployment or
+an external consumer of the paper credentials.
+
+The resulting containment map is:
+
+| writer class | proven execution path | effective control | controls that do not prove containment |
+| --- | --- | --- | --- |
+| April 21 Clean broker writer | hard-coded Alpaca PAPER endpoint, API-key variables, import-time scheduler, `submit_order` | stop the exact verified service/revision, or revoke/rotate only its verified PAPER key after dependency and rollback proof | `AUTO_TRADING`; `AUTO_RUN_ENABLED` |
+| current Clean/Splendid main | internal `run_cycle`; no tracked broker submitter; deployment authority says `places_orders=false` | `AUTO_RUN_ENABLED` controls only the internal simulation runner | `AUTO_TRADING`; changing the internal runner does not contain an external broker client |
+| external or untracked key consumer | not yet identified | broker-level PAPER key containment after masked key/client inventory and dependency proof | every application flag until the consumer is bound |
+
+If a fresh unintentional Alpaca PAPER order appears, the operator-controlled
+pause protocol is now explicit:
+
+1. Capture the broker order ID and client-order ID, submitted/filled timestamps
+   with timezone, status, symbol, side, quantity, masked account fingerprint,
+   current open orders and key/client fingerprint. Do not expose secrets.
+2. Bind the order to an exact service, revision and key client, or retain it as
+   an unmatched external exception. Capture that service's deployment SHA,
+   relevant variable names/presence, startup behavior and dependency set.
+3. Before a service action, capture the persistent-volume identity, verified
+   provider backup and durable-file manifest/digests described in the 2026-11-10
+   checkpoint. A restart or rollback is not observational because preflight
+   recovery may replace state files.
+4. If service-bound, pause only the exact writer using its real scheduler or
+   service control. If external/unmatched, revoke or rotate only the implicated
+   PAPER key after dependency and rollback review. Neither action was taken.
+5. Open-order cancellation changes broker state and is a separate explicit
+   operator action; do not infer cancellation from pausing a writer and do not
+   perform it automatically.
+6. Verify no new orders over a defined observation window, recheck positions
+   and open orders, and prove that no live endpoint/key was involved before
+   declaring containment.
+
+There are 20 days to the 2026-12-01 hard review. Concrete progress: the known
+writer classes now have explicit effective and ineffective controls, removing
+`AUTO_TRADING` as a false pause mechanism. The exact blocker remains
+authenticated private Alpaca order/key-client evidence and authenticated
+Railway configuration, volume/backup and usage evidence. The next executable
+step is the read-only Alpaca order/state export plus masked key-client binding;
+if it shows fresh unintended activity, execute the operator-controlled protocol
+above against only the verified writer. Broker order ownership, current broker
+positions/open orders, broker/internal reconciliation, measured cost reduction
+and single-writer acceptance remain open. No pause, stop, cancellation,
+credential change, backup, restore, deployment, consolidation or acceptance is
+claimed.
