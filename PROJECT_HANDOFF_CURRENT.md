@@ -5151,3 +5151,97 @@ positions/open orders, broker/internal reconciliation, measured cost reduction
 and single-writer acceptance remain open. No pause, stop, cancellation,
 credential change, backup, restore, deployment, consolidation or acceptance is
 claimed.
+
+## 2026-11-12 Issues #324/#325 — one Alpaca PAPER order independently bound to Clean
+
+Emergency stabilization remains the only objective. This run reconciled the
+newest user-supplied Alpaca/Railway screenshots with immutable GitHub commit
+statuses and the exact historical source. It establishes historical broker
+ownership for one specific order. It does not establish current key ownership
+or current broker inactivity. No service, runner, halt, variable, credential,
+order, volume, deployment, strategy, ML, research or automation state was
+changed.
+
+At 09:01 CST, GitHub main, Clean and Splendid still matched exact SHA
+`78d36138198eeec0895ecef998539467e4943edb`. Clean deployment
+`e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` were unchanged and both declared
+`places_orders=false`. Only `/paper/deployment-info` was called.
+
+The user-supplied Alpaca PAPER order detail in `IMG_2416.png`, observed on
+2026-10-28 at approximately 14:59 CDT, records:
+
+- order ID `fa0e7da5-2d5b-49ac-bfb7-504d71bb593c`;
+- NVDA market sell, quantity 78, time-in-force `day`, status `filled`;
+- created `2026-04-21T21:55:50.135835Z`;
+- submitted `2026-04-22T08:01:15.628239Z`.
+
+GitHub commit `704a34e478a9f9663c3ebfb67545de45d24d7070` was authored at
+`2026-04-21T21:55:13Z`. Its immutable combined status records a successful
+Clean deployment (`dazzling-dedication - Trading-bot`, deployment
+`d2dcbddb-a145-4467-9800-ac8b005e6c7f`) at `21:55:44Z`, followed 6.135835
+seconds later by the Alpaca order creation. The same commit's Splendid
+deployment failed at `21:56:01Z`, after the order already existed. Exact source
+at that commit uses the Alpaca PAPER endpoint and credential variables, calls
+`api.submit_order`, and starts an ungated import-time scheduler whose first
+action is `run_bot()`. It does not retain the returned broker order object or
+set a client-order ID, so no repository journal/execution identifier exists for
+an exact ID match.
+
+The eight subsequent April 21 submit-capable revisions tell the same deployment
+story: every one has a successful Clean status and failed Splendid status. This
+is independent evidence that Clean was the only successfully deployed runtime
+in that submit-capable lineage. Combined with the six-second timestamp binding,
+the NVDA order is attributable to the Clean deployment with high confidence;
+Splendid did not place that order. This narrows, but does not yet prove, the
+ownership of every April order.
+
+Additional screenshot evidence is scoped by observation date:
+
+- `IMG_2393.png`, `IMG_2395.png`, `IMG_2397.png` and `IMG_2421.png` show Clean
+  connected to repo `main` with auto-deploy, persistent `STATE_DIR`, presence
+  (not values) of the Alpaca base URL and credential variables, and the PAPER
+  API endpoint. No secret or account number was read or recorded.
+- `IMG_2399.png`/`IMG_2400.png` show the separate Alpaca PAPER account context
+  and positions on 2026-10-27; they remain non-comparable to Splendid's internal
+  simulation ledger.
+- `IMG_2415.png` shows zero open orders under the Alpaca PAPER `Open` filter at
+  approximately 14:57 CDT on 2026-10-28. This is dated evidence, not proof of
+  the current 2026-11-12 open-order state.
+- The user identified the NVDA order as the most recent and reported no trades
+  after April 22. That report is retained as user-verified evidence, but an
+  authenticated current Trading API order export is still required for
+  independent completeness.
+
+The broker-to-runtime ownership map is now:
+
+| context | writer ownership | evidence status |
+| --- | --- | --- |
+| Alpaca PAPER order `fa0e7da5-…` | Clean deployment `d2dcbddb-…` at commit `704a34e…` | high-confidence independent timestamp/deployment/source binding |
+| other April Alpaca PAPER orders | likely Clean submit-capable lineage | not yet order-by-order matched; only symbols/actions visible in screenshots |
+| Splendid April deployment lineage | did not own the bound NVDA order | failed deployment status on all nine submit-capable revisions |
+| current Clean/Splendid main | no tracked broker submitter; both declare `places_orders=false` | current source/deployment evidence, but not a broker account activity export |
+| current Alpaca PAPER key client | unverified | private account/order/key-client evidence unavailable |
+
+The available Alpaca integration exposes market data only; it cannot read the
+private PAPER account, orders, positions, open orders or API-key client identity.
+Therefore the remaining broker gap is specifically private Trading API access,
+not a general Alpaca/market-data outage.
+
+Acceptance status: the authoritative broker versus simulation boundary is now
+explicit, one broker order is matched to Clean, deployed SHA parity is current,
+and rollback/cost gates remain defined. Still open are the complete broker order
+and fill export, order-by-order matching, a current positions/open-orders
+snapshot, masked key-client binding, Clean risk/accounting/ledger reconciliation,
+provider backup/rollback proof and measured Railway cost impact. Clean must not
+be stopped merely from this historical attribution.
+
+There are 19 days to the 2026-12-01 hard review. The next executable step is an
+authenticated read-only Alpaca Trading API export covering orders since
+2026-04-01, current positions, current open orders and a masked account/key
+fingerprint. Match it against the successful Clean deployment windows and
+retain all unmatched orders as explicit exceptions. If that export confirms no
+orders after April 22 and no open orders, current broker inactivity can be
+accepted separately from the historical Clean ownership finding. No pause,
+stop, cancellation, credential change, backup, restore, deployment,
+consolidation or single-writer acceptance is claimed.
