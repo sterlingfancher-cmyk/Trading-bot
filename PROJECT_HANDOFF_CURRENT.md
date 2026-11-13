@@ -5245,3 +5245,101 @@ orders after April 22 and no open orders, current broker inactivity can be
 accepted separately from the historical Clean ownership finding. No pause,
 stop, cancellation, credential change, backup, restore, deployment,
 consolidation or single-writer acceptance is claimed.
+
+## 2026-11-13 Issues #324/#325 — Apr 22 queued-order timing reconciled to Clean lineage
+
+Emergency stabilization remains the only objective. This run reconciled the
+exact NVDA order timestamps from `IMG_2416.png` with the previously preserved
+Apr 22 order-table evidence in `IMG_2455.png` through `IMG_2462.png`. It
+resolves the batch's timezone and the distinction between order creation and
+later broker submission. No service, runner, halt, variable, credential,
+order, volume, deployment, strategy, ML, research or automation state was
+changed.
+
+At 09:05 CST, GitHub main, Clean and Splendid still matched exact SHA
+`78d36138198eeec0895ecef998539467e4943edb`. Clean deployment
+`e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` were unchanged and both declared
+`places_orders=false`. Only `/paper/deployment-info` was called.
+
+The Apr 22 table shows at least 24 distinct filled `access_key` orders with the
+same displayed submitted time, `Apr 22, 2026, 03:01:15 AM`. The detailed NVDA
+row is one of that batch and supplies the missing absolute timestamps:
+
+- created `2026-04-21T21:55:50.135835Z`;
+- submitted `2026-04-22T08:01:15.628239Z`;
+- dashboard display `Apr 22, 2026, 03:01:15 AM`.
+
+The exact UTC-to-dashboard offset is five hours, so the table was displaying
+Central Daylight Time for this order. More importantly, the order existed for
+10 hours, 5 minutes and 25.492404 seconds before Alpaca marked it submitted.
+The shared 03:01:15 time is therefore the broker's later release/submission
+boundary for queued orders, not the time the Clean process created them.
+
+This corrects a material ambiguity in the 2026-11-05 checkpoint. The fact that
+the table's submitted time is after Clean's successful submit-path removal at
+`2026-04-22T02:04:17Z` and Alpaca-client removal at `02:10:20Z` does not exclude
+Clean as owner. The proven NVDA order was created 4 hours, 8 minutes and 26.864165
+seconds before the submit-path removal, remained queued, and was submitted
+5 hours, 56 minutes and 58.628239 seconds after the removal. Runtime attribution
+must therefore use `created_at`/accepted-at evidence where available, not the
+later exchange-release timestamp alone.
+
+The batch's source pattern now has a concrete tracked mechanism:
+
+1. Clean successfully deployed commit
+   `704a34e478a9f9663c3ebfb67545de45d24d7070` at `21:55:44Z`; Splendid failed
+   the same commit.
+2. Six seconds later Clean created the NVDA sell-78 order. The exact source
+   covers the batch symbols, supports buys and sells, calls `run_bot()` on
+   import and repeats every 300 seconds.
+3. Eight additional expanded-universe submit-capable revisions subsequently
+   succeeded on Clean and failed on Splendid through `23:13:40Z`. Every fresh
+   deployment immediately started another scheduler.
+4. None of the nine revisions checked the broker market clock or open orders,
+   supplied a client-order ID, deduplicated pending orders, or persisted the
+   returned broker order. Their five-position limit was per process cycle, not
+   across redeploys; sell paths added further orders.
+5. The queued batch was released by Alpaca at the common `08:01:15Z` boundary,
+   after the application submit path had already been removed.
+
+The visible batch includes NVDA sell 78, AVGO sell 1, ARM buy 85, PANW buys
+12/100/1, CRWD buys 1/4, MSFT buys 5/1, AMD sell 154, NFLX sells, META sell 25,
+INTC sell 327 and SNOW buy 100. All are covered by the expanded Clean revision
+family's universe and direction paths. The exact final revision
+`c24fd2b482257fb60dbede38fa77d833c6d4da31` still cannot explain the complete
+batch by itself; the rapid Clean deployment family can.
+
+`IMG_2412.png` is only a clipped description-only activity extract. It shows
+17 visible fill/activity descriptions but no timestamps, IDs, prices or source.
+Its visible NVDA sells total 67 shares rather than the bound 78-share order,
+and its visible buys are far smaller than the later position quantities. It is
+therefore incomplete and cannot be used as closed-trade coverage or an exact
+lifecycle reconstruction.
+
+The corrected ownership classification is:
+
+| scope | classification | limitation |
+| --- | --- | --- |
+| NVDA order `fa0e7da5-…` | independently bound to Clean deployment `d2dcbddb-…` | no client-order ID or durable local execution row |
+| Apr 22 queued `access_key` batch | high-confidence Clean submit-capable lineage | only NVDA has an immutable order ID/created time; an external user of the same key is not cryptographically excluded |
+| Splendid Apr 22 ownership | excluded for the proven NVDA order and unsupported for the batch | all nine relevant Splendid deployments failed |
+| current broker writer | unverified; no tracked current submitter | private current orders/open orders and key-client usage remain unavailable |
+
+This establishes a provisional historical owner and removes the post-removal
+submission-time objection. It does not establish current inactivity or make the
+broker/internal ledgers comparable. Formal batch acceptance still requires the
+immutable order details or Trading API export for every row, especially each
+`created_at`, plus masked key-client evidence. Missing rows remain exceptions;
+no fill price or P/L is inferred.
+
+There are 18 days to the 2026-12-01 hard review. The next executable step is
+still an authenticated read-only Alpaca Trading API/order-detail capture for
+the remaining Apr 22 rows and current positions/open orders. Match each
+`created_at` to the exact Clean deployment window; if the remaining orders were
+created inside those windows and no conflicting key-client evidence exists,
+accept Clean as the historical batch owner while separately proving current
+broker inactivity. Railway volume backup/rollback and measured cost evidence
+remain required before any compute-stop proposal. No pause, stop, cancellation,
+credential change, backup, restore, deployment, consolidation or current
+single-writer acceptance is claimed.
