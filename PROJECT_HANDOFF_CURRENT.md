@@ -4794,6 +4794,100 @@ revoke only its key after dependency/rollback verification), then confirm no
 new broker orders. No pause, stop, credential change, consolidation or
 single-writer acceptance is claimed.
 
+## 2026-11-14 Issues #324/#325 — visible Alpaca PAPER order inventory normalized
+
+Emergency stabilization remains the only objective. This run converted the
+eight preserved Alpaca PAPER order-table screenshots, `IMG_2455.png` through
+`IMG_2462.png`, from representative examples into a row-level visible-order
+inventory. No service, runner, halt, variable, credential, order, volume,
+deployment, strategy, ML, research or automation state was changed.
+
+At 09:00 CST, GitHub main, Clean and Splendid still matched exact SHA
+`78d36138198eeec0895ecef998539467e4943edb`. Clean deployment
+`e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` were unchanged and both declared
+`places_orders=false`. Only each runtime's read-only
+`/paper/deployment-info` endpoint was called.
+
+The screenshots contain 33 unique, fully readable filled market-order rows:
+25 in the Apr 22 queued batch, four additional Apr 21 rows and four Apr 13
+rows. One Apr 22 CRWD row appears again at the top of the older-page capture;
+it is counted once. Every row shows source `access_key`. The normalized
+inventory is:
+
+| session shown | asset | side | quantity | average fill | submitted at (dashboard) | filled at (dashboard) |
+| --- | --- | --- | ---: | ---: | --- | --- |
+| Apr 22 | NVDA | sell | 78 | 200.545513 | 03:01:15 AM | 08:33:01 AM |
+| Apr 22 | AVGO | sell | 1 | 406.51 | 03:01:15 AM | 08:31:16 AM |
+| Apr 22 | ARM | buy | 85 | 181.00 | 03:01:15 AM | 08:30:54 AM |
+| Apr 22 | PANW | buy | 12 | 176.586667 | 03:01:15 AM | 08:32:21 AM |
+| Apr 22 | CRWD | buy | 1 | 456.33 | 03:01:15 AM | 08:31:26 AM |
+| Apr 22 | MSFT | buy | 5 | 425.574 | 03:01:15 AM | 08:32:06 AM |
+| Apr 22 | MSFT | buy | 1 | 425.63 | 03:01:15 AM | 08:30:24 AM |
+| Apr 22 | CRWD | buy | 1 | 457.90 | 03:01:15 AM | 08:31:46 AM |
+| Apr 22 | AMD | sell | 154 | 289.44987 | 03:01:15 AM | not visible in preserved crop |
+| Apr 22 | NFLX | sell | 1 | 92.95 | 03:01:15 AM | not visible in preserved crop |
+| Apr 22 | CRWD | buy | 4 | 456.695 | 03:01:15 AM | not visible in preserved crop |
+| Apr 22 | CRWD | buy | 1 | 456.00 | 03:01:15 AM | 08:30:20 AM (later overlapping capture) |
+| Apr 22 | MSFT | buy | 5 | 425.17 | 03:01:15 AM | not visible in preserved crop |
+| Apr 22 | PANW | buy | 100 | 176.9235 | 03:01:15 AM | not visible in preserved crop |
+| Apr 22 | PANW | buy | 1 | 176.95 | 03:01:15 AM | not visible in preserved crop |
+| Apr 22 | MSFT | buy | 1 | 426.22 | 03:01:15 AM | not visible in preserved crop |
+| Apr 22 | META | sell | 25 | 673.2312 | 03:01:15 AM | 08:31:03 AM |
+| Apr 22 | NFLX | sell | 1 | 92.94 | 03:01:15 AM | 08:30:41 AM |
+| Apr 22 | INTC | sell | 327 | 68.14 | 03:01:15 AM | 08:32:51 AM |
+| Apr 22 | CRWD | buy | 4 | 456.2825 | 03:01:15 AM | 08:32:46 AM |
+| Apr 22 | SNOW | buy | 100 | 152.1433 | 03:01:15 AM | 08:32:43 AM |
+| Apr 22 | PANW | buy | 1 | 176.40 | 03:01:15 AM | 08:30:39 AM |
+| Apr 22 | NFLX | sell | 1 | 93.44 | 03:01:15 AM | 08:31:48 AM |
+| Apr 22 | PANW | buy | 12 | 176.1825 | 03:01:15 AM | 08:32:45 AM |
+| Apr 22 | CRWD | buy | 1 | 455.89 | 03:01:15 AM | 08:30:32 AM |
+| Apr 21 | INTC | buy | 327 | 66.10 | 01:22:09 PM | 01:22:11 PM |
+| Apr 21 | INTC | sell | 9 | 66.13 | 01:21:58 PM | 01:21:59 PM |
+| Apr 21 | INTC | buy | 9 | 67.28 | 09:07:02 AM | 09:07:02 AM |
+| Apr 21 | AVGO | buy | 1 | 397.76 | 09:07:01 AM | 09:07:02 AM |
+| Apr 13 | NVDA | buy | 78 | 186.355 | 08:30:47 AM | 08:35:00 AM |
+| Apr 13 | META | buy | 25 | 628.1572 | 08:30:47 AM | 08:36:35 AM |
+| Apr 13 | AMD | buy | 73 | 245.481233 | 08:30:47 AM | 08:35:56 AM |
+| Apr 13 | AMD | buy | 81 | 246.25 | 03:00:43 AM | 08:30:59 AM |
+
+The Apr 22 batch therefore contains 17 visible buys totaling 335 shares and
+eight visible sells totaling 588 shares. These are broker order quantities,
+not matched trades or P/L. All 25 rows share the exact displayed submission
+time already bound through the detailed NVDA record to
+`2026-04-22T08:01:15Z` (03:01:15 CDT). Six Apr 22 rows still lack a visible
+fill timestamp because `IMG_2458.png` ends at the submitted-at column. Only the
+NVDA row has an immutable order ID and exact `created_at`; the other 24 Apr 22
+rows and all eight older rows remain unmatched to journal/execution IDs.
+
+This inventory strengthens the historical Clean-lineage classification without
+overstating it. The Apr 22 symbols, directions and quantities are consistent
+with the nine rapidly deployed Clean submit-capable revisions; all relevant
+Splendid deployments failed. It does not cryptographically exclude another
+consumer of the same PAPER key, establish current open-order/position state,
+or reconcile broker fills to the Clean or Splendid internal ledgers.
+
+Acceptance checklist status:
+
+| gate | status on 2026-11-14 |
+| --- | --- |
+| authoritative broker versus simulation source/date | explicit; Alpaca PAPER screenshots remain separate from both internal ledgers |
+| matched orders/fills/positions | 1/33 visible orders has immutable ID/created-at binding; 32 remain exceptions; current positions/open orders unavailable |
+| risk/accounting/ledger checks | current deployment identity observed; Clean's historical WARN/FAIL evidence remains unresolved and no state-mutating audit was called |
+| deployed SHA parity | accepted for observation: main, Clean and Splendid all `78d3613…` |
+| rollback/durable evidence | screenshot digest and GitHub checkpoints retained; Railway volume backup/restore proof still unavailable |
+| cost impact | unmeasured; no compute-stop proposal is allowed yet |
+
+There are 17 days to the 2026-12-01 hard review. The next executable step is
+the same narrowly defined blocker: obtain an authenticated read-only Alpaca
+Trading API/order-detail export for all 33 visible rows plus current positions,
+current open orders and a masked account/key-client fingerprint. Use each
+order's `created_at` to match exact Clean deployment windows and retain every
+unmatched row as an exception. Railway volume backup/restore and measured cost
+evidence remain required before any Clean compute-stop proposal. No pause,
+stop, cancellation, credential change, backup, restore, deployment,
+consolidation or current single-writer acceptance is claimed.
+
 ## 2026-11-07 Issues #324/#325 — historical Tradier path bounded; no tracked current broker submitter
 
 Emergency stabilization remains the only objective. The focused action was to
@@ -5343,3 +5437,16 @@ broker inactivity. Railway volume backup/rollback and measured cost evidence
 remain required before any compute-stop proposal. No pause, stop, cancellation,
 credential change, backup, restore, deployment, consolidation or current
 single-writer acceptance is claimed.
+
+## 2026-11-14 latest resume pointer
+
+The detailed 2026-11-14 Issues #324/#325 checkpoint above is the latest
+authoritative section. It normalizes 33 unique visible Alpaca PAPER filled
+market orders from `IMG_2455.png` through `IMG_2462.png`, including 25 Apr 22
+queued-batch rows. One of 33 rows has immutable order-ID/`created_at` binding;
+32 remain explicit lifecycle exceptions. Main, Clean and Splendid were still
+at `78d36138198eeec0895ecef998539467e4943edb`; both current runtimes declared
+`places_orders=false`. With 17 days remaining to the 2026-12-01 review, the
+next executable step is the authenticated read-only Trading API/order-detail,
+positions, open-orders and masked account/key-client export described in that
+checkpoint. No consolidation or current single-writer acceptance is claimed.
