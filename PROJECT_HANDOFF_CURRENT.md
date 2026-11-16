@@ -5450,3 +5450,104 @@ at `78d36138198eeec0895ecef998539467e4943edb`; both current runtimes declared
 next executable step is the authenticated read-only Trading API/order-detail,
 positions, open-orders and masked account/key-client export described in that
 checkpoint. No consolidation or current single-writer acceptance is claimed.
+
+## 2026-11-16 Issues #324/#325 — Apr 13/21 order windows separated by deployment ownership
+
+Emergency stabilization remains the only objective. This run tested the eight
+older visible Alpaca PAPER rows against the exact source and Railway status of
+the revisions active near their displayed submission times. It corrects the
+previous broad treatment of the Apr 13/21 rows as one Clean-candidate group.
+No service, runner, halt, variable, credential, order, volume, deployment,
+strategy, ML, research or automation state was changed.
+
+At 10:03 CST, GitHub main, Clean and Splendid still matched exact SHA
+`78d36138198eeec0895ecef998539467e4943edb`. Clean deployment
+`e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` were unchanged and both declared
+`places_orders=false`. Only each runtime's read-only
+`/paper/deployment-info` endpoint was called.
+
+### Apr 13 morning rows
+
+Commit `495d9e70f9161f9c58205f2f13d5a4978908398b`, authored on Apr 12
+at 17:14:17 CDT, is the last repository revision before the Apr 13 broker
+rows. GitHub status records Clean deployment
+`fc563853-4903-4d51-8830-651beeb65bea` as successful and Splendid deployment
+`45ff9133-1c0f-4fad-a7ab-e75520d228ce` as failed.
+
+The exact source uses Alpaca PAPER mode, reads `AUTO_TRADING` dynamically,
+starts a daemon five-minute loop on import, checks Alpaca's market clock, and
+can submit GTC market buys for `NVDA`, `AMD` and `META` with a three-position
+cap. It does not inspect open orders, provide a client-order ID or persist the
+returned broker order. The three orders submitted at 08:30:47 CDT — NVDA buy
+78, META buy 25 and AMD buy 73 — exactly match that source's universe,
+direction, open-boundary timing and three-position cap. This is high-confidence
+Clean-lineage attribution, but remains corroboration rather than an immutable
+order join.
+
+The separate AMD buy 81 submitted at 03:00:43 CDT does **not** fit that
+revision's broker-clock gate. Its later 08:30:59 fill does not repair the
+creation-time mismatch. Without immutable `created_at`, client/key evidence or
+an earlier still-running process record, this row remains runtime-unassigned.
+
+### Apr 21 rows
+
+The two 09:07 CDT orders — INTC buy 9 and AVGO buy 1 — fall under commit
+`12e97a97c53228f93ba1af7d66180c12fe5f8289`, authored the prior evening.
+Its source has the matching watchlist and day-order submit path, but no
+background scheduler; submission requires an external call to its `/run`
+route. GitHub status records **both** Clean deployment
+`8d0163fc-a793-4d7d-9e05-83db81d4db08` and Splendid deployment
+`e980f9c6-0307-4e96-b420-4dd993dfbd60` as successful. The invocation source
+and credential presence at that historical moment are not retained, so these
+orders cannot be assigned to either runtime.
+
+The INTC sell 9 at 13:21:58 CDT and INTC buy 327 at 13:22:09 CDT occurred 41
+and 52 seconds after commit
+`8203d8a8817db38f634d6431b8bb8e574e1998d1` was authored at 13:21:17 CDT.
+That revision starts a background bot immediately, uses a five-minute loop,
+sells qualifying positions before refreshing and buying one new watchlist
+symbol, and includes INTC. The sell-then-buy sequence and timing are therefore
+a strong source-level match. But GitHub status again records both Clean
+deployment `c3d78928-040d-499f-b58e-a6327289b5dd` and Splendid deployment
+`c9dd1a3b-f5e9-464c-9301-425b526ebd06` as successful. The connector does not
+expose their settle timestamps, and historical masked-key presence/client use
+is unavailable. Neither service can be selected as owner without fabricating
+evidence.
+
+The 33-row visible inventory is now classified as:
+
+| scope | row count | attribution |
+| --- | ---: | --- |
+| Apr 22 NVDA sell 78 | 1 | independently bound to Clean deployment `d2dcbddb-…` |
+| remaining Apr 22 queued batch | 24 | high-confidence Clean submit-capable lineage; no immutable row join |
+| Apr 13 08:30:47 buys | 3 | high-confidence Clean lineage from exact successful-only deployment/source match |
+| Apr 13 03:00:43 AMD buy | 1 | runtime-unassigned; contradicts candidate revision's market-clock gate |
+| Apr 21 09:07 and 13:21–13:22 rows | 4 | runtime-unassigned; candidate revisions succeeded on both Clean and Splendid |
+
+Thus 1/33 visible orders has an immutable ID/`created_at` Clean binding,
+27/33 additional rows have high-confidence Clean-lineage corroboration, and
+5/33 rows remain runtime-unassigned. All 32 rows without immutable order IDs
+remain lifecycle exceptions regardless of lineage confidence.
+
+Acceptance checklist status remains fail closed:
+
+| gate | status on 2026-11-16 |
+| --- | --- |
+| authoritative broker versus simulation source/date | explicit; dashboard orders remain separate from both internal ledgers |
+| matched orders/fills/positions | 1 exact join; 27 lineage candidates; 5 runtime-unassigned; current broker positions/open orders unavailable |
+| risk/accounting/ledger | current deployments declare no order authority; historical Clean WARN/FAIL evidence remains unresolved |
+| deployed SHA parity | accepted for observation: main, Clean and Splendid all `78d3613…` |
+| rollback/durable evidence | GitHub status/deployment IDs and screenshot evidence retained; Railway volume backup/restore proof unavailable |
+| cost impact | unmeasured; no compute-stop proposal is allowed |
+
+There are 15 days to the 2026-12-01 hard review. The next executable step is
+the authenticated read-only Alpaca order-detail export and masked key/client
+inventory, with special focus on the five runtime-unassigned rows. For the Apr
+21 rows, obtain immutable `created_at` plus historical key/client identity and
+exact Railway deployment settle time; symbol/time matching alone cannot break
+the Clean/Splendid tie. Current positions/open orders, Railway volume
+backup/restore and measured cost evidence remain required before any Clean
+compute-stop proposal. No pause, stop, cancellation, credential change,
+backup, restore, deployment, consolidation or current single-writer acceptance
+is claimed.
