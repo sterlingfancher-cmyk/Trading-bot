@@ -5551,3 +5551,85 @@ backup/restore and measured cost evidence remain required before any Clean
 compute-stop proposal. No pause, stop, cancellation, credential change,
 backup, restore, deployment, consolidation or current single-writer acceptance
 is claimed.
+
+
+## 2026-11-17 Issues #324/#325 — Apr 21 runtime tie reaches scoped access boundary
+
+Emergency stabilization remains the only objective. This run attempted to break
+the remaining Apr 21 Clean/Splendid ownership tie using exact historical
+Railway deployment timing and historical credential/config dependency. It
+establishes why the available successful-deployment statuses cannot assign the
+four rows to one runtime and records the exact operator evidence needed next.
+No service, runner, halt, variable, credential, order, volume, deployment,
+strategy, ML, research or automation state was changed.
+
+At approximately 09:05 CST, GitHub main, Clean and Splendid still matched exact
+SHA `78d36138198eeec0895ecef998539467e4943edb`. Clean deployment
+`e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` were unchanged and both declared
+`places_orders=false`. Only each runtime's read-only
+`/paper/deployment-info` endpoint was called.
+
+The relevant immutable GitHub statuses remain:
+
+- Apr 21 09:07 CDT candidate revision `12e97a97c53228f93ba1af7d66180c12fe5f8289`:
+  Clean deployment `8d0163fc-a793-4d7d-9e05-83db81d4db08` and Splendid
+  deployment `e980f9c6-0307-4e96-b420-4dd993dfbd60`, both successful.
+- Apr 21 13:21-13:22 CDT candidate revision
+  `8203d8a8817db38f634d6431b8bb8e574e1998d1`: Clean deployment
+  `c3d78928-040d-499f-b58e-a6327289b5dd` and Splendid deployment
+  `c9dd1a3b-f5e9-464c-9301-425b526ebd06`, both successful.
+
+The GitHub connector exposes the deployment identifiers and final success
+state but not exact deployment settle times or historical Railway logs. Direct
+read-only navigation to each exact Railway deployment URL returned the public
+unauthenticated `404 / Looks like you are lost` page. No login or credential
+access was attempted. Exact settle times, logs and historical variable-name
+presence are therefore unavailable through the presently authorized surfaces.
+
+A successful status is not proof of a usable Alpaca client. At
+`8203d8a...`, Alpaca initialization is conditional and the application can
+continue running when the package or credential variables are unavailable.
+Consequently both services could report successful deployment while only one
+(or neither) had usable PAPER credentials. Source/timing fit remains strong for
+the INTC sell-9 then buy-327 sequence, but selecting Clean or Splendid from
+success status alone would fabricate evidence. The four Apr 21 rows remain
+runtime-unassigned; the broader 1 exact / 27 high-confidence lineage / 5
+runtime-unassigned classification is unchanged.
+
+The exact missing evidence is now bounded:
+
+1. For both Apr 21 deployments, export settle timestamps and retained logs
+   covering 13:21:17-13:22:09 CDT. Search specifically for `API initialized`,
+   `Bot loop started`, `SOLD INTC` and `BOUGHT INTC`.
+2. Export only the historical presence/absence of `APCA_API_KEY_ID`,
+   `APCA_API_SECRET_KEY` and `APCA_API_BASE_URL` for each deployment;
+   never export values.
+3. Export immutable Alpaca PAPER order details for the Apr 21 INTC/AVGO rows,
+   including order ID, `created_at`, `submitted_at`, client-order ID if any,
+   and a masked key/client identity. Bind those records to the two service
+   windows.
+4. For the 09:07 pair, also export Railway access logs showing which service,
+   if either, received the required external `/run` request. Source inspection
+   proves that revision had no scheduler, so deployment success cannot explain
+   invocation.
+
+If unintended PAPER activity cannot be excluded, the safe operator-controlled
+pause procedure is: first export current Alpaca positions, open orders, recent
+immutable order IDs/timestamps and masked active-key/client usage; then export
+Railway variable names, relevant logs and retained-volume/backup evidence.
+Bind the active client to an exact service before acting. Do not treat
+`AUTO_TRADING` as a proven pause for the Apr 21 background revision because
+that source did not enforce it. Only after dependency and rollback verification
+should an operator pause the exact verified submitter or rotate only the
+implicated PAPER key, then verify zero new broker orders while preserving all
+volumes and exports. No pause was performed or claimed.
+
+Acceptance remains fail closed. Broker/internal reconciliation, current
+positions/open orders, historical masked key ownership, Railway volume
+backup/restore and measured cost evidence remain open. Clean compute must not
+be stopped and duplicate auto-deploy must not be disabled until those gates
+pass. There are 14 days to the 2026-12-01 hard review. The next executable step
+is the scoped authenticated Railway/Alpaca capture above; absent that access,
+the Apr 21 runtime tie is an irreducible evidence exception rather than a
+basis for consolidation.
