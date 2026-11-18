@@ -5633,3 +5633,81 @@ pass. There are 14 days to the 2026-12-01 hard review. The next executable step
 is the scoped authenticated Railway/Alpaca capture above; absent that access,
 the Apr 21 runtime tie is an irreducible evidence exception rather than a
 basis for consolidation.
+
+
+## 2026-11-18 Issues #324/#325 — Clean volume, credential and cost boundary captured
+
+Emergency stabilization remains the only objective. This run reconciled the ten
+new Railway screenshots uploaded on 2026-11-17 at approximately 20:38-20:45
+CST with fresh read-only deployment identities. It closes the Clean
+volume-attachment and project-cost observation gaps, and exposes a specific
+auto-deploy risk. It does not prove current broker activity or complete the
+backup/restore gate. No service, runner, halt, variable, credential, order,
+volume, deployment, strategy, ML, research or automation state was changed.
+
+At 08:56 CST on 2026-11-18, GitHub main, Clean and Splendid still matched exact
+SHA `78d36138198eeec0895ecef998539467e4943edb`. Clean deployment
+`e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` were unchanged, had both been running
+since 2026-11-05, and both declared `places_orders=false`. Only each runtime's
+read-only `/paper/deployment-info` endpoint was called.
+
+The screenshots establish these dated Clean configuration facts without
+revealing any secret value:
+
+- Clean has 11 service variables. A PAPER Alpaca endpoint variable is visible,
+  two APCA credential variables are present but masked, `AUTO_TRADING=true`,
+  and `STATE_DIR=/data`.
+- The Clean service is connected to repository
+  `sterlingfancher-cmyk/Trading-bot`, branch `main`; automatic deploys on
+  GitHub push are enabled and `Wait for CI` is disabled.
+- Clean's public domain routes to port 8080. Static outbound IP is disabled.
+- A persistent volume named `trading-bot-volume` is attached to the Clean
+  `Trading-bot` service at mount path `/data`, matching `STATE_DIR`.
+  The configured maximum is 5.00 GB and the volume region is US West
+  (California, USA).
+- The service was online, and the dated deployment log showed repeated
+  `yfinance`/Pandas deprecation warnings on Nov 17. Those warnings prove a
+  running market-data workload, not broker-order submission.
+- The Railway usage view showed current project costs of $15.91 for
+  `splendid-creativity` and $13.94 for `dazzling-dedication`, a combined
+  observed baseline of $29.85. The expanded Splendid graph showed roughly 3 GB
+  of volume usage. The screenshot did not expose Clean's actual stored-byte
+  usage, billing-period boundaries or a cost forecast.
+
+This materially changes the dependency map. Clean is a credential-bearing
+PAPER environment with durable state and an automatic main-branch deployment
+path, while the currently deployed code has no tracked broker submitter.
+Therefore `AUTO_TRADING=true` is not evidence of present order activity, but
+the combination of retained credentials, auto-deploy enabled and CI gating
+disabled is a latent broker-reactivation risk if a future main revision
+reintroduces a submit path. The masked variables do not identify the active
+Alpaca key client, and an external consumer of the same PAPER key remains
+unexcluded. Current single-writer acceptance still fails closed.
+
+The acceptance checklist is now:
+
+| gate | status on 2026-11-18 |
+| --- | --- |
+| authoritative broker versus simulation source/date | explicit: Alpaca PAPER, Clean legacy broker context and Splendid internal simulation remain separate |
+| matched orders/fills/positions | unchanged: 1 exact Clean binding, 27 high-confidence Clean-lineage rows, 5 runtime-unassigned; current private broker positions/open orders unavailable |
+| risk/accounting/ledger | both current deployments declare no order authority; historical Clean WARN/FAIL exceptions remain unresolved |
+| deployed SHA parity | freshly accepted for observation: main, Clean and Splendid all `78d3613…` |
+| rollback/durable evidence | Clean volume attachment, mount path, maximum and region are proven; backup/export contents and restore test remain missing |
+| cost impact | dated baseline now measured at $29.85 combined ($15.91 Splendid, $13.94 Clean); prospective savings remain unverified and past accrued cost is not recoverable |
+| auto-deploy/single writer | fail closed: Clean retains masked PAPER credentials, auto-deploys `main`, and does not wait for CI; active key/client ownership is unknown |
+
+The safe consolidation sequence remains conditional: export and checksum the
+Clean volume, prove a restore into a non-writing sandbox, capture current Alpaca
+positions/open orders/recent immutable order IDs and masked key-client use,
+resolve or retain every ledger exception, and verify no independent credential
+consumer. Only then may the operator disable Clean's duplicate auto-deploy and
+stop Clean compute while retaining the volume and a tested rollback path. The
+screenshots identify where those controls are located; they do not authorize or
+prove any change.
+
+There are 13 days to the 2026-12-01 hard review. The next executable step is a
+read-only backup/export and restore-proof capture for
+`trading-bot-volume`, plus the authenticated Alpaca PAPER state/key-client
+export. Until those exist, no stop, pause, credential rotation, auto-deploy
+change, consolidation or single-writer acceptance is claimed.
