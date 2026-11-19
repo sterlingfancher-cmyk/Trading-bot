@@ -5711,3 +5711,89 @@ read-only backup/export and restore-proof capture for
 `trading-bot-volume`, plus the authenticated Alpaca PAPER state/key-client
 export. Until those exist, no stop, pause, credential rotation, auto-deploy
 change, consolidation or single-writer acceptance is claimed.
+
+
+## 2026-11-19 Issues #324/#325 — exact Clean restore boundary from fresh dual-runtime audits
+
+Emergency stabilization remains the only objective. This run used only the
+curated read-only `/paper/daily-audit` and `/paper/deployment-info` surfaces
+to bind the two current state systems and define what a non-destructive Clean
+volume backup/restore must reproduce. It did not call `/paper/status`,
+`/paper/journal`, `/paper/run`, report compilation or any repair endpoint.
+No service, runner, halt, variable, credential, order, volume, deployment,
+strategy, ML, research or automation state was changed.
+
+At 08:59 CST, GitHub main, Clean and Splendid still matched exact SHA
+`78d36138198eeec0895ecef998539467e4943edb`. Clean deployment
+`e3f17e68-caab-4694-977b-928d8fc878cd` and Splendid deployment
+`878d4a63-044a-46b2-bb8c-10ca8b2884ab` were unchanged and both declared
+`places_orders=false`.
+
+The fresh compact audits prove the runtimes remain separate:
+
+| field | Clean / dazzling-dedication | Splendid / splendid-creativity |
+| --- | --- | --- |
+| generated | 2026-11-19 08:58:57 CST | 2026-11-19 08:59:08 CST |
+| internal account | cash/equity `-26064.308325 / -26064.31`; flat | cash `12179.642219`; equity `13168.35`; open internal JOBY position; unrealized `1.17` |
+| epoch | `stable-paper-v1-20260810-clean01`; blocked legacy fallback | `stable-paper-v5-20260914-issue222-flat-successor01`; active successor |
+| accounting | WARN; 193 coverage issues, 50 economic issues, 303 parsed rows | PASS; zero coverage/economic issues, 147 parsed rows |
+| canonical ledger | chain valid; 55 rows; SHA-256 `7f587d15fae776c0bc9ed577783ed060e1dc93b427081335fac7c0c116be1bc0` | chain valid; 235 rows; SHA-256 `13592260a505cb37de07f3edde096dc73d2f510272971bc254ad316260110c25` |
+| state projection | FAIL; 37 current rows vs 55 ledger rows; 18 missing from state | PASS; 147 current rows; zero omissions; exact parity |
+| risk | halted on retained 3% daily-loss latch; self-defense active | not halted; self-defense clear |
+| runner | enabled; no active error; last successful cycle 08:57:11 CST | enabled; no active error; last successful cycle 08:57:32 CST |
+| market data | PASS; no in-flight/unclassified requests | PASS; no in-flight/unclassified requests |
+| overall | FAIL, fail-closed | PASS |
+
+Both services are actively cycling their own internal paper systems. That fact
+does not contradict `places_orders=false`: the current runners are not
+tracked Alpaca broker submitters. Clean remains credential-bearing and its
+active runner plus automatic main-branch deploy path preserve the latent
+reactivation risk documented on Nov 18. Private Alpaca state and active
+key-client identity remain unavailable.
+
+A valid Clean backup must copy and checksum the **entire** mounted `/data`
+tree as one evidence unit. A selective state-only copy is unsafe. Known critical
+members include `state.json`, `trade_journal.json`,
+`trade_journal_backup.json`, `canonical_execution_ledger.jsonl`,
+state backups and recovery-status files, `runtime_controls.json`,
+`state_snapshots/`, `forensic_archives/`, and successor/reconciliation
+markers. Lock files may be transient, but they must not be used as a reason to
+omit any immutable or recovery evidence.
+
+Restore acceptance is deliberately non-repairing. In an isolated non-writing
+sandbox with broker credentials absent, the restored Clean tree must reproduce:
+
+1. canonical ledger hash
+   `7f587d15fae776c0bc9ed577783ed060e1dc93b427081335fac7c0c116be1bc0`
+   and exactly 55 rows;
+2. exactly 37 state-projected current rows and all 18 missing-from-state
+   execution identifiers;
+3. the blocked legacy epoch, 193 accounting coverage issues, 50 economic
+   issues and the retained risk halt;
+4. zero broker-order authority and no outbound broker credentials;
+5. a byte-manifest/hash for every exported file, plus the volume identity,
+   mount `/data`, configured 5.00 GB maximum and US West region.
+
+A restore that silently achieves parity, clears the halt, changes the negative
+internal balance or drops forensic files is a failed restore because it has
+rewritten evidence. Splendid's independent hash/row/position boundary above is
+the control proving the restored Clean sandbox did not attach or read the
+Splendid volume.
+
+One reporting defect is now explicit: the Clean compact audit's `full_audit`
+field points to the Splendid public domain. Following that link would silently
+switch account contexts. Clean evidence must be captured from the Clean domain
+directly and labeled by deployment ID; the embedded cross-runtime link is not
+accepted as provenance. No code repair is authorized until identity and
+reconciliation gates are complete.
+
+The acceptance checklist remains fail closed. Deployed SHA parity, separate
+runtime identities, the Clean volume attachment and the exact restore
+invariants are now documented. Still missing are the provider-side export,
+file manifest/checksums, isolated restore proof, current Alpaca positions/open
+orders/recent immutable order IDs, masked active key-client binding and verified
+prospective cost reduction. There are 12 days to the 2026-12-01 hard review.
+The next executable step is an operator/provider read-only export of the full
+Clean volume and a credential-free sandbox restore that demonstrates the five
+invariants above. No pause, stop, credential rotation, auto-deploy change,
+consolidation or single-writer acceptance is claimed.
