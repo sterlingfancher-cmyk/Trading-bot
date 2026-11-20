@@ -5797,3 +5797,32 @@ The next executable step is an operator/provider read-only export of the full
 Clean volume and a credential-free sandbox restore that demonstrates the five
 invariants above. No pause, stop, credential rotation, auto-deploy change,
 consolidation or single-writer acceptance is claimed.
+
+
+## 2026-11-20 Issues #324/#325 — broker-order join remains unobservable; exact internal boundaries refreshed
+
+Objective: close the order-ownership gap as far as current read-only surfaces permit. Observation window: 2026-11-20 09:01–09:03 CST. No strategy/research work, state mutation, `/paper/run`, report compilation, deployment, service/volume setting, credential, runner or halt change was performed. Exact deployed commit on both runtimes remained `78d36138198eeec0895ecef998539467e4943edb`; Clean deployment `e3f17e68-caab-4694-977b-928d8fc878cd`, Splendid deployment `878d4a63-044a-46b2-bb8c-10ca8b2884ab`. Both deployment-info surfaces still declare `places_orders=false`.
+
+### Read-only execution map
+
+| Boundary | Clean | Splendid |
+|---|---|---|
+| Status authority | read-only; `places_orders=false` | read-only; `places_orders=false` |
+| Runner | enabled; last success 2026-11-20 08:59:37 CST; no error; new entries blocked by retained halt | enabled; last success 2026-11-20 08:55:48 CST; no error |
+| Internal positions at observation | 0 | 0 |
+| Broker positions/open orders | **not exposed; unverified** | **not exposed; unverified** |
+| Last internal execution | HOOD exit `e746b3e674654f9199402c8904df1f43`, legacy epoch, 2026-08-14 08:51:07 CDT | JOBY exit `fb3098a9badb41ab867df6ee3bc0da31`, path `JOBY|short|1795185944|3.938600`, successor epoch, 2026-11-20 09:01:34 CST |
+| Current internal equity | -$26,064.31; halted | $13,187.91; clear |
+| Journal broker join fields | none in 30-row full journal | none in 30-row full journal |
+
+Splendid's exact new internal lifecycle was entry `3399679a532d4a93adf5d340833c50ad` at 08:45:44 CST and exit `fb3098a9badb41ab867df6ee3bc0da31` at 09:01:34 CST, producing internal realized P/L -$12.72; the runtime was internally flat afterward. This proves only a simulation lifecycle. Neither full journal contains `broker_order_id`, `order_id`, `client_order_id`, Alpaca ID or another immutable broker binding. Clean's journal remains legacy-only and its last row remains August 14. Therefore no current runtime endpoint can prove that either runtime placed, owns or did not place an Alpaca paper order. Internal flatness must not be reported as broker flatness.
+
+### Fail-closed ownership and consolidation decision
+
+Single-writer acceptance remains **blocked**. The required independent join is the Alpaca PAPER account's current positions, open orders and recent immutable order/activity IDs plus timestamps and a masked account fingerprint, compared to runtime execution IDs and Railway request/log provenance. The installed Alpaca connector exposes market data only, not account/order history. No account number, key or secret was read or printed.
+
+If the operator elects to pause possible independent Clean generation before that join is available, use this reversible sequence: (1) export/checksum the entire Clean `/data` volume and record the current deployment/variable inventory with values masked; (2) retain the volume and service; (3) set only Clean `AUTO_TRADING=false` and redeploy under operator control; (4) verify Clean `/paper/status` reports `auto_runner.enabled=false`, no new journal/ledger rows, the retained halt, and unchanged state/ledger hashes; (5) keep the Alpaca PAPER credentials unchanged until dependency and ownership evidence is captured; (6) rollback only by restoring the recorded variable after single-writer acceptance. This is a recommendation, **not an action taken or a pause claimed**.
+
+Acceptance checklist remains fail-closed: authoritative broker vs simulation source/date labeled; positions/open orders/order IDs matched or exceptions enumerated; exact SHA/deployment parity recorded; accounting/ledger/risk checks retained; full-volume export and credential-free restore proven; rollback and measured monthly cost captured. Only then may stopping Clean compute while retaining its volume and disabling duplicate auto-deploy be proposed.
+
+Missing evidence / next executable step: obtain a read-only Alpaca PAPER order/activity export and masked account fingerprint, then join by immutable order/client-order ID and timestamp against both runtime journals and Railway logs. If no join field exists, classify each broker order as unmatched rather than inventing ownership. **11 days remain to Dec 1.** No consolidation, broker ownership, pause, cost saving or profitability acceptance is claimed.
