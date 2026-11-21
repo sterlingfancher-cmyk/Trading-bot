@@ -5826,3 +5826,35 @@ If the operator elects to pause possible independent Clean generation before tha
 Acceptance checklist remains fail-closed: authoritative broker vs simulation source/date labeled; positions/open orders/order IDs matched or exceptions enumerated; exact SHA/deployment parity recorded; accounting/ledger/risk checks retained; full-volume export and credential-free restore proven; rollback and measured monthly cost captured. Only then may stopping Clean compute while retaining its volume and disabling duplicate auto-deploy be proposed.
 
 Missing evidence / next executable step: obtain a read-only Alpaca PAPER order/activity export and masked account fingerprint, then join by immutable order/client-order ID and timestamp against both runtime journals and Railway logs. If no join field exists, classify each broker order as unmatched rather than inventing ownership. **11 days remain to Dec 1.** No consolidation, broker ownership, pause, cost saving or profitability acceptance is claimed.
+
+
+## 2026-11-21 Issues #324/#325 — exact deployed code has no broker writer; historical/external ownership still unverified
+
+Objective: close the code-side half of the broker-to-runtime execution map at the exact deployed SHA. Observation window: 2026-11-21 08:57–09:02 CST. Read-only repository inspection plus `/paper/status` and `/paper/deployment-info` only. No `/paper/run`, report compilation, state/history mutation, deploy, merge, credential, variable, runner, halt, service or volume change.
+
+### Exact deployed identity and runtime boundary
+
+Both environments remain on `78d36138198eeec0895ecef998539467e4943edb`: Clean deployment `e3f17e68-caab-4694-977b-928d8fc878cd`; Splendid deployment `878d4a63-044a-46b2-bb8c-10ca8b2884ab`. Both deployment/status surfaces declare `places_orders=false`. Both runners skipped on 2026-11-21 because the market is closed for the weekend.
+
+Clean remains internally flat, equity -$26,064.31, risk halted, and its last internal execution remains legacy HOOD exit `e746b3e674654f9199402c8904df1f43` (2026-08-14 08:51:07 CDT). Splendid is not internally flat: it retains a PL short with 57.50043379042731 shares after a partial exit, entry 11.524999618530273 and last internal mark 10.524999618530273; internal unrealized P/L $57.50 and equity $13,241.50. Splendid's last internal execution is PANW exit `5925394ba8e54d31b62605d10f0dbc81`, path `PANW|short|1795190620|348.255000`, from 2026-11-20. These are simulation facts only; neither endpoint exposes Alpaca PAPER positions or open orders.
+
+### Exact-SHA broker capability inspection
+
+A fresh archive of deployed SHA `78d361...` was inspected without importing the application or reading secrets.
+
+- `repository_validation.py`: PASS; 357/357 tracked Python files parsed, 0 compile errors, 0 static contract errors.
+- AST scan excluding tests: **0 production broker SDK imports** across Alpaca, Tradier, Robinhood, IBKR, Coinbase, Kraken, Binance and CCXT tokens.
+- AST scan: **0 production order-call sites** for `submit_order`, `place_order`, `send_order`, `create_order`, `execute_order`, market/limit submitters or `broker_submit_order`.
+- Full exact-tree text search found no production Alpaca/Tradier/Robinhood client, broker endpoint, credential-read or client/broker order-ID implementation. The only Alpaca references outside tests/docs are independent market-price evidence strings.
+- `requirements.txt` still declares `alpaca-trade-api`, but the exact production tree does not import it.
+- 70 literal references to `LIVE_TRADING_ENABLED`/`BROKER_MODE`-class guards exist across 36 production files. Those guards reject live/broker contexts; they do not instantiate a broker client.
+- Railway startup is exactly the tracked `railway.json`/Procfile Gunicorn command: `bootstrap_wsgi:app`, one worker, four threads. No alternate tracked startup script or broker worker exists.
+- No other tracked broker integration was found. FinancialModelingPrep and market-data access are research/price dependencies, not execution brokers.
+
+**Conclusion:** the current tracked application at the exact SHA deployed to both Railway services has no code path that can submit a broker order. Therefore current internal executions, including PL/PANW, are simulation lifecycle rows and cannot be the source of a new Alpaca order through this tracked build. This materially lowers present order-generation risk but does **not** prove historical Alpaca order ownership, revoke the credential-bearing Clean environment, exclude an external/untracked client using the same keys, or establish the broker account's current positions/open orders.
+
+### Acceptance impact and next executable step
+
+The code-side “no tracked broker writer” gate now passes for `78d361...`. Single-writer and consolidation acceptance remain blocked on the independent Alpaca PAPER export: masked account fingerprint, positions, open orders and immutable order/activity IDs with timestamps, joined against Railway logs and both runtime journals. Any broker order lacking an exact join remains an enumerated unmatched exception; never infer ownership from ticker, time proximity or internal P/L.
+
+The reversible operator-controlled Clean pause sequence recorded on 2026-11-20 remains recommended after full `/data` export/checksum; it was not executed here. Stopping Clean compute or disabling duplicate auto-deploy remains prohibited until volume restore, dependency, rollback and broker-account gates pass. **10 days remain to Dec 1.** No broker ownership, pause, consolidation, cost reduction, broker flatness or profitability acceptance is claimed.
