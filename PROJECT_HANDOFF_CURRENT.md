@@ -5858,3 +5858,25 @@ A fresh archive of deployed SHA `78d361...` was inspected without importing the 
 The code-side “no tracked broker writer” gate now passes for `78d361...`. Single-writer and consolidation acceptance remain blocked on the independent Alpaca PAPER export: masked account fingerprint, positions, open orders and immutable order/activity IDs with timestamps, joined against Railway logs and both runtime journals. Any broker order lacking an exact join remains an enumerated unmatched exception; never infer ownership from ticker, time proximity or internal P/L.
 
 The reversible operator-controlled Clean pause sequence recorded on 2026-11-20 remains recommended after full `/data` export/checksum; it was not executed here. Stopping Clean compute or disabling duplicate auto-deploy remains prohibited until volume restore, dependency, rollback and broker-account gates pass. **10 days remain to Dec 1.** No broker ownership, pause, consolidation, cost reduction, broker flatness or profitability acceptance is claimed.
+
+
+## 2026-11-23 — emergency stabilization: deployed paper/broker-mode boundary verified
+
+### Objective and read-only method
+
+Resolve the remaining runtime-mode ambiguity without changing either service. Exact deployed source at `78d36138198eeec0895ecef998539467e4943edb` defines `clean_epoch_validation_release._paper_only()` as true only when both `LIVE_TRADING_ENABLED` is not truthy and `BROKER_MODE` is not one of `live`, `real`, or `production`. The public read-only `/paper/clean-epoch-validation-release-status` endpoint exposes that derived value as `last_result.checks.paper_runtime` and separately declares `authority.paper_only` and `authority.places_orders`; it exposes no credential value. I read that endpoint and `/paper/deployment-info` on both runtimes at 2026-11-23 09:02-09:03 CST (15:02-15:03 UTC). No state-mutating endpoint, report compilation, broker action, runner change, credential change, deploy, merge, volume action, halt clear, or service stop occurred.
+
+### Captured execution map evidence
+
+| Runtime | Deployment | Exact SHA | Derived environment mode | Endpoint authority | Risk state |
+| --- | --- | --- | --- | --- | --- |
+| Clean (`trading-bot-clean.up.railway.app`) | `e3f17e68-caab-4694-977b-928d8fc878cd` | `78d36138198eeec0895ecef998539467e4943edb` | `paper_runtime=true` (therefore neither live flag nor live broker mode requested) | `paper_only=true`, `places_orders=false` | halted; `daily loss limit hit (3.0%)` |
+| Splendid (`web-production-e1796.up.railway.app`) | `878d4a63-044a-46b2-bb8c-10ca8b2884ab` | `78d36138198eeec0895ecef998539467e4943edb` | `paper_runtime=true` (therefore neither live flag nor live broker mode requested) | `paper_only=true`, `places_orders=false` | not halted; empty halt reason |
+
+Both processes report startup on 2026-11-05 within 13 seconds of one another and remain at exact SHA parity. This closes the specific current-runtime configuration gap: neither deployed process has requested live execution or a live/real/production broker mode, and both self-declare no order-placement authority. Combined with the 2026-11-21 exact-tree proof that the deployed tracked build has no production broker client or submission call site, current tracked Railway code cannot submit an Alpaca order.
+
+### Remaining blockers, acceptance checklist, and next action
+
+This does **not** prove historical Alpaca PAPER order ownership, exclude another untracked/external client using the same credentials, or provide the broker account fingerprint, positions, open orders, activities, or immutable broker order IDs. Internal Clean/Splendid positions and P/L remain non-comparable to Alpaca and are not broker evidence.
+
+Acceptance remains blocked until an independent Alpaca PAPER export supplies a masked account fingerprint plus positions, open orders and order/activity IDs with timestamps; each broker item must be joined exactly to Railway logs and runtime journal/execution IDs, with every unmatched item retained as an exception. Only then can one writer be designated and Clean compute/auto-deploy consolidation be proposed after full `/data` export, checksum, dependency/restore proof, rollback rehearsal and measured cost baseline. The previously documented operator-controlled Clean pause remains recommended but was **not** executed. **8 days remain to the Dec 1 review.** No broker ownership, pause, consolidation, cost reduction, broker reconciliation, profitability or milestone acceptance is claimed.
