@@ -5880,3 +5880,42 @@ Both processes report startup on 2026-11-05 within 13 seconds of one another and
 This does **not** prove historical Alpaca PAPER order ownership, exclude another untracked/external client using the same credentials, or provide the broker account fingerprint, positions, open orders, activities, or immutable broker order IDs. Internal Clean/Splendid positions and P/L remain non-comparable to Alpaca and are not broker evidence.
 
 Acceptance remains blocked until an independent Alpaca PAPER export supplies a masked account fingerprint plus positions, open orders and order/activity IDs with timestamps; each broker item must be joined exactly to Railway logs and runtime journal/execution IDs, with every unmatched item retained as an exception. Only then can one writer be designated and Clean compute/auto-deploy consolidation be proposed after full `/data` export, checksum, dependency/restore proof, rollback rehearsal and measured cost baseline. The previously documented operator-controlled Clean pause remains recommended but was **not** executed. **8 days remain to the Dec 1 review.** No broker ownership, pause, consolidation, cost reduction, broker reconciliation, profitability or milestone acceptance is claimed.
+
+
+## 2026-11-24 — emergency stabilization: Alpaca API-source orders and historical writer path isolated
+
+### Objective and evidence scope
+
+Resolve the highest-value remaining ownership question using only read-only evidence. No broker call, state-mutating endpoint, report compilation, deploy, merge, runner/halt/credential/volume/service change, or order action occurred.
+
+Evidence reviewed:
+
+- user-supplied Alpaca dashboard screenshots captured 2026-11-23, showing historical PAPER orders and API configuration;
+- the now-complete Git history for the repository through the April order dates;
+- the connected Alpaca capability inventory, which is market-data-only and cannot read private account identity, positions, orders, or activities.
+
+### New broker-side facts
+
+1. The Alpaca configuration screenshot shows the endpoint `https://paper-api.alpaca.markets/v2`. This independently confirms the pictured account activity is PAPER, not live.
+2. The order-table screenshots show filled market orders with `Source: access_key`. Therefore those pictured orders were submitted through an Alpaca API key, not entered manually in the dashboard.
+3. The screenshots include fills on April 13, April 21, and April 22, 2026. The latest visible fill is April 22 at 08:33:01 AM. The user reports no activity after April 22; the screenshots are consistent with that statement but are not a complete machine-readable export.
+4. The screenshots do not expose an account fingerprint or immutable Alpaca order IDs. They therefore cannot alone bind an order to Clean, Splendid, a particular Railway deployment, or an external client that shared the key.
+
+### Historical repository writer evidence
+
+The prior current-tree conclusion remains correct only for the present deployed SHA: `78d36138198eeec0895ecef998539467e4943edb` has no broker client or submission call site. Full Git history proves that older revisions did contain real Alpaca PAPER order writers on the relevant dates:
+
+- Commit `495d9e70f9161f9c58205f2f13d5a4978908398b` (2026-04-12 17:14 CDT), the latest repository commit before the April 13 pictured orders, instantiated Alpaca `TradingClient(..., paper=True)`, read `AUTO_TRADING`, called `submit_order` for buys and sells, and started an automatic loop every 300 seconds.
+- Commit `8203d8a8817db38f634d6431b8bb8e574e1998d1` (2026-04-21 13:21 CDT) used `https://paper-api.alpaca.markets`, read Alpaca API credentials, and called `submit_order` on multiple lifecycle paths.
+- Numerous April 21 revisions retained an active broker writer. The last writer-bearing revision before removal was `c24fd2b482257fb60dbede38fa77d833c6d4da31` at 20:59 CDT; it instantiated `REST` against the Alpaca PAPER endpoint, submitted liquidation and entry market orders, and ran continuously every 300 seconds. Main removed the submission calls at `82cee66fbf322e95234bfa1160bbfab8d1f12238` at 21:03 CDT.
+- By the April 22 03:01 submission timestamps visible in Alpaca, repository main was already on a no-writer revision. By the April 22 08:30 fills, main was at `6e920466decaeae51643ca85879c32a1183bc74f`, also no-writer. This creates a specific deployment-lag/alternate-client discrepancy: an older writer-bearing Railway deployment may have remained active after main changed, or another client using the same key submitted the orders. Git commit time alone cannot distinguish those possibilities.
+
+### Ownership conclusion and acceptance impact
+
+**Supported:** the April Alpaca PAPER orders were API-key originated, and the Trading-bot repository had a capable automatic Alpaca PAPER writer on the same dates. The historical bot deployment is therefore a strong candidate source.
+
+**Not yet proven:** exact Clean versus Splendid ownership, the deployed SHA at each submission time, exact broker-to-journal lifecycle bindings, current broker positions/open orders, and whether any external/untracked client also used the key. Do not promote “strong candidate” to verified ownership without an exact order-ID/log join.
+
+The missing decisive evidence is now narrow and explicit: (a) immutable Alpaca order/activity IDs plus masked account fingerprint, current positions and open orders; and (b) Railway deployment history/logs for April 13, 21 and 22 showing the running deployment SHA and request/order evidence. Exact-join those fields to runtime journals/execution IDs; retain every unmatched item as an exception. If neither source can be recovered, record historical ownership as unresolved rather than fabricate a match.
+
+The reversible operator-controlled Clean pause remains recommended after full `/data` export/checksum, but it was not executed. Stopping Clean compute or duplicate auto-deploy remains prohibited until restore/dependency/rollback and current broker-state gates pass. **7 days remain to the Dec 1 review.** No exact broker ownership, pause, consolidation, cost reduction, broker reconciliation, profitability, or milestone acceptance is claimed.
