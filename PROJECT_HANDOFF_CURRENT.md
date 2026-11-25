@@ -5919,3 +5919,46 @@ The prior current-tree conclusion remains correct only for the present deployed 
 The missing decisive evidence is now narrow and explicit: (a) immutable Alpaca order/activity IDs plus masked account fingerprint, current positions and open orders; and (b) Railway deployment history/logs for April 13, 21 and 22 showing the running deployment SHA and request/order evidence. Exact-join those fields to runtime journals/execution IDs; retain every unmatched item as an exception. If neither source can be recovered, record historical ownership as unresolved rather than fabricate a match.
 
 The reversible operator-controlled Clean pause remains recommended after full `/data` export/checksum, but it was not executed. Stopping Clean compute or duplicate auto-deploy remains prohibited until restore/dependency/rollback and current broker-state gates pass. **7 days remain to the Dec 1 review.** No exact broker ownership, pause, consolidation, cost reduction, broker reconciliation, profitability, or milestone acceptance is claimed.
+
+
+## 2026-11-25 — emergency stabilization: April 22 order-batch fingerprint rules out one writer instance
+
+### Objective and read-only method
+
+Fingerprint the broker-visible April 22 batch against the exact historical writer constraints, then verify present Clean/Splendid identity parity. Evidence was limited to the user-supplied Alpaca PAPER screenshots, immutable Git history, and public read-only `/paper/deployment-info`. No broker call, state-mutating endpoint, report compilation, deploy, merge, runner/halt/credential/volume/service change, or order action occurred.
+
+### Exact broker-batch reconstruction
+
+The horizontally scrolled Alpaca order-table screenshots are complementary views of the same rows. They expose **26 filled market orders submitted at exactly 2026-04-22 03:01:15 AM**, all with `Source: access_key`:
+
+- **18 buys:** ARM 85; PANW 12, 100, 1, 1, 12; CRWD 1, 1, 4, 1, 4, 1, 1; MSFT 5, 1, 5, 1; SNOW 100.
+- **8 sells:** NVDA 78; AVGO 1; AMD 154; META 25; INTC 327; NFLX 1, 1, 1.
+
+Repeated same-symbol orders within one second are material: CRWD appears in seven separate buys, PANW in five buys, MSFT in four buys, and NFLX in three sells. The screenshots do not expose immutable order IDs, so these rows remain broker-visible observations rather than exact lifecycle joins.
+
+### Historical writer comparison
+
+The last writer-bearing main revision before the no-writer transition, `c24fd2b482257fb60dbede38fa77d833c6d4da31`, cannot by itself generate this batch:
+
+- it allowed at most four entry orders per cycle (`MAX_TRADES_PER_CYCLE = 4`), while the batch contains 18 buys in one second;
+- it capped each entry quantity at 50 shares, while the batch contains ARM 85 and PANW/SNOW 100-share buys;
+- it ran one Python process from `Procfile: web: python app.py`, not a tracked multi-worker Gunicorn topology.
+
+The April 12 writer `495d9e70f9161f9c58205f2f13d5a4978908398b` also selected at most three new symbols per loop. Therefore neither a single instance of that writer nor a single instance of the final April 21 writer explains the 26-order fingerprint. The supported hypotheses are now bounded to: concurrent writer instances/services using the same key; a different historical writer revision still deployed; an external/untracked API client; or a combination. The current existence of two Railway projects makes concurrent historical writers plausible, but no April deployment record currently proves that Clean and Splendid both existed or were both active then.
+
+### Current runtime check
+
+At 2026-11-25 09:02 CST (15:02 UTC), public deployment evidence remained unchanged:
+
+| Runtime | Deployment ID | Exact SHA | Declared order authority |
+| --- | --- | --- | --- |
+| Clean | `e3f17e68-caab-4694-977b-928d8fc878cd` | `78d36138198eeec0895ecef998539467e4943edb` | `places_orders=false` |
+| Splendid | `878d4a63-044a-46b2-bb8c-10ca8b2884ab` | `78d36138198eeec0895ecef998539467e4943edb` | `places_orders=false` |
+
+Both processes still report the same Nov 5 startups. Present tracked Clean and Splendid remain simulation-only at the exact same SHA; this does not exclude an external client that retains the Alpaca key.
+
+### Acceptance impact and next action
+
+This fingerprint materially strengthens the historical duplicate-writer risk finding and rules out one specific single-instance explanation, but it does **not** establish exact Clean/Splendid ownership. The decisive next action remains recovery of April Railway deployment records/logs and Alpaca immutable order IDs/account fingerprint. Join the 26 rows by exact order ID and submission time to deployed SHA, service/deployment ID, and runtime journal/execution ID. If unavailable, retain all 26 as an enumerated unresolved API-origin batch; do not infer ownership from ticker/quantity/time alone.
+
+Current positions/open orders also remain unverified because the connected Alpaca capability is market-data-only. The operator-controlled Clean pause remains recommended after full `/data` export/checksum, but was not executed. Stopping Clean compute or duplicate auto-deploy remains prohibited until restore/dependency/rollback and current broker-state gates pass. **6 days remain to the Dec 1 review.** No exact ownership, pause, consolidation, cost reduction, reconciliation, profitability, or milestone acceptance is claimed.
