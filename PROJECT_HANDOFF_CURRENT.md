@@ -5962,3 +5962,41 @@ Both processes still report the same Nov 5 startups. Present tracked Clean and S
 This fingerprint materially strengthens the historical duplicate-writer risk finding and rules out one specific single-instance explanation, but it does **not** establish exact Clean/Splendid ownership. The decisive next action remains recovery of April Railway deployment records/logs and Alpaca immutable order IDs/account fingerprint. Join the 26 rows by exact order ID and submission time to deployed SHA, service/deployment ID, and runtime journal/execution ID. If unavailable, retain all 26 as an enumerated unresolved API-origin batch; do not infer ownership from ticker/quantity/time alone.
 
 Current positions/open orders also remain unverified because the connected Alpaca capability is market-data-only. The operator-controlled Clean pause remains recommended after full `/data` export/checksum, but was not executed. Stopping Clean compute or duplicate auto-deploy remains prohibited until restore/dependency/rollback and current broker-state gates pass. **6 days remain to the Dec 1 review.** No exact ownership, pause, consolidation, cost reduction, reconciliation, profitability, or milestone acceptance is claimed.
+
+
+## 2026-11-26 — emergency stabilization: single-process self-duplication ruled out
+
+### Objective and read-only method
+
+Test the narrow remaining hypothesis that one historical Railway process could have multiplied its own Alpaca writer through Flask debug/reloader behavior. Evidence was limited to immutable Git objects for the three bounded historical writer revisions and current `origin/main`. No runtime or broker endpoint was called; no state, report, deploy, runner, halt, credential, volume, service, automation, or order action occurred.
+
+### Exact startup-path findings
+
+The three inspected writer revisions each used `Procfile: web: python app.py`, invoked `app.run(...)` without `debug=True` or an explicit reloader, and started exactly one background trading thread per OS process:
+
+- `495d9e70f9161f9c58205f2f13d5a4978908398b`: one `auto_trader` thread; at most three held/new symbols by its own `MAX_POSITIONS = 3` boundary.
+- `8203d8a8817db38f634d6431b8bb8e574e1998d1`: one `bot_loop` thread; one new buy per cycle, plus exits for qualifying existing positions.
+- `c24fd2b482257fb60dbede38fa77d833c6d4da31`: one `scheduler` thread; at most four entries per cycle and 50 shares per entry.
+
+Therefore a normal single process at any of these bounded revisions does not explain the April 22 fingerprint of 18 buys and 8 sells submitted in the same second, including seven CRWD buys, five PANW buys, four MSFT buys, three NFLX sells, and buy quantities above 50. The batch still requires one or more of: multiple OS processes/deployments sharing the key, a different historical revision/client, or an external/untracked API client. This rules out single-process self-duplication; it does not identify Clean or Splendid as the owner.
+
+Current repository main is unchanged at `78d36138198eeec0895ecef998539467e4943edb`. The Nov 21/23 exact-tree and runtime-mode findings therefore remain applicable: the current tracked build has no broker submitter and both last-observed runtimes declared paper-only/no-order authority. No fresh runtime claim is made from today's repository-only check.
+
+### Fail-closed acceptance checklist
+
+| Gate | Status | Required evidence before consolidation |
+| --- | --- | --- |
+| Authoritative source labeling | PASS for known observations | Keep Alpaca PAPER broker state separate from Clean/Splendid simulation state with source and timestamp. |
+| Exact order/fill ownership | BLOCKED | Alpaca immutable order/activity IDs and masked account fingerprint joined to April Railway deployment/service logs and runtime execution IDs; retain unmatched rows. |
+| Current broker positions/open orders | BLOCKED | Read-only Alpaca PAPER positions/open-orders export with observation time. |
+| Current tracked writer boundary | PASS at SHA `78d361...` | Reverify only if SHA/config changes; no tracked broker client or submit call exists. |
+| Risk/accounting/ledger preservation | PARTIAL/BLOCKED | Preserve Clean halt, 55-row ledger/hash, 37 state rows, 18 omissions and all evidence; obtain full `/data` export/checksum and credential-free restore proof. |
+| Deployed SHA/service parity | PASS at last observation; no change in main today | Any later deployment requires exact service/deployment/SHA recapture. |
+| Rollback | BLOCKED | Record masked variable inventory and prove the full-volume restore before any pause or stop. |
+| Cost impact | BLOCKED | Capture current Clean monthly compute/storage baseline and projected retained-volume cost before proposing compute shutdown. |
+
+### Ownership boundary, blocker, and next executable action
+
+No single execution writer can yet be accepted because the active Alpaca key-client identity and historical service/deployment join are unavailable. The operator-controlled Clean pause sequence already recorded remains the safest reversible containment recommendation after a full `/data` export/checksum: set only Clean `AUTO_TRADING=false`, retain service/volume/credentials, redeploy, and verify runner-disabled plus unchanged evidence hashes. It was **not executed** and no pause is claimed.
+
+The next executable action is the minimum independent retrieval: export the Alpaca PAPER account's masked fingerprint, current positions, open orders, and immutable April 22 order/activity IDs, plus Railway deployment history/logs covering April 22 03:01 CDT. Exact-join them to service/deployment SHA and any journal/execution IDs; enumerate every unmatched item. Only after that join, full-volume restore proof, rollback evidence, and measured cost baseline may stopping Clean compute while retaining its volume and disabling duplicate auto-deploy be proposed. **5 days remain to the Dec 1 review.** No exact ownership, pause, consolidation, cost reduction, reconciliation, profitability, or milestone acceptance is claimed.
