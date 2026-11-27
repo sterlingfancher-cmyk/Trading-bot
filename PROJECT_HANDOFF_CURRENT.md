@@ -6000,3 +6000,47 @@ Current repository main is unchanged at `78d36138198eeec0895ecef998539467e4943ed
 No single execution writer can yet be accepted because the active Alpaca key-client identity and historical service/deployment join are unavailable. The operator-controlled Clean pause sequence already recorded remains the safest reversible containment recommendation after a full `/data` export/checksum: set only Clean `AUTO_TRADING=false`, retain service/volume/credentials, redeploy, and verify runner-disabled plus unchanged evidence hashes. It was **not executed** and no pause is claimed.
 
 The next executable action is the minimum independent retrieval: export the Alpaca PAPER account's masked fingerprint, current positions, open orders, and immutable April 22 order/activity IDs, plus Railway deployment history/logs covering April 22 03:01 CDT. Exact-join them to service/deployment SHA and any journal/execution IDs; enumerate every unmatched item. Only after that join, full-volume restore proof, rollback evidence, and measured cost baseline may stopping Clean compute while retaining its volume and disabling duplicate auto-deploy be proposed. **5 days remain to the Dec 1 review.** No exact ownership, pause, consolidation, cost reduction, reconciliation, profitability, or milestone acceptance is claimed.
+
+
+## 2026-11-27 — emergency stabilization: current two-runtime boundary refreshed; broker join still absent
+
+### Objective and read-only method
+
+Refresh the present Clean/Splendid execution boundary after the historical writer finding and test whether either public journal now exposes an exact broker-order join. Observation window: 2026-11-27 08:59–09:02 CST. Read-only calls were limited to `/paper/deployment-info`, `/paper/status`, `/paper/daily-audit`, `/paper/canonical-execution-ledger-status`, and `/paper/journal`. No `/paper/run`, report compilation, broker call, state mutation, deploy, merge, runner/halt/credential/volume/service/automation change, or order action occurred.
+
+### Current execution map
+
+| Boundary | Clean | Splendid |
+| --- | --- | --- |
+| Project / environment / service | `dazzling-dedication` / `Clean` / `Trading-bot` | `splendid-creativity` / `production` / `web` |
+| Deployment ID | `e3f17e68-caab-4694-977b-928d8fc878cd` | `878d4a63-044a-46b2-bb8c-10ca8b2884ab` |
+| Exact deployed SHA | `78d36138198eeec0895ecef998539467e4943edb` | same |
+| Declared order authority | `places_orders=false`; status read-only | `places_orders=false`; status read-only |
+| Runner | enabled; last success 08:58:31 CST; entries blocked by `risk_halted,self_defense_feedback_loop` | enabled; last success 08:57:10 CST; no runner error |
+| Internal positions | 0 | 0 |
+| Internal equity / cash | -$26,064.31 / -$26,064.3083 | $13,131.02 / $13,131.0232 |
+| Risk | halted; daily loss limit; self-defense active | not halted; feedback loop clear |
+| Accounting | WARN; 193 coverage issues, 50 economic issues | PASS; 0 coverage/economic issues |
+| Canonical ledger | FAIL; 55 rows, 37 state rows, 18 missing from state; hash `7f587d15fae776c0bc9ed577783ed060e1dc93b427081335fac7c0c116be1bc0` | PASS; 268 total rows, 180 current/state rows, 0 missing; hash `9abd568ca46a1a505c40653c9af30eeb99ee8781ecf91cebda3167e7b83af949` |
+| Latest internal execution | HOOD exit `e746b3e674654f9199402c8904df1f43`, 2026-08-14 08:51:07 CDT, legacy epoch | MCHP exit `e9f1e1a53c904a83b200eb4839ef131a`, 2026-11-25 11:08:03 CST, successor epoch |
+| Broker positions/open orders | not exposed; unverified | not exposed; unverified |
+
+Both services are independently cycling simulation runners, but current main remains unchanged and the exact deployed tree still has no tracked broker submission path. Internal flatness is not broker flatness. Neither 30-row journal exposes `broker_order_id`, `order_id`, `client_order_id`, or any broker/client join field. Clean's journal remains legacy-only; Splendid's latest rows are internal successor executions. Consequently no public runtime surface can bind the April Alpaca API orders to either service or exclude an external client that retains the key.
+
+The Clean compact audit still embeds Splendid's `full_audit` URL. It is not accepted as Clean provenance; Clean evidence above came directly from the Clean domain and deployment identity.
+
+### Acceptance checklist and Dec 1 status
+
+| Gate | Result on 2026-11-27 |
+| --- | --- |
+| Broker vs simulation sources/date labeled | PASS for captured observations |
+| Exact orders/fills/positions matched | BLOCKED: private Alpaca IDs/fingerprint/positions/open orders and April Railway logs unavailable |
+| Risk/accounting/ledger checks | PASS for capture; Clean remains fail-closed and unreconciled, Splendid passes its current epoch |
+| Deployed SHA parity/no tracked writer | PASS at `78d361...`; recheck on any SHA/config change |
+| Single writer | BLOCKED: active key-client identity and historical deployment join unavailable |
+| Full Clean backup/restore and rollback | BLOCKED: provider export/checksum and credential-free restore proof unavailable |
+| Cost impact | BLOCKED: no measured Clean monthly compute/storage baseline or retained-volume projection |
+
+### Next executable action
+
+Retrieve the minimum independent evidence package: Alpaca PAPER masked account fingerprint, current positions, open orders and immutable April 22 order/activity IDs; April 22 Railway deployment/service/SHA history and logs; full Clean `/data` export with file hashes; and current Clean compute/storage cost. Exact-join broker rows to service/deployment and runtime execution IDs, preserving every unmatched exception. The reversible operator-controlled Clean pause previously specified remains recommended only after the full export/checksum; it was **not executed**. Do not stop compute or disable duplicate auto-deploy until broker ownership, restore, dependency, rollback and cost gates pass. **4 days remain to Dec 1.** No ownership, pause, consolidation, reconciliation, cost reduction, profitability, or milestone acceptance is claimed.
