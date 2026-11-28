@@ -6044,3 +6044,40 @@ The Clean compact audit still embeds Splendid's `full_audit` URL. It is not acce
 ### Next executable action
 
 Retrieve the minimum independent evidence package: Alpaca PAPER masked account fingerprint, current positions, open orders and immutable April 22 order/activity IDs; April 22 Railway deployment/service/SHA history and logs; full Clean `/data` export with file hashes; and current Clean compute/storage cost. Exact-join broker rows to service/deployment and runtime execution IDs, preserving every unmatched exception. The reversible operator-controlled Clean pause previously specified remains recommended only after the full export/checksum; it was **not executed**. Do not stop compute or disable duplicate auto-deploy until broker ownership, restore, dependency, rollback and cost gates pass. **4 days remain to Dec 1.** No ownership, pause, consolidation, reconciliation, cost reduction, profitability, or milestone acceptance is claimed.
+
+
+## 2026-11-28 — emergency stabilization: tracked inter-service dependency sub-gate cleared
+
+### Objective and read-only method
+
+Determine whether the exact deployed repository requires Clean compute for Splendid runtime or mandatory GitHub validation, before any future consolidation proposal. Evidence was limited to current main at `78d36138198eeec0895ecef998539467e4943edb`, tracked production/workflow domain references, and public read-only `/paper/deployment-info` and `/paper/status` on both services at 2026-11-28 09:04–09:05 CST. No state/broker call, `/paper/run`, report compilation, deploy, merge, runner/halt/credential/volume/service/automation change, or order action occurred.
+
+### Dependency map
+
+The exact tracked tree contains **no production outbound HTTP call from Clean to Splendid or from Splendid to Clean**:
+
+- `daily_operational_audit.py`, `daily_self_check_compactor.py`, `one_link_check.py`, `self_check.py`, and `final_daily_audit_compactor.py` use the domains only to construct operator-facing links/default URLs. They do not import or invoke an HTTP client.
+- Hard-coded Clean `/paper/run` strings in `app.py` are inert curl examples, not executed calls. They remain hazardous operator guidance and are not evidence of a dependency or permission to invoke the endpoint.
+- `runtime_research_snapshot.py` is a standalone CLI HTTP collector. Its only tracked invoker is `refactor-audit.yml`, which explicitly passes the Splendid base URL.
+- `daily-operational-audit.yml` and `refactor-audit.yml` perform live validation against Splendid only. No tracked workflow calls the Clean domain.
+- Both runtimes expose their own `RAILWAY_PUBLIC_DOMAIN`, so the Clean fallback URLs in self-check modules are not the active base for Splendid.
+
+Therefore the **repository-internal app/workflow dependency sub-gate passes**: the tracked code does not require Clean compute to keep Splendid or exact-head live validation operating. This does not prove that untracked external automations, Railway service dependencies, health checks, manual tooling, or shared credentials do not depend on Clean.
+
+### Current identity and safety boundary
+
+| Runtime | Deployment / SHA | Weekend state |
+| --- | --- | --- |
+| Clean | `e3f17e68-caab-4694-977b-928d8fc878cd` / `78d361...` | running, internally flat, equity -$26,064.31, retained halt, runner enabled but skipped at 09:02:30 CST because weekend, `places_orders=false` |
+| Splendid | `878d4a63-044a-46b2-bb8c-10ca8b2884ab` / `78d361...` | running, internally flat, equity $13,131.42, not halted, runner enabled but skipped at 09:05:19 CST because weekend, `places_orders=false` |
+
+Main and both deployment identities remain unchanged. Internal flatness remains simulation-only and does not establish Alpaca broker flatness.
+
+### Consolidation acceptance impact and next action
+
+The dependency checklist now distinguishes a passed tracked-code sub-gate from unresolved external gates:
+
+- **PASS:** no tracked Clean-to-Splendid/Splendid-to-Clean runtime call; mandatory workflows target Splendid.
+- **BLOCKED:** external automation and Railway dependency inventory; Alpaca masked fingerprint, positions/open orders and immutable order IDs; April deployment/log ownership join; full Clean `/data` export/checksum and credential-free restore; rollback proof; current and projected Railway cost.
+
+The next executable action remains an operator/provider evidence export, not a compute stop: capture Railway service dependency/health-check/automation inventory plus current Clean cost; export and checksum all of Clean `/data`; retrieve the private Alpaca read-only package; then exact-join orders and rehearse restore without credentials. Only after those gates pass may stopping Clean compute while retaining its volume and disabling duplicate auto-deploy be proposed. The documented operator-controlled `AUTO_TRADING=false` containment remains a recommendation after export/checksum and was **not executed**. **3 days remain to Dec 1.** No ownership, pause, consolidation, reconciliation, cost reduction, profitability, or milestone acceptance is claimed.
